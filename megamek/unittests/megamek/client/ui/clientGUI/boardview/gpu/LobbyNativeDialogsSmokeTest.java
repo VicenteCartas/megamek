@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -29,6 +30,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
+import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import megamek.client.Client;
 import megamek.client.bot.AIType;
@@ -36,29 +38,43 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.PriorityTargetChoices.Candidate;
 import megamek.client.bot.princess.PriorityTargetChoices.ForceRole;
 import megamek.client.generator.enums.SkillGeneratorMethod;
+import megamek.client.lobby.AlphaStrikeStatsForm;
+import megamek.client.lobby.AutoResolveRun;
+import megamek.client.lobby.BotFacingForm;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.BotTargetPicker;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.GameOptionsForm;
+import megamek.client.lobby.HelpDocument;
+import megamek.client.lobby.IconCatalog;
+import megamek.client.lobby.LanceRoleForm;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyPrompts;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
+import megamek.client.lobby.PortraitCatalog;
+import megamek.client.lobby.SbfStatsForm;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTestStage;
+import megamek.client.ui.gdx.UiTextField;
 import megamek.common.Hex;
+import megamek.common.OffBoardDirection;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.containers.MunitionTree;
 import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
+import megamek.common.icons.Portrait;
 import megamek.common.loaders.MapSettings;
 import megamek.common.options.GameOptions;
 import megamek.common.options.IBasicOption;
 import megamek.common.options.OptionsConstants;
+import megamek.common.orders.LanceRole;
+import megamek.common.orders.LanceRoles;
+import megamek.common.orders.UnitOrders;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.planetaryConditions.Weather;
@@ -121,6 +137,52 @@ class LobbyNativeDialogsSmokeTest {
             assertFalse(dialog.isOpen());
             click(ui, lobby);
             assertEquals(1, behind[0], "the lobby takes clicks again once it closes");
+        });
+    }
+
+    @Test
+    void escapeClosesADialogWhoseTextFieldHasTheFocus() {
+        UiTestStage.run(ui -> {
+            List<String> said = new ArrayList<>();
+            UiDialog dialog = new UiDialog(ui.kit, "Test", () -> said.add("cancel")).width("dialog.sm");
+            UiTextField name = ui.kit.input("Vicente", false);
+            dialog.body().add(name).width(200);
+            dialog.primary("OK", () -> said.add("ok"));
+            dialog.cancelButton("Cancel");
+            dialog.show(ui.stage, false);
+            ui.draw();
+            assertEquals(name, ui.stage.getKeyboardFocus(), "the text field takes the first focus");
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            assertEquals(List.of("cancel"), said, "Escape cancels though the text field takes every key");
+
+            ui.stage.setKeyboardFocus(null);
+            ui.stage.act(1 / 60f);
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            assertEquals(List.of("cancel", "cancel"), said, "Escape cancels once a slider dropped the focus");
+        });
+    }
+
+    @Test
+    void theFirstFocusIsTheFirstButtonNotTheTitleBarClose() {
+        UiTestStage.run(ui -> {
+            UiDialog dialog = new UiDialog(ui.kit, "Test", () -> { }).width("dialog.sm");
+            Button first = ui.kit.button("button-quiet", null, "First", null);
+            dialog.body().add(first).row();
+            dialog.body().add(ui.kit.button("button-quiet", null, "Second", null));
+            dialog.cancelButton("Close");
+            dialog.show(ui.stage, false);
+            ui.draw();
+            assertEquals(first, ui.stage.getKeyboardFocus(), "a dialog without OK starts on its first button");
+            dialog.close();
+
+            UiDialog withOk = new UiDialog(ui.kit, "Test", () -> { }).width("dialog.sm");
+            withOk.body().add(ui.kit.button("button-quiet", null, "Other", null));
+            Button ok = withOk.primary("OK", () -> { });
+            withOk.cancelButton("Cancel");
+            withOk.show(ui.stage, false);
+            ui.draw();
+            assertEquals(ok, ui.stage.getKeyboardFocus(), "OK takes the first focus when there is one");
+            withOk.close();
         });
     }
 
@@ -193,6 +255,47 @@ class LobbyNativeDialogsSmokeTest {
             assertFalse(dialogs.isOpen(), "OK closes the chooser");
             assertEquals(1, chosen.size());
             assertEquals("BLUE", chosen.getFirst().getFilename());
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void thePortraitChooserHandsBackTheClickedPortrait() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            PortraitCatalog catalog = new PortraitCatalog(new IconCatalog.Folder("", "", List.of(),
+                  List.of(new IconCatalog.Folder("Pilot", "Pilot/", List.of("Ace.png", "Rookie.png"), List.of()))));
+            BufferedImage picture = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
+            LobbyPortraitView.Source source = new LobbyPortraitView.Source() {
+                @Override
+                public PortraitCatalog catalog(boolean refresh) {
+                    return catalog;
+                }
+
+                @Override
+                public BufferedImage thumbnail(Portrait portrait, int size) {
+                    return picture;
+                }
+            };
+            List<Portrait> chosen = new ArrayList<>();
+            LobbyPortraitView view = dialogs.portrait(source, catalog, new Portrait("Pilot/", "Ace.png"),
+                  chosen::add);
+            await(ui, () -> view.previewShown() && view.item(1) != null);
+            assertTrue(dialogs.isOpen());
+            assertEquals(2, view.items().size(), "the initial portrait's category shows");
+
+            click(ui, view.item(1));
+            assertEquals(new Portrait("Pilot/", "Rookie.png"), view.selected());
+            click(ui, ui.stage.getRoot().findActor("portrait-ok"));
+            assertFalse(dialogs.isOpen(), "OK closes the chooser");
+            assertEquals(List.of(new Portrait("Pilot/", "Rookie.png")), chosen);
+
+            LobbyPortraitView again = dialogs.portrait(source, catalog, null, chosen::add);
+            ui.draw();
+            click(ui, ui.stage.getRoot().findActor("portrait-cancel"));
+            assertFalse(dialogs.isOpen(), "Cancel closes the chooser");
+            assertEquals(1, chosen.size(), "Cancel chooses nothing");
+            assertNull(again.selected());
             dialogs.dispose();
         });
     }
@@ -547,6 +650,103 @@ class LobbyNativeDialogsSmokeTest {
     }
 
     @Test
+    void theBotReadmeNagAnswersWithItsBox() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            List<String> answers = new ArrayList<>();
+            dialogs.botReadme("Remember", (yes, checked) -> answers.add(yes + "/" + checked));
+            ui.draw();
+            assertNotNull(ui.stage.getRoot().findActor("bot-readme-headline"));
+            click(ui, find(ui, "yes-no-check"));
+            click(ui, find(ui, "yes-no-yes"));
+            assertEquals(List.of("true/true"), answers, "Read the guide answers, with the box as ticked");
+            assertFalse(dialogs.isOpen());
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theDocumentTurnsItsChaptersFromTheRailAndTheFooter() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            HelpDocument report = HelpDocument.battleReport("""
+                  <h1>Battle</h1><p>Two lances met.</p>
+                  <a name="round-1"><h2>Initiative</h2></a>
+                  <h3>Movement</h3>&ensp;<span style='color:#8686bf'>Lance A</span> moved<br>
+                  &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;Atlas walked 3 hexes<br>
+                  <a name="round-2"><h2>Initiative</h2></a><h3>Firing</h3>&ensp;Lance B fired<br>
+                  <a name="end-of-combat"><h2>End of Combat</h2></a>
+                  <a name="victory"><h2><i>Team 2 is victorious!</i></h2></a>
+                  """, "Summary", round -> "Round " + round);
+            LobbyDocumentView view = dialogs.document("Report", report, false);
+            ui.draw();
+            assertEquals(report.chapters().size(), view.chapterCount());
+            assertEquals(0, view.shown());
+            assertEquals("SUMMARY", ((Label) find(ui, "document-title")).getText().toString().toUpperCase());
+
+            click(ui, find(ui, "document-chapter-1"));
+            ui.draw();
+            assertEquals(1, view.shown());
+            assertEquals("ROUND 1", ((Label) find(ui, "document-title")).getText().toString().toUpperCase());
+            assertNotNull(ui.stage.getRoot().findActor("document-event"), "the round's lines read as events");
+
+            click(ui, find(ui, "document-next"));
+            ui.draw();
+            assertEquals(2, view.shown());
+            click(ui, find(ui, "document-previous"));
+            ui.draw();
+            assertEquals(1, view.shown());
+
+            click(ui, find(ui, "document-chapter-" + (view.chapterCount() - 1)));
+            ui.draw();
+            assertNotNull(ui.stage.getRoot().findActor("document-callout"), "the victory reads as a banner");
+            click(ui, find(ui, "document-close"));
+            assertFalse(dialogs.isOpen());
+            assertNull(dialogs.documentView());
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theSaveQuestionBeforeLeavingSavesLeavesOrStays() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            List<String> answers = new ArrayList<>();
+            UiDialog dialog = dialogs.saveFirst(save -> answers.add("save " + save), () -> answers.add("stayed"));
+            ui.draw();
+            Table card = dialog.card();
+            Vector2 cardRight = card.localToStageCoordinates(new Vector2(card.getWidth(), 0));
+            for (String name : List.of("save-first-save", "save-first-leave", "save-first-cancel")) {
+                Actor button = find(ui, name);
+                Vector2 right = button.localToStageCoordinates(new Vector2(button.getWidth(), 0));
+                assertTrue(right.x <= cardRight.x + 0.5f, name + " stays inside the card");
+            }
+            click(ui, find(ui, "save-first-save"));
+            assertEquals(List.of("save true"), answers, "Save… saves");
+            assertFalse(dialogs.isOpen());
+
+            dialogs.saveFirst(save -> answers.add("save " + save), () -> answers.add("stayed"));
+            ui.draw();
+            click(ui, find(ui, "save-first-leave"));
+            assertEquals("save false", answers.getLast(), "Don't save leaves");
+
+            dialogs.saveFirst(save -> answers.add("save " + save), () -> answers.add("stayed"));
+            ui.draw();
+            click(ui, find(ui, "save-first-cancel"));
+            ui.draw();
+            assertEquals("stayed", answers.getLast(), "Cancel stays");
+
+            dialogs.saveFirst(save -> answers.add("save " + save), () -> answers.add("stayed"));
+            ui.draw();
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            ui.draw();
+            assertFalse(dialogs.isOpen());
+            assertEquals(List.of("save true", "save false", "stayed", "stayed"), answers, "Escape stays too");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
     void aLockedGameOptionShowsButTakesNoClick() {
         UiTestStage.run(ui -> {
             GameOptions options = new GameOptions();
@@ -595,6 +795,165 @@ class LobbyNativeDialogsSmokeTest {
             reveal(ui, friendlyFire);
             click(ui, friendlyFire);
             assertEquals(fire, form.bool(OptionsConstants.BASE_FRIENDLY_FIRE), "a locked option keeps its value");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theAutoResolveBriefingMovesFromTheOddsToTheOutcome() {
+        UiTestStage.run(ui -> {
+            List<String> said = new ArrayList<>();
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            LobbyAutoResolveView view = dialogs.autoResolve(true, List.of("Chatter one", "Chatter two"),
+                  new LobbyAutoResolveView.Host() {
+                      @Override
+                      public void proceed() {
+                          said.add("proceed");
+                      }
+
+                      @Override
+                      public void report() {
+                          said.add("report");
+                      }
+                  }, () -> said.add("closed"));
+            ui.draw();
+            assertEquals(LobbyAutoResolveView.Phase.ODDS, view.phase());
+            view.odds(3, 10);
+            ui.draw();
+            assertTrue(((Label) find(ui, "autoresolve-count")).getText().toString().startsWith("3"),
+                  "the count says how many simulated battles ended");
+            for (int frame = 0; frame < 3 * 60 * LobbyAutoResolveView.LINE_SECONDS; frame++) {
+                ui.stage.act(1 / 60f);
+            }
+
+            view.choice(new AutoResolveRun.Score(10, 6, 3, 1, 0));
+            ui.draw();
+            assertEquals(LobbyAutoResolveView.Phase.CHOICE, view.phase());
+            assertEquals("60%", ((Label) find(ui, "autoresolve-chance")).getText().toString());
+            assertNotNull(ui.stage.getRoot().findActor("autoresolve-victories"));
+            assertNull(ui.stage.getRoot().findActor("autoresolve-count"), "the odds' progress is gone");
+            Button proceed = find(ui, "autoresolve-proceed");
+            assertEquals(proceed, ui.stage.getKeyboardFocus(), "Resolve takes the focus");
+            click(ui, proceed);
+            assertEquals(List.of("proceed"), said);
+
+            view.resolving();
+            ui.draw();
+            assertEquals(LobbyAutoResolveView.Phase.RESOLVING, view.phase());
+            assertNull(ui.stage.getRoot().findActor("autoresolve-proceed"), "the footer has moved on");
+
+            view.result(AutoResolveRun.Outcome.VICTORY, "Team 1 won the scenario.", true);
+            ui.draw();
+            assertEquals(AutoResolveRun.headline(AutoResolveRun.Outcome.VICTORY),
+                  ((Label) find(ui, "autoresolve-headline")).getText().toString());
+            click(ui, find(ui, "autoresolve-report"));
+            assertEquals(List.of("proceed", "report"), said);
+            click(ui, find(ui, "autoresolve-close"));
+            assertFalse(view.isOpen());
+            assertNull(dialogs.autoResolveView());
+            assertEquals(List.of("proceed", "report", "closed"), said);
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theFacingCardSetsBothCompassesAndOkSends() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            BotFacingForm form = new BotFacingForm("Atlas AS7-D", UnitOrders.FACING_AUTO, 3);
+            List<String> sent = new ArrayList<>();
+            dialogs.facing(form, (work, then) -> {
+                work.run();
+                then.run();
+            }, () -> sent.add(form.whileMoving() + "/" + form.whenStopped()));
+            ui.draw();
+            assertTrue(find(ui, "facing-stopped-3") instanceof Button stopped && stopped.isChecked(),
+                  "the unit's facing shows chosen");
+            click(ui, find(ui, "facing-moving-2"));
+            assertTrue(((Button) find(ui, "facing-moving-2")).isChecked());
+            assertFalse(((Button) find(ui, "facing-moving-auto")).isChecked(), "one side at a time");
+            click(ui, find(ui, "facing-stopped-auto"));
+            assertTrue(sent.isEmpty(), "nothing is sent before OK");
+            click(ui, find(ui, "facing-ok"));
+            assertEquals(List.of("2/" + UnitOrders.FACING_AUTO), sent);
+            assertFalse(dialogs.isOpen());
+
+            dialogs.facing(form, (work, then) -> work.run(), () -> sent.add("again"));
+            ui.draw();
+            click(ui, find(ui, "facing-cancel"));
+            assertEquals(1, sent.size(), "Cancel sends nothing");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theLanceRoleCardWaitsForAPlaceRoundTheConvoy() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            LanceRoles.ConvoyChoice trucks = new LanceRoles.ConvoyChoice(7, "Trucks", 4, true,
+                  OffBoardDirection.SOUTH);
+            LanceRole shown = LanceRole.defaultEscort(7);
+            LanceRoleForm form = new LanceRoleForm("Alpha", List.of(trucks), OffBoardDirection.NORTH, shown);
+            for (LanceRole.Position position : LanceRole.Position.values()) {
+                if (form.holds(position)) {
+                    form.toggle(position);
+                }
+            }
+            List<LanceRole> sent = new ArrayList<>();
+            dialogs.lanceRole(form, (work, then) -> {
+                work.run();
+                then.run();
+            }, () -> sent.add(form.role()));
+            ui.draw();
+            Button ok = find(ui, "role-ok");
+            assertTrue(ok.isDisabled(), "an escort with no place round the convoy cannot be sent");
+            click(ui, find(ui, "role-escort-lead"));
+            ok = find(ui, "role-ok");
+            assertFalse(ok.isDisabled());
+            click(ui, ok);
+            assertEquals(1, sent.size());
+            assertTrue(sent.getFirst().isEscort());
+            assertEquals(7, sent.getFirst().getConvoyForceId());
+            assertTrue(sent.getFirst().getPositions().contains(LanceRole.Position.LEAD));
+
+            LanceRoleForm convoy = new LanceRoleForm("Bravo", List.of(), OffBoardDirection.NORTH, null);
+            dialogs.lanceRole(convoy, (work, then) -> work.run(), () -> sent.add(convoy.role()));
+            ui.draw();
+            assertNull(ui.stage.getRoot().findActor("role-tab-escort"), "no lance to guard, no Escort tab");
+            click(ui, find(ui, "role-tab-convoy"));
+            assertNotNull(find(ui, "role-convoy-edge"));
+            click(ui, find(ui, "role-ok"));
+            assertTrue(sent.getLast().isConvoy());
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theStatsCardsShowNothingToCopyForNoUnits() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            LobbyStatsView.Host host = mock(LobbyStatsView.Host.class);
+            when(host.fonts()).thenReturn(List.of("", "Serif"));
+            when(host.sheetFonts()).thenReturn(new String[] { "Serif", "" });
+            dialogs.alphaStrikeStats(new AlphaStrikeStatsForm(List.of()), host);
+            ui.draw();
+            Button copy = find(ui, "stats-copy-cards");
+            assertTrue(copy.isDisabled(), "no units, nothing to copy");
+            UiSelect sort = find(ui, "stats-sort");
+            assertEquals(0, sort.getSelectedIndex());
+            click(ui, find(ui, "stats-close"));
+            assertFalse(dialogs.isOpen());
+
+            dialogs.sbfStats(new SbfStatsForm(List.of(), new Game()), host);
+            ui.draw();
+            UiSelect header = find(ui, "stats-header-font");
+            assertEquals(1, header.getSelectedIndex(), "the sheet's last header font is chosen");
+            assertTrue(((Button) find(ui, "stats-print")).isDisabled());
+            click(ui, find(ui, "stats-elements"));
+            assertTrue(((Button) find(ui, "stats-elements")).isChecked(), "Show elements turns on");
+            click(ui, find(ui, "stats-close"));
+            verify(host, never()).print(org.mockito.ArgumentMatchers.any(SbfStatsForm.class),
+                  org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
             dialogs.dispose();
         });
     }

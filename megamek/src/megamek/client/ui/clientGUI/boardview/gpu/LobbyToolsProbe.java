@@ -16,7 +16,8 @@ import megamek.logging.MMLogger;
 /**
  * The developer switch's run through the L17 tools and prompts: {@code lobby+victory}, {@code +randomarmy},
  * {@code +skills}, {@code +names}, {@code +readout} (or {@code +readout=tro}, {@code bv} or {@code cost} for that
- * page), {@code +princesshelp} or {@code +prompt=name} ({@code forcename},
+ * page), {@code +princesshelp}, {@code +maphelp}, {@code +resolve} (auto-resolve with its odds, or
+ * {@code +resolve=quick} without, once the player's units arrive) or {@code +prompt=name} ({@code forcename},
  * {@code squadron}, {@code asset}, {@code assetdamage}, {@code train}, {@code confirm} or {@code error}) opens it
  * {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, as its control would; so do the L18 file routes: {@code +gameoptions}
  * and {@code +playersettings} open their dialogs (then {@code +click=options-save}, {@code options-load},
@@ -29,8 +30,8 @@ import megamek.logging.MMLogger;
 final class LobbyToolsProbe {
     private static final MMLogger LOGGER = MMLogger.create(LobbyToolsProbe.class);
     /** The tools the probe opens by name. */
-    static final Set<String> TOOLS = Set.of("victory", "randomarmy", "skills", "names", "readout", "princesshelp",
-          "gameoptions", "playersettings", "savelist", "loadlist", "sprite");
+    static final Set<String> TOOLS = Set.of("victory", "randomarmy", "skills", "names", "readout", "princesshelp", "maphelp",
+          "gameoptions", "playersettings", "savelist", "loadlist", "sprite", "resolve", "resolve=quick");
     private static final String PROMPT_OPTION = "prompt=";
     /** {@code readout=tro}, {@code readout=bv} or {@code readout=cost}: the readout, opened on that page. */
     private static final String READOUT_OPTION = "readout=";
@@ -122,16 +123,33 @@ final class LobbyToolsProbe {
             return "victory, objectives " + form.activeObjectives() + ", changed " + form.changedOptions().size();
         }
         if (dialogs.randomArmyView() != null) {
-            RandomArmyForm form = dialogs.randomArmyView().form();
+            LobbyRandomArmyView view = dialogs.randomArmyView();
+            LobbyForceGeneratorPane force = view.forcePane();
+            if (view.mode() == LobbyRandomArmyView.Mode.FORCE && force != null) {
+                return "army force " + force.form().organization() + ", units " + force.form().allUnits().size()
+                      + ", included " + force.form().included().size() + (force.busy() ? " (busy)" : "");
+            }
+            RandomArmyForm form = view.form();
             List<String> units = form.cards().stream()
                   .map(card -> card.unit().getName() + (card.kept() ? " (kept)" : "")).toList();
-            return "army " + units + ", BV " + form.battleValue() + ", table " + form.table() + ", browsing "
-                  + dialogs.randomArmyView().browser().path();
+            String source = view.mode() == LobbyRandomArmyView.Mode.TABLES
+                  ? "table " + form.table() + ", browsing " + view.browser().path()
+                  : "generator " + view.mode() + (view.factionsReady() ? "" : " (loading)")
+                        + (form.context() != null ? ", for " + form.context().faction() : "");
+            return "army " + units + ", BV " + form.battleValue() + ", " + source
+                  + (view.filtering() ? ", filtering" : "");
         }
         if (dialogs.readoutView() != null) {
             LobbyReadoutView view = dialogs.readoutView();
             return "readout, unit " + view.shown() + ", tab " + (view.tabs() == null ? "-"
                   : view.tabs().getSelectedIndex());
+        }
+        if (dialogs.documentView() != null) {
+            LobbyDocumentView view = dialogs.documentView();
+            return "document, chapter " + (view.shown() + 1) + " of " + view.chapterCount();
+        }
+        if (dialogs.autoResolveView() != null) {
+            return "auto-resolve " + dialogs.autoResolveView().phase();
         }
         if (dialogs.crewView() != null) {
             return "crew tool open";

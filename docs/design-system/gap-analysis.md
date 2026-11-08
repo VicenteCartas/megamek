@@ -372,8 +372,8 @@ work for Swing, and item 11 is under investigation.
      footers (settings, game options, scenario chooser, unit and bot dialogs) move with their own steps.
   3. Main menu, in libGDX (a Swing version dropped frames on ordinary machines, and the 2D board that kept the
      startup path in Swing is going away): a full-window game screen over the battle art
-     (`GpuStartWindow`, `GpuStartScreen`), opened by a skippable "Welcome back, Commander" greeting ("Welcome,
-     Commander" on the first launch; the player is always Commander, never named) and reveal on app launch (an
+     (`GpuStartWindow`, `GpuStartScreen`), opened by a skippable "Welcome, Commander" greeting
+     (the same for new and returning players; the player is always Commander, never named) and reveal on app launch (an
      instant cut with reduce motion), with Settings, Help and Tools on screen and Up, Down, Tab and Enter moving
      through the menu. The developers chose the hex reveal: hexes pop open across the art from left to right. The menu
      sits in a column on the right, because the art's main mech stands on the left, with the tip card at the bottom
@@ -626,7 +626,7 @@ work for Swing, and item 11 is under investigation.
        forces (random army, skills, random names, C3 network, load, save and print list with the MUL check, the
        unit menu's customize, C3, loadout, readout, BV and cost), battlefield (planetary conditions, game options,
        victory conditions, random map, map setup with its preview and size questions, load and save map setup,
-       auto-resolve, advanced map search) and the prompts (`SwingLobbyPrompts`: errors, confirmations, the ready
+       auto-resolve) and the prompts (`SwingLobbyPrompts`: errors, confirmations, the ready
        warning, force names, squadrons, battlefield support, unit editor, training, SBF and AS stats). Each is owned
        by the hidden client frame or a dialog of it; `LobbyDialogs` adopts each one as it shows (also the modal
        questions MekHQ asks with no parent, which Swing gives its shared hidden frame), centres it on the window's
@@ -639,7 +639,7 @@ work for Swing, and item 11 is under investigation.
        `randomarmy`, `skills`, `names`, `loadlist`, `alert`) and photographs the window and its dialogs from the
        screen: all 17 checked on Windows, centred within a pixel, modal ones blocking, the focus back on closing.
        MekHQ needs nothing more: its lobby use is the client API and the parentless questions above. Not checked
-       live: the prompts, the save choosers, auto-resolve and advanced map search (the same path, by the source
+       live: the prompts, the save choosers and auto-resolve (the same path, by the source
        test); native ownership and focus on macOS and Linux; dialogs opened from within dialogs, which stay where
        their owner puts them.
      - L9 ~~Removal and checks~~. `ChatLounge` and the Swing lobby's view code are deleted: its player and unit
@@ -711,7 +711,9 @@ work for Swing, and item 11 is under investigation.
        need the full centre: the view has its title, the live count of matching units, Clear (the tab's criteria)
        and Done over compact `UiTabs` (Total Warfare, Alpha Strike, Battlefield Support), then the tab's titled
        blocks laid out in as many columns as fit (`control.lg` × 8 each, at most three: two at 2560x1400, one narrow),
-       in a vertical scroll. The controls are kit only: `UiRangeInput` for from–to numbers, selects, Any/Yes/No
+       in a vertical scroll. With three columns a block can name its column, so Total Warfare balances as movement
+       and construction, unit types and equipment, quirks and unit flags; fewer columns fill the shortest first.
+       Filter chips wrap into a grid across the column. The controls are kit only: `UiRangeInput` for from–to numbers, selects, Any/Yes/No
        segmented flags, filter chips for short choices, `UiPickList` for long ones (quirks, specials, engines,
        cockpits), All/Any segmented where the filter supports both, steppers, and the equipment editor (a search over
        the weapons and equipment with their groups, ≥ or <, a count, Add, AND, OR, brackets, Undo and Clear; the
@@ -985,8 +987,8 @@ work for Swing, and item 11 is under investigation.
          the first network on an untouched OK); two ECM suites in use show an inline keep-one choice rather than a
          dialog; implant changes reach the equipment only on OK, so Cancel drops them; the Partial Repairs tab is
          hidden when nothing can be repaired. The Swing dialog's dump box (never shown) and command-detonated mines
-         (not implemented) stay out. The portrait picker is still the Swing `PortraitChooserDialog`, through
-         `LobbyDialogs`.
+         (not implemented) stay out. The portrait picker is native too (`LobbyPortraitView`, through
+         `LobbyNativeDialogs.portrait`).
        - The C3 network manager replaces `C3NetworkManagerDialog` in the lobby, from the unit and forces menus. Each
          network is drawn as an org chart (company master, lance masters, slaves, joined by connector lines; C3i, NC3
          and Nova as a linked row; open slots as ghost chips), the free units sit in a tray grouped as masters,
@@ -1001,15 +1003,16 @@ work for Swing, and item 11 is under investigation.
        `lobby+configure` (`+multi`, `+bayrules`, `+bayclick=...`) opens the bay and clicks through it, and an OK after
        Next customizes both units; `lobby+c3+c3plan+c3build` plans a ten-unit force into two lances and builds them
        (two C3 networks, team BV 17,879 to 20,845). MekHQ and MegaMekLab compile.
-     - ~~L16 Map setup~~. The map setup and the random map settings are native; the Swing `MapSetupDialog` and
-       `RandomMapDialog` stay for other callers:
+     - ~~L16 Map setup~~. The map setup and the random map settings are native; the Swing `MapSetupDialog` is
+       deleted (see step 6) and `RandomMapDialog` stays for other callers:
        - Edit Map and the Battlefield menu open a "war table" centre view (with Back) in place of `MapSetupDialog`:
          the map type (ground, low altitude, space) as a segmented choice; boards across and down as steppers; the
          board size picker with a custom size; the board grid as tiles with their previews, where a click selects a
          slot. The selected slot shows its rotation, theme and level offset (with Reset), and a searchable board
          browser with a preview that places a board, places it rotated, or makes a random or a surprise board from
-         several picked ones (Pick All selects every slot at once). Load and Save Map Setup, Advanced Search (the Swing
-         `BoardSearchDialog`, through `LobbyDialogs`), the planetary conditions, the map assembly help, the 3D
+         several picked ones (Pick All selects every slot at once). Load and Save Map Setup, the board browser's Filters
+                  (tags, folders and boards of any size, in place of the Swing advanced map search), the planetary
+                  conditions, the map assembly help, the 3D
          preview and Generate Battlefield sit in the view's header and footer.
        - Random Map Settings is a native dialog: the normal view sets each feature as None, Low, Medium or High by
          theme tab; the advanced view shows every generator field as sliders and steppers; the board size and theme
@@ -1037,29 +1040,31 @@ work for Swing, and item 11 is under investigation.
        - Victory Conditions (the Battlefield column's Change) shows objective cards, one per master switch (Battle
          Value destroyed and ratio, turn limit, kill count, objectives) with its values, and a General card; a card's
          switch arms its fields, numbers keep `VictoryOptionLayout`'s bounds, and OK sends the changed options (with
-         the server password) and saves them as the last used ones, as `VictoryConditionsDialog` did.
+         the server password) and saves them as the last used ones, as the Swing victory dialog did (it is gone
+         now).
        - The random army deals unit cards with their sprites from a random assignment table: Roll fills the hand to
          the unit count, each card can be kept, rerolled or discarded, the totals show BV and tonnage, and Add sends
-         them to the chosen player as `RandomArmyDialog.commitChosenUnits` does. Advanced opens the Swing dialog for
-         its other tabs (BV- and force-generator armies). The tables load on a thread of their own; the lobby waits
-         for them.
+         them to the chosen player as `RandomArmyDialog.commitChosenUnits` does. The generators beside the tables
+         are native too (see "Random army generators" below), the Force Generator among them. The tables load on a
+         thread of their own; the lobby waits for them.
        - Random skills and random names are small cards over the lobby with the Swing dialogs' choices (client,
          method, type, level, force close; faction, female share, ethnicity), Save and Randomize.
        - Load list opens the system file dialog through L16's `SystemFileDialog`, and
          `ClientGUI.loadListFile(Player, File)` loads the list as before.
        - The unit readout (unit menu View, BV and Cost) is a dossier: the sprite, name and line, tabs for the summary,
-         the TRO, the BV and the cost calculations, and Prev/Next through several units. The Princess help shows the
-         bot documentation as rows in the same view.
+         the TRO, the BV and the cost calculations, and Prev/Next through several units. The Princess help opens in
+         the chaptered document view (see below).
        - `LobbyCommands` asks through `LobbyAsks`, an asynchronous version of `LobbyPrompts` set with
          `LobbyCommands.asks(...)`, as L15's unit configurator is; with none set, as in MekHQ and MegaMekLab,
-         `LobbyAsks.of(prompts)` answers through the blocking prompts and `SwingLobbyPrompts` runs as before. The
+         `LobbyAsks.of(prompts)` answers through the blocking prompts (`DecliningLobbyPrompts` since the Swing
+         prompts were removed, see step 6). The
          libGDX lobby's asks are native for the error and ready-blocked messages, confirmations, force and squadron
          names (the force name with suggestion chips), a Battlefield Support Asset's crew and damage, and the train
          order.
-       - Still Swing, through `LobbyDialogs` or `SwingLobbyPrompts`: Add Unit (the Requisition supersedes it), the
-         unit damage editor (`UnitEditorDialog`), the SBF and Alpha Strike stats, the unit's sprite and camo picker,
-         the bot facing and role, the GIF recording consent and the auto-resolve dialogs; the readout has no Alpha
-         Strike card or faction tab and does not update while open.
+       - Still Swing, through `LobbyDialogs`: Add Unit (the Requisition supersedes it), the unit damage editor
+         (`UnitEditorDialog`) and the GIF recording consent. The SBF and Alpha Strike stats, the unit's sprite and
+         camo picker, the bot facing and role and auto-resolve are native now, and the readout has its Alpha Strike
+         and Factions pages and stays live (see below).
        Checks: `VictoryConditionsFormTest`, `RandomArmyFormTest`, `RandomSkillsFormTest`, `RandomNamesFormTest`,
        `TrainOrderFormTest`, `AssetFormTest` and `LobbyAsksTest`; the on-demand `LobbyDialogsL17SmokeTest` (victory
        switch and count, roll, keep, discard and add, skills save, readout units, the prompts' suggestion, stepper and
@@ -1078,7 +1083,7 @@ work for Swing, and item 11 is under investigation.
          added unless the name ends with ".mul" or ".xml", as the Swing client does.
        - The unit menu's sprite export asks for a PNG through the system dialog instead of an AWT `FileDialog`.
        - The game options and player settings views' hosts are asynchronous (they get a callback), so the lobby
-         keeps drawing while the dialog is open; `SwingLobbyUnitActions` takes the `LobbyFiles` to use.
+         keeps drawing while the dialog is open; `LobbyUnitActions` takes the `LobbyFiles` to use.
          `GameOptionsDialog`, `ClientGUI.saveListFile` and the other Swing choosers that MekHQ, MegaMekLab and the
          in-game screens open are unchanged.
        - Bot presets have no file chooser: `BotSetupForm`'s named presets are kept in the bot behaviours file, so
@@ -1279,26 +1284,309 @@ work for Swing, and item 11 is under investigation.
        Checks: `RequisitionCatalogTest.theTypeRowOffersOnlyTypesWithAnAllowedUnit`, `LobbyFilesTest`,
        `LobbyTogglesSmokeTest` (the game menu saves and loads; a MekHQ lobby only saves) and
        `LobbyNativeDialogsSmokeTest.theFooterButtonsStayCentredOnTheCardWithAToolBesideThem`.
+     - Menu polish on `ui-work`, so the lobby has fewer nested menus and fewer Swing dialogs:
+       - Leaving the lobby asks "Save before leaving?" in a native dialog (`LobbyNativeDialogs.saveFirst`)
+         instead of the Swing "Save First?" question (`AbstractClientGUI.handleExit`). Save… opens the system
+         file dialog and leaves once the game is written; Don't save leaves (`AbstractClientGUI.exitWithoutAsking`);
+         Cancel or Escape stays. No "Don't ask again" box: it pushed the footer past the card, and Settings →
+         Advanced already turns the question off (`AdvancedNoSaveNag`). The battle window asks too, in its own
+         window, and picks the save file in the system file dialog (#39).
+       - A system menu, as a game's pause menu (`LobbyNativeDialogs.systemMenu`): Resume, Save game…, Quick save,
+         Load game…, Quick load, Settings and Leave lobby, one column of buttons in groups, with each shortcut in its
+         tooltip. Esc opens it once nothing else is left to close, and closes it again. The top bar's gear, ⋮ game
+         menu and Leave button become one ☰ button that opens it, so the bar ends with the Game Master's seat, Ready
+         and ☰ in the corner, as a game's menu button. The shortcuts stay (Alt+C, Ctrl+S, Ctrl+Shift+S, Ctrl+L,
+         Ctrl+Shift+L). A MekHQ lobby offers no
+         loading here either.
+       - Player cards without a menu (`LobbyPlayersPanel`): the ⋮ button, the right click and the player menu's
+         submenus are gone. On the local player's own cards and their bots' cards, the team and the deployment area
+         are quiet buttons on the second line: Team opens a flat list of teams with the current one checked, and
+         the deployment button opens the start positions as the player settings' compass, with the map's custom
+         zones under it. A rail under the ready mark holds icons for the player settings, a bot's own settings and
+         Remove bot; a disconnected player's card offers Replace with a bot. The rail keeps the forces line's full
+         width; on the line itself the icons cut "3 units" short. The swatch still opens the camouflage and a
+         double click the player settings. The Game Master item left the card for the top bar's seat
+         (`LobbyPlayersPanel.Actions.toggleGameMaster` is gone). `lobby+menu` now opens the deployment picker.
+       - The battlefield column without its ⋮ menu (`LobbyBattlefieldPanel`): a cube icon beside Change map previews
+         the map in 3D, and a map rolled at launch shows a die (Generate battlefield, enabled when no surprise
+         board stops it) and the random map settings beside its line (`LobbyBattlefield.rolled`). Loading and
+         saving the map setup were already in the map setup's footer; the Board Editor joins them there
+         (`LobbyMapSetupView.Action.BOARD_EDITOR`).
+       - Unit cards act in place, and the unit menu no longer cascades (`LobbyForcesPanel`). A wide card of the local
+         player's unit shows Configure, C3 (for a unit with C3, opening the network manager on it) and Delete as icons
+         beside its ⋮; a compact row keeps only the ⋮. In the menu, a submenu replaces the list in the same popover,
+         under the submenu's name and a Back row (Left and Esc go back too), instead of opening up to four
+         popovers side by side. `lobby+unitmenu+unitsub` shows a submenu.
+       - Every kit dialog answers Esc, even with a text field focused (`UiDialog`): libGDX's `TextField` takes every
+         key, so Esc never reached the modal and the player settings, which open on their name, stayed open. The
+         dialog's first focus is now its first text field, else its primary button, else its first control outside
+         the title bar, so the system menu starts on Resume rather than the title bar's ×.
+       - A tidier player card (`LobbyPlayersPanel`): the swatch, name, chips and ready mark share the first line, so
+         YOU and the ready circle line up; the team and deployment pickers run the card's full width under it,
+         starting under the swatch; and the card's icons (settings, bot settings, Remove bot, Replace with a bot)
+         end the totals line, in the ready mark's column, rather than a rail that left space under the swatch. A
+         bot's card no longer cuts its team short.
+       - The random map settings keep one size (`LobbyRandomMapView`): the page takes the size of the largest tab,
+         measured once for the normal view and once for the advanced view, so the tabs no longer jump.
+       - More of a unit's actions on its wide card: View (eye) and Alpha Strike stats for any unit the local player
+         can see, and for their own Configure, Camouflage, C3 and Delete, at most four to a row with the ⋮ last in
+         the corner. An icon runs the unit menu's own command on the unit (`LobbyUnitMenu.unitCommand`, through
+         `GpuLobbyWindow.unitCommand`), and the card's ⋮ leaves those items out (`LobbyUnitMenu.of(…, omit)`). A
+         right click, a compact row's ⋮ or a menu for several units keeps them all. Edit Damage stays in the menu,
+         since only the menu knows when a Game Master takes it away.
+       - The card's icons settle into two rows (`LobbyForcesPanel`): the first always holds the main actions, View,
+         Configure, Delete and the ⋮; the second, under it, the secondary ones a unit may lack: Edit Damage (when the
+         local player may edit it, now carried on `LobbyUnit.damage` from `LobbyCommands.canEditDamage`; under a Game
+         Master everyone else finds it, greyed with the reason, in the ⋮ menu), Camouflage and C3. Alpha Strike
+         stats, a Swing dialog, go back into the menu.
+       - The team picker's icon lines up with the swatch and the totals: its row starts the quiet button's inset to
+         the left (`LobbyPlayersPanel`).
+       - A dialog that loses its keyboard focus takes it back (`UiDialog`): a slider or a closing popover drops the
+         stage's focus, and Esc then fell through to the lobby, which ignores it while a dialog is open, so the
+         random map settings never closed on Esc. The random map settings no longer pin the page's width to the
+         widest tab either, which pushed the advanced view's Theme out of the card; only the height is pinned.
+       - Edit Damage is a libGDX dialog (`LobbyDamageView`, through `LobbyNativeDialogs.damage`) for every unit the
+         Swing editor takes, which the lobby no longer opens: the unit's paperdoll on the left, coloured live by the
+         edits with the change from the unit as read, and the picked location's values on the right, or the unit's
+         general ones (`SI` on the doll, or Whole Unit, picks those).
+         - Armour, rear armour, structure, ammunition shots, a platoon's troopers and a bay's capacity are health
+           bars (`UiHealthBar`): a drag or a click sets the value in one go, the field types it, and − and + still
+           step it. Systems and equipment take hit boxes; breached, blown off, jammed and the like are switches.
+         - The location dropdown went: the doll picks, and ‹ › chevrons step through the locations. A unit with no
+           doll (battle armour, buildings, capital fighters, gun emplacements) picks from a list of its locations
+           instead; a conventional platoon has only its own values, so the list and chevrons hide.
+         - The damage roller is a row of level tiles (`UiLevelTiles`: None, Light, Moderate, Heavy) under both
+           columns, each with a pip meter in its colour (`status.success`, `accent.primary`, `status.warning`,
+           `status.danger`); the rolled one lights up, and the die rolls it again. Each roll starts again from the
+           unit as read.
+         - A Mek shows its record sheet's three dolls, as the board's unit sheet does: front armour, and rear armour
+           over structure beside it, each under its caption, and any of them picks a location; with the structure
+           on its own doll, the front doll shows the armour alone. The dialog is extra-large for those; other units
+           keep one doll. The values pane is taller (348), as high as the dialog can grow and still fit a 900 pixel
+           window at the shipped scale.
+         - The lobby's dolls are vivid (`GpuPaperdoll.vivid`): a critical location's red is stronger, with its
+           numbers in `text.primary`, so it stands apart from a damaged amber one, and an exposed location's change
+           takes the dark ink its number does. The board's dolls are unchanged.
+         - Large craft add their systems (CIC or FCS, K-F drive parts, grav decks, docking collars, sail, K-F boom)
+           and their transport bays, a place of their own with each bay's doors; a building edits its power and
+           gunners (stunned turns, killed per hex) instead of a crew.
+         - The values live in the toolkit-free `UnitDamageForm`, which writes a partial `DamageEditSpec` through
+           `DamageEditApplier`, so what it does not show stays as it was. More… (the way to the Swing editor) is
+           gone, and with it the bug where More → Apply closed both dialogs and dropped the damage.
+         - The Game Master's skill modifiers stay on the board's editor: the Swing dialog offers them only with a
+           game in play, and the lobby has none yet.
+         - `lobby+unitdamage` opens it for a shot, `+next` steps on a location and `+heavy` clicks the Heavy tile.
+       - Game options moved to the top bar, because testers did not find them in the battlefield column: a
+         `button-special` Game options button with a gavel stands before the Game Master's seat, its tooltip naming
+         the era, tech level and notable rules that the column's Rules section showed. It keeps its name while the
+         whole bar fits, and folds to its gavel when the bar has no room for it. The Rules section and its chips are
+         gone from the column.
+         - Planetary conditions and Victory are summary cards (`UiSummaryCard`, `UiKit.summaryCard`): the whole card
+           opens the setting, its edge strong under the pointer and a › chevron by the title, instead of a quiet
+           Change button beside the overline. In space the conditions card is disabled, muted and without a chevron.
+       - The damage editor became the Unit Status dialog and took in the unit menu's Deploy submenu. The Whole unit
+         values end with a Deployment section (`UnitDamageForm.deployment()`): heat at start (moved off a Mek's
+         centre torso), prone, hull down (TacOps hull-down rule; tanks only if hull-down capable), hidden (hidden
+         units rule), wanted for scanning (a Game Master's, in a game with objectives)
+         and the deployment round, a select from pre-game (walk-on rules only) and game start to round 40. These are
+         written straight to the unit, and neither Restore Unit nor a roll touches them. A unit already hull-down or
+         hidden keeps its toggle with the rule off, so it can be cleared.
+         - The card's wrench opens it for every unit the player configures. Under a Game Master, a player who isn't
+           one sees the damage read-only (`UnitDamageForm.Options.damage`), with a note in place of the roller and
+           Restore Unit disabled, and the dialog opens on the Deployment section. An asset's damage is still the
+           Game Master's alone.
+         - A single wide card's ⋮ leaves Deploy out, because a submenu can now be omitted by key (`LMP_DEPLOY`).
+           An asset's card keeps it, since its status dialog has no deployment (`LobbyUnit.statusDeploys`).
+           Compact rows and multi-select menus keep it, and the item is renamed Unit Status... in every menu.
+         - Checks: `UnitDamageFormTest.theDeploymentReachesTheUnitAndRepairAndRollsLeaveIt` and
+           `readOnlyDamageWritesOnlyTheDeployment`, `LobbyAsksTest.readOnlyDamageIsRefusedBySwing`,
+           `LobbyUnitMenuTest.theUnitStatusIconLeavesTheDeploySubmenuOut` and
+           `LobbyDamageSmokeTest.underAGameMasterTheDamageShowsAndTheDeploymentEdits`.
+       - Unit Status and card polish. Each value row is its own Table (`LobbyDamageView.line`), because one Table
+         mixing full-width bars with label/control rows squeezed the control column until toggles and hit boxes
+         were clipped. Controls now end on one right edge: a label-less `UiChoice` has no trailing gap and a
+         `UiHealthBar` ends on its "/ max". The deployment round is a ‹ › selector (`UiKit.selector`, a
+         `UiStepper` over named choices), not a 40-entry dropdown.
+         - The card's second icon row is Unit Status, Camo, Randomize (a die opening Name, Callsign or Skills) and
+           C3, up to eight icons. The ⋮ leaves out Randomize and C3, which are now omitted by key
+           (`LMP_RANDOMIZE`, `LMP_C3`); the C3 network manager has the rest of that submenu.
+         - Warning chips keep their size in a `UiChipRow` (`UiKit.chipRow`). Those that don't fit fold into "+n",
+           instead of squeezing until the icon and text spill out.
+         - Checks: `LobbyUnitMenuTest.theRandomizeAndC3IconsLeaveTheirSubmenusOut`,
+           `LobbyUnitCardActionsSmokeTest.theRandomizeIconOffersNameCallsignAndSkills` and
+           `chipsThatDoNotFitFoldIntoACountWhole`, and `LobbyDamageSmokeTest` stepping the round.
+       Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
+       `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
+       `gameOptionsInTheTopBarOpensTheGameOptionsNamedOrFolded`,
+       `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`;
+       `LobbyPlayerCardSmokeTest` (the rail's icons, the team list and the deployment compass, clicked through the
+       stage; another player's card has no controls) and `LobbyRecipientSmokeTest`, whose card click now lands on
+       the name line; `LobbyBattlefieldToolsSmokeTest` (with the conditions and victory cards, and space's disabled
+       conditions), `LobbyMapSetupSmokeTest` (Board Editor) and
+       `LobbyBattlefieldTest.generatedRandomAndSurpriseSheetsAreRolled`; `LobbyUnitCardActionsSmokeTest` (the card's
+       icons and the submenu's Back, Esc and Left, clicked through the stage);
+       `LobbyNativeDialogsSmokeTest.escapeClosesADialogWhoseTextFieldHasTheFocus` and
+       `theFirstFocusIsTheFirstButtonNotTheTitleBarClose`; `LobbyMapSetupSmokeTest.theRandomMapSettingsKeepTheirSizeAcrossTheTabs`;
+       `LobbyUnitMenuTest.aCardsIconsLeaveTheirItemsOutOfItsMenu` and `aCardIconRunsTheMenusCommandOnItsUnit`, and
+       `LobbyUnitCardActionsSmokeTest` (every icon clicked, the main and secondary rows, the ⋮'s menu without them,
+       no damage icon when a Game Master keeps it); `escapeClosesADialogWhoseTextFieldHasTheFocus` (Esc with no
+       focus) and `theRandomMapSettingsKeepTheirSizeAcrossTheTabs` (Esc closes it, Theme inside the card);
+       `UnitDamageFormTest` (a Mek's, vehicle's, VTOL's and fighter's places and values, repair, the partial spec
+       written to the unit, ammunition and weapon switches, the roller, and every kind of unit the Swing editor
+       takes read unchanged and applied: a platoon's troopers, each battle armour trooper, a DropShip's systems and
+       bays, an emplacement, a building's power and gunners) and `LobbyDamageSmokeTest` (the doll's left arm
+       clicked, a bar dragged and a hit box, the chevrons, a roll lighting its tile, the rear armour and structure
+       dolls clicked, Restore Unit, and OK writing the armour to the
+       unit; a squad's location list and a platoon's troopers clicked through the stage).
+     - ~~Random army generators~~ (phase 1). The Swing random army dialog's generator tabs are native. A strip of
+       mode tiles over the random army's left pane picks where the hand comes from: Tables (the browser above),
+       Battle Value, Balanced, Faction and Formation. The hand, Roll, the totals and Add stay the same on the right;
+       a generator is a `RandomArmyForm.Dealer` in `megamek.client.lobby`, toolkit-free:
+       - Battle Value (`BattleValueArmy`, the Swing BV tab): steppers per kind (Meks, vehicles, battle armour,
+         infantry) with the available count or a warning when there are none, a line on how the budget is split
+         (by count × average BV per kind, infantry last), the BV budget and design years as ranges, canon units
+         only and padding spare BV with infantry. It deals through `RandomArmyCreator.generateArmy`, whose kept cards
+         count toward their kind. The count field hides, since the kinds set the size.
+       - Balanced (`BalancedArmy`, the simple lance): balance by BV or tonnage, a target and a tolerance, dealt
+         through `SimpleRandomLanceCreator.buildForce` against what the kept cards leave.
+       - Faction (`RatGeneratorForm` over `FactionChoice`): year, faction (minor ones on a switch), command and
+         rating (segments for short codes, a select for named ratings), then the options (unit type, weight
+         classes, roles, role strictness, network, motive) and under them a table preview, shown on demand, which
+         lists the generated table's units with their share and BV and takes one into the hand.
+       - Formation (`FormationForm`): the same faction block, unit type, a formation of those the type can head or
+         join, extra units (a select) and their type, and network. It deals a whole hand, so its cards are not kept or
+         rerolled alone.
+       - The Battle Value and Balanced generators share the Requisition's advanced search
+         (`LobbyAdvancedSearchView`) as a filter, which swaps into the dialog's body with a match count.
+       - The RAT Generator loads in the background; the Faction and Formation panes show it loading and Roll waits.
+         A generator's faction, year and rating are noted with the dealt units (`GenerationContext`) and the last
+         faction and unit type are remembered for the next opening, as is the mode, kept as the Swing random
+         army's last tab so either opens on the same generator.
+       - Every card and every unit row of the Faction table preview opens the unit's readout (summary, TRO, BV,
+         cost) over the random army, as the Swing tables' View, View BV and View Cost did.
+       - ~~Still Swing: the Force Generator~~ (phase 2, below).
+       Checks: `ArmyGeneratorsTest`, `RandomArmyFormTest` (a dealer, a whole hand, counts of its own, the context)
+       and the on-demand `LobbyDialogsL17SmokeTest.theRandomArmyGeneratorsDealByTheirChoices` (the remembered
+       mode, Battle Value's stepper and roll, the filter opened and closed, Balanced's roll, Faction's and Force's
+       loading state) and `theRandomArmyRollsKeepsAndAdds` (a card's readout, shown over the army).
+       Live: `lobby+randomarmy+click=army-mode-battleValue`.
+     - ~~Random army Force Generator~~ (phase 2). A sixth mode tile, Force, rolls a whole command as its faction
+       would field it; the Swing "Force generator…" footer button is gone. The model is `ForceGeneratorForm` in
+       `megamek.client.lobby`, toolkit-free, and the edits and the summary it shares with the Swing generator are
+       `ForceEdits` and `ForceComposition` in `megamek.client.ratgenerator`, which the Swing generator now calls too:
+       - The left pane has the Swing generator's options: year, faction, command, unit type (or combined arms),
+         size, rating, option, experience, weight class or infantry class, roles, and the transport block
+         (detachments, DropShip, JumpShip, WarShip and cargo shares, carriers' fighters).
+       - In the hand's place (`LobbyForceGeneratorPane`): the command's organisation, faction, rating, units, BV
+         and tons; Generate, which rolls on the Swing thread and processes off it, as `GenerateTask` does, each roll
+         folded into the command by echelon (`ForceEdits.accumulate`); Export, a .mul through `LobbyFiles`'
+         `EXPORT_FORCE` route; the organisation as a searchable tree whose rows' eye leaves a branch out of the game
+         or brings it back.
+       - The chosen node's orders: its readout, Reroll ship, and change the formation to, or add a formation of,
+         the type picked in the formation mix (the Swing mix's sampled palette, used as a brush; each type's tip says
+         what it needs and how often the sample built it). An order that cannot run says why; a change that lands
+         as another type or finds no units says so after.
+       - The composition by unit type and weight class, as the Swing summary.
+       - Add sends the included units for the chosen player as the Swing generator's Okay does: wired (C3, force
+         strings), carried units loaded, the context noted, the command cleared.
+       Checks: `ForceGeneratorFormTest` (folding rolls by echelon, the formation template, the tree's children,
+       leaving out, the markup dropped), `LobbyFilesTest.aGeneratedForceExportsAsAUnitListAndRemembersTheFolder`,
+       `ForceGeneratorSummaryRowKeyTest`, and the smoke test's Force loading state. Live:
+       `lobby+randomarmy+click=army-mode-force`, then `army-force-generate`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
          player in a second MegaMek window. Already checked: saving and loading game options, a loadout and a
          unit list through the real system file dialog (L18), and a second human as the Game Master seat (a
          windowless client). Bot presets have no file to save.
-       - The last Swing dialogs the lobby opens, to move into libGDX:
-         - the portrait chooser (`PortraitChooserDialog`), next to the native camo chooser;
-         - the advanced map search (`AdvancedSearchMapDialog`), from map setup;
-         - the map assembly help (`HelpDialog`);
-         - the random army's Advanced Search, which still opens the Swing random army dialog;
-         - Print list (`SwingLobbyServices.ForcesCommand.PRINT_LIST`).
-         Add unit opens the native requisition; the window's Swing `ADD_UNIT` branch is no longer reached and can
-         go.
+       - The last Swing dialogs the lobby opens, to move into libGDX: none from the forces column. The random
+         army's Force Generator is native now, Add unit opens the native requisition, and the Swing forces
+         commands the lobby once fell back to (`SwingLobbyServices.forcesCommand`) are gone. The Swing random army
+         stays for the start screen, a battle's reinforcements, the Game Master's player setup, MegaMekLab and
+         MekHQ.
+       - Done: auto-resolve is native, one briefing card (`LobbyAutoResolveView` over the toolkit-free
+         `AutoResolveRun`). With the odds setting on, the staff simulate the battle in the background while the
+         card cycles their chatter and counts the battles fought, then shows the chance of victory as a big colored
+         percent with Victories, Defeats and Draws (the Swing chance dialog never counted draws) and Resolve battle.
+         The battle resolves on a worker with an asymptotic bar, and the after-action card names Victory, Defeat
+         or Draw, the winner, and opens the ACAR log as a battle report (see the document view below). Closing
+         during the
+         odds cancels the simulation; closing while resolving reopens the card with the result. The dead Swing
+         battlefield commands (`SwingLobbyServices.battlefieldCommand`, `runAutoResolve`) and the Swing
+         `VictoryConditionsDialog` are removed; the Swing auto-resolve dialogs stay for MekHQ. The lobby now opens
+         no Swing dialog except the startup-failure message. Checks: `AutoResolveRunTest`, the smoke test's
+         auto-resolve briefing. Live: `lobby+resolve` (with the odds; `+click=autoresolve-proceed,autoresolve-report`
+         goes on through the battle and its report) and `lobby+resolve=quick` (without them).
+       - Done: help documents and the battle report read a chapter at a time (`LobbyDocumentView` over the
+         toolkit-free `HelpDocument`). A rail on the left lists the chapters, with Prev/Next and "n of m" in the
+         footer; each chapter opens on its free text, then its topics as cards (two by two for a guide). Lists of
+         short items read as tags, a command as a code chip. A guide's h2s are its chapters; its navigation, "Back to
+         Top" links and layout pictures are dropped. The ACAR report becomes Summary, Starting Scenario Phase, one
+         chapter per round and End of Combat: each phase is a card, each action an event with its team's color at
+         its edge and its rolls and damage as indented details; the victory is a banner. The bot readme nag is a
+         game card ("Know the bot before you fight it": Read the guide / Not now) instead of three plain lines.
+         Fixed on the way: the report's `acar.short_range` key and its `&ensp;` indents. Checks: `HelpDocumentTest`,
+         `MapSetupHelpTest` and the smoke test's document and nag. Live: `lobby+princesshelp` (with
+         `+click=document-chapter-1`), `lobby+maphelp`, the auto-resolve report above.
        - The unit dialogs still in Swing, from the lobby and the board:
-         - the unit damage editor (`UnitEditorDialog`);
-         - the SBF and Alpha Strike stats dialogs, with their export;
-         - the auto-resolve dialogs: the chance of winning, the progress and the log.
-       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2), and the map editor's Client
-         Settings and About.
+         - the unit damage editor (`UnitEditorDialog`) on the board; the lobby's is native;
+         - the SBF and Alpha Strike stats dialogs on the board (the lobby's are native, see below);
+       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2) and the map editor's Client
+         Settings and About. The "Save First?" question when leaving a battle is native since #39.
+       - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
+         thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser
+         only adds its own preview and footer. The Swing `PortraitChooserDialog` stays for the Swing pilot view.
+       - Done: the advanced map search is folded into the map setup's board drawer. A compact filter bar under the
+         search holds Tags and Folders drop-down checklists (popovers that scroll on their own, with a find field
+         for a long list and Match all tags) and the board size (this size, or any size on a one-board map off
+         space, with width and height ranges on a second row). Active tags and folders show as removable chips with
+         Clear, and the faces count them, so the drawer never needs a second scrollbar. Automatic tags read as words
+         ("Light forest", not "LightForest (Auto)") and merge with a manual twin. Any size lists the whole board
+         library (`BoardClassifier`, read once off the Swing thread when Tags first opens) with each board's size;
+         Place makes such a board the whole map at its own size, as the Swing dialog's OK did, and Add to stack
+         refuses it. The lobby window's Swing branch is gone; the Swing
+         `AdvancedSearchMapDialog` stays for the board window. Covered by `MapSetupFormTest`
+         and `LobbyMapSetupSmokeTest`. The library is not re-read after the board editor saves a board.
+       - Done: the map setup's help (the ? in Map setup) opens in the lobby's native document view, as Princess's
+         help does (`GpuLobbyTools.helpDocument`). Its text is new, in `MapSetupHelp.html`,
+         written for the libGDX map setup: the map type and size, the slots and the board drawer, stacks and
+         surprise boards, each slot's controls, finding boards with the filter bar, saving and previewing. The old
+         `MapAssemblyHelp.html` is deleted with the Swing `MapSetupDialog`. Covered by `MapSetupHelpTest`; probe
+         `+maphelp`.
+       - Done: Print list runs natively (`GpuLobbyTools.printList`). The lobby writes the player's units in force
+         tree order (`LobbyFiles.writeUnitList`, shared with Save list) and starts MegaMekLab's print dialog through
+         `MegaMekLabPrint`, which `ClientGUI.printList` now uses too. The chat says MegaMekLab is opening, and the
+         forces menu shows "Printing in MegaMekLab…" (disabled) until MegaMekLab exits. When MegaMekLab cannot be
+         found or run, a native notice says why and offers Open settings. With no path set, MegaMek looks for
+         MegaMekLab.jar in its own folder, where the launcher installs the suite. Covered by `MegaMekLabPrintTest`
+         and `LobbyTogglesSmokeTest`.
+       - Done: the unit menu opens no Swing. Its commands run in the toolkit-free `LobbyUnitActions` (which
+         replaces `SwingLobbyUnitActions`), with the windows behind a `LobbyUnitActions.Host`:
+         - Bot facing is one card with two compasses, while moving and when stopped, each with Auto at its middle
+           (`BotFacingForm`, `LobbyBotOrderViews`).
+         - The lance role is a card with None, Convoy and Escort tabs; a convoy picks its exit edge, an escort its
+           convoy and its places round it (Surround takes them all), and OK waits until an escort has one
+           (`LanceRoleForm`).
+         - Alpha Strike stats are element cards with stat tiles, PV and specials, sortable, with Copy cards, Copy
+           stats, Print and Save (`AlphaStrikeStatsForm`, `LobbyStatsView`); SBF stats are formation cards with
+           their units, Show elements, and Print with the sheet's header and value fonts (`SbfStatsForm`). Save
+           goes through the system file dialog (`LobbyFiles.exportStats`).
+         - The sprite export asks for the camo in the native camo chooser.
+         The dead Swing classes are deleted: `SwingLobbyUnitActions`, `SwingLobbyPrompts` (the client's blocking
+         prompts outside the lobby decline with a logged warning, `DecliningLobbyPrompts`), `ForceNameChooser`,
+         `C3NetworkManagerDialog`, `LanceRoleDialog`, `BotFormationsMenuBuilder`, `ASStatsDialog`,
+         `ASStatsTablePanel`, `SBFStatsDialog` and `SBFStatsTablePanel`; none of MekHQ or MegaMekLab used them.
+         The readout gains an Alpha Strike page (the card over its conversion report) and a Factions page (era by
+         era availability, from the toolkit-free `UnitAvailability` that the Swing `AvailabilityPanel` now uses
+         too), and an open readout of the lobby's units reads them again when the lobby changes, on the same unit
+         and page. Checks: `LobbyUnitActionsTest`, `LobbyBotOrderFormsTest`, `UnitAvailabilityTest`,
+         `ReadoutPagesTest`, and the smoke tests' facing, lance role and stats cards.
+       - Done: the Swing map setup is gone. `MapSetupDialog`, `MapListPopup` and `MapPreviewButton` are deleted, with
+         the old 2D preview beside the 3D one; what the lobby still used from them (the 3D preview, its refresh and
+         close, the board editor's saved-board settings) is in `LobbyBoardPreviews`. `SwingLobbyServices` is
+         `LobbyServices`, so no lobby class is named after Swing. The lobby's 3D preview no longer offers Legacy 2D in its
+         Renderer menu (file and start-screen previews still do), and the map size commands nothing called are gone. Unused map setup messages are dropped from every
+         language. Checks: `LobbyBoardPreviewsTest`, `LobbyServicesTest`, `ClientGUIBoardLifecycleTest`.
        - A Swing modal that a dead client leaves open could still block the start screen; the routing above
          covers the questions found so far.
        - The settings check across the startup path, step 7 below.

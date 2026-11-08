@@ -974,11 +974,45 @@ public final class UiKit {
     }
 
     /**
+     * A health bar ({@link UiHealthBar}) for {@code value} of {@code max}, such as a location's armor: click or drag
+     * the bar, wheel over it, step with − and + or the arrow keys, or type the value; the change from {@code original}
+     * shows at its end.
+     */
+    public UiHealthBar healthBar(int value, int max, int original) {
+        return new UiHealthBar(this, value, max, original);
+    }
+
+    /**
+     * A row of level tiles ({@link UiLevelTiles}) named {@code names}, each with a pip meter of its step lit in its
+     * colour role from {@code roles}, such as how much damage to roll.
+     */
+    public UiLevelTiles levelTiles(String[] names, String[] roles) {
+        return new UiLevelTiles(this, names, roles);
+    }
+
+    /**
      * A stepper as {@link #stepper(int, int, int)} led by {@code caption} in small text.secondary, the caption, the
      * buttons and the value all {@link UiStepper#gap()} apart: one group, which stands a larger space from the next.
      */
     public UiStepper stepper(String caption, int value, int min, int max) {
         return new UiStepper(this, caption, value, min, max);
+    }
+
+    /**
+     * A selector ({@link UiStepper}): one of {@code choices}, the {@code index}th first, between chevrons that step
+     * through them, as a game's settings menu picks a value; for a short ordered run of choices, such as a round, where
+     * a dropdown would be a long list. Its value is the chosen index.
+     */
+    public UiStepper selector(List<String> choices, int index) {
+        return new UiStepper(this, choices, index);
+    }
+
+    /**
+     * A row of status chips that keeps each chip whole ({@link UiChipRow}): those past its width fold into
+     * {@code more}'s "+n", with {@code folded} chips already left out before it.
+     */
+    public UiChipRow chipRow(List<Actor> chips, int folded, java.util.function.IntFunction<String> more) {
+        return new UiChipRow(this, chips, folded, more);
     }
 
     /**
@@ -1131,11 +1165,15 @@ public final class UiKit {
     /**
      * Whether {@code input} takes the whole width of its form column, so the right edges of a form's inputs line up:
      * selects, text, search and range inputs, pick lists and rows built of them do; check boxes, radios, switches,
-     * segmented controls, buttons, chips, steppers and number inputs keep their own width.
+     * segmented controls, buttons, chips, steppers and number inputs keep their own width. A wrapping group of chips
+     * fills it too: it has no width of its own and would otherwise stack its chips one per row.
      */
     public static boolean fillsFormColumn(Actor input) {
-        return !(input instanceof Button || input instanceof UiOptionBar || input instanceof HorizontalGroup
-              || input instanceof UiStepper || input instanceof UiNumber);
+        if (input instanceof HorizontalGroup group) {
+            return group.getWrap();
+        }
+        return !(input instanceof Button || input instanceof UiOptionBar || input instanceof UiStepper
+              || input instanceof UiNumber);
     }
 
     /**
@@ -1172,6 +1210,14 @@ public final class UiKit {
      */
     public UiPictureCard pictureCard(String text, float aspect) {
         return new UiPictureCard(this, text, aspect);
+    }
+
+    /**
+     * A card that sums something up under {@code title} and opens it when clicked ({@link UiSummaryCard}), such as the
+     * lobby's planetary conditions; its summary is set with {@link UiSummaryCard#summary(String)}.
+     */
+    public UiSummaryCard summaryCard(String title) {
+        return new UiSummaryCard(this, title);
     }
 
     /** Makes radio buttons exclusive: exactly one stays selected, the first checked one or else the first. */

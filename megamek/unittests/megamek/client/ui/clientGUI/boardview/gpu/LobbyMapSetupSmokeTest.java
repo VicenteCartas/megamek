@@ -19,6 +19,8 @@ import java.util.function.Consumer;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -32,6 +34,7 @@ import megamek.client.lobby.RandomMapForm.Param;
 import megamek.client.ui.Messages;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiDialog;
+import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.board.BoardDimensions;
@@ -157,7 +160,8 @@ class LobbyMapSetupSmokeTest {
 
             click(ui, body.findActor("map-load"));
             click(ui, body.findActor("map-random-settings"));
-            assertTrue(calls.containsAll(List.of("run LOAD", "run RANDOM_MAP")), calls.toString());
+            click(ui, body.findActor("map-board-editor"));
+            assertTrue(calls.containsAll(List.of("run LOAD", "run RANDOM_MAP", "run BOARD_EDITOR")), calls.toString());
 
             click(ui, body.findActor("map-medium-space"));
             assertEquals(MapSettings.MEDIUM_SPACE, fixture.form.settings().getMedium(), "the segmented control sets the map type");
@@ -355,6 +359,42 @@ class LobbyMapSetupSmokeTest {
             assertEquals(1, sent.size(), "OK sends the settings");
             assertEquals(lakes + 1, sent.get(0).getMaxWaterSpots());
             assertFalse(dialogs.isOpen(), "OK closes the dialog");
+        });
+    }
+
+    @Test
+    void theRandomMapSettingsKeepTheirSizeAcrossTheTabs() {
+        UiTestStage.run(ui -> {
+            server();
+            RandomMapForm form = new RandomMapForm(server, settings -> { });
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            LobbyRandomMapView view = dialogs.randomMap(form, List.of("", "snow"), new RandomHost());
+            for (String mode : List.of("random-normal", "random-advanced")) {
+                click(ui, view.control(mode));
+                ui.draw();
+                Actor card = view.control("random-tabs");
+                while (!"dialog".equals(card.getName())) {
+                    card = card.getParent();
+                }
+                float width = card.getWidth();
+                float height = card.getHeight();
+                Actor theme = view.control("random-theme");
+                float right = theme.localToActorCoordinates(card, new Vector2(theme.getWidth(), 0)).x;
+                assertTrue(right <= width, mode + " keeps the theme inside the dialog");
+                for (String tab : List.of("civilization", "elevation", "natural", "water", "effects")) {
+                    Actor control = view.control("random-tab-" + tab);
+                    assertNotNull(control, tab);
+                    click(ui, control);
+                    ui.draw();
+                    assertEquals(width, card.getWidth(), .5f, mode + " " + tab + " keeps the dialog's width");
+                    assertEquals(height, card.getHeight(), .5f, mode + " " + tab + " keeps the dialog's height");
+                }
+            }
+            assertTrue(dialogs.isOpen());
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            ui.draw();
+            assertFalse(dialogs.isOpen(), "Escape closes the random map settings");
+            dialogs.dispose();
         });
     }
 
@@ -609,6 +649,78 @@ class LobbyMapSetupSmokeTest {
     }
 
     @Test
+    void filtersNarrowByTagAndFolderAndAnySizeMakesAPlacedBoardTheWholeMap() {
+        UiTestStage.run(ui -> {
+            Fixture fixture = new Fixture(ui);
+            Table body = fixture.body;
+            Group root = ui.stage.getRoot();
+            assertNotNull(body.findActor("map-filter-bar"), "the filter bar sits under the search");
+            assertNull(body.findActor("map-filter-chips"), "no chips row without an active filter");
+            click(ui, body.findActor("map-filter-tags"));
+            assertEquals(MapSetupForm.Library.READING, fixture.form.libraryState(),
+                  "opening the tags asks for the library");
+            assertTrue(root.<UiPopover>findActor("map-filter-tag-popover").isVisible(), "Tags opens its checklist");
+            assertNotNull(root.findActor("map-filter-tag-reading"));
+            assertTrue(body.<Button>findActor("map-filter-scope-any").isDisabled(),
+                  "a map of two boards cannot browse any size");
+
+            fixture.form.library(List.of(
+                  new MapSetupForm.LibraryBoard("16x17/Desert 1.board2", 16, 17, List.of("Desert")),
+                  new MapSetupForm.LibraryBoard("16x17/City Hills.board2", 16, 17, List.of("Urban")),
+                  new MapSetupForm.LibraryBoard(LAKE, 16, 17, List.of("Water")),
+                  new MapSetupForm.LibraryBoard("32x34/Big City.board2", 32, 34, List.of("Urban"))));
+            fixture.show();
+            ui.draw();
+            assertTrue(root.<UiPopover>findActor("map-filter-tag-popover").isVisible(),
+                  "the checklist stays open as the library arrives");
+            click(ui, root.findActor("map-filter-tag-Urban"));
+            assertEquals(List.of("16x17/City Hills.board2"),
+                  fixture.view.shown().boards().stream().map(Entry::name).toList(),
+                  "a tag keeps the boards of this size that have it, without Generated");
+            assertTrue(root.<Button>findActor("map-filter-tag-Urban").isChecked());
+            assertEquals("Tags \u00b7 1", body.<UiButton>findActor("map-filter-tags").getText().toString(),
+                  "the face counts its checked tags");
+            ui.draw();
+            assertNotNull(body.findActor("map-filter-chip-tag-Urban"), "an active tag shows as a chip");
+            click(ui, body.findActor("map-filter-tags"));
+            assertFalse(root.<UiPopover>findActor("map-filter-tag-popover").isVisible(), "the face closes it again");
+            click(ui, body.findActor("map-filter-chip-tag-Urban"));
+            assertEquals(MapSetupForm.Filter.NONE, fixture.form.filter(), "the chip removes its filter");
+            ui.draw();
+            assertNull(body.findActor("map-filter-chips"), "the chips row leaves with the last filter");
+
+            click(ui, body.findActor("map-filter-folders"));
+            click(ui, root.findActor("map-filter-folder-16x17"));
+            assertEquals(3, fixture.view.shown().boards().size(), "the folder keeps its three boards");
+            ui.draw();
+            click(ui, body.findActor("map-filter-clear"));
+            assertEquals(MapSetupForm.Filter.NONE, fixture.form.filter(), "Clear drops every filter");
+            assertFalse(root.<Button>findActor("map-filter-folder-16x17").isChecked(),
+                  "the checklist follows the cleared filter");
+            root.<UiPopover>findActor("map-filter-folder-popover").cancel();
+
+            fixture.form.mapWidth(1);
+            fixture.show();
+            ui.draw();
+            click(ui, body.findActor("map-filter-scope-any"));
+            assertTrue(fixture.view.shown().anySize(), "a one-board map browses any size");
+            assertNotNull(body.findActor("map-filter-width"), "any size shows the size ranges");
+            List<Entry> boards = fixture.view.shown().boards();
+            int big = boards.indexOf(boards.stream().filter(entry -> entry.name().startsWith("32x34"))
+                  .findFirst().orElseThrow());
+            click(ui, body.findActor("map-board-" + big));
+            assertTrue(body.<UiButton>findActor("map-add-to-stack").isDisabled(),
+                  "a board of another size cannot join the slot's stack");
+            calls.clear();
+            click(ui, body.findActor("map-place"));
+            assertTrue(calls.contains("single 32x34/Big City.board2 32x34"), calls.toString());
+            assertEquals(32, fixture.form.settings().getBoardWidth(), "the map takes the board's own size");
+            fixture.view.dispose();
+            body.remove();
+        });
+    }
+
+    @Test
     void scrollingToTheEndRequestsOnlyTheVisibleThumbnailsInBothViews() {
         UiTestStage.run(ui -> {
             Fixture fixture = new Fixture(ui);
@@ -735,6 +847,10 @@ class LobbyMapSetupSmokeTest {
 
         @Override
         public void selectSingleBoard(MapSettings settings, String board, BoardDimensions size) {
+            calls.add("single " + board + " " + size.width() + "x" + size.height());
+            settings.setMapSize(1, 1);
+            settings.setBoardSize(size.width(), size.height());
+            settings.setBoardsSelectedVector(new ArrayList<>(List.of(board)));
         }
 
         @Override

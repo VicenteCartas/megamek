@@ -3,7 +3,9 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -23,15 +25,18 @@ import megamek.client.ui.gdx.UiTabs;
 
 /**
  * The lobby's unit readout as a dossier: the unit's sprite beside its name and key figures, then a page at a time, the
- * summary readout, the Technical Readout, the Battle Value and the cost calculations, as the Swing readout, BV and cost
- * dialogs show them; Previous and Next go through several units. Also shows a help document, a single page of rows.
+ * summary readout, the Technical Readout, the Battle Value and the cost calculations, the Alpha Strike card with its
+ * conversion and the factions that field the unit, as the Swing readout, BV and cost dialogs show them; Previous and
+ * Next go through several units, and {@link #update} follows the lobby's changes. Also shows a help document, a single
+ * page of rows.
  * <p>
- * GPU thread. The sprites' textures are given back once it closes.
+ * GPU thread. The sprites' and cards' textures are given back once it closes.
  */
 final class LobbyReadoutView {
     /** The pages of a dossier, in their tabs' order. */
     enum Page {
-        SUMMARY("Lobby.readout.summary"), TRO("Lobby.readout.tro"), BV("Lobby.readout.bv"), COST("Lobby.readout.cost");
+        SUMMARY("Lobby.readout.summary"), TRO("Lobby.readout.tro"), BV("Lobby.readout.bv"), COST("Lobby.readout.cost"),
+        ALPHA_STRIKE("Lobby.readout.alphaStrike"), FACTIONS("Lobby.readout.factions");
 
         private final String key;
 
@@ -43,17 +48,41 @@ final class LobbyReadoutView {
     /**
      * One unit's dossier, read on the Swing thread.
      *
-     * @param line   the unit's key figures, under its name
-     * @param sprite its sprite in its camouflage, or null
-     * @param pages  the rows of each {@link Page}, in order
+     * @param id       the unit's entity id, or {@link #NO_UNIT} when it is not in the game
+     * @param line     the unit's key figures, under its name
+     * @param sprite   its sprite in its camouflage, or null
+     * @param pages    the rows of each {@link Page}, in order; the factions' rows may come from {@code factions}
+     * @param card     its Alpha Strike card, shown above the Alpha Strike page's rows, or null
+     * @param factions the factions page, read once it first shows, or null when {@code pages} has it
      */
-    record Dossier(String name, String line, @Nullable BufferedImage sprite, List<List<EntityReadout.Row>> pages) {
+    record Dossier(int id, String name, String line, @Nullable BufferedImage sprite,
+          List<List<EntityReadout.Row>> pages, @Nullable BufferedImage card, @Nullable LaterRows factions) {
+        static final int NO_UNIT = -1;
+
+        Dossier(int id, String name, String line, @Nullable BufferedImage sprite,
+              List<List<EntityReadout.Row>> pages, @Nullable BufferedImage card) {
+            this(id, name, line, sprite, pages, card, null);
+        }
+
+        Dossier(String name, String line, @Nullable BufferedImage sprite, List<List<EntityReadout.Row>> pages) {
+            this(NO_UNIT, name, line, sprite, pages, null, null);
+        }
+    }
+
+    /** A page's rows that take a while to read, so are read only when the page first shows. */
+    interface LaterRows {
+        /** The rows, or null while they are not read yet. */
+        @Nullable List<EntityReadout.Row> rows();
+
+        /** Reads the rows off the GPU thread, then runs {@code done} on whatever thread read them. */
+        void read(Runnable done);
     }
 
     private final UiKit kit;
     private final boolean motion;
-    private final List<Dossier> dossiers;
+    private List<Dossier> dossiers;
     private final List<Texture> textures = new ArrayList<>();
+    private final Map<Dossier, Texture> cards = new IdentityHashMap<>();
     private final Image sprite = new Image((TextureRegionDrawable) null, Scaling.fit);
     private final Label name;
     private final Label line;
@@ -62,6 +91,7 @@ final class LobbyReadoutView {
     private @Nullable UiButton previous;
     private @Nullable UiButton next;
     private int shown;
+    private boolean quiet;
 
     LobbyReadoutView(UiKit kit, UiDialog dialog, List<Dossier> dossiers, boolean motion, Runnable close) {
         this.kit = kit;
@@ -145,15 +175,79 @@ final class LobbyReadoutView {
 
     /** Shows the dossier's page that the tabs pick. */
     private void page() {
-        int at = (tabs == null) ? 0 : Math.max(0, tabs.getSelectedIndex());
-        List<List<EntityReadout.Row>> pages = dossiers.get(shown).pages();
+        int at = selected();
+        Dossier dossier = dossiers.get(shown);
+        List<List<EntityReadout.Row>> pages = dossier.pages();
         List<EntityReadout.Row> rows = at < pages.size() ? pages.get(at) : List.of();
         page.clearChildren();
-        if (rows.isEmpty()) {
-            page.add(kit.typeLabel(Messages.getString("Lobby.readout.none"), "body", "text.muted")).left();
-        } else {
-            page.add(LobbyReadoutRows.of(kit, motion, rows)).growX().minWidth(0);
+        LaterRows later = (at == Page.FACTIONS.ordinal()) ? dossier.factions() : null;
+        if (later != null) {
+            List<EntityReadout.Row> read = later.rows();
+            if (read == null) {
+                Label loading = kit.typeLabel(Messages.getString("Lobby.readout.loading"), "body", "text.muted");
+                loading.setName("readout-loading");
+                page.add(loading).left();
+                later.read(() -> GpuHost.post(() -> {
+                    if (page.getStage() != null && dossiers.get(shown) == dossier && selected() == at) {
+                        page();
+                    }
+                }));
+                return;
+            }
+            rows = read;
         }
+        Texture card = (at == Page.ALPHA_STRIKE.ordinal()) ? card(dossier) : null;
+        if (card != null) {
+            Image picture = new Image(new TextureRegionDrawable(card), Scaling.fit);
+            picture.setName("readout-card");
+            page.add(picture).size(card.getWidth(), card.getHeight()).left().padBottom(space("lg")).row();
+        }
+        if (rows.isEmpty() && card == null) {
+            page.add(kit.typeLabel(Messages.getString("Lobby.readout.none"), "body", "text.muted")).left();
+        } else if (!rows.isEmpty()) {
+            page.add(LobbyReadoutRows.of(kit, motion && !quiet, rows)).growX().minWidth(0);
+        }
+    }
+
+    private int selected() {
+        return (tabs == null) ? 0 : Math.max(0, tabs.getSelectedIndex());
+    }
+
+    /** {@code dossier}'s Alpha Strike card as a texture, made at first showing, or null when it has none. */
+    private @Nullable Texture card(Dossier dossier) {
+        if (dossier.card() == null) {
+            return null;
+        }
+        return cards.computeIfAbsent(dossier, each -> {
+            Texture texture = GpuStartScreen.texture(each.card(), true);
+            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+            return texture;
+        });
+    }
+
+    /**
+     * Replaces the dossiers with fresh ones of the same units, as the lobby changes while this shows: stays on the
+     * unit that shows, or the first one if it has gone, and on the tab; gives the old pictures back. Ignores an empty
+     * list.
+     */
+    void update(List<Dossier> fresh) {
+        if (fresh.isEmpty()) {
+            return;
+        }
+        int id = dossiers.get(shown).id();
+        int index = 0;
+        for (int i = 0; i < fresh.size(); i++) {
+            if (fresh.get(i).id() == id) {
+                index = i;
+                break;
+            }
+        }
+        dispose();
+        dossiers = List.copyOf(fresh);
+        // The same unit again: no fade in
+        quiet = true;
+        show(index);
+        quiet = false;
     }
 
     /** Turns to {@code shown}'s tab; returns this. */
@@ -169,6 +263,8 @@ final class LobbyReadoutView {
     void dispose() {
         textures.forEach(Texture::dispose);
         textures.clear();
+        cards.values().forEach(Texture::dispose);
+        cards.clear();
     }
 
     // ---- For the probe and the tests ----

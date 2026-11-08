@@ -98,6 +98,8 @@ final class GpuPaperdoll extends WidgetGroup {
     private static final Color BREACHED = Color.valueOf("9FB2F0");
     /** The hull that belongs to no location, and a region without a cell (such as a ProtoMek's absent main gun). */
     private static final Color NEUTRAL = DamageTier.over(alpha(UiTheme.ACCENT, .05f));
+    /** A critical region's fill on a {@link #vivid} doll: a red that stands apart from the damaged amber. */
+    private static final Color VIVID_CRITICAL = DamageTier.over(alpha(UiTheme.CORAL, .62f));
 
     private final Texture white;
     private final BitmapFont font;
@@ -108,6 +110,8 @@ final class GpuPaperdoll extends WidgetGroup {
     private Map<String, Cell> structure = Map.of();
     private float maxFont = 14;
     private boolean dimmed;
+    /** Whether a critical region takes the stronger red, as the lobby's damage editor asks; the board's never do. */
+    private boolean vivid;
     private String hover = "";
     private String selected = "";
     private String linked = "";
@@ -210,10 +214,13 @@ final class GpuPaperdoll extends WidgetGroup {
                 if (cell == null || cell.text().isEmpty() && !cell.crit() && cell.delta() == 0) {
                     continue;
                 }
-                Label text = cell.text().isEmpty() ? null : label(cell.text(), cell.tier().number);
+                boolean lit = vivid && cell.tier() == DamageTier.CRITICAL;
+                Label text = cell.text().isEmpty() ? null : label(cell.text(), lit ? UiTheme.TEXT
+                      : cell.tier().number);
                 Label dot = cell.crit() ? label("\u2022", cell.tier() == DamageTier.EXPOSED ? UiTheme.FILL_INK
                       : UiTheme.AMBER) : null;
-                Label delta = cell.delta() > 0 ? label("\u2212" + cell.delta(), UiTheme.CORAL) : null;
+                Label delta = cell.delta() > 0 ? label("\u2212" + cell.delta(), lit ? UiTheme.TEXT
+                      : vivid && cell.tier() == DamageTier.EXPOSED ? UiTheme.FILL_INK : UiTheme.CORAL) : null;
                 Figure figure = new Figure(region, text, dot, delta);
                 figures.add(figure);
                 for (Label label : new Label[] { figure.text(), figure.dot(), figure.delta() }) {
@@ -233,6 +240,15 @@ final class GpuPaperdoll extends WidgetGroup {
             maxFont = size;
             invalidate();
         }
+    }
+
+    /**
+     * Gives a critical region a stronger red with its numbers in text.primary, so it stands apart from a damaged one
+     * at a glance, and an exposed region's change in the ink its number takes; set before {@link #show}. The lobby's
+     * damage editor asks for it; the board's dolls keep the ramp.
+     */
+    void vivid(boolean on) {
+        vivid = on;
     }
 
     /** A destroyed unit: every region at .45 alpha except its destroyed ones. */
@@ -465,7 +481,8 @@ final class GpuPaperdoll extends WidgetGroup {
             }
             Cell cell = cell(region);
             float regionAlpha = cell != null && cell.tier() == DamageTier.DESTROYED ? alpha : rest;
-            Color fill = cell == null ? NEUTRAL : cell.tier().opaque;
+            Color fill = cell == null ? NEUTRAL : vivid && cell.tier() == DamageTier.CRITICAL ? VIVID_CRITICAL
+                  : cell.tier().opaque;
             if (fill.a > 0) {
                 fill(batch, fills.get(index), fill, regionAlpha);
             }

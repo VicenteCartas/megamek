@@ -6,17 +6,21 @@ import java.util.List;
 import java.util.Objects;
 
 import jakarta.annotation.Nullable;
+import megamek.client.ratgenerator.GenerationContext;
 import megamek.common.loaders.MekSummary;
 
 /**
- * A random army rolled from a random assignment table, without a toolkit, as the Swing {@code RandomArmyDialog}'s RAT
- * tab rolls it, dealt as unit cards: Roll fills the hand to the unit count, rerolling every card that is not kept; a
- * card can be kept, rerolled alone or discarded. The cards go to the chosen player, one the local player may add units
- * to (the dialog's player chooser).
+ * A random army, without a toolkit, dealt as unit cards: Roll fills the hand to the unit count, rerolling every card
+ * that is not kept; a card can be kept, rerolled alone or discarded. The cards go to the chosen player, one the local
+ * player may add units to (the dialog's player chooser).
+ * <p>
+ * The hand is dealt from a random assignment table, as the Swing {@code RandomArmyDialog}'s RAT tab rolls it, until a
+ * {@link Dealer} takes over: one of the dialog's other generators, such as the Battle Value army or the formation
+ * builder.
  */
 public final class RandomArmyForm {
 
-    /** The most units one roll deals. */
+    /** The most units a table roll deals or the hand takes one by one; a generator deals all it was asked for. */
     public static final int MAX_UNITS = 24;
 
     /** Rolls units from a table. */
@@ -25,10 +29,50 @@ public final class RandomArmyForm {
         List<MekSummary> roll(int count, String table);
     }
 
+    /** A generator the hand is dealt from instead of a table. */
+    public interface Dealer {
+        /** Whether it can deal now, with what it has been asked for. */
+        boolean canDeal();
+
+        /**
+         * Deals the units to go with {@code kept}, the cards the hand keeps: {@code count} of them, unless the dealer
+         * knows better (a Battle Value army deals what its counts and budget ask for).
+         */
+        List<MekSummary> deal(int count, List<MekSummary> kept);
+
+        /** A unit to take the place of {@code unit}, or null when there is none; {@code rest} are the other cards. */
+        @Nullable MekSummary replace(MekSummary unit, List<MekSummary> rest);
+
+        /**
+         * Whether a roll deals a whole hand that holds together, as a formation does: Roll deals every card anew and
+         * no card is kept or rerolled alone.
+         */
+        default boolean wholeHand() {
+            return false;
+        }
+
+        /** Whether the hand's size is the form's unit count; a dealer with counts of its own says no. */
+        default boolean usesCount() {
+            return true;
+        }
+
+        /** What the hand was dealt for, to record with the units, or null when the dealer knows nothing of that. */
+        default @Nullable GenerationContext context() {
+            return null;
+        }
+
+        /** Whether its last deal stopped short of what it was asked for, at a limit of its own. */
+        default boolean cutShort() {
+            return false;
+        }
+    }
+
     /** One dealt unit. */
     public static final class Card {
         private MekSummary unit;
         private boolean kept;
+        private @Nullable GenerationContext dealtFor;
+        private long dealt;
 
         private Card(MekSummary unit) {
             this.unit = unit;
@@ -50,6 +94,9 @@ public final class RandomArmyForm {
     private String table;
     private int count = 4;
     private int player;
+    private @Nullable Dealer dealer;
+    private long dealings;
+    private boolean cutShort;
 
     /**
      * @param tables  the random assignment tables offered
@@ -108,38 +155,122 @@ public final class RandomArmyForm {
         return List.copyOf(cards);
     }
 
-    /** Whether Roll can deal: there is a table. */
-    public boolean canRoll() {
-        return table != null;
+    /** The generator the hand is dealt from, or null for the chosen table. */
+    public @Nullable Dealer dealer() {
+        return dealer;
     }
 
-    /** Rerolls every card not kept, then deals new cards up to the unit count, or discards unkept ones over it. */
+    /** Deals the hand from {@code dealer} from now on, or from the chosen table for null; the cards stay. */
+    public void dealer(@Nullable Dealer dealer) {
+        this.dealer = dealer;
+    }
+
+    /** Whether a card can be kept or rerolled alone, which a formation's cards cannot. */
+    public boolean cardsApart() {
+        return dealer == null || !dealer.wholeHand();
+    }
+
+    /** Whether Roll can deal: there is a table, or the dealer can deal. */
+    public boolean canRoll() {
+        return dealer == null ? table != null : dealer.canDeal();
+    }
+
+    /**
+     * Rerolls every card not kept, then deals new cards up to the unit count, or discards unkept ones over it. A
+     * dealer of whole hands deals every card anew.
+     */
     public void roll() {
         if (!canRoll()) {
             return;
         }
+        if (dealer != null && dealer.wholeHand()) {
+            cards.clear();
+            List<MekSummary> units = dealer.deal(count, List.of());
+            deal(units);
+            return;
+        }
         cards.removeIf(card -> !card.kept);
         int missing = count - cards.size();
-        if (missing > 0) {
-            for (MekSummary unit : roller.roll(missing, table)) {
-                cards.add(new Card(unit));
-            }
+        if (dealer != null && !dealer.usesCount()) {
+            List<MekSummary> units = dealer.deal(Math.max(0, missing), army());
+            deal(units);
+        } else if (missing > 0) {
+            List<MekSummary> units = dealer == null ? roller.roll(missing, table) : dealer.deal(missing, army());
+            deal(units);
+        }
+    }
+
+    /**
+     * Adds every unit dealt: a generator deals what it was asked for, which may be more than the count a table rolls,
+     * as Swing's do; none is silently left out.
+     */
+    private void deal(List<MekSummary> units) {
+        cutShort = dealer != null && dealer.cutShort();
+        GenerationContext context = dealerContext();
+        for (MekSummary unit : units) {
+            Card card = new Card(unit);
+            note(card, context);
+            cards.add(card);
         }
     }
 
     /** Rerolls the card at {@code index}, kept or not. */
     public void reroll(int index) {
-        if (!canRoll() || index < 0 || index >= cards.size()) {
+        if (!canRoll() || !cardsApart() || index < 0 || index >= cards.size()) {
             return;
         }
-        List<MekSummary> rolled = roller.roll(1, table);
-        if (!rolled.isEmpty()) {
-            cards.get(index).unit = rolled.get(0);
+        MekSummary unit = null;
+        if (dealer == null) {
+            List<MekSummary> rolled = roller.roll(1, table);
+            unit = rolled.isEmpty() ? null : rolled.get(0);
+        } else {
+            List<MekSummary> rest = army();
+            rest.remove(index);
+            unit = dealer.replace(cards.get(index).unit, rest);
+        }
+        if (unit != null) {
+            Card card = cards.get(index);
+            card.unit = unit;
+            note(card, dealerContext());
         }
     }
 
+    /** Puts {@code unit} in the hand as a card of its own, as a table's row is taken; false when the hand is full. */
+    public boolean take(MekSummary unit) {
+        if (cards.size() >= MAX_UNITS) {
+            return false;
+        }
+        Card card = new Card(Objects.requireNonNull(unit));
+        note(card, dealerContext());
+        cards.add(card);
+        return true;
+    }
+
+    /**
+     * What the hand's newest generator-dealt card was dealt for, or null when no card in the hand came from a
+     * generator that knows; a context leaves with the last of its cards, so it never names units it did not deal.
+     */
+    public @Nullable GenerationContext context() {
+        Card newest = null;
+        for (Card card : cards) {
+            if (card.dealtFor != null && (newest == null || card.dealt > newest.dealt)) {
+                newest = card;
+            }
+        }
+        return newest == null ? null : newest.dealtFor;
+    }
+
+    private @Nullable GenerationContext dealerContext() {
+        return dealer == null ? null : dealer.context();
+    }
+
+    private void note(Card card, @Nullable GenerationContext context) {
+        card.dealtFor = context;
+        card.dealt = ++dealings;
+    }
+
     public void keep(int index, boolean kept) {
-        if (index >= 0 && index < cards.size()) {
+        if (cardsApart() && index >= 0 && index < cards.size()) {
             cards.get(index).kept = kept;
         }
     }
@@ -152,6 +283,12 @@ public final class RandomArmyForm {
 
     public void clear() {
         cards.clear();
+        cutShort = false;
+    }
+
+    /** Whether the hand's last deal stopped short of what was asked for, at a limit of the generator's. */
+    public boolean cutShort() {
+        return cutShort && !cards.isEmpty();
     }
 
     /** @return the dealt units, in order, to add to the game */

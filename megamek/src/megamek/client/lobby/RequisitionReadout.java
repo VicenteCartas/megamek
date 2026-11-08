@@ -147,6 +147,9 @@ public final class RequisitionReadout {
             String name = entity.group(1);
             String value = switch (name.toLowerCase(Locale.ROOT)) {
                 case "nbsp" -> "\u00A0";
+                case "ensp" -> "\u2002";
+                case "emsp" -> "\u2003";
+                case "thinsp" -> "\u2009";
                 case "amp" -> "&";
                 case "lt" -> "<";
                 case "gt" -> ">";

@@ -44,7 +44,7 @@ import megamek.client.lobby.LobbyCommands;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.dialogs.buttonDialogs.AbstractNagDialog;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyServices;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.force.Force;
@@ -89,7 +89,7 @@ import org.lwjgl.glfw.GLFW;
  *     without it makes the window {@value #NARROW_WIDTH} by {@value #NARROW_HEIGHT}, which folds the battlefield into
  *     its rail. Either keeps the window's saved size as it was.</li>
  *     <li>{@code lobby+rail}: opens the folded battlefield from its rail.</li>
- *     <li>{@code lobby+menu}: opens the first bot's player menu (the first player's without bots) before the shot.</li>
+ *     <li>{@code lobby+menu}: opens the first local player's deployment picker before the shot.</li>
  *     <li>{@code lobby+chat}: has the player and each bot say a line in the chat as they join.</li>
  *     <li>{@code lobby+fold}: clicks the chat's fold button through the stage {@value GpuLobbyScreen#PROBE_CLICK_AT} s
  *     in, keeping the client's fold preference as it was, then has the player and each bot say a line
@@ -97,7 +97,11 @@ import org.lwjgl.glfw.GLFW;
  *     <li>{@code lobby+formations}: puts the player's first units in a formation and a sub-formation, and shows the
  *     forces as formations.</li>
  *     <li>{@code lobby+compact}: shows the forces as compact rows.</li>
- *     <li>{@code lobby+unitmenu}: opens the menu of the player's first unit before the shot.</li>
+ *     <li>{@code lobby+unitmenu}: opens the menu of the player's first unit before the shot; {@code +unitsub} then
+ *     opens its first submenu in its place.</li>
+ *     <li>{@code lobby+unitdamage}: clicks the first unit card's damage icon through the stage {@value GpuLobbyScreen#PROBE_CLICK_AT} s
+ *     in, opening the damage editor; with {@code +next} it then steps the editor on to the next location, and with
+ *     {@code +heavy} clicks the roller's Heavy tile; {@code +whole} picks the whole unit and its deployment.</li>
  *     <li>{@code lobby+zones}: deploys the player at the west edge and the bots at the east, so the map shows
  *     zones.</li>
  *     <li>{@code lobby+autoresolve}: turns on the client setting that shows auto-resolve, and opens its settings in
@@ -168,7 +172,7 @@ import org.lwjgl.glfw.GLFW;
  *     among it. Since L17 {@code victory}, {@code randomarmy}, {@code skills} and {@code names} open their libGDX
  *     views and {@code loadlist} the system's file dialog; the pages below probe those views.</li>
  *     <li>{@code lobby+victory}, {@code +randomarmy}, {@code +skills}, {@code +names}, {@code +readout},
- *     {@code +princesshelp} and {@code +prompt=name}, with {@code +click=name,name}: the L17 tools and prompts, see
+ *     {@code +princesshelp}, {@code +maphelp} and {@code +prompt=name}, with {@code +click=name,name}: the L17 tools and prompts, see
  *     {@link LobbyToolsProbe}.</li>
  * </ul>
  */
@@ -363,7 +367,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 if (starts) {
                     LOGGER.info("The lobby probe presses Ready");
                     answerNo();
-                    SwingLobbyServices.of(gui).ready();
+                    LobbyServices.of(gui).ready();
                 } else {
                     LOGGER.info("The lobby probe readies the player");
                     client.sendDone(true);

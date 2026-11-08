@@ -68,8 +68,15 @@ final class LobbyAdvancedSearchView {
         void done();
     }
 
-    /** A titled block of a tab's criteria. */
-    private record Block(String key, List<Field> fields) { }
+    /**
+     * A titled block of a tab's criteria; {@code column} is where it goes when the page has {@link #MAX_COLUMNS}
+     * columns, so the long blocks share the columns evenly, or -1 to go to the shortest column.
+     */
+    private record Block(String key, List<Field> fields, int column) {
+        Block(String key, List<Field> fields) {
+            this(key, fields, -1);
+        }
+    }
 
     private final UiKit kit;
     private final Host host;
@@ -90,6 +97,7 @@ final class LobbyAdvancedSearchView {
     private final Table page = new Table();
     private final ScrollPane scroll;
     private final List<Table> blocks = new ArrayList<>();
+    private List<Block> shownBlocks = List.of();
     private final Map<Field, Actor> controls = new EnumMap<>(Field.class);
     private Section section = Section.TOTAL_WARFARE;
     private RequisitionAdvancedSearch shown = RequisitionAdvancedSearch.NONE;
@@ -217,7 +225,8 @@ final class LobbyAdvancedSearchView {
         controls.clear();
         blocks.clear();
         editor = null;
-        for (Block block : blocksOf(section)) {
+        shownBlocks = blocksOf(section);
+        for (Block block : shownBlocks) {
             blocks.add(block(block));
         }
         arrange();
@@ -227,16 +236,18 @@ final class LobbyAdvancedSearchView {
 
     private static List<Block> blocksOf(Section section) {
         return switch (section) {
+            // The unit flags are the longest block, so they share a column with the short quirks
             case TOTAL_WARFARE -> List.of(
                   new Block("movement", List.of(Field.WALK, Field.RUN, Field.JUMP, Field.TONS, Field.YEAR, Field.BV,
-                        Field.ARMOR)),
-                  new Block("types", List.of(Field.UNIT_TYPE, Field.TECH_BASE, Field.TECH_LEVEL, Field.MOVE_MODE)),
+                        Field.ARMOR), 0),
+                  new Block("types", List.of(Field.UNIT_TYPE, Field.TECH_BASE, Field.TECH_LEVEL, Field.MOVE_MODE),
+                        1),
+                  new Block("quirks", List.of(Field.QUIRKS, Field.WEAPON_QUIRKS), 2),
                   new Block("construction", List.of(Field.ARMOR_TYPE, Field.INTERNALS, Field.ENGINE, Field.COCKPIT,
-                        Field.GYRO)),
-                  new Block("equipment", List.of(Field.EQUIPMENT)),
-                  new Block("quirks", List.of(Field.QUIRKS, Field.WEAPON_QUIRKS)),
+                        Field.GYRO), 0),
+                  new Block("equipment", List.of(Field.EQUIPMENT), 1),
                   new Block("flags", Field.of(Section.TOTAL_WARFARE).stream()
-                        .filter(field -> field.kind() == RequisitionAdvancedSearch.Kind.FLAG).toList()));
+                        .filter(field -> field.kind() == RequisitionAdvancedSearch.Kind.FLAG).toList(), 2));
             case ALPHA_STRIKE -> List.of(
                   new Block("asUnit", List.of(Field.AS_TYPE, Field.AS_SIZE, Field.AS_ROLE, Field.AS_MOVE,
                         Field.AS_TMM)),
@@ -259,7 +270,7 @@ final class LobbyAdvancedSearchView {
         return Math.max(1, Math.min(MAX_COLUMNS, (int) ((width + space("lg")) / (column + space("lg")))));
     }
 
-    /** Lays the blocks into the columns, each to the shortest column so far, in order. */
+    /** Lays the blocks into the columns: where a full page places them, otherwise each to the shortest column. */
     private void arrange() {
         page.clearChildren();
         int count = Math.max(1, columns);
@@ -271,16 +282,20 @@ final class LobbyAdvancedSearchView {
             columnTables.add(column);
             page.add(column).top().growX().uniformX().minWidth(0).padLeft(i == 0 ? 0 : space("lg"));
         }
-        for (Table block : blocks) {
-            int shortest = 0;
-            for (int i = 1; i < count; i++) {
-                if (heights[i] < heights[shortest] - 1) {
-                    shortest = i;
+        for (int index = 0; index < blocks.size(); index++) {
+            Table block = blocks.get(index);
+            int placed = count == MAX_COLUMNS ? shownBlocks.get(index).column() : -1;
+            if (placed < 0) {
+                placed = 0;
+                for (int i = 1; i < count; i++) {
+                    if (heights[i] < heights[placed] - 1) {
+                        placed = i;
+                    }
                 }
             }
-            Table column = columnTables.get(shortest);
+            Table column = columnTables.get(placed);
             column.add(block).growX().minWidth(0).padBottom(space("lg")).row();
-            heights[shortest] += block.getPrefHeight() + space("lg");
+            heights[placed] += block.getPrefHeight() + space("lg");
         }
     }
 

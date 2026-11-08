@@ -178,8 +178,11 @@ public class ASCardPrinter implements Printable {
             }
 
             final int doneCards = elementIndex;
-            SwingUtilities.invokeLater(() ->
-                  progressPopup.progressBar.setValue(doneCards));
+            SwingUtilities.invokeLater(() -> {
+                if (progressPopup != null) {
+                    progressPopup.progressBar.setValue(doneCards);
+                }
+            });
             return Printable.PAGE_EXISTS;
         } else {
             return Printable.NO_SUCH_PAGE;

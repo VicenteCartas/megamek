@@ -970,15 +970,10 @@ completes the second endpoint. These gestures also work with an editor tool acti
 `GpuMapSource` uses the same `RulerModel` and `GpuLosPanel` as battle mode.
 Changing maps clears the measurement and rejects commands from an older board generation.
 
-The lobby's 2D Preview and 3D Preview stay open together for an A/B comparison (`MapSetupDialog`). Both show one board,
-the lobby preview game's: the 3D buttons (the lobby's and the 2D preview's) show the open 2D preview's board, and the
-2D button shows the open 3D preview's board. Once the 2D preview is open its button rolls the map settings again, and
-the open 3D preview follows; that, a map change and a server-built battlefield update whichever is open without
-opening the other or bringing the 3D preview to the front (`GpuBoardWindow.updatePreview`). The 3D preview belongs to
-the lobby window, not to the 2D preview, so each closes on its own; the lobby's end (Done, the game's start, leaving)
-closes both. Swing dialogs of a preview's owner that are open when the preview appears are kept above it, as those
-opened while it runs are, so the 2D preview is not hidden behind a maximized 3D preview; a raised dialog that closes is
-released. The 3D preview's View > Renderer > Legacy 2D still switches: it closes the 3D preview and opens a separate 2D
+The lobby's 3D Preview (`LobbyBoardPreviews`) shows the lobby preview game's board. A roll of the map settings, a map
+change and a server-built battlefield update it without bringing it to the front (`GpuBoardWindow.updatePreview`). It
+belongs to the lobby window, and the lobby's end (Done, the game's start, leaving) closes it. It is 3D only: its View >
+Renderer offers Classic and Enhanced, not Legacy 2D (`GpuBoardWindow.openLobbyPreview`). A file or start-screen 3D preview's View > Renderer > Legacy 2D still switches: it closes the 3D preview and opens a separate 2D
 window of the same board, whose Renderer menu returns to 3D.
 
 

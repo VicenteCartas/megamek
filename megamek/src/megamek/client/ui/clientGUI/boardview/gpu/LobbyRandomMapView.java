@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Locale;
 
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -70,6 +71,9 @@ final class LobbyRandomMapView {
     private final UiSelect theme;
     private final List<String> themes;
     private final Table page = new Table();
+    private Cell<Table> pageCell;
+    /** The tallest tab of the normal and of the advanced view, so switching tabs never resizes the dialog. */
+    private final float[] tallest = { -1, -1 };
     private final Label problem;
     private final UiButton ok;
     private final UiButton save;
@@ -157,7 +161,8 @@ final class LobbyRandomMapView {
         UiKit.onChange(tabs, this::fillPage);
         body.add(tabs).left().padTop(space("lg")).row();
         page.top().left();
-        body.add(page).growX().top().padTop(space("md")).row();
+        pageCell = body.add(page).growX().top().padTop(space("md"));
+        pageCell.row();
         problem = kit.typeLabel("", "small", "status.danger");
         problem.setWrap(true);
         problem.setName("random-problem");
@@ -185,15 +190,27 @@ final class LobbyRandomMapView {
     // ---- The page ----
 
     private void fillPage() {
+        int view = form.advanced() ? 1 : 0;
+        if (tallest[view] < 0) {
+            for (Tab each : Tab.values()) {
+                fillTab(each);
+                tallest[view] = Math.max(tallest[view], page.getPrefHeight());
+            }
+        }
+        fillTab(Tab.values()[Math.max(0, tabs.getSelectedIndex())]);
+        pageCell.minHeight(tallest[view]);
+        dialog.card().invalidateHierarchy();
+        showProblem();
+    }
+
+    private void fillTab(Tab tab) {
         page.clearChildren();
         cityRows.clear();
-        Tab tab = Tab.values()[Math.max(0, tabs.getSelectedIndex())];
         if (form.advanced()) {
             fillAdvanced(tab);
         } else {
             fillNormal(tab);
         }
-        showProblem();
     }
 
     /** A feature to a row: its name, and None, Low, Medium and High; the civilization's city type below them. */

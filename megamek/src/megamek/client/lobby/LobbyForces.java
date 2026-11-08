@@ -12,6 +12,7 @@ import java.util.Set;
 
 import jakarta.annotation.Nullable;
 import megamek.common.Player;
+import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
 import megamek.common.force.Force;
 import megamek.common.force.Forces;
 import megamek.common.game.Game;
@@ -161,7 +162,10 @@ public record LobbyForces(List<LobbyUnit> units, List<Owner> owners, List<Format
         List<LobbyUnit> units = new ArrayList<>();
         Map<Integer, List<Entity>> byOwner = new LinkedHashMap<>();
         for (Entity entity : visible) {
-            units.add(LobbyUnit.of(entity, game, local, medium, local != null && commands.isEditable(entity)));
+            boolean editable = local != null && commands.isEditable(entity);
+            units.add(LobbyUnit.of(entity, game, local, medium, editable, editable
+                  && (!(entity instanceof BattlefieldSupportAsset)
+                  || LobbyCommands.canEditDamage(session.client(), entity))));
             byOwner.computeIfAbsent(entity.getOwnerId(), key -> new ArrayList<>()).add(entity);
         }
         Comparator<Player> ownerOrder = ownerOrder(local, bots);

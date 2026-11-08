@@ -64,7 +64,6 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
-import java.util.jar.JarFile;
 import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.filechooser.FileFilter;
@@ -82,7 +81,9 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.commands.*;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListener;
+import megamek.client.lobby.DecliningLobbyPrompts;
 import megamek.client.lobby.LobbyCommands;
+import megamek.client.lobby.MegaMekLabPrint;
 import megamek.client.ratgenerator.GenerationContext;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.audio.AudioService;
@@ -140,10 +141,9 @@ import megamek.client.ui.panels.ReceivingGameDataPanel;
 import megamek.client.ui.panels.StartingScenarioPanel;
 import megamek.client.ui.panels.WaitingForServerPanel;
 import megamek.client.ui.panels.phaseDisplay.*;
-import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyBoardPreviews;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyServices;
 import megamek.client.ui.panels.phaseDisplay.lobby.PlayerSettingsDialog;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyPrompts;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.client.ui.tileset.TilesetManager;
@@ -1525,13 +1525,13 @@ public class ClientGUI extends AbstractClientGUI
             case GAME_ALL_MG_BURST_ON:
             case GAME_ALL_MG_BURST_OFF:
                 if (client.getGame().getPhase().isLounge()) {
-                    SwingLobbyServices.of(this).setAllBurstMg(event.getActionCommand().equals(GAME_ALL_MG_BURST_ON));
+                    LobbyServices.of(this).setAllBurstMg(event.getActionCommand().equals(GAME_ALL_MG_BURST_ON));
                 }
                 break;
             case GAME_ALL_HOT_LOAD_ON:
             case GAME_ALL_HOT_LOAD_OFF:
                 if (client.getGame().getPhase().isLounge()) {
-                    SwingLobbyServices.of(this).setAllHotLoad(event.getActionCommand().equals(GAME_ALL_HOT_LOAD_ON));
+                    LobbyServices.of(this).setAllHotLoad(event.getActionCommand().equals(GAME_ALL_HOT_LOAD_ON));
                 }
                 break;
             case VIEW_NETWORK_INFORMATION:
@@ -1800,10 +1800,20 @@ public class ClientGUI extends AbstractClientGUI
         if (unitDisplayPanel != null) { unitDisplayPanel.disposeDisplay(); }
 
         dead = true;
+        try {
+            releaseForDeath();
+        } finally {
+            // Closes the frame, which the start screen waits for, even when a display failed to let go
+            super.die();
+        }
+    }
+
+    /** Tells every display, dialog and the client to let go, before the frame closes. */
+    private void releaseForDeath() {
         // Tell all the displays to remove themselves as listeners.
         GpuBoardWindow.closeFor(this);
         GpuLobbyWindow.closeFor(this);
-        SwingLobbyServices.forget(this);
+        LobbyServices.forget(this);
         client.getGame().removeGameListener(gameListener);
         boolean reportHandled = false;
         boardViews().forEach(IBoardView::dispose);
@@ -1849,7 +1859,6 @@ public class ClientGUI extends AbstractClientGUI
 
         GUIP.removePreferenceChangeListener(this);
         tilesetManager.close();
-        super.die();
     }
 
     public GameOptionsDialog getGameOptionsDialog() {
@@ -2053,7 +2062,7 @@ public class ClientGUI extends AbstractClientGUI
                 panMain.add(component, main);
                 break;
             case EXCHANGE:
-                MapSetupDialog.closePreviews(this);
+                LobbyBoardPreviews.closePreviews(this);
                 component = new ReceivingGameDataPanel();
                 main = CG_EXCHANGE;
                 component.setName(main);
@@ -3184,22 +3193,6 @@ public class ClientGUI extends AbstractClientGUI
         return Toolkit.getDefaultToolkit().getScreenSize();
     }
 
-    /**
-     * Pops up a dialog box giving the player information on a subject. It also includes a checkbox if they don't want
-     * to be bothered again by it.
-     *
-     * @param title           the <code>String</code> title of the dialog box.
-     * @param message         the <code>String</code> message to display.
-     * @param includeCheckBox if <code>true</code>, a checkbox will be included in the dialog box
-     *
-     * @return {@link InformDialog} containing the player's responses. The dialog will already have been shown
-     */
-    public InformDialog doInformBotherDialog(String title, String message, boolean includeCheckBox) {
-        InformDialog informDialog = new InformDialog(frame, title, message, includeCheckBox);
-        informDialog.setVisible(true);
-        informDialog.dispose();
-        return informDialog;
-    }
 
     /**
      * Pops up a dialog box asking a yes/no question
@@ -3423,22 +3416,38 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     @Override
-    public boolean saveGame() {
-        ignoreHotKeys = true;
-        JFileChooser fc = new JFileChooser(MMConstants.SAVEGAME_DIR);
-        fc.setLocation(frame.getLocation().x + 150, frame.getLocation().y + 100);
-        fc.setDialogTitle(Messages.getString("ClientGUI.FileSaveDialog.title"));
+    protected int askSaveFirst() {
+        return confirm(Messages.getString("ClientGUI.gameSaveDialogMessage"),
+              Messages.getString("ClientGUI.gameSaveFirst"), JOptionPane.YES_NO_CANCEL_OPTION,
+              JOptionPane.WARNING_MESSAGE);
+    }
 
-        int returnVal = fc.showSaveDialog(frame);
-        ignoreHotKeys = false;
-        if ((returnVal != JFileChooser.APPROVE_OPTION) || (fc.getSelectedFile() == null)) {
+    @Override
+    public boolean saveGame() {
+        String title = Messages.getString("ClientGUI.FileSaveDialog.title");
+        Optional<File> chosen = GpuBoardWindow.chooseFile(this, new File(MMConstants.SAVEGAME_DIR).getAbsoluteFile(),
+              title, new FileNameExtensionFilter(Messages.getString("Lobby.files.saveGames"),
+                    MMConstants.SAVE_FILE_GZ_EXT.substring(1), MMConstants.SAVE_FILE_EXT.substring(1)), true);
+        File selected;
+        if (chosen != null) {
+            selected = chosen.orElse(null);
+        } else {
+            ignoreHotKeys = true;
+            JFileChooser fc = new JFileChooser(MMConstants.SAVEGAME_DIR);
+            fc.setLocation(frame.getLocation().x + 150, frame.getLocation().y + 100);
+            fc.setDialogTitle(title);
+            int returnVal = fc.showSaveDialog(frame);
+            ignoreHotKeys = false;
+            selected = (returnVal == JFileChooser.APPROVE_OPTION) ? fc.getSelectedFile() : null;
+        }
+        if (selected == null) {
             // I want a file, know!
             return false;
         }
-        String file = fc.getSelectedFile().getName();
+        String file = selected.getName();
         // stupid hack to allow for savegames in folders with spaces in
         // the name
-        String path = fc.getSelectedFile().getParentFile().getPath();
+        String path = selected.getAbsoluteFile().getParentFile().getPath();
         path = path.replace(" ", "|");
         client.sendChat(CG_CHAT_COMMAND_LOCAL_SAVE + " " + file + " " + path);
         client.setAwaitingSave(true);
@@ -3512,14 +3521,13 @@ public class ClientGUI extends AbstractClientGUI
         }
     }
 
-    private ProcessBuilder printToMegaMekLab(ArrayList<Entity> unitList, File mmlExecutable, boolean autodetected) {
-        boolean jarFile;
-        try (var ignored = new JarFile(mmlExecutable)) {
-            jarFile = true;
-        } catch (IOException ignored) {
-            jarFile = false;
+    private @Nullable ProcessBuilder printToMegaMekLab(ArrayList<Entity> unitList) {
+        MegaMekLabPrint print = MegaMekLabPrint.of(CP.getMmlPath());
+        MegaMekLabPrint.Problem problem = print.problem();
+        if (problem != null) {
+            logger.errorDialog(Messages.getString("MegaMekLabPrint.title"), problem.message(print.executable()));
+            return null;
         }
-
         File unitFile;
         try {
             unitFile = File.createTempFile("MegaMekPrint", ".mul");
@@ -3528,60 +3536,7 @@ public class ClientGUI extends AbstractClientGUI
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-
-        String[] command;
-
-        if (!jarFile) {
-            if (!mmlExecutable.canExecute()) {
-                String dialogTitle = "Error printing unit list";
-                if (autodetected) {
-                    logger.errorDialog(dialogTitle,
-                          "Could not auto-detect MegaMekLab! Please configure the "
-                                + "path to the MegaMekLab executable in the settings.");
-                } else {
-                    logger.errorDialog(dialogTitle,
-                          "{} does not appear to be an executable! You may need to set execute permission or "
-                                + "configure the path to the MegaMekLab executable in the settings.",
-                          mmlExecutable.getName());
-                }
-                return null;
-            }
-
-            if (mmlExecutable.getName().toLowerCase().contains("gradle")) {
-                // If the executable is `gradlew`/`gradelw.bat`, assume it's the gradle wrapper
-                // which comes in the MML git repo. Compile and run MML from source in order to print units.
-                command = new String[] { mmlExecutable.getAbsolutePath(), "run",
-                                         "--args=%s --no-startup".formatted(unitFile.getAbsolutePath()) };
-            } else {
-                // Start mml normally. "--no-startup" tells MML to exit after the user closes the
-                // print dialog (by printing or cancelling)
-                command = new String[] { mmlExecutable.getAbsolutePath(), unitFile.getAbsolutePath(), "--no-startup" };
-            }
-        } else {
-            if (!mmlExecutable.exists()) {
-                String dialogTitle = "Error printing unit list";
-
-                if (autodetected) {
-                    logger.errorDialog(dialogTitle,
-                          "Could not auto-detect MegaMekLab! Please configure the path to the MegaMekLab executable "
-                                + "in the settings.");
-                } else {
-                    logger.errorDialog(dialogTitle,
-                          "{} does not appear to exist! Please configure the path to the MegaMekLab executable in "
-                                + "the settings.",
-                          mmlExecutable.getName());
-                }
-                return null;
-            }
-
-            // The executable is a jarFile, so let's execute it.
-            var javaExecutable = ProcessHandle.current().info().command().orElse("java");
-            command = new String[] { javaExecutable, "-jar", mmlExecutable.getAbsolutePath(),
-                                     unitFile.getAbsolutePath(), "--no-startup" };
-
-        }
-
-        return new ProcessBuilder(command).directory(mmlExecutable.getAbsoluteFile().getParentFile()).inheritIO();
+        return print.command(unitFile);
     }
 
     /**
@@ -3598,17 +3553,7 @@ public class ClientGUI extends AbstractClientGUI
             return;
         }
 
-        // Detect the MML executable.
-        // If the user hasn't set this manually, try to pick "MegaMakLab.exe"/".sh"
-        // from the same directory that MM is in
-        var mmlPath = CP.getMmlPath();
-        var autodetect = false;
-        if (mmlPath == null || mmlPath.isBlank()) {
-            autodetect = true;
-            mmlPath = "MegaMekLab.jar";
-        }
-
-        var pb = printToMegaMekLab(unitList, new File(mmlPath), autodetect);
+        var pb = printToMegaMekLab(unitList);
         if (pb == null) {
             return;
         }
@@ -4515,10 +4460,10 @@ public class ClientGUI extends AbstractClientGUI
         return client;
     }
 
-    /** @return the lobby's commands for this client, with their Swing dialogs */
+    /** @return the lobby's commands for this client; the lobby attaches its own dialogs while it shows */
     public LobbyCommands lobbyCommands() {
         if (lobbyCommands == null) {
-            lobbyCommands = new LobbyCommands(this::getClient, new SwingLobbyPrompts(this));
+            lobbyCommands = new LobbyCommands(this::getClient, new DecliningLobbyPrompts());
         }
         return lobbyCommands;
     }
@@ -4528,7 +4473,7 @@ public class ClientGUI extends AbstractClientGUI
      * the map settings take the saved board, as the map setup's own Edit Board does.
      */
     public void boardEditorClosed(@Nullable Path savedFile, boolean savedAssembledPreview) {
-        MapSetupDialog.boardEditorClosed(this, savedFile, savedAssembledPreview);
+        LobbyBoardPreviews.boardEditorClosed(this, savedFile, savedAssembledPreview);
     }
     @Override
     public JComponent turnTimerComponent() {

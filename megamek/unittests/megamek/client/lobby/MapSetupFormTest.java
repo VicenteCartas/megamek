@@ -117,6 +117,15 @@ class MapSetupFormTest {
     }
 
     @Test
+    void tagLabelsSpellAutomaticTagsAsWordsAndKeepManualOnes() {
+        assertEquals("Light forest", MapSetupForm.tagLabel("LightForest (Auto)"));
+        assertEquals("Under water bridge", MapSetupForm.tagLabel("UnderWaterBridge (Auto)"));
+        assertEquals("Woods", MapSetupForm.tagLabel("Woods (Auto)"));
+        assertEquals("Arena", MapSetupForm.tagLabel("Arena"));
+        assertEquals("CityCenter", MapSetupForm.tagLabel("CityCenter"));
+    }
+
+    @Test
     void picturesTheSlotsAndSizes() {
         Picture picture = form.picture();
         assertEquals(2, picture.mapWidth());
@@ -165,6 +174,83 @@ class MapSetupFormTest {
         form.search("16x17;hills");
         assertEquals(List.of("16x17/City Hills.board2"), names(form.boards()));
         assertEquals("16x17", form.boards().get(0).folder());
+    }
+
+    @Test
+    void foldersAndTagsFilterTheBoardsOfThisSize() {
+        Picture picture = form.picture();
+        assertEquals(List.of("16x17"), picture.folderChoices());
+        assertEquals(List.of(), picture.tagChoices(), "no tags show before the library is read");
+        assertEquals(MapSetupForm.Library.UNREAD, form.libraryState());
+
+        form.filter(filter -> filter.withFolder("16x17", true));
+        assertEquals(3, form.boards().size(), "a folder hides Generated and keeps its boards");
+        form.filter(filter -> filter.withFolder("16x17", false).withFolder("other", true));
+        assertEquals(List.of(), form.boards());
+        form.filter(filter -> MapSetupForm.Filter.NONE);
+
+        form.filter(filter -> filter.withTag("water", true));
+        assertTrue(form.libraryDue(), "a tag wants the library");
+        assertEquals(MapSetupForm.Library.READING, form.libraryState());
+        assertEquals(List.of("16x17/Lake Shore.board2"), names(form.boards()), "the board file's tags serve meanwhile");
+
+        form.library(List.of(new MapSetupForm.LibraryBoard("16x17/Lake Shore.board2", 16, 17, List.of("Water")),
+              new MapSetupForm.LibraryBoard("16x17/City Hills.board2", 16, 17, List.of("Urban", "Hills")),
+              new MapSetupForm.LibraryBoard("16x17/Desert 1.board2", 16, 17, List.of("Hills")),
+              new MapSetupForm.LibraryBoard("32x34/Big City.board2", 32, 34, List.of("Urban"))));
+        assertFalse(form.libraryDue());
+        assertEquals(MapSetupForm.Library.READ, form.libraryState());
+        form.filter(filter -> MapSetupForm.Filter.NONE.withTag("Urban", true).withTag("Hills", true));
+        assertEquals(List.of("16x17/Desert 1.board2", "16x17/City Hills.board2"), names(form.boards()),
+              "any of the tags will do, in the server's order");
+        form.filter(filter -> filter.withAllTags(true));
+        assertEquals(List.of("16x17/City Hills.board2"), names(form.boards()), "all the tags are needed");
+        assertEquals(List.of("Hills", "Urban", "Water"), form.picture().tagChoices(),
+              "only the tags of this size's boards are offered");
+        assertEquals(1, form.picture().filterCount());
+    }
+
+    @Test
+    void anySizeBrowsesTheLibraryOnlyOnAOneBoardMapAndPlacesTheBoardAtItsSize() {
+        form.filter(filter -> filter.withAnySize(true).withWidth(20, null));
+        Picture picture = form.picture();
+        assertFalse(picture.advancedSearch());
+        assertFalse(picture.anySize(), "a map of two boards stays at its size");
+        assertEquals(0, picture.filterCount());
+        assertEquals(MapSettings.BOARD_GENERATED, form.boards().get(0).name());
+
+        form.mapWidth(1);
+        picture = form.picture();
+        assertTrue(picture.advancedSearch());
+        assertTrue(picture.anySize());
+        assertEquals(2, picture.filterCount());
+        assertEquals(List.of(), form.boards(), "nothing lists until the library is read");
+        assertTrue(form.libraryDue());
+
+        form.library(List.of(new MapSetupForm.LibraryBoard("16x17/Desert 1.board2", 16, 17, List.of()),
+              new MapSetupForm.LibraryBoard("32x34/Big City.board2", 32, 34, List.of("Urban")),
+              new MapSetupForm.LibraryBoard("32x34\\Big City.board2", 32, 34, List.of()),
+              new MapSetupForm.LibraryBoard("15x17/Moor.board2", 15, 17, List.of())));
+        List<Entry> boards = form.boards();
+        assertEquals(List.of("32x34/Big City.board2"), names(boards), "the width range keeps the wide board once");
+        assertEquals(32, boards.get(0).width());
+        assertEquals(List.of("15x17", "16x17", "32x34"), form.picture().folderChoices(),
+              "the folders are those of the whole library");
+        form.filter(filter -> filter.withWidth(null, null));
+        assertEquals(3, form.boards().size(), "any size lists the whole library without Generated");
+        assertEquals(new BoardDimensions(32, 34), form.sizeOf("32x34/Big City.board2"));
+
+        assertTrue(form.singleBoard("32x34/Big City.board2"));
+        assertTrue(calls.contains("single 32x34/Big City.board2"), calls.toString());
+        form.filter(filter -> filter.withAnySize(false));
+        assertEquals(SIXTEEN, form.sizeOf("32x34/Big City.board2"), "at this size every board has the map's");
+    }
+
+    @Test
+    void topFolderIsTheFirstFolderUnderTheBoards() {
+        assertEquals("16x17", MapSetupForm.topFolder("/16x17/Desert 1"));
+        assertEquals("Mek", MapSetupForm.topFolder("Mek\\Arena\\Pit.board"));
+        assertEquals("", MapSetupForm.topFolder("Loose.board"));
     }
 
     private static List<String> names(List<Entry> entries) {

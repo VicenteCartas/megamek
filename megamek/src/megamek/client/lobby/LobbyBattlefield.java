@@ -25,16 +25,17 @@ import megamek.common.preference.PreferenceManager;
  * @param space        whether the map is in space, where the Swing lobby offers no planetary conditions, random map
  *                     or map setup files
  * @param generable    whether the server can build the battlefield now: no surprise board and no unset sheet
+ * @param rolled       whether any sheet is generated, random, a surprise or unset, so the map is rolled at launch
  * @param rulesLine    the year and the tech level
  * @param notableRules the short names of the rules that are on and change how the battle plays
  * @param victory      the conditions that end the battle
  * @param autoResolve  the auto-resolve settings, and whether the lobby offers them
  */
 public record LobbyBattlefield(String mapLine, String conditions, boolean space, boolean generable,
-      String rulesLine, List<String> notableRules, String victory, AutoResolve autoResolve) {
+      boolean rolled, String rulesLine, List<String> notableRules, String victory, AutoResolve autoResolve) {
 
     /** The battlefield before the client has its game. */
-    public static final LobbyBattlefield EMPTY = new LobbyBattlefield("", "", false, false, "", List.of(), "",
+    public static final LobbyBattlefield EMPTY = new LobbyBattlefield("", "", false, false, false, "", List.of(), "",
           AutoResolve.DEFAULT);
 
     private static final String SEPARATOR = " \u00b7 ";
@@ -106,7 +107,7 @@ public record LobbyBattlefield(String mapLine, String conditions, boolean space,
         return new LobbyBattlefield(settings == null ? "" : mapLine(settings),
               conditions == null ? "" : conditions(conditions),
               settings != null && settings.getMedium() == MapSettings.MEDIUM_SPACE,
-              settings != null && generable(settings),
+              settings != null && generable(settings), settings != null && rolled(settings),
               options == null ? "" : rulesLine(options), options == null ? List.of() : notableRules(options),
               options == null ? "" : victory(options), autoResolve.shown(shown));
     }

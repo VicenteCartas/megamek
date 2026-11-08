@@ -319,21 +319,23 @@ final class GpuMapSource implements BoardSource {
     /**
      * View > Renderer, as CommonMenuBar's Renderer submenu, with this window's 3D graphics checked: a preview's Legacy
      * 2D closes it and shows its board in a Legacy 2D window; the editor draws only in 3D, so there it is unavailable
-     * (its Legacy 2D Preview opens beside it); Classic and Enhanced apply at once.
+     * (its Legacy 2D Preview opens beside it); the lobby's preview has no Legacy 2D. Classic and Enhanced apply at once.
      */
     private BoardScene.Command renderer(GUIPreferences gui) {
-        BoardScene.Command legacy2D = editor == null && requestLegacy2D != null
-              ? viewCommand(ClientGUI.VIEW_LEGACY_2D, null, false, requestLegacy2D)
-              : new BoardScene.Command(ClientGUI.VIEW_LEGACY_2D, Messages.getString("CommonMenuBar.viewLegacy2D"),
-                    editor == null ? "" : Messages.getString("BoardEditor.noLegacy2D"), false, false, false, List.of(),
-                    () -> { }, "", false);
+        List<BoardScene.Command> choices = new ArrayList<>();
+        if (editor == null && requestLegacy2D != null) {
+            choices.add(viewCommand(ClientGUI.VIEW_LEGACY_2D, null, false, requestLegacy2D));
+        } else if (editor != null) {
+            choices.add(new BoardScene.Command(ClientGUI.VIEW_LEGACY_2D, Messages.getString("CommonMenuBar.viewLegacy2D"),
+                  Messages.getString("BoardEditor.noLegacy2D"), false, false, false, List.of(), () -> { }, "", false));
+        }
         BoardGraphics graphics = gui.getBoardGraphics();
+        choices.add(viewCommand(ClientGUI.VIEW_GRAPHICS_CLASSIC, null, graphics == BoardGraphics.CLASSIC,
+              () -> gui.setBoardGraphics(BoardGraphics.CLASSIC)));
+        choices.add(viewCommand(ClientGUI.VIEW_GRAPHICS_ENHANCED, null, graphics == BoardGraphics.ENHANCED,
+              () -> gui.setBoardGraphics(BoardGraphics.ENHANCED)));
         return new BoardScene.Command("viewRenderer", Messages.getString("CommonMenuBar.viewRenderer"), "", true, false,
-              List.of(legacy2D,
-                    viewCommand(ClientGUI.VIEW_GRAPHICS_CLASSIC, null, graphics == BoardGraphics.CLASSIC,
-                          () -> gui.setBoardGraphics(BoardGraphics.CLASSIC)),
-                    viewCommand(ClientGUI.VIEW_GRAPHICS_ENHANCED, null, graphics == BoardGraphics.ENHANCED,
-                          () -> gui.setBoardGraphics(BoardGraphics.ENHANCED))), () -> { });
+              List.copyOf(choices), () -> { });
     }
 
     /**

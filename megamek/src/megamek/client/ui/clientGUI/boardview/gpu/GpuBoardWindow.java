@@ -24,7 +24,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -40,6 +43,7 @@ import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.event.MenuEvent;
 import javax.swing.event.MenuListener;
+import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Files.FileType;
@@ -229,6 +233,8 @@ public final class GpuBoardWindow {
     private final BoardEditorSession editor;
     /** The editor's open 2D Preview ({@link #showPreview2D}), or null. EDT. */
     private JDialog preview2D;
+    /** Whether View > Renderer offers Legacy 2D; the lobby's preview is 3D only. */
+    private boolean offersLegacy2D = true;
     private final Game mapGame;
     private final Map<Dialog, Boolean> dialogOnTop = new IdentityHashMap<>();
     /** Natively owned raised dialogs (Windows, macOS, Linux on X11) instead of floating them on top. Else {@code null}. */
@@ -354,7 +360,17 @@ public final class GpuBoardWindow {
         openPreview(owner, board, null, conditions);
     }
 
+    /** The lobby's map preview: as {@link #openPreview(Window, Board, PlanetaryConditions)}, but 3D only. */
+    public static synchronized void openLobbyPreview(Window owner, Board board, PlanetaryConditions conditions) {
+        openPreview(owner, board, null, conditions, false);
+    }
+
     private static synchronized void openPreview(Window owner, Board board, File file, PlanetaryConditions conditions) {
+        openPreview(owner, board, file, conditions, true);
+    }
+
+    private static synchronized void openPreview(Window owner, Board board, File file, PlanetaryConditions conditions,
+          boolean legacy2D) {
         if (!SwingUtilities.isEventDispatchThread()) {
             throw new IllegalStateException("Open the GPU preview on the Swing event thread");
         }
@@ -368,7 +384,7 @@ public final class GpuBoardWindow {
                 active.close(false);
                 active.afterClose = () -> {
                     if (owner.isShowing()) {
-                        openPreview(owner, board, file, snapshot);
+                        openPreview(owner, board, file, snapshot, legacy2D);
                     }
                 };
             } else {
@@ -384,6 +400,7 @@ public final class GpuBoardWindow {
             game.setPlanetaryConditions(snapshot);
             GpuBoardWindow window = new GpuBoardWindow(null, null, () -> null, owner, null, game);
             window.previewFile = file;
+            window.offersLegacy2D = legacy2D;
             start(window);
         } catch (RuntimeException | LinkageError failure) {
             reportPreviewFailure(owner, failure);
@@ -866,8 +883,8 @@ public final class GpuBoardWindow {
             }
         }
         if (preview) {
-            // The owner's open dialogs stay in front, as those it opens later do (dialogListener), so the lobby's 2D
-            // preview is not hidden behind its 3D preview.
+            // The owner's open dialogs stay in front, as those it opens later do (dialogListener), so a preview does not
+            // hide them.
             for (Window window : Window.getWindows()) {
                 if (window != swingWindow && window.isShowing() && window instanceof Dialog dialog
                       && !(dialog instanceof FileDialog) && belongsToSwingWindow(dialog)) {
@@ -904,7 +921,8 @@ public final class GpuBoardWindow {
         if (plantsAhead != null && !plantsAhead.isDone()) { return; }
         try {
             source = mapGame == null ? new GpuBoardSource(view, panel)
-                  : new GpuMapSource(mapGame, swingWindow, editor, this::requestExit, this::requestLegacy2D,
+                  : new GpuMapSource(mapGame, swingWindow, editor, this::requestExit,
+                        offersLegacy2D ? this::requestLegacy2D : null,
                         preview ? this::requestEditor : null);
             startupTimer.stop();
         } catch (RuntimeException | LinkageError failure) {
@@ -1285,6 +1303,74 @@ public final class GpuBoardWindow {
     }
 
     /**
+     * EDT: shows an error over the battle window that asks its client's prompts and waits for its answer, as Swing's
+     * message box does; Enter presses the first button. Returns the index of the button pressed, or
+     * {@link JOptionPane#CLOSED_OPTION} when Esc closes it; null, showing nothing, when no battle window asks prompts.
+     */
+    static @Nullable Integer showError(String title, String text, List<String> buttons) {
+        GpuBoardWindow window = active;
+        ClientGUI client = window == null ? null : window.gui;
+        if (client == null || client.isDead()) {
+            return null;
+        }
+        DialogAnswer answer = ask(client, new DialogRequest(0, DialogKind.MESSAGE, title, text, false, buttons, 0,
+              JOptionPane.CLOSED_OPTION, List.of(), List.of(), "", false, null, null, null, List.of()));
+        if (answer == null) {
+            return null;
+        }
+        int button = answer.button();
+        return button < 0 || button >= buttons.size() ? JOptionPane.CLOSED_OPTION : button;
+    }
+
+    /**
+     * EDT: asks for a file in the system's file dialog over this client's battle window and waits for it, as a modal
+     * dialog does; the battle takes no input meanwhile. A file to save to that exists is only taken once the player
+     * confirms replacing it, in the battle window.
+     *
+     * @return the file chosen, empty when the player cancels; null, showing nothing, when no battle window asks this
+     *       client's prompts, so the caller shows Swing's chooser
+     */
+    @SuppressWarnings("OptionalAssignedToNull")
+    public static @Nullable Optional<File> chooseFile(ClientGUI gui, @Nullable File directory, String title,
+          FileNameExtensionFilter filter, boolean save) {
+        GpuBoardWindow window = active;
+        if (!SwingUtilities.isEventDispatchThread() || window == null || window.gui != gui || !window.asksPrompts()
+              || Thread.holdsLock(GpuBoardWindow.class)) {
+            return null;
+        }
+        window.focus(false);
+        AtomicReference<SystemFileDialog.Choice> chosen = new AtomicReference<>();
+        AtomicBoolean answered = new AtomicBoolean();
+        SecondaryLoop loop = Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
+        SystemFileDialog.show(new SystemFileDialog.Request(directory, title, filter, save), () -> window.nativeOwner,
+              gui::getFrame, busy -> window.post(battle -> battle.setInputBlocked(busy || window.modalOpen)),
+              choice -> {
+                  chosen.set(choice);
+                  answered.set(true);
+                  loop.exit();
+              });
+        // The answer comes in a later event, inside the loop, unless the smoke tests' fake gives it at once
+        if (!answered.get()) {
+            loop.enter();
+        }
+        SystemFileDialog.Choice choice = chosen.get();
+        if (choice == null) {
+            return Optional.empty();
+        }
+        if (choice.askReplace()) {
+            List<String> yesNo = List.of(Messages.getString("Yes"), Messages.getString("No"));
+            DialogAnswer replace = ask(gui, new DialogRequest(0, DialogKind.MESSAGE,
+                  Messages.getString("ChatLounge.map.confirmReplace"),
+                  Messages.getString("Lobby.files.replace", choice.file().getName()), false, yesNo, 0,
+                  JOptionPane.CLOSED_OPTION, List.of(), List.of(), "", false, null, null, null, List.of()));
+            if (replace == null || replace.button() != 0) {
+                return Optional.empty();
+            }
+        }
+        return Optional.of(choice.file());
+    }
+
+    /**
      * EDT: while this client's native window is starting, waits in a nested event loop, as a modal dialog does, until
      * it asks prompts itself, closes, or {@link #STARTUP_PROMPT_WAIT_MS} pass. Asked in Swing meanwhile, the prompt
      * would be a modal dialog the board never draws; it could outlive the game and leave the start screen blocked.
@@ -1473,8 +1559,9 @@ public final class GpuBoardWindow {
               null, choices, choices[0]);
         if (choice == 0) {
             open(gui, initialView, panel);
-        } else if (gui != null) {
-            gui.handleExit();
+        } else if (gui != null && !gui.handleExit()) {
+            // The game stays without a battle view, which nothing would show again; the player retries or leaves
+            reportFailure(failure);
         }
     }
 

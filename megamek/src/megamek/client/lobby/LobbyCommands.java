@@ -48,6 +48,7 @@ import megamek.common.interfaces.ForceAssignable;
 import megamek.common.loaders.MapSettings;
 import megamek.common.loaders.MapSetup;
 import megamek.common.net.packets.InvalidPacketDataException;
+import megamek.common.options.GameOptions;
 import megamek.common.options.OptionsConstants;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
@@ -426,45 +427,9 @@ public class LobbyCommands {
         client().sendMapDimensions(mapSettings);
     }
 
-    /**
-     * Sets the number of boards across when it is within {@link #MIN_MAP_SIZE} and {@link #MAX_MAP_SIZE}.
-     *
-     * @return {@code true} when the width was changed and sent
-     */
-    public boolean changeMapWidth(MapSettings mapSettings, int width) {
-        if ((width < MIN_MAP_SIZE) || (width > MAX_MAP_SIZE)) {
-            return false;
-        }
-        resizeMap(mapSettings, width, mapSettings.getMapHeight());
-        return true;
-    }
 
-    /**
-     * Sets the number of boards down when it is within {@link #MIN_MAP_SIZE} and {@link #MAX_MAP_SIZE}.
-     *
-     * @return {@code true} when the height was changed and sent
-     */
-    public boolean changeMapHeight(MapSettings mapSettings, int height) {
-        if ((height < MIN_MAP_SIZE) || (height > MAX_MAP_SIZE)) {
-            return false;
-        }
-        resizeMap(mapSettings, mapSettings.getMapWidth(), height);
-        return true;
-    }
 
-    /** Removes a column of boards unless only one is left. */
-    public void shrinkMapWidth(MapSettings mapSettings) {
-        if (mapSettings.getMapWidth() > MIN_MAP_SIZE) {
-            resizeMap(mapSettings, mapSettings.getMapWidth() - 1, mapSettings.getMapHeight());
-        }
-    }
 
-    /** Removes a row of boards unless only one is left. */
-    public void shrinkMapHeight(MapSettings mapSettings) {
-        if (mapSettings.getMapHeight() > MIN_MAP_SIZE) {
-            resizeMap(mapSettings, mapSettings.getMapWidth(), mapSettings.getMapHeight() - 1);
-        }
-    }
 
     /** Sets the size of each board and sends the map settings. */
     public void resizeBoards(MapSettings mapSettings, int width, int height) {
@@ -472,31 +437,7 @@ public class LobbyCommands {
         sendMapSettings(mapSettings);
     }
 
-    /**
-     * Sets the width of each board when it is within {@link #MIN_BOARD_SIZE} and {@link #MAX_BOARD_SIZE}.
-     *
-     * @return {@code true} when the width was changed and sent
-     */
-    public boolean changeBoardWidth(MapSettings mapSettings, int width) {
-        if ((width < MIN_BOARD_SIZE) || (width > MAX_BOARD_SIZE)) {
-            return false;
-        }
-        resizeBoards(mapSettings, width, mapSettings.getBoardHeight());
-        return true;
-    }
 
-    /**
-     * Sets the height of each board when it is within {@link #MIN_BOARD_SIZE} and {@link #MAX_BOARD_SIZE}.
-     *
-     * @return {@code true} when the height was changed and sent
-     */
-    public boolean changeBoardHeight(MapSettings mapSettings, int height) {
-        if ((height < MIN_BOARD_SIZE) || (height > MAX_BOARD_SIZE)) {
-            return false;
-        }
-        resizeBoards(mapSettings, mapSettings.getBoardWidth(), height);
-        return true;
-    }
 
     /** Applies a saved map setup's map size, board size and boards and sends the map settings. */
     public void applyMapSetup(MapSettings mapSettings, MapSetup setup) {
@@ -629,19 +570,25 @@ public class LobbyCommands {
             return;
         }
         Entity entity = CollectionUtil.anyOneElement(entities);
-        if (!canEditDamage(client(), entity)) {
-            asks().error(LobbyError.CANNOT_EDIT_DAMAGE);
-            return;
-        }
+        boolean damage = canEditDamage(client(), entity);
         // An asset has no armor/structure/criticals; its only persistent damage is a lowered Destroy Check.
         if (entity instanceof BattlefieldSupportAsset asset) {
+            if (!damage) {
+                asks().error(LobbyError.CANNOT_EDIT_DAMAGE);
+                return;
+            }
             asks().editAssetDamage(asset, () -> sendUpdates(entities));
             return;
         }
 
-        // Reaching here means the local player may edit this unit: the gamemaster, or the owner when no gamemaster
-        // is present. Either way the editor offers the full editing tools without re-checking the gamemaster role.
-        asks().editDamage(entity, () -> sendUpdates(entities));
+        // Any unit the local player may configure opens: its deployment is its owner's to set, while its damage is
+        // the gamemaster's when one is present, so the editor shows the damage read-only to anyone else.
+        GameOptions gameOptions = client().getGame().getOptions();
+        UnitDamageForm.Options options = new UnitDamageForm.Options(damage,
+              Game.rulesManager.getRulesGame().isWalkOnDeployment(), LobbyUnitMenu.isScanTargetMenuUseful(client()),
+              gameOptions.booleanOption(OptionsConstants.ADVANCED_GROUND_MOVEMENT_TAC_OPS_HULL_DOWN),
+              gameOptions.booleanOption(OptionsConstants.ADVANCED_HIDDEN_UNITS));
+        asks().editDamage(entity, options, () -> sendUpdates(entities));
     }
 
     /**

@@ -189,13 +189,21 @@ public final class UiTheme implements Disposable {
           Map.entry("open-in-new", 0xE89E), Map.entry("book", 0xEA19), Map.entry("forum", 0xE0BF),
           // The random army's table browser: folder and casino (a die, a table to roll on)
           Map.entry("folder", 0xE2C7), Map.entry("die", 0xEB40),
+          // The random army's generators: military_tech (Battle Value), balance, flag (a faction's table),
+          // account_tree (a formation) and filter_alt (the unit filter)
+          Map.entry("military-tech", 0xEA3F), Map.entry("balance", 0xEAF6), Map.entry("flag", 0xE153),
+          Map.entry("account-tree", 0xE97A), Map.entry("filter", 0xEF4F),
           // shield_person: the Game Master's toast (Token v0) and seat; cancel: a no in the seat's vote
           Map.entry("shield-person", 0xF650), Map.entry("cancel", 0xE5C9),
           // The lobby's player cards: more_vert, add, check_circle, radio_button_unchecked, hourglass_empty,
           // smart_toy (a bot) and palette (camouflage)
           Map.entry("more-vert", 0xE5D4), Map.entry("add", 0xE145), Map.entry("check-circle", 0xE86C),
           Map.entry("radio-unchecked", 0xE836), Map.entry("hourglass", 0xE88B), Map.entry("bot", 0xF06C),
-          Map.entry("palette", 0xE40A),
+          Map.entry("palette", 0xE40A), Map.entry("build", 0xE869),
+          // The lobby's unit cards: hub (a C3 network) and delete
+          Map.entry("hub", 0xE9F4), Map.entry("delete", 0xE872),
+          // The lobby's top bar: gavel, Game options (the rules of the game)
+          Map.entry("gavel", 0xE90E),
           // The Tactical View's unit badges: power_settings_new, vertical_align_bottom, anchor, sensors_off, sensors,
           // security, visibility, terrain, visibility_off (a TAG link's crosshair is "locate").
           Map.entry("power", 0xE8AC), Map.entry("prone", 0xE258), Map.entry("anchor", 0xF1CD),

@@ -12,6 +12,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -21,6 +23,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
@@ -32,11 +35,14 @@ import megamek.common.board.BoardFile;
 import megamek.common.loaders.MapSettings;
 import megamek.common.loaders.MapSetup;
 import megamek.common.util.fileUtils.MegaMekFile;
+import megamek.utilities.BoardClassifier;
+import megamek.utilities.BoardsTagger;
 
 /**
- * The lobby's map setup without a toolkit, the native counterpart of the Swing MapSetupDialog: the map's medium, its
+ * The lobby's map setup without a toolkit: the map's medium, its
  * size in boards, the board size, the board in each slot (fixed, rotated, generated, random or surprise), each
- * slot's theme and level offset, the searchable list of available boards, Generate and map setup files. Changes
+ * slot's theme and level offset, the searchable and filterable list of available boards (on a one-board map, the
+ * whole board library at any size, as the Swing advanced map search), Generate and map setup files. Changes
  * apply at once through {@link Commands} to a local copy of the server's settings, as the dialog's do; {@link #reload}
  * takes the server's echo. {@link #picture()} reads the whole setup for a view. Runs on the Swing thread.
  */
@@ -132,10 +138,95 @@ public final class MapSetupForm {
     public record Slot(int index, String board, Kind kind, String label, String file, boolean rotated,
           List<String> stack, boolean canRotate, boolean adjustable, @Nullable String theme, int levelOffset) {}
 
-    /** An entry of the board list: the name the map settings use, its short label and its folder. */
-    public record Entry(String name, String label, String folder) {
+    /** An entry of the board list: the name the map settings use, its short label, its folder and its size. */
+    public record Entry(String name, String label, String folder, int width, int height) {
         public boolean generated() {
             return MapSettings.BOARD_GENERATED.equals(name);
+        }
+    }
+
+    /** A board of the library at any size: its name as the map settings use it, its size and its tags. */
+    public record LibraryBoard(String name, int width, int height, List<String> tags) {
+        public LibraryBoard {
+            tags = List.copyOf(tags);
+        }
+    }
+
+    /** Whether the board library, every board at any size, is read: a slow scan, wanted only by the filters. */
+    public enum Library { UNREAD, READING, READ }
+
+    /**
+     * The board browser's filters, the Swing advanced map search's.
+     *
+     * @param anySize browse the whole library at any size rather than the boards of the current size; only a one-board
+     *                map takes it, and placing a board then resizes the map to it
+     * @param tags    the tags a board must have: any one of them, or all with {@code allTags}; none passes every board
+     * @param folders the top folders under the boards folder a board must be in, "" for those directly in it; none
+     *                passes every board
+     */
+    public record Filter(boolean anySize, @Nullable Integer minWidth, @Nullable Integer maxWidth,
+          @Nullable Integer minHeight, @Nullable Integer maxHeight, Set<String> tags, boolean allTags,
+          Set<String> folders) {
+        public static final Filter NONE = new Filter(false, null, null, null, null, Set.of(), false, Set.of());
+
+        public Filter {
+            tags = Set.copyOf(tags);
+            folders = Set.copyOf(folders);
+        }
+
+        public Filter withAnySize(boolean any) {
+            return new Filter(any, minWidth, maxWidth, minHeight, maxHeight, tags, allTags, folders);
+        }
+
+        public Filter withWidth(@Nullable Integer min, @Nullable Integer max) {
+            return new Filter(anySize, min, max, minHeight, maxHeight, tags, allTags, folders);
+        }
+
+        public Filter withHeight(@Nullable Integer min, @Nullable Integer max) {
+            return new Filter(anySize, minWidth, maxWidth, min, max, tags, allTags, folders);
+        }
+
+        public Filter withTag(String tag, boolean on) {
+            return new Filter(anySize, minWidth, maxWidth, minHeight, maxHeight, toggled(tags, tag, on), allTags,
+                  folders);
+        }
+
+        public Filter withAllTags(boolean all) {
+            return new Filter(anySize, minWidth, maxWidth, minHeight, maxHeight, tags, all, folders);
+        }
+
+        public Filter withFolder(String folder, boolean on) {
+            return new Filter(anySize, minWidth, maxWidth, minHeight, maxHeight, tags, allTags,
+                  toggled(folders, folder, on));
+        }
+
+        /** The filters at work; the size ones only count while browsing any size, which only a one-board map can. */
+        public int count(boolean anySizeAllowed) {
+            boolean any = anySize && anySizeAllowed;
+            int count = any ? 1 : 0;
+            if (any && ((minWidth != null) || (maxWidth != null))) {
+                count++;
+            }
+            if (any && ((minHeight != null) || (maxHeight != null))) {
+                count++;
+            }
+            if (!tags.isEmpty()) {
+                count++;
+            }
+            if (!folders.isEmpty()) {
+                count++;
+            }
+            return count;
+        }
+
+        private static Set<String> toggled(Set<String> set, String value, boolean on) {
+            Set<String> next = new HashSet<>(set);
+            if (on) {
+                next.add(value);
+            } else {
+                next.remove(value);
+            }
+            return next;
         }
     }
 
@@ -145,13 +236,26 @@ public final class MapSetupForm {
     /**
      * The whole setup for a view.
      *
-     * @param sizeIndex the index in {@code sizes} of the board size, or -1 for a custom size
+     * @param sizeIndex      the index in {@code sizes} of the board size, or -1 for a custom size
+     * @param advancedSearch whether the browser can show boards of any size: a one-board map off space
+     * @param tagChoices     the tags of the boards in scope, and those chosen; empty until the library is read
+     * @param folderChoices  the top folders of the boards in scope, and those chosen
      */
     public record Picture(int medium, int mapWidth, int mapHeight, int boardWidth, int boardHeight,
           List<BoardDimensions> sizes, int sizeIndex, boolean customSize, List<Slot> slots, List<Entry> boards,
-          String search, boolean generable, String generateTip, boolean advancedSearch) {
+          String search, boolean generable, String generateTip, boolean advancedSearch, Filter filter,
+          Library library, List<String> tagChoices, List<String> folderChoices) {
         public boolean space() {
             return medium == MapSettings.MEDIUM_SPACE;
+        }
+
+        /** Whether the browser shows the library at any size. */
+        public boolean anySize() {
+            return advancedSearch && filter.anySize();
+        }
+
+        public int filterCount() {
+            return filter.count(advancedSearch);
         }
 
         public boolean hasGeneratedBoards() {
@@ -179,6 +283,12 @@ public final class MapSetupForm {
     private final List<MapSettings> pending = new ArrayList<>();
     private String search = "";
     private boolean customSize;
+    private Filter filter = Filter.NONE;
+    private boolean libraryWanted;
+    /** The library by {@link #key}, in name order; null until read. */
+    private @Nullable Map<String, LibraryBoard> library;
+    /** The library's tags by {@link #key}, lowercase and joined as {@link #fileTags}. */
+    private final Map<String, String> libraryTags = new HashMap<>();
 
     /**
      * @param server         the server's map settings, copied by {@link #reload}
@@ -279,10 +389,21 @@ public final class MapSetupForm {
             tip = "ChatLounge.GenerateBattlefieldTooltip";
         }
         boolean space = settings.getMedium() == MapSettings.MEDIUM_SPACE;
+        boolean advanced = anySizeAllowed();
         return new Picture(settings.getMedium(), settings.getMapWidth(), settings.getMapHeight(),
               settings.getBoardWidth(), settings.getBoardHeight(), sizes, custom ? -1 : sizeIndex, custom,
               List.copyOf(slots), space ? List.of() : boards(), search, !surprise && !unset,
-              Messages.getString(tip), !space && (settings.getMapWidth() == 1) && (settings.getMapHeight() == 1));
+              Messages.getString(tip), advanced, filter, libraryState(), space ? List.of() : tagChoices(),
+              space ? List.of() : folderChoices());
+    }
+
+    private boolean anySizeAllowed() {
+        return (settings.getMedium() != MapSettings.MEDIUM_SPACE) && (settings.getMapWidth() == 1)
+              && (settings.getMapHeight() == 1);
+    }
+
+    private boolean anySizeActive() {
+        return filter.anySize() && anySizeAllowed();
     }
 
     private List<BoardDimensions> sortedSizes() {
@@ -355,42 +476,119 @@ public final class MapSetupForm {
 
     // region Board list
 
-    /** The available boards: Generated first, or only the matches of a search of {@link #SEARCH_MIN} letters. */
+    /**
+     * The boards in scope that pass the filters and a search of {@link #SEARCH_MIN} letters or more, Generated first
+     * when neither a search nor a filter narrows the boards of the current size. In scope are the server's boards of
+     * the current size, or, browsing any size, the whole library.
+     */
     public List<Entry> boards() {
-        List<String> names = new ArrayList<>();
-        if (search.length() < SEARCH_MIN) {
-            names.add(MapSettings.BOARD_GENERATED);
-            names.addAll(settings.getBoardsAvailableVector());
-        } else {
-            names.addAll(searched(search));
-        }
+        boolean any = anySizeActive();
         List<Entry> result = new ArrayList<>();
-        for (String name : names) {
-            String folder = (name.startsWith(MapSettings.BOARD_GENERATED)) ? ""
-                  : Objects.toString(new File(name).getParent(), "").replace('\\', '/');
-            result.add(new Entry(name, label(name), folder));
+        if (!any && (search.length() < SEARCH_MIN) && filter.tags().isEmpty() && filter.folders().isEmpty()) {
+            result.add(new Entry(MapSettings.BOARD_GENERATED, label(MapSettings.BOARD_GENERATED), "",
+                  settings.getBoardWidth(), settings.getBoardHeight()));
+        }
+        List<String> tokens = (search.length() < SEARCH_MIN) ? List.of()
+              : List.of(search.toLowerCase(Locale.ROOT).split(";"));
+        Set<String> wanted = new HashSet<>();
+        filter.tags().forEach(tag -> wanted.add(tag.toLowerCase(Locale.ROOT)));
+        for (LibraryBoard board : inScope(any)) {
+            if (passes(board, any, wanted, tokens)) {
+                String folder = Objects.toString(new File(board.name()).getParent(), "").replace('\\', '/');
+                result.add(new Entry(board.name(), label(board.name(), board.width(), board.height()), folder,
+                      board.width(), board.height()));
+            }
         }
         return List.copyOf(result);
     }
 
-    /** The dialog's search: each ";" token must match a board file's name or one of its tags. */
-    List<String> searched(String text) {
-        List<String> result = new ArrayList<>(settings.getBoardsAvailableVector());
-        for (String token : text.toLowerCase(Locale.ROOT).split(";")) {
-            List<String> kept = new ArrayList<>();
-            for (String board : result) {
-                boolean byName = board.toLowerCase(Locale.ROOT).contains(token) && isBoardFile(board);
-                if (byName || tags(board).contains(token)) {
-                    kept.add(board);
-                }
-            }
-            result = kept;
+    /** The boards to browse: the library at any size, or the server's boards of the current size. */
+    private List<LibraryBoard> inScope(boolean any) {
+        if (any) {
+            return (library == null) ? List.of() : List.copyOf(library.values());
+        }
+        List<LibraryBoard> result = new ArrayList<>();
+        for (String name : settings.getBoardsAvailableVector()) {
+            result.add(new LibraryBoard(name, settings.getBoardWidth(), settings.getBoardHeight(), List.of()));
         }
         return result;
     }
 
-    private String tags(String board) {
-        return tags.computeIfAbsent(board, tagReader);
+    private boolean passes(LibraryBoard board, boolean any, Set<String> wanted, List<String> tokens) {
+        if (!filter.folders().isEmpty() && !filter.folders().contains(topFolder(board.name()))) {
+            return false;
+        }
+        if (any && (!within(board.width(), filter.minWidth(), filter.maxWidth())
+              || !within(board.height(), filter.minHeight(), filter.maxHeight()))) {
+            return false;
+        }
+        if (!wanted.isEmpty()) {
+            Set<String> has = Set.of(tagText(board.name()).split("\\|\\|"));
+            boolean match = filter.allTags() ? has.containsAll(wanted) : wanted.stream().anyMatch(has::contains);
+            if (!match) {
+                return false;
+            }
+        }
+        // The dialog's search: each ";" token must match a board file's name or one of its tags
+        for (String token : tokens) {
+            boolean byName = board.name().toLowerCase(Locale.ROOT).contains(token) && isBoardFile(board.name());
+            if (!byName && !tagText(board.name()).contains(token)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean within(int value, @Nullable Integer min, @Nullable Integer max) {
+        return ((min == null) || (value >= min)) && ((max == null) || (value <= max));
+    }
+
+    /** A board's tags, lowercase and joined: the library's once read, else the board file's. */
+    private String tagText(String board) {
+        String known = libraryTags.get(key(board));
+        return (known != null) ? known : tags.computeIfAbsent(board, tagReader);
+    }
+
+    /** The tags of the boards in scope, as the library spells them, with the chosen ones; none before it is read. */
+    private List<String> tagChoices() {
+        if (library == null) {
+            return List.of();
+        }
+        TreeSet<String> result = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        for (LibraryBoard board : inScope(anySizeActive())) {
+            LibraryBoard known = library.get(key(board.name()));
+            if (known != null) {
+                result.addAll(known.tags());
+            }
+        }
+        result.addAll(filter.tags());
+        return List.copyOf(result);
+    }
+
+    /** The top folders of the boards in scope, with the chosen ones. */
+    private List<String> folderChoices() {
+        TreeSet<String> result = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        for (LibraryBoard board : inScope(anySizeActive())) {
+            result.add(topFolder(board.name()));
+        }
+        result.addAll(filter.folders());
+        return List.copyOf(result);
+    }
+
+    /** The first folder of a board name under the boards folder, or "" for a board directly in it. */
+    public static String topFolder(String board) {
+        String path = key(board);
+        int slash = path.indexOf('/');
+        return (slash < 0) ? "" : path.substring(0, slash);
+    }
+
+    /** A board name with forward slashes and no leading one, so the server's names and the library's meet. */
+    private static String key(String board) {
+        String path = board.replace('\\', '/');
+        while (path.startsWith("/")) {
+            path = path.substring(1);
+        }
+        return path;
     }
 
     private static boolean isBoardFile(String board) {
@@ -404,6 +602,107 @@ public final class MapSetupForm {
 
     public String search() {
         return search;
+    }
+
+    public Filter filter() {
+        return filter;
+    }
+
+    /** Changes the filters; browsing any size or by tag wants the library. */
+    public void filter(UnaryOperator<Filter> change) {
+        filter = change.apply(filter);
+        if (filter.anySize() || !filter.tags().isEmpty()) {
+            libraryWanted = true;
+        }
+    }
+
+    /** Asks for the library, as the filters open, so their tags can show. */
+    public void wantLibrary() {
+        libraryWanted = true;
+    }
+
+    /** Whether the library is wanted and not yet read; the controller reads it off the Swing thread. */
+    public boolean libraryDue() {
+        return libraryWanted && (library == null);
+    }
+
+    public Library libraryState() {
+        if (library != null) {
+            return Library.READ;
+        }
+        return libraryWanted ? Library.READING : Library.UNREAD;
+    }
+
+    /** Takes the library {@link #readLibrary} read; the first of two boards of one name stays. */
+    public void library(Collection<LibraryBoard> boards) {
+        Map<String, LibraryBoard> read = new LinkedHashMap<>();
+        libraryTags.clear();
+        boards.stream().sorted(Comparator.comparing(LibraryBoard::name)).forEach(board -> {
+            if (read.putIfAbsent(key(board.name()), board) == null) {
+                libraryTags.put(key(board.name()), String.join("||", board.tags()).toLowerCase(Locale.ROOT));
+            }
+        });
+        library = read;
+    }
+
+    /**
+     * Reads every board at any size, with its tags, from the board classifier: a slow scan the first time, so not on
+     * the Swing thread.
+     */
+    public static List<LibraryBoard> readLibrary() {
+        BoardClassifier classifier = BoardClassifier.getInstance();
+        Map<String, List<String>> tagsByPath = new HashMap<>();
+        for (Map.Entry<BoardsTagger.Tags, List<String>> tagged : classifier.getBoardsByTag().entrySet()) {
+            for (String path : tagged.getValue()) {
+                addTag(tagsByPath, path, tagged.getKey().getName());
+            }
+        }
+        for (Map.Entry<String, List<String>> tagged : classifier.getBoardsByManualTag().entrySet()) {
+            for (String path : tagged.getValue()) {
+                addTag(tagsByPath, path, tagged.getKey());
+            }
+        }
+        List<LibraryBoard> result = new ArrayList<>();
+        for (Map.Entry<String, String> board : classifier.getBoardPaths().entrySet()) {
+            Integer width = classifier.getBoardWidth().get(board.getKey());
+            Integer height = classifier.getBoardHeight().get(board.getKey());
+            if ((width != null) && (height != null)) {
+                String name = BoardFile.selectionName(board.getValue()).replace('\\', '/');
+                result.add(new LibraryBoard(name, width, height,
+                      tagsByPath.getOrDefault(board.getKey(), List.of())));
+            }
+        }
+        result.sort(Comparator.comparing(LibraryBoard::name));
+        return result;
+    }
+
+    /** Adds a board's tag as {@link #tagLabel} spells it, once, so a manual tag and its automatic twin merge. */
+    private static void addTag(Map<String, List<String>> tagsByPath, String path, String tag) {
+        List<String> tags = tagsByPath.computeIfAbsent(path, k -> new ArrayList<>());
+        String label = tagLabel(tag);
+        if (tags.stream().noneMatch(label::equalsIgnoreCase)) {
+            tags.add(label);
+        }
+    }
+
+    /**
+     * A board tag as a player reads it: an automatic tag, such as "LightForest (Auto)", loses its suffix and becomes
+     * words, "Light forest"; a manual tag stays as written.
+     */
+    public static String tagLabel(String tag) {
+        String suffix = " (Auto)";
+        if (!tag.endsWith(suffix)) {
+            return tag;
+        }
+        String words = tag.substring(0, tag.length() - suffix.length()).replaceAll("(?<=[a-z])(?=[A-Z])", " ");
+        return words.isEmpty() ? words : words.charAt(0) + words.substring(1).toLowerCase(Locale.ROOT);
+    }
+
+    /** The size a board of the list is drawn at: its own while browsing any size, else the current board size. */
+    public BoardDimensions sizeOf(String board) {
+        LibraryBoard known = (library == null) ? null : library.get(key(board));
+        return (anySizeActive() && (known != null)) ? new BoardDimensions(known.width(), known.height())
+              : settings.getBoardSize();
     }
 
     // endregion
@@ -619,17 +918,20 @@ public final class MapSetupForm {
     }
 
     /**
-     * Makes the map the single board an advanced search found, as the dialog does.
+     * Makes the map the single board {@code board}, at the board's own size, as the Swing advanced search did.
      *
-     * @param path the board file's path under the boards folder
+     * @param board a board name as the map settings use it
      * @return whether the board's size could be read and it was selected
      */
-    public boolean singleBoard(String path) {
-        BoardDimensions size = Board.getSize(new MegaMekFile(Configuration.boardsDir(), path).getFile());
+    public boolean singleBoard(String board) {
+        LibraryBoard known = (library == null) ? null : library.get(key(board));
+        BoardDimensions size = (known != null) ? new BoardDimensions(known.width(), known.height())
+              : Board.getSize(new MegaMekFile(Configuration.boardsDir(), BoardFile.fileName(board)).getFile());
         if (size == null) {
             return false;
         }
-        commands.selectSingleBoard(settings, BoardFile.selectionName(path).replace("\\", "/"), size);
+        customSize = false;
+        commands.selectSingleBoard(settings, board.replace("\\", "/"), size);
         sent();
         return true;
     }

@@ -74,7 +74,6 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.util.UIUtil;
 import megamek.codeUtilities.MathUtility;
 import megamek.common.Player;
-import megamek.common.battleArmor.BattleArmor;
 import megamek.common.game.Game;
 import megamek.common.options.GameOptions;
 import megamek.common.options.OptionsConstants;
@@ -1366,102 +1365,15 @@ public class ForceGeneratorOptionsView extends JPanel implements FocusListener, 
      */
     public void updateSummaryTable(ForceDescriptor force) {
         summaryModel.setRowCount(0);
-        if (force == null) {
-            return;
-        }
-        ArrayList<Entity> entities = new ArrayList<>();
-        force.addAllEntities(entities);
-        // Per (row, weightClassColumn): [0]=squad/entity count, [1]=trooper count (BA only). A row is a unit type,
-        // or for conventional infantry a unit type and class. Column NO_WEIGHT_COLUMN holds units with no weight class.
-        Map<SummaryRowKey, int[][]> counts = new TreeMap<>();
-        for (Entity entity : entities) {
-            int unitType = entity.getUnitType();
-            int weightClass = entity.getWeightClass();
-            int column;
-            if (hasNoWeightClass(unitType)) {
-                column = NO_WEIGHT_COLUMN;
-            } else if (weightClass <= EntityWeightClass.WEIGHT_LIGHT) {
-                column = 0;
-            } else if (weightClass == EntityWeightClass.WEIGHT_MEDIUM) {
-                column = 1;
-            } else if (weightClass == EntityWeightClass.WEIGHT_HEAVY) {
-                column = 2;
-            } else {
-                column = 3;
-            }
-            SummaryRowKey rowKey = new SummaryRowKey(unitType, infantryClassOf(entity));
-            int[][] row = counts.computeIfAbsent(rowKey, newRowKey -> new int[NO_WEIGHT_COLUMN + 1][2]);
-            row[column][0]++;
-            if (entity instanceof BattleArmor ba) {
-                row[column][1] += ba.getShootingStrength();
-            }
-        }
-        // At Galaxy echelon and above (constants.txt: GALAXY/BRIGADE=7, TOUMAN/DIVISION=8, ...) a force
-        // holds hundreds of units, so raw per-cell counts are unreadable. Show each weight class as a
-        // percentage of that unit type's total instead. Smaller forces keep the exact counts.
-        Integer echelon = force.getEchelon();
-        boolean asPercent = (echelon != null) && (echelon >= LARGE_ECHELON_PERCENT_THRESHOLD);
-        // Column totals count units (squads for Battle Armor) so the bottom row adds up across types.
-        int[] columnTotals = new int[4];
-        int grandTotal = 0;
-        for (Map.Entry<SummaryRowKey, int[][]> entry : counts.entrySet()) {
-            int[][] row = entry.getValue();
-            SummaryRowKey rowKey = entry.getKey();
-            boolean isBA = (rowKey.unitType() == UnitType.BATTLE_ARMOR);
-            int typeTotal = row[0][0] + row[1][0] + row[2][0] + row[3][0] + row[NO_WEIGHT_COLUMN][0];
-            int typeTroopers = row[0][1] + row[1][1] + row[2][1] + row[3][1] + row[NO_WEIGHT_COLUMN][1];
+        for (ForceComposition.Row row : ForceComposition.rows(force)) {
+            Object[] cells = new Object[6];
+            cells[0] = row.label();
             for (int column = 0; column < 4; column++) {
-                columnTotals[column] += row[column][0];
+                cells[column + 1] = row.weight().get(column);
             }
-            grandTotal += typeTotal;
-            // The Total column is always the plain count, even when the weight cells show percentages: the
-            // percentages say how the type is spread, the total says how many there are.
-            String rowTotal = formatSummaryCell(new int[] { typeTotal, typeTroopers }, isBA);
-            if (hasNoWeightClass(rowKey.unitType())) {
-                summaryModel.addRow(new Object[] {
-                      rowKey.label(),
-                      NO_WEIGHT_CELL, NO_WEIGHT_CELL, NO_WEIGHT_CELL, NO_WEIGHT_CELL,
-                      rowTotal
-                });
-            } else if (asPercent) {
-                summaryModel.addRow(new Object[] {
-                      rowKey.label(),
-                      formatSummaryPercent(row[0][0], typeTotal),
-                      formatSummaryPercent(row[1][0], typeTotal),
-                      formatSummaryPercent(row[2][0], typeTotal),
-                      formatSummaryPercent(row[3][0], typeTotal),
-                      rowTotal
-                });
-            } else {
-                summaryModel.addRow(new Object[] {
-                      rowKey.label(),
-                      formatSummaryCell(row[0], isBA),
-                      formatSummaryCell(row[1], isBA),
-                      formatSummaryCell(row[2], isBA),
-                      formatSummaryCell(row[3], isBA),
-                      rowTotal
-                });
-            }
+            cells[5] = row.total();
+            summaryModel.addRow(cells);
         }
-        if (!counts.isEmpty()) {
-            summaryModel.addRow(new Object[] {
-                  Messages.getString("ForceGeneratorDialog.summary.total"),
-                  String.valueOf(columnTotals[0]),
-                  String.valueOf(columnTotals[1]),
-                  String.valueOf(columnTotals[2]),
-                  String.valueOf(columnTotals[3]),
-                  // Every unit, including those with no weight class, so the corner still matches the rows above
-                  String.valueOf(grandTotal)
-            });
-        }
-    }
-
-    /**
-     * Conventional infantry has no weight class: the engine reports every platoon as Light whatever it carries, so
-     * counting it under Light would make a Heavy infantry force look as if it ignored its weight.
-     */
-    private static boolean hasNoWeightClass(int unitType) {
-        return unitType == UnitType.INFANTRY;
     }
 
     /**
@@ -1473,64 +1385,6 @@ public class ForceGeneratorOptionsView extends JPanel implements FocusListener, 
             return InfantryClass.classify(platoon.getMovementMode(), platoon.isMounted());
         }
         return null;
-    }
-
-    /**
-     * One row of the summary table: a unit type, split by class for conventional infantry. Rows sort by unit type,
-     * then infantry class in its declared order, with an unclassified row first.
-     *
-     * @param unitType      the unit type
-     * @param infantryClass the infantry class, or {@code null} for other unit types and unclassified platoons
-     */
-    record SummaryRowKey(int unitType, @Nullable InfantryClass infantryClass) implements Comparable<SummaryRowKey> {
-        private static final Comparator<SummaryRowKey> ORDER = Comparator.comparingInt(SummaryRowKey::unitType)
-              .thenComparing(SummaryRowKey::infantryClass, Comparator.nullsFirst(Comparator.naturalOrder()));
-
-        @Override
-        public int compareTo(SummaryRowKey other) {
-            return ORDER.compare(this, other);
-        }
-
-        /**
-         * @return the row label, e.g. "Mek" or "Infantry (Jump)"
-         */
-        String label() {
-            String unitTypeName = UnitType.getTypeDisplayableName(unitType);
-            return (infantryClass == null) ? unitTypeName : unitTypeName + " (" + infantryClass.getDisplayName() + ")";
-        }
-    }
-
-    /** Echelon level at or above which the composition summary switches from counts to percentages. */
-    private static final int LARGE_ECHELON_PERCENT_THRESHOLD = 7;
-
-    /** Summary column, after the four weight columns, for units that have no weight class. Never displayed. */
-    private static final int NO_WEIGHT_COLUMN = 4;
-
-    /** Shown in the weight columns of a unit type that has no weight class. */
-    private static final String NO_WEIGHT_CELL = "-";
-
-    /**
-     * Formats a summary-table cell as a whole-number percentage of the unit type's total, e.g. "43%". An empty bucket
-     * renders as "0%"; a type with no units renders blank.
-     */
-    private static String formatSummaryPercent(int count, int total) {
-        if (total <= 0) {
-            return "";
-        }
-        return Math.round(100.0 * count / total) + "%";
-    }
-
-    /**
-     * Formats a summary-table cell. For Battle Armor with at least one squad, shows "N (M)" — squad count and total
-     * trooper count in parentheses. Other unit types and empty cells render as the plain integer.
-     */
-    private static String formatSummaryCell(int[] squadsAndTroopers, boolean isBattleArmor) {
-        int squads = squadsAndTroopers[0];
-        int troopers = squadsAndTroopers[1];
-        if (isBattleArmor && squads > 0) {
-            return squads + " (" + troopers + ")";
-        }
-        return String.valueOf(squads);
     }
 
     /**

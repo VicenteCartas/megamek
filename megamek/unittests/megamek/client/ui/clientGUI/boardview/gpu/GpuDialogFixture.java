@@ -186,7 +186,7 @@ final class GpuDialogFixture {
     /** The client methods under test run their real code; every other client call answers the Mockito default. */
     static final Set<String> ROUTED = Set.of("askNative", "askYesNo", "confirm", "option", "message",
           "doYesNoDialog", "doAlertDialog", "addToast", "askRows", "askText", "input", "doChoiceDialog", "askForm",
-          "askEntry");
+          "askEntry", "askSaveFirst");
 
     /** The client's frame, carrying the client as its constructor puts it there for the dialogs it owns. */
     static JFrame clientFrame(ClientGUI gui) throws Exception {

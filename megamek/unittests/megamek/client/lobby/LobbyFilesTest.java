@@ -87,7 +87,7 @@ class LobbyFilesTest {
         LobbyFiles.Ask loadout = files.ask(LobbyFiles.Route.LOAD_LOADOUT, null);
         assertEquals(Paths.get(MMConstants.USER_LOADOUTS_DIR).toAbsolutePath().toFile(), loadout.directory());
         assertEquals(Messages.getString("ClientGui.LoadoutLoadDialog.title"), loadout.title());
-        assertEquals("adf files (*.adf)", loadout.filterName());
+        assertEquals(Messages.getString("Lobby.files.loadoutFiles"), loadout.filterName());
         assertEquals(List.of("adf"), loadout.extensions());
 
         LobbyFiles.Ask list = files.ask(LobbyFiles.Route.SAVE_UNIT_LIST, "Kai");
@@ -95,6 +95,13 @@ class LobbyFilesTest {
         assertEquals(Messages.getString("ClientGUI.saveUnitListFileDialog.title"), list.title());
         assertEquals("Kai.mul", list.name());
         assertEquals(List.of("mul", "mmu"), files.ask(LobbyFiles.Route.LOAD_UNIT_LIST, null).extensions());
+        assertEquals(Messages.getString("Lobby.files.unitListFiles"),
+              files.ask(LobbyFiles.Route.LOAD_UNIT_LIST, null).filterName());
+
+        LobbyFiles.Ask stats = files.ask(LobbyFiles.Route.EXPORT_STATS, "Lance");
+        assertEquals(Messages.getString("Lobby.files.mmuFiles"), stats.filterName());
+        assertEquals(List.of("mmu"), stats.extensions());
+        assertEquals("Lance.mmu", stats.name());
 
         LobbyFiles.Ask sprite = files.ask(LobbyFiles.Route.EXPORT_SPRITE, "Atlas AS7-D");
         assertNull(sprite.directory());
@@ -267,5 +274,23 @@ class LobbyFilesTest {
         answer(null);
         files.exportSprite("Atlas AS7-D", written::add);
         assertEquals(1, written.size());
+    }
+
+    @Test
+    void aGeneratedForceExportsAsAUnitListAndRemembersTheFolder() {
+        answer("lance");
+        List<File> written = new ArrayList<>();
+        files.exportForce("Davion Lance", written::add);
+        LobbyFiles.Ask ask = asked.get(0);
+        assertTrue(ask.save());
+        assertEquals(Messages.getString("ForceGeneratorDialog.exportMUL.title"), ask.title());
+        assertEquals("Davion Lance.mul", ask.name());
+        assertEquals(List.of("mul"), ask.extensions());
+        assertEquals(List.of(folder.resolve("lance.mul").toFile()), written, ".mul is added");
+        assertEquals(folder.toFile().getAbsoluteFile(), files.ask(LobbyFiles.Route.SAVE_UNIT_LIST, "Kai").directory(),
+              "the unit lists' folder is where the force went");
+        answer(null);
+        files.exportForce("Davion Lance", written::add);
+        assertEquals(1, written.size(), "a cancel writes nothing");
     }
 }

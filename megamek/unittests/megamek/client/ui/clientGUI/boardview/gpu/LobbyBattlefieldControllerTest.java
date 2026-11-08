@@ -60,7 +60,7 @@ class LobbyBattlefieldControllerTest {
     }
 
     @Test
-    void theSwingLobbyRunsTheButtons() {
+    void theLobbyRunsTheButtons() {
         controller.run(Command.CONDITIONS);
         controller.run(Command.GAME_OPTIONS);
         controller.run(Command.VICTORY);

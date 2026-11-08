@@ -36,6 +36,7 @@ package megamek.logging;
 
 import java.util.Objects;
 import javax.swing.JOptionPane;
+import javax.swing.SwingUtilities;
 
 import io.sentry.Sentry;
 import org.apache.logging.log4j.Level;
@@ -304,6 +305,37 @@ public class MMLogger extends ExtendedLoggerWrapper {
     }
 
     /**
+     * Shows error dialogs in the user interface's own windows instead of Swing's message box, installed by the user
+     * interface layer, as {@link ErrorDialogButton} is.
+     */
+    @FunctionalInterface
+    public interface ErrorPresenter {
+        /**
+         * EDT: shows an error.
+         *
+         * @param title   the dialog's title
+         * @param message the fully formatted message
+         * @param report  the reporting button to offer, or {@code null} for none
+         *
+         * @return false when it cannot show the error, so Swing's message box shows it
+         */
+        boolean present(String title, String message, ErrorDialogButton report);
+    }
+
+    /** The installed error presenter, or {@code null} for Swing's message box. Any thread may report an error. */
+    private static volatile ErrorPresenter errorPresenter;
+
+    /**
+     * Installs what shows error dialogs in the user interface's own windows. While one is installed, an error reported
+     * off the Swing thread shows on it later and the reporting thread goes on.
+     *
+     * @param errorPresenter the presenter, or {@code null} for Swing's message box as before
+     */
+    public static void setErrorPresenter(ErrorPresenter errorPresenter) {
+        MMLogger.errorPresenter = errorPresenter;
+    }
+
+    /**
      * Formatted Error Level Logging w/o Exception w/ Dialog.
      *
      * @param message Message to write to the log file AND be displayed in the error pane.
@@ -328,6 +360,22 @@ public class MMLogger extends ExtendedLoggerWrapper {
      */
     private void showErrorDialog(String title, String message, boolean offerBugReport) {
         ErrorDialogButton extraButton = errorDialogButton;
+        ErrorPresenter presenter = errorPresenter;
+        if (presenter != null) {
+            if (!SwingUtilities.isEventDispatchThread()) {
+                // The user interface's windows show and answer it on the Swing thread
+                SwingUtilities.invokeLater(() -> showErrorDialog(title, message, offerBugReport));
+                return;
+            }
+            try {
+                if (presenter.present(title, message, offerBugReport ? extraButton : null)) {
+                    return;
+                }
+            } catch (RuntimeException failure) {
+                exLoggerWrapper.logIfEnabled(MMLogger.FQCN, Level.ERROR, null, "Could not show an error dialog",
+                      failure);
+            }
+        }
         try {
             if (!offerBugReport || (extraButton == null)) {
                 JOptionPane.showMessageDialog(null, message, title, JOptionPane.ERROR_MESSAGE);

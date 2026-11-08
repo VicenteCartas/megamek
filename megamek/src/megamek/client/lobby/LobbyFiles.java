@@ -2,6 +2,7 @@
 package megamek.client.lobby;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,6 +38,7 @@ public final class LobbyFiles {
     /** The folder of the game options files, as the Swing game options dialog opens it. */
     static final File OPTIONS_FOLDER = new File("mmconf");
     private static final String MUL = "mul";
+    private static final String STATS = "mmu";
     private static final String SAVE = MMConstants.SAVE_FILE_EXT.substring(1);
     private static final String SAVE_GZ = MMConstants.SAVE_FILE_GZ_EXT.substring(1);
 
@@ -49,6 +51,8 @@ public final class LobbyFiles {
         SAVE_UNIT_LIST(true),
         LOAD_UNIT_LIST(false),
         EXPORT_SPRITE(true),
+        EXPORT_FORCE(true),
+        EXPORT_STATS(true),
         SAVE_GAME(true),
         LOAD_GAME(false);
 
@@ -139,16 +143,23 @@ public final class LobbyFiles {
                   Paths.get(MMConstants.USER_LOADOUTS_DIR).toAbsolutePath().toFile(),
                   Messages.getString(route.save() ? "ClientGui.LoadoutSaveDialog.title"
                         : "ClientGui.LoadoutLoadDialog.title"),
-                  "adf files (*.adf)", List.of("adf"), null);
+                  Messages.getString("Lobby.files.loadoutFiles"), List.of("adf"), null);
             case SAVE_UNIT_LIST -> new Ask(route, folders.saveList,
                   Messages.getString("ClientGUI.saveUnitListFileDialog.title"),
                   Messages.getString("ClientGUI.descriptionMULFiles"), List.of(MUL),
                   (name == null) ? null : name + '.' + MUL);
             case LOAD_UNIT_LIST -> new Ask(route, folders.loadList,
-                  Messages.getString("ClientGUI.openUnitListFileDialog.title"), "MUL files", List.of(MUL, "mmu"),
-                  null);
+                  Messages.getString("ClientGUI.openUnitListFileDialog.title"),
+                  Messages.getString("Lobby.files.unitListFiles"), List.of(MUL, "mmu"), null);
             case EXPORT_SPRITE -> new Ask(route, null, Messages.getString("ExportUnitSpriteDialog.title"),
                   Messages.getString("Lobby.files.pngFiles"), List.of("png"), (name == null) ? null : name + ".png");
+            case EXPORT_FORCE -> new Ask(route, folders.saveList,
+                  Messages.getString("ForceGeneratorDialog.exportMUL.title"),
+                  Messages.getString("ClientGUI.descriptionMULFiles"), List.of(MUL),
+                  (name == null) ? null : name + '.' + MUL);
+            case EXPORT_STATS -> new Ask(route, folders.saveList, Messages.getString("Save.text"),
+                  Messages.getString("Lobby.files.mmuFiles"), List.of(STATS),
+                  (name == null) ? null : name + '.' + STATS);
             case SAVE_GAME, LOAD_GAME -> new Ask(route, new File(MMConstants.SAVEGAME_DIR).getAbsoluteFile(),
                   Messages.getString(route.save() ? "Lobby.files.saveGame" : "Lobby.files.loadGame"),
                   Messages.getString("Lobby.files.saveGames"), List.of(SAVE_GZ, SAVE), null);
@@ -287,24 +298,37 @@ public final class LobbyFiles {
             }
             folders.saveList = folder(file, folders.saveList);
             File saved = withMul(file);
-            ArrayList<Entity> units = new ArrayList<>(game.getForces()
-                  .sortedInTreeOrder(game.getPlayerEntities(player, false)));
-            for (Entity unit : units) {
-                unit.setForceString(game.getForces().forceStringFor(unit));
-            }
             try {
-                EntityListFile.saveTo(saved, units);
-                LOGGER.info("[LobbyFiles] Saved {} unit(s) to {}", units.size(), saved);
+                int count = writeUnitList(saved, game, player);
+                LOGGER.info("[LobbyFiles] Saved {} unit(s) to {}", count, saved);
             } catch (Exception failure) {
                 LOGGER.error(failure, "saveListFile");
                 report.message(Messages.getString("ClientGUI.errorSavingFile"), String.valueOf(failure.getMessage()));
-            } finally {
-                // A stamp left behind would outrank the live force tree the next time the unit is written
-                for (Entity unit : units) {
-                    unit.setForceString("");
-                }
             }
         }, done);
+    }
+
+    /**
+     * Writes {@code player}'s units to {@code file} as a unit list in force tree order, each stamped with its force
+     * while it is written, so the list reloads with its forces as they were arranged.
+     *
+     * @return how many units it wrote
+     */
+    public static int writeUnitList(File file, Game game, Player player) throws IOException {
+        ArrayList<Entity> units = new ArrayList<>(game.getForces()
+              .sortedInTreeOrder(game.getPlayerEntities(player, false)));
+        for (Entity unit : units) {
+            unit.setForceString(game.getForces().forceStringFor(unit));
+        }
+        try {
+            EntityListFile.saveTo(file, units);
+            return units.size();
+        } finally {
+            // A stamp left behind would outrank the live force tree the next time the unit is written
+            for (Entity unit : units) {
+                unit.setForceString("");
+            }
+        }
     }
 
     /** {@code file}, with ".mul" added unless it is a MUL or XML file, as the Swing client saves a list. */
@@ -337,6 +361,50 @@ public final class LobbyFiles {
         chooser.choose(ask(Route.EXPORT_SPRITE, unitName), file -> {
             if (file != null) {
                 write.accept(file.getPath().endsWith(".png") ? file : new File(file.getPath() + ".png"));
+            }
+        });
+    }
+
+    // ---- Alpha Strike and SBF stats
+
+    /** Writes a stats file; it may fail. */
+    @FunctionalInterface
+    public interface StatsWriter {
+        void write(File file) throws IOException;
+    }
+
+    /**
+     * Asks for an MMU file, suggesting {@code name}, in the unit lists' folder, and writes the stats to it; nothing
+     * when cancelled, and a message when it cannot be written.
+     */
+    public void exportStats(String name, StatsWriter write) {
+        chooser.choose(ask(Route.EXPORT_STATS, name), file -> {
+            if (file == null) {
+                return;
+            }
+            folders.saveList = folder(file, folders.saveList);
+            File stats = file.getName().endsWith('.' + STATS) ? file : new File(file.getPath() + '.' + STATS);
+            try {
+                write.write(stats);
+                LOGGER.info("[LobbyFiles] Saved the stats to {}", stats);
+            } catch (IOException | RuntimeException failure) {
+                LOGGER.error(failure, "The lobby could not save the stats to {}", stats);
+                report.message(Messages.getString("ClientGUI.errorSavingFile"), String.valueOf(failure.getMessage()));
+            }
+        });
+    }
+
+    // ---- The Force Generator
+
+    /**
+     * Asks for a file, suggesting the force's name, in the unit lists' folder, and hands it to {@code write} as a MUL
+     * file; nothing when cancelled.
+     */
+    public void exportForce(String forceName, Consumer<File> write) {
+        chooser.choose(ask(Route.EXPORT_FORCE, forceName), file -> {
+            if (file != null) {
+                folders.saveList = folder(file, folders.saveList);
+                write.accept(withMul(file));
             }
         });
     }

@@ -67,13 +67,13 @@ import javax.swing.filechooser.FileFilter;
 import javax.xml.parsers.DocumentBuilder;
 
 import jakarta.annotation.Nullable;
+import megamek.client.lobby.VictoryConditionsForm;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.DialogOptionListener;
 import megamek.client.ui.dialogs.MMDialogs.MMConfirmDialog;
 import megamek.client.ui.panels.DialogOptionComponentYPanel;
 import megamek.client.ui.panels.GameOptionsCatalog;
 import megamek.client.ui.panels.GameOptionsPane;
-import megamek.client.ui.panels.phaseDisplay.lobby.VictoryConditionsDialog;
 import megamek.client.ui.settings.SettingsBadge;
 import megamek.client.ui.settings.SettingsIconLegend;
 import megamek.client.ui.util.UIUtil;
@@ -504,7 +504,7 @@ public class GameOptionsDialog extends AbstractButtonDialog implements ActionLis
      */
     private boolean isVictoryGroupHiddenForLobby(IOptionGroup group) {
         boolean isInLobby = (clientGui != null) && clientGui.getClient().getGame().getPhase().isLounge();
-        return isInLobby && VictoryConditionsDialog.VICTORY_OPTIONS_GROUP_NAME.equals(group.getName());
+        return isInLobby && VictoryConditionsForm.GROUP.equals(group.getName());
     }
 
     /** Refreshes unofficial/legacy visibility and dependent control state without changing hidden rule values. */

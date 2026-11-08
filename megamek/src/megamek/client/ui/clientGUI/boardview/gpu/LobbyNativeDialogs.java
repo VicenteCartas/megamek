@@ -11,30 +11,41 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import jakarta.annotation.Nullable;
+import megamek.client.lobby.AlphaStrikeStatsForm;
 import megamek.client.lobby.AssetForm;
+import megamek.client.lobby.AutoResolveRun;
+import megamek.client.lobby.BotFacingForm;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.ForceNameRequest;
 import megamek.client.lobby.GameOptionsForm;
+import megamek.client.lobby.HelpDocument;
+import megamek.client.lobby.LanceRoleForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
+import megamek.client.lobby.PortraitCatalog;
 import megamek.client.lobby.RandomArmyForm;
 import megamek.client.lobby.RandomMapForm;
 import megamek.client.lobby.RandomNamesForm;
 import megamek.client.lobby.RandomSkillsForm;
 import megamek.client.lobby.RatBrowser;
+import megamek.client.lobby.SbfStatsForm;
 import megamek.client.lobby.TrainOrderForm;
+import megamek.client.lobby.UnitDamageForm;
 import megamek.client.lobby.VictoryConditionsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
-import megamek.client.ui.entityreadout.EntityReadout;
+import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.icons.Camouflage;
+import megamek.common.icons.Portrait;
 import megamek.common.units.Entity;
 
 /**
@@ -43,12 +54,12 @@ import megamek.common.units.Entity;
  * odd-sized board warning, the victory conditions, the random army, skills and names, the unit readout and a help
  * document, the small prompts ({@link LobbyPromptViews}), a message and a confirmation. A
  * dialog shows over the whole lobby on a scrim that takes every click and key ({@link UiDialog}). Opening the camo
- * chooser, the player settings, the conditions or the game options replaces whatever shows; the bot setup, a message
+ * or portrait chooser, the player settings, the conditions or the game options replaces whatever shows; the bot setup, a message
  * and a confirmation go over it, as the player settings' Bot settings opens the bot setup or hiding a rule category
  * asks first, and closing one shows the one below again. Every {@code new UiDialog} of the lobby is here, which
  * {@code LobbyDialogEntryPointsTest} enforces.
  * <p>
- * GPU thread. The camo pictures are read on a daemon thread of their own.
+ * GPU thread. The camo and portrait pictures are read on a daemon thread of their own.
  */
 final class LobbyNativeDialogs {
     private final UiKit kit;
@@ -69,6 +80,7 @@ final class LobbyNativeDialogs {
     /** The dialogs that show, the top one first, each with what to do once it has closed. */
     private final Deque<Open> open = new ArrayDeque<>();
     private LobbyCamoView camoView;
+    private LobbyPortraitView portraitView;
     private LobbyPlayerSettingsView settingsView;
     private LobbyBotSetupView botView;
     private LobbyConditionsView conditionsView;
@@ -78,6 +90,10 @@ final class LobbyNativeDialogs {
     private LobbyRandomArmyView randomArmyView;
     private LobbyCrewToolsView crewView;
     private LobbyReadoutView readoutView;
+    private LobbyDocumentView documentView;
+    private LobbyAutoResolveView autoResolveView;
+    /** The paperdoll drawings, read once the damage editor first opens. */
+    private GpuPaperdolls paperdolls;
 
     private record Open(UiDialog dialog, Runnable closed) { }
 
@@ -113,17 +129,43 @@ final class LobbyNativeDialogs {
                   camoView.dispose();
                   camoView = null;
               });
+        camoView = new LobbyCamoView(kit, dialog, source, catalog, choice, assets, pictures(), bodyWidth(dialog,
+              "dialog.xl"), camoGridHeight(), chosen, this::close);
+        show(dialog);
+        return camoView;
+    }
+
+    /**
+     * Opens the portrait chooser over the lobby and its unit bay, replacing whatever dialog shows.
+     *
+     * @param source  where the portraits come from
+     * @param catalog the portrait directory as first read
+     * @param initial the crew member's portrait, selected at first, or null
+     * @param chosen  takes the confirmed portrait, on this thread
+     */
+    LobbyPortraitView portrait(LobbyPortraitView.Source source, PortraitCatalog catalog, @Nullable Portrait initial,
+          Consumer<Portrait> chosen) {
+        UiDialog dialog = begin(Messages.getString("PortraitChoiceDialog.select_portrait"), "dialog.xl", false,
+              () -> {
+                  portraitView.dispose();
+                  portraitView = null;
+              });
+        portraitView = new LobbyPortraitView(kit, dialog, source, catalog, initial, pictures(),
+              bodyWidth(dialog, "dialog.xl"), camoGridHeight(), chosen, this::close);
+        show(dialog);
+        return portraitView;
+    }
+
+    /** The daemon thread the icon choosers read their pictures on, started at first use. */
+    private ExecutorService pictures() {
         if (pictures == null) {
             pictures = Executors.newSingleThreadExecutor(work -> {
-                Thread thread = new Thread(work, "Lobby camo pictures");
+                Thread thread = new Thread(work, "Lobby icon pictures");
                 thread.setDaemon(true);
                 return thread;
             });
         }
-        camoView = new LobbyCamoView(kit, dialog, source, catalog, choice, assets, pictures, bodyWidth(dialog,
-              "dialog.xl"), camoGridHeight(), chosen, this::close);
-        show(dialog);
-        return camoView;
+        return pictures;
     }
 
     /**
@@ -200,15 +242,15 @@ final class LobbyNativeDialogs {
     }
 
     /**
-     * Opens the random army, as wide as the game options, with {@code browser} over its tables; {@code sprites} has
-     * the units' sprites drawn so far.
+     * Opens the random army, as wide as the game options, with {@code browser} over its tables and {@code generators}
+     * beside them; {@code sprites} has the units' sprites drawn so far.
      */
-    LobbyRandomArmyView randomArmy(RandomArmyForm form, RatBrowser browser, Function<String, Drawable> sprites,
-          LobbyRandomArmyView.Host host) {
+    LobbyRandomArmyView randomArmy(RandomArmyForm form, RatBrowser browser, LobbyRandomArmyView.Generators generators,
+          Function<String, Drawable> sprites, LobbyRandomArmyView.Host host) {
         UiDialog dialog = begin(Messages.getString("Lobby.randomArmy.title"), OPTIONS_WIDTH, false,
               () -> randomArmyView = null);
-        randomArmyView = new LobbyRandomArmyView(kit, dialog, form, browser, bodyWidth(dialog, OPTIONS_WIDTH),
-              sprites, host, this::close);
+        randomArmyView = new LobbyRandomArmyView(kit, dialog, form, browser, generators,
+              bodyWidth(dialog, OPTIONS_WIDTH), sprites, host, this::close);
         show(dialog);
         return randomArmyView;
     }
@@ -232,8 +274,17 @@ final class LobbyNativeDialogs {
 
     /** Opens the dossiers of one or more units. */
     LobbyReadoutView readout(List<LobbyReadoutView.Dossier> dossiers) {
+        return readout(dossiers, false);
+    }
+
+    /** Opens the dossiers of one or more units over the dialog that shows, as a random army's unit. */
+    LobbyReadoutView readoutOver(List<LobbyReadoutView.Dossier> dossiers) {
+        return readout(dossiers, true);
+    }
+
+    private LobbyReadoutView readout(List<LobbyReadoutView.Dossier> dossiers, boolean over) {
         String title = dossiers.size() == 1 ? dossiers.get(0).name() : Messages.getString("Lobby.readout.title");
-        UiDialog dialog = begin(title, "dialog.lg", false, () -> {
+        UiDialog dialog = begin(title, "dialog.lg", over, () -> {
             readoutView.dispose();
             readoutView = null;
         });
@@ -242,16 +293,15 @@ final class LobbyNativeDialogs {
         return readoutView;
     }
 
-    /** Shows a help document's rows over whatever shows, as the bot setup's help. */
-    LobbyReadoutView help(String title, List<EntityReadout.Row> rows) {
-        UiDialog dialog = begin(title, "dialog.lg", true, () -> {
-            readoutView.dispose();
-            readoutView = null;
-        });
-        readoutView = new LobbyReadoutView(kit, dialog,
-              List.of(new LobbyReadoutView.Dossier(title, "", null, List.of(rows))), motion, this::close);
+    /**
+     * Shows a help document or battle report a chapter at a time over whatever shows, as the bot setup's help;
+     * {@code grid} sets its topics two by two, as a guide's.
+     */
+    LobbyDocumentView document(String title, HelpDocument document, boolean grid) {
+        UiDialog dialog = begin(title, "dialog.xl", true, () -> documentView = null);
+        documentView = new LobbyDocumentView(kit, dialog, document, grid, motion, this::close);
         show(dialog);
-        return readoutView;
+        return documentView;
     }
 
     /** Asks for a force designation over whatever shows. */
@@ -288,12 +338,91 @@ final class LobbyNativeDialogs {
         return dialog;
     }
 
+    /**
+     * Shows the unit's damage editor over whatever shows.
+     *
+     * @param applied runs on the Swing thread once OK wrote the edits to the unit
+     */
+    UiDialog damage(UnitDamageForm form, LobbyPromptViews.Edt edt, Runnable applied) {
+        if (paperdolls == null) {
+            paperdolls = new GpuPaperdolls();
+        }
+        // a Mek's front, rear and structure dolls stand side by side, as on the record sheet, so it takes more width
+        UiDialog dialog = begin(Messages.getString("Lobby.damage.title", form.entity().getDisplayName()),
+              LobbyDamageView.sheet(paperdolls, form) ? "dialog.xl" : "dialog.lg", true, () -> { });
+        new LobbyDamageView(kit, dialog, form, paperdolls, edt, applied, this::close);
+        show(dialog);
+        return dialog;
+    }
+
     /** Asks for a train's order over whatever shows. */
     UiDialog trainOrder(TrainOrderForm form, LobbyPromptViews.Edt edt, Consumer<List<Entity>> ordered) {
         UiDialog dialog = begin(Messages.getString("TrainOrderDialog.title"), "dialog.sm", true, () -> { });
         LobbyPromptViews.trainOrder(kit, dialog, form, edt, ordered, this::close);
         show(dialog);
         return dialog;
+    }
+
+    /** Asks for a bot's unit's facings; {@code confirmed} runs on the Swing thread once OK closed it. */
+    UiDialog facing(BotFacingForm form, LobbyPromptViews.Edt edt, Runnable confirmed) {
+        UiDialog dialog = begin(Messages.getString("BotCommandPanel.Orders.facing.dialogTitle"), "dialog.sm", true,
+              () -> { });
+        LobbyBotOrderViews.facing(kit, dialog, form, edt, confirmed, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /** Asks for a bot's lance's role; {@code confirmed} runs on the Swing thread once OK closed it. */
+    UiDialog lanceRole(LanceRoleForm form, LobbyPromptViews.Edt edt, Runnable confirmed) {
+        UiDialog dialog = begin(Messages.getString("BotCommandPanel.Role.dialogTitleFor", form.lanceName()),
+              "dialog.md", true, () -> { });
+        LobbyBotOrderViews.lanceRole(kit, dialog, form, edt, confirmed, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /** Shows the units' Alpha Strike stats as cards. */
+    UiDialog alphaStrikeStats(AlphaStrikeStatsForm form, LobbyStatsView.Host host) {
+        UiDialog dialog = begin(Messages.getString("AlphaStrikeStatsDialog.title"), "dialog.xl", true, () -> { });
+        LobbyStatsView.alphaStrike(kit, dialog, form, host, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /** Shows the forces' Strategic BattleForce formations as cards. */
+    UiDialog sbfStats(SbfStatsForm form, LobbyStatsView.Host host) {
+        UiDialog dialog = begin(Messages.getString("SBFStatsDialog.title"), "dialog.xl", true, () -> { });
+        LobbyStatsView.sbf(kit, dialog, form, host, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /**
+     * Opens the auto-resolve briefing, on the odds when {@code odds} says so, else on the battle being resolved;
+     * {@code closed} hears when it closes, as a Cancel that stops the odds.
+     */
+    LobbyAutoResolveView autoResolve(boolean odds, List<String> chatter, LobbyAutoResolveView.Host host,
+          Runnable closed) {
+        return autoResolve(odds, chatter, host, closed, false);
+    }
+
+    /**
+     * Opens the briefing again over whatever shows, as a battle resolved after its briefing was closed ends: a dialog
+     * opened in the meantime keeps its place and its work, and shows again once the result is closed.
+     */
+    LobbyAutoResolveView autoResolveOver(List<String> chatter, LobbyAutoResolveView.Host host) {
+        return autoResolve(false, chatter, host, () -> { }, true);
+    }
+
+    private LobbyAutoResolveView autoResolve(boolean odds, List<String> chatter, LobbyAutoResolveView.Host host,
+          Runnable closed, boolean over) {
+        UiDialog dialog = begin(AutoResolveRun.title(), "dialog.sm", over, () -> {
+            autoResolveView = null;
+            closed.run();
+        });
+        autoResolveView = new LobbyAutoResolveView(kit, dialog, odds, chatter, host, this::close);
+        show(dialog);
+        return autoResolveView;
     }
 
     /** Asks {@code text} over whatever shows; {@code yes} runs once OK closed it, and Cancel only closes it. */
@@ -355,6 +484,140 @@ final class LobbyNativeDialogs {
     }
 
     /**
+     * Asks, before the first bot joins, whether to read Princess's guide: {@code yes} reads it, and the box stops the
+     * question coming back. Closing it any other way, such as with Esc, answers nothing.
+     */
+    UiDialog botReadme(String check, YesNoAnswer answer) {
+        UiDialog dialog = begin(Messages.getString("Lobby.botReadme.overline"), "dialog.md", true, () -> { });
+        float gap = DesignTokens.shipped().space().get("md");
+        var headline = kit.typeLabel(Messages.getString("Lobby.botReadme.headline"), "headline", "text.primary");
+        headline.setWrap(true);
+        headline.setName("bot-readme-headline");
+        Table pitch = new Table();
+        pitch.add(kit.solid("accent.primary")).width(3).growY().padRight(gap);
+        var text = kit.typeLabel(Messages.getString("Lobby.botReadme.text"), "body", "text.secondary");
+        text.setWrap(true);
+        pitch.add(text).growX().left();
+        dialog.body().add(headline).growX().left().padBottom(gap).row();
+        dialog.body().add(pitch).growX().left().padBottom(gap).row();
+        UiChoice box = kit.check(check, false);
+        box.setName("yes-no-check");
+        dialog.body().add(box).left().padTop(gap);
+        dialog.primary(Messages.getString("Lobby.botReadme.read"), () -> {
+            close();
+            answer.answered(true, box.isChecked());
+        }).setName("yes-no-yes");
+        dialog.secondary(Messages.getString("Lobby.botReadme.later"), () -> {
+            close();
+            answer.answered(false, box.isChecked());
+        }).setName("yes-no-no");
+        show(dialog);
+        return dialog;
+    }
+
+    /** What the save question before leaving was answered; closing it any other way stays in the game. */
+    interface SaveFirstAnswer {
+        /**
+         * @param save whether to save the game before leaving
+         */
+        void answered(boolean save);
+    }
+
+    /**
+     * Asks whether to save the game before leaving it: Save…, Don't save, or Cancel to stay. Settings → Advanced
+     * turns the question off.
+     *
+     * @param stayed runs when it closes unanswered, as with Cancel or Esc
+     */
+    UiDialog saveFirst(SaveFirstAnswer answer, Runnable stayed) {
+        boolean[] answered = new boolean[1];
+        UiDialog dialog = begin(Messages.getString("Lobby.saveFirst.title"), "dialog.md", true, () -> {
+            if (!answered[0]) {
+                stayed.run();
+            }
+        });
+        var label = kit.typeLabel(Messages.getString("Lobby.saveFirst.message"), "body", "text.primary");
+        label.setWrap(true);
+        dialog.body().add(label).growX().left();
+        dialog.primary(Messages.getString("Lobby.saveFirst.save"), () -> {
+            answered[0] = true;
+            close();
+            answer.answered(true);
+        }).setName("save-first-save");
+        dialog.secondary(Messages.getString("Lobby.saveFirst.leave"), () -> {
+            answered[0] = true;
+            close();
+            answer.answered(false);
+        }).setName("save-first-leave");
+        dialog.cancelButton(Messages.getString("Cancel.text")).setName("save-first-cancel");
+        show(dialog);
+        return dialog;
+    }
+
+    /** What the lobby's system menu does; the screen runs each on the Swing thread. */
+    interface SystemActions {
+        void save();
+
+        void quickSave();
+
+        /** Asks for a saved game and leaves the lobby to load it. */
+        void load();
+
+        /** Leaves the lobby to load the quick save. */
+        void quickLoad();
+
+        /** Whether this lobby offers loading at all: a MekHQ lobby loads its own campaigns. */
+        boolean loads();
+
+        void settings();
+
+        void leave();
+    }
+
+    /**
+     * The lobby's system menu, as a game's pause menu: Resume, then saving and loading, Settings and Leave lobby, one
+     * column of buttons in groups. Esc or Resume closes it; every other button closes it before it acts.
+     */
+    UiDialog systemMenu(SystemActions actions) {
+        UiDialog dialog = begin(Messages.getString("Lobby.menu.title"), "dialog.sm", false, () -> { });
+        Table column = dialog.body();
+        float gap = DesignTokens.shipped().space().get("sm");
+        float group = DesignTokens.shipped().space().get("lg");
+        menuButton(column, "button-primary", "Lobby.menu.resume", null, 0, null);
+        menuButton(column, "button-secondary", "Lobby.gameMenu.save", KeyCommandBind.LOCAL_SAVE, group,
+              actions::save);
+        menuButton(column, "button-secondary", "Lobby.gameMenu.quickSave", KeyCommandBind.QUICK_SAVE, gap,
+              actions::quickSave);
+        if (actions.loads()) {
+            menuButton(column, "button-secondary", "Lobby.gameMenu.load", KeyCommandBind.LOCAL_LOAD, gap,
+                  actions::load);
+            menuButton(column, "button-secondary", "Lobby.gameMenu.quickLoad", KeyCommandBind.QUICK_LOAD, gap,
+                  actions::quickLoad);
+        }
+        menuButton(column, "button-secondary", "Lobby.menu.settings", KeyCommandBind.CLIENT_SETTINGS, group,
+              actions::settings);
+        menuButton(column, "button-secondary", "Lobby.menu.leave", null, group, actions::leave);
+        show(dialog);
+        return dialog;
+    }
+
+    private void menuButton(Table column, String style, String key, KeyCommandBind binding, float above,
+          Runnable action) {
+        UiButton button = kit.button(style, null, Messages.getString(key), null);
+        button.setName(key);
+        if (binding != null) {
+            kit.tip(button, true).getActor().setText(KeyCommandBind.getDesc(binding));
+        }
+        UiKit.onChange(button, () -> {
+            close();
+            if (action != null) {
+                action.run();
+            }
+        });
+        column.add(button).growX().padTop(above).row();
+    }
+
+    /**
      * Opens the random map settings.
      *
      * @param themes the tileset's themes
@@ -386,6 +649,27 @@ final class LobbyNativeDialogs {
                 dontShowAgain.run();
             }
         }).setName("nag-ok");
+        show(dialog);
+        return dialog;
+    }
+
+    /**
+     * Shows an error over whatever shows: OK closes it, and the report button, when {@code reportLabel} is given, closes
+     * it and runs {@code report}.
+     */
+    UiDialog error(String title, String text, String dismissLabel, @Nullable String reportLabel,
+          @Nullable Runnable report) {
+        UiDialog dialog = begin(title, "dialog.md", true, () -> { });
+        var label = kit.typeLabel(text, "body", "text.primary");
+        label.setWrap(true);
+        dialog.body().add(label).growX().left();
+        dialog.primary(dismissLabel, this::close).setName("error-ok");
+        if (reportLabel != null && report != null) {
+            dialog.secondary(reportLabel, () -> {
+                close();
+                report.run();
+            }).setName("error-report");
+        }
         show(dialog);
         return dialog;
     }
@@ -465,6 +749,10 @@ final class LobbyNativeDialogs {
         return camoView;
     }
 
+    @Nullable LobbyPortraitView portraitView() {
+        return portraitView;
+    }
+
     @Nullable LobbyPlayerSettingsView settingsView() {
         return settingsView;
     }
@@ -499,6 +787,14 @@ final class LobbyNativeDialogs {
 
     @Nullable LobbyReadoutView readoutView() {
         return readoutView;
+    }
+
+    @Nullable LobbyDocumentView documentView() {
+        return documentView;
+    }
+
+    @Nullable LobbyAutoResolveView autoResolveView() {
+        return autoResolveView;
     }
 
     /** The top dialog, or null. */

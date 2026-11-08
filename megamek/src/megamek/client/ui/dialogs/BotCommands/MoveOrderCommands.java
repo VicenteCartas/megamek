@@ -59,7 +59,7 @@ import megamek.server.commands.UnitOrderCommand;
  * its leader and slot in the formation, then its route with each waypoint's formation, facing and hold, and the
  * route's priority.
  */
-final class MoveOrderCommands {
+public final class MoveOrderCommands {
 
     private MoveOrderCommands() {
     }
@@ -125,7 +125,7 @@ final class MoveOrderCommands {
      *
      * @return the formation commands, or empty
      */
-    static List<String> convoyColumnCommands(List<Entity> units, @Nullable LanceRole role) {
+    public static List<String> convoyColumnCommands(List<Entity> units, @Nullable LanceRole role) {
         List<String> commands = new ArrayList<>();
         if ((role == null) || !role.isConvoy() || (units.size() < 2)) {
             return commands;
@@ -179,7 +179,7 @@ final class MoveOrderCommands {
      *
      * @return the commands to send, in order
      */
-    static List<String> makeConvoyCommands(List<Entity> units, OffBoardDirection edge) {
+    public static List<String> makeConvoyCommands(List<Entity> units, OffBoardDirection edge) {
         List<Entity> botUnits = new ArrayList<>();
         for (Entity unit : units) {
             if ((unit.getOwner() != null) && unit.getOwner().isBot()) {
@@ -223,7 +223,7 @@ final class MoveOrderCommands {
      *
      * @return the commands to send, in order
      */
-    static List<String> roleCommands(List<Entity> units, @Nullable LanceRole role) {
+    public static List<String> roleCommands(List<Entity> units, @Nullable LanceRole role) {
         List<String> commands = new ArrayList<>();
         for (Entity unit : units) {
             LanceRole current = LanceRoles.effectiveRole(unit);

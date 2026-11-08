@@ -108,6 +108,16 @@ public class RandomArmyCreator {
         public boolean padWithInfantry;
 
         /**
+         * The most infantry padding adds; a large budget would otherwise pad with hundreds
+         */
+        public int maxPadding = Integer.MAX_VALUE;
+
+        /**
+         * Set by {@link #generateArmy}: whether padding stopped at {@link #maxPadding} short of the budget
+         */
+        public boolean paddingLimited;
+
+        /**
          * Advanced options for search
          */
         public MekSearchFilter advancedSearchFilter = null;
@@ -206,8 +216,12 @@ public class RandomArmyCreator {
     }
 
     public static List<MekSummary> generateArmy(Parameters p) {
+        return generateArmy(p, MekSummaryCache.getInstance().getAllMeks());
+    }
+
+    /** Generates the army from {@code all} rather than from the whole unit cache. */
+    public static List<MekSummary> generateArmy(Parameters p, MekSummary[] all) {
         int allowedVariance = java.lang.Math.abs(p.maxBV - p.minBV);
-        MekSummary[] all = MekSummaryCache.getInstance().getAllMeks();
         List<MekSummary> allMeks = new ArrayList<>();
         List<MekSummary> allTanks = new ArrayList<>();
         List<MekSummary> allInfantry = new ArrayList<>();
@@ -306,24 +320,25 @@ public class RandomArmyCreator {
         int averageTankBV = countBV(allTanks) / Math.max(1, allTanks.size());
         int averageInfBV = countBV(allInfantry) / Math.max(1, allInfantry.size());
         int averageBaBV = countBV(allBA) / Math.max(1, allBA.size());
-        int helpWeight = Math.max(1, p.meks * averageMekBV + p.tanks
-              * averageTankBV + p.infantry * averageInfBV + p.ba * averageBaBV);
+        long helpWeight = Math.max(1, (long) p.meks * averageMekBV + (long) p.tanks
+              * averageTankBV + (long) p.infantry * averageInfBV + (long) p.ba * averageBaBV);
 
-        int baBV = (p.ba * averageBaBV * p.maxBV) / helpWeight;
+        // long arithmetic: a dozen heavy units against a large budget overflows an int
+        int baBV = (int) (((long) p.ba * averageBaBV * p.maxBV) / helpWeight);
         if ((p.ba > 0) && !allBA.isEmpty()) {
             baBV = Math.max(baBV, p.ba * allBA.getFirst().getBV());
             baBV = Math.min(baBV, p.ba * allBA.getLast().getBV());
         } else {
             baBV = 0;
         }
-        int mekBV = (p.meks * averageMekBV * p.maxBV) / helpWeight;
+        int mekBV = (int) (((long) p.meks * averageMekBV * p.maxBV) / helpWeight);
         if ((p.meks > 0) && !allMeks.isEmpty()) {
             mekBV = Math.max(mekBV, p.meks * allMeks.getFirst().getBV());
             mekBV = Math.min(mekBV, p.meks * allMeks.getLast().getBV());
         } else {
             mekBV = 0;
         }
-        int tankBV = (p.tanks * averageTankBV * p.maxBV) / helpWeight;
+        int tankBV = (int) (((long) p.tanks * averageTankBV * p.maxBV) / helpWeight);
         if ((p.tanks > 0) && !allTanks.isEmpty()) {
             tankBV = Math.max(tankBV, p.tanks * allTanks.getFirst().getBV());
             tankBV = Math.min(tankBV, p.tanks * allTanks.getLast().getBV());
@@ -338,10 +353,15 @@ public class RandomArmyCreator {
         units.addAll(generateArmy(allMeks, p.meks, mekBV + tankBV + baBV
               - countBV(units), allowedVariance));
 
+        p.paddingLimited = false;
         if (p.padWithInfantry) {
             int inf = 0;
             if (averageInfBV != 0) {
                 inf = (p.maxBV - countBV(units)) / averageInfBV;
+            }
+            if (inf > p.maxPadding) {
+                inf = Math.max(0, p.maxPadding);
+                p.paddingLimited = true;
             }
 
             units.addAll(generateArmy(allInfantry, inf, p.maxBV
