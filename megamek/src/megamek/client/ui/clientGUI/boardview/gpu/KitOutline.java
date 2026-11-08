@@ -107,6 +107,7 @@ final class KitOutline {
         return sector(direction).stream().allMatch(keep -> keep.at(point[0], point[1]) >= 0);
     }
 
+    /** How far a point is inside the hex: a point test only. As a clip it cuts wrong where the nearest side changes. */
     static double insideHex(double x, double y) {
         double best = Double.POSITIVE_INFINITY;
         for (int i = 0; i < 6; i++) {
@@ -284,7 +285,7 @@ final class KitOutline {
         int mask = (first ? 1 << direction : 0) | (second ? 1 << (direction + 1) % 6 : 0);
         List<List<double[]>> polygons = new ArrayList<>();
         List<GeneratedMesh.Keep> keeps = new ArrayList<>();
-        keeps.add(KitOutline::insideHex);
+        keeps.addAll(hexSides());
         keeps.addAll(sector(direction));
         for (Cell cell : cells(mask)) {
             var points = clipped(cell.corners(), keeps);
