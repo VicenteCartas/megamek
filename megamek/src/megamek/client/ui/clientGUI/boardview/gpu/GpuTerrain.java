@@ -4516,11 +4516,11 @@ final class GpuTerrain implements Disposable {
                     }
                 }
             }
-            // Ordinary placements copy the same unchanged model nodes. Scan its vertices once per build and copy
-            // the local box before transforming it; an assembled building's, once per assembly.
+            // Ordinary placements copy the same unchanged model nodes: copy the model's local box (GpuAssets#bounds)
+            // before transforming it; an assembled building's, once per assembly. A flag's cloth moves its vertices.
             BoundingBox bounds = building != null ? building.bounds(instance)
-                  : new BoundingBox(build.modelBounds.computeIfAbsent(model,
-                        unused -> instance.calculateBoundingBox(new BoundingBox())));
+                  : BoardFlag.ASSET.equals(feature.asset()) ? instance.calculateBoundingBox(new BoundingBox())
+                  : new BoundingBox(assets.bounds(model, instance));
             BoundingBox editorBounds = feature.decoration() == null ? null : new BoundingBox(bounds);
             if (BoardFlag.ASSET.equals(feature.asset())) {
                 editorBounds.set(Vector3.Zero, new Vector3(GpuFlag.WIDTH, 0, GpuFlag.HEIGHT));
@@ -5089,7 +5089,6 @@ final class GpuTerrain implements Disposable {
         // Derived once per model while preparing a chunk; no extra model data survives construction.
         final Map<Model, Float> coralRootRadii = new IdentityHashMap<>();
         final Map<Model, List<Vector3>> crystalRoots = new IdentityHashMap<>();
-        final Map<Model, BoundingBox> modelBounds = new IdentityHashMap<>();
         final Map<Coords, BoardSurface> plantSupports;
         final Map<String, LiquidSurface> animations = new HashMap<>();
         final Map<Material, Material> reusedMaterials = new java.util.IdentityHashMap<>();

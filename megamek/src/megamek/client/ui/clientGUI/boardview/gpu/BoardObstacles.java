@@ -9,6 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.math.Intersector;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.Configuration;
@@ -210,6 +211,8 @@ final class BoardObstacles {
                 unreadable(file, failure);
                 continue;
             }
+            // An earthwork keeps its triangles' heights (Footprint#earthwork).
+            boolean earthwork = object == null && BoardGroundCut.digs(feature.asset());
             List<Vector3> points = new ArrayList<>();
             if (wall) {
                 // Ground cover grows up to a military wall's body; other dressing also keeps clear of its buttresses. A
@@ -229,10 +232,14 @@ final class BoardObstacles {
                 points.addAll(BoardIndustrial.triangles(BoardIndustrial.layout(scene, tile, feature)));
             } else if (custom) {
                 // The drawn kit's pieces for this hex's connections (GpuBuilding), with the selected roof's underside
-                // that defines the rendered building's occupied interior; a roof without one (a tank's cap) whole.
+                // that defines the rendered building's occupied interior; a roof without one (a tank's cap) whole. A
+                // storey's piece repeating a lower one's plan (each comes lowest first) adds nothing a footprint without
+                // local heights tests.
                 int levels = Math.max(1, Math.round(feature.height()));
+                var plans = new java.util.HashSet<Plan>();
                 for (var piece : ConnectedKit.placements(kit, 0, levels, ConnectedKit.reach(scene, tile, levels), 0,
                       GpuBuilding.seed(tile, feature), megamek.common.board.HexAppearance.steppedBuilding(tile.appearance()))) {
+                    if (!earthwork && !piece.role().startsWith("roof") && !plans.add(Plan.of(piece))) { continue; }
                     var triangles = ConnectedKit.triangles(kit, 0, piece);
                     var underside = !piece.role().startsWith("roof") ? List.<Vector3>of()
                           : GpuBuildingInterior.plane(triangles, piece.level() * GpuBuilding.LEVEL_HEIGHT, false);
@@ -298,7 +305,7 @@ final class BoardObstacles {
                 // The tall pier must not reserve empty space over its shorter connecting arms.
                 for (Vector3 point : points) { point.z = low + point.z * verticalScale + upperGround - ground; }
             }
-            if (object == null && BoardGroundCut.digs(feature.asset())) {
+            if (earthwork) {
                 // An earthwork stands on its hex's ground at its model's own zero.
                 points.forEach(point -> point.z = low + point.z * verticalScale);
                 footprints.add(new Footprint(List.copyOf(points), low + bounds.min.z * verticalScale,
@@ -306,6 +313,15 @@ final class BoardObstacles {
                 continue;
             }
             footprints.add(new Footprint(List.copyOf(points), low, low + height + upperGround - ground, bounds, wall || multiHex));
+        }
+    }
+
+    /** A kit piece's footprint seen from above: its node and the rows of its placement that give x and y. */
+    private record Plan(String node, float xx, float xy, float xz, float x, float yx, float yy, float yz, float y) {
+        static Plan of(ConnectedKit.Placement piece) {
+            float[] m = piece.matrix().val;
+            return new Plan(piece.node(), m[Matrix4.M00], m[Matrix4.M01], m[Matrix4.M02], m[Matrix4.M03],
+                  m[Matrix4.M10], m[Matrix4.M11], m[Matrix4.M12], m[Matrix4.M13]);
         }
     }
 

@@ -35,9 +35,11 @@ import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.TextureArrayData;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.board.BoardBillboard;
 import megamek.common.board.BoardFlag;
@@ -72,6 +74,10 @@ final class GpuAssets implements Disposable {
     private final Map<String, Boolean> hasSlots = new HashMap<>();
     /** How many mesh levels each placed model's file holds, read from its JSON once. */
     private final Map<String, Integer> fileLevels = new HashMap<>();
+    /** Each placed model's own box ({@link #bounds}); a model no longer referenced drops out. */
+    private final Map<Model, BoundingBox> bounds = new java.util.WeakHashMap<>();
+    /** Whether each model, kit or paint file exists, asked once ({@link #isFile}). */
+    private final Map<File, Boolean> files = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
     // By kit: every kit file and generated footprint is read once (ConnectedKit#kit, HabitatKit#kit).
     private final Map<ConnectedKit.Kit, GpuBuilding> buildings = new java.util.IdentityHashMap<>();
@@ -1254,6 +1260,20 @@ final class GpuAssets implements Disposable {
         unreported.clear();
     }
 
+    /**
+     * The box of {@code instance}, a fresh placement of {@code model} with its nodes unchanged: its vertices scanned once
+     * for every chunk build that places the model. The caller copies it.
+     */
+    BoundingBox bounds(Model model, ModelInstance instance) {
+        return bounds.computeIfAbsent(model, unused -> instance.calculateBoundingBox(new BoundingBox()));
+    }
+
+    /**
+     * Whether {@code file} exists, asked once per asset owner: every chunk build places the same models again, and a
+     * file added while the board shows waits for the asset reload, which makes a fresh owner (GpuBattleView).
+     */
+    private boolean isFile(File file) { return files.computeIfAbsent(file, File::isFile); }
+
     /** A recolourable model's decoded levels, in its own colours; decoded once. */
     private List<ModelData> decoded(String name) {
         return recolourable.computeIfAbsent(name, shape -> decode(shape, RigidGlb.source(root, shape)));
@@ -1384,7 +1404,7 @@ final class GpuAssets implements Disposable {
         if (BoardFlag.ASSET.equals(name)) { return flagPreview(); }
         if (BoardBillboard.ASSET.equals(name)) { return billboardPreview(); }
         var source = RigidGlb.source(root, name);
-        if (!source.file().isFile()) { return missing(name, "no model file " + source.file().getPath()); }
+        if (!isFile(source.file())) { return missing(name, "no model file " + source.file().getPath()); }
         if (unloadable.containsKey(name)) { return missing(name, unloadable.get(name)); }
         try {
             if (!hasSlots.computeIfAbsent(name, key -> !RigidGlb.colourSlots(source.file()).isEmpty())) {
@@ -1406,7 +1426,7 @@ final class GpuAssets implements Disposable {
         if (BoardFlag.ASSET.equals(name)) { return flagPreview(); }
         if (BoardBillboard.ASSET.equals(name)) { return billboardPreview(); }
         var file = RigidGlb.source(root, name).file();
-        return file.isFile() ? model(name, colours) : missing(name, "no model file " + file.getPath());
+        return isFile(file) ? model(name, colours) : missing(name, "no model file " + file.getPath());
     }
 
     /**
@@ -1416,7 +1436,7 @@ final class GpuAssets implements Disposable {
      */
     Texture decorationPaint(String asset) {
         File file = megamek.common.board.BoardDecalArt.image(asset);
-        if (!file.isFile()) { return null; }
+        if (!isFile(file)) { return null; }
         return materials.computeIfAbsent(file.toPath().toAbsolutePath().normalize().toString(), key -> paintTexture(file));
     }
 
@@ -1454,7 +1474,7 @@ final class GpuAssets implements Disposable {
         File file = TilesetScenery.customBuildingFile(asset);
         // A kit that cannot load is reported under its own name; the caller then draws the asset's model, or its box.
         String kit = asset + " (kit)";
-        if (!file.isFile()) { return null; }
+        if (!isFile(file)) { return null; }
         if (unloadable.containsKey(kit)) { missing(kit, unloadable.get(kit)); return null; }
         try {
             return buildings.computeIfAbsent(GpuBuilding.kit(asset, footprintScale), key -> new GpuBuilding(key, this::createModel))
