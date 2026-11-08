@@ -181,7 +181,45 @@ final class GpuBuildingInterior {
         if (!any) { return floor; }
         Area result = new Area(floor);
         result.subtract(new Area(cuts));
-        return result;
+        return withoutScraps(result);
+    }
+
+    /** Smaller than any real floor: the scraps neighbouring cuts leave between them, edged on the walls they keep clear of. */
+    private static final double SCRAP = .05;
+
+    /** {@code area} without its islands smaller than {@link #SCRAP}; holes stay as they are. */
+    private static Area withoutScraps(Area area) {
+        List<Path2D.Float> contours = new ArrayList<>();
+        List<Double> sizes = new ArrayList<>();
+        float[] point = new float[6];
+        Path2D.Float contour = null;
+        double size = 0, firstX = 0, firstY = 0, lastX = 0, lastY = 0;
+        for (var path = area.getPathIterator(null); !path.isDone(); path.next()) {
+            int kind = path.currentSegment(point);
+            if (kind == PathIterator.SEG_MOVETO) {
+                contour = new Path2D.Float(Path2D.WIND_NON_ZERO);
+                contour.moveTo(point[0], point[1]);
+                size = 0; firstX = lastX = point[0]; firstY = lastY = point[1];
+                continue;
+            }
+            double x = kind == PathIterator.SEG_CLOSE ? firstX : point[0], y = kind == PathIterator.SEG_CLOSE ? firstY : point[1];
+            size += lastX * y - x * lastY;
+            lastX = x; lastY = y;
+            if (kind == PathIterator.SEG_CLOSE) {
+                contour.closePath();
+                contours.add(contour);
+                sizes.add(size / 2);
+            } else { contour.lineTo(point[0], point[1]); }
+        }
+        // Islands wind like the largest outline; holes the other way.
+        double outer = sizes.stream().max(java.util.Comparator.comparingDouble(Math::abs)).orElse(0d);
+        Path2D.Float kept = new Path2D.Float(Path2D.WIND_NON_ZERO);
+        boolean dropped = false;
+        for (int i = 0; i < contours.size(); i++) {
+            if (Math.signum(sizes.get(i)) == Math.signum(outer) && Math.abs(sizes.get(i)) < SCRAP) { dropped = true; continue; }
+            kept.append(contours.get(i), false);
+        }
+        return dropped ? new Area(kept) : area;
     }
 
     /**
