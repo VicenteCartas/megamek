@@ -48,19 +48,34 @@ final class LobbyReadoutView {
     /**
      * One unit's dossier, read on the Swing thread.
      *
-     * @param id     the unit's entity id, or {@link #NO_UNIT} when it is not in the game
-     * @param line   the unit's key figures, under its name
-     * @param sprite its sprite in its camouflage, or null
-     * @param pages  the rows of each {@link Page}, in order
-     * @param card   its Alpha Strike card, shown above the Alpha Strike page's rows, or null
+     * @param id       the unit's entity id, or {@link #NO_UNIT} when it is not in the game
+     * @param line     the unit's key figures, under its name
+     * @param sprite   its sprite in its camouflage, or null
+     * @param pages    the rows of each {@link Page}, in order; the factions' rows may come from {@code factions}
+     * @param card     its Alpha Strike card, shown above the Alpha Strike page's rows, or null
+     * @param factions the factions page, read once it first shows, or null when {@code pages} has it
      */
     record Dossier(int id, String name, String line, @Nullable BufferedImage sprite,
-          List<List<EntityReadout.Row>> pages, @Nullable BufferedImage card) {
+          List<List<EntityReadout.Row>> pages, @Nullable BufferedImage card, @Nullable LaterRows factions) {
         static final int NO_UNIT = -1;
 
-        Dossier(String name, String line, @Nullable BufferedImage sprite, List<List<EntityReadout.Row>> pages) {
-            this(NO_UNIT, name, line, sprite, pages, null);
+        Dossier(int id, String name, String line, @Nullable BufferedImage sprite,
+              List<List<EntityReadout.Row>> pages, @Nullable BufferedImage card) {
+            this(id, name, line, sprite, pages, card, null);
         }
+
+        Dossier(String name, String line, @Nullable BufferedImage sprite, List<List<EntityReadout.Row>> pages) {
+            this(NO_UNIT, name, line, sprite, pages, null, null);
+        }
+    }
+
+    /** A page's rows that take a while to read, so are read only when the page first shows. */
+    interface LaterRows {
+        /** The rows, or null while they are not read yet. */
+        @Nullable List<EntityReadout.Row> rows();
+
+        /** Reads the rows off the GPU thread, then runs {@code done} on whatever thread read them. */
+        void read(Runnable done);
     }
 
     private final UiKit kit;
@@ -160,11 +175,28 @@ final class LobbyReadoutView {
 
     /** Shows the dossier's page that the tabs pick. */
     private void page() {
-        int at = (tabs == null) ? 0 : Math.max(0, tabs.getSelectedIndex());
-        List<List<EntityReadout.Row>> pages = dossiers.get(shown).pages();
+        int at = selected();
+        Dossier dossier = dossiers.get(shown);
+        List<List<EntityReadout.Row>> pages = dossier.pages();
         List<EntityReadout.Row> rows = at < pages.size() ? pages.get(at) : List.of();
         page.clearChildren();
-        Texture card = (at == Page.ALPHA_STRIKE.ordinal()) ? card(dossiers.get(shown)) : null;
+        LaterRows later = (at == Page.FACTIONS.ordinal()) ? dossier.factions() : null;
+        if (later != null) {
+            List<EntityReadout.Row> read = later.rows();
+            if (read == null) {
+                Label loading = kit.typeLabel(Messages.getString("Lobby.readout.loading"), "body", "text.muted");
+                loading.setName("readout-loading");
+                page.add(loading).left();
+                later.read(() -> GpuHost.post(() -> {
+                    if (page.getStage() != null && dossiers.get(shown) == dossier && selected() == at) {
+                        page();
+                    }
+                }));
+                return;
+            }
+            rows = read;
+        }
+        Texture card = (at == Page.ALPHA_STRIKE.ordinal()) ? card(dossier) : null;
         if (card != null) {
             Image picture = new Image(new TextureRegionDrawable(card), Scaling.fit);
             picture.setName("readout-card");
@@ -175,6 +207,10 @@ final class LobbyReadoutView {
         } else if (!rows.isEmpty()) {
             page.add(LobbyReadoutRows.of(kit, motion && !quiet, rows)).growX().minWidth(0);
         }
+    }
+
+    private int selected() {
+        return (tabs == null) ? 0 : Math.max(0, tabs.getSelectedIndex());
     }
 
     /** {@code dossier}'s Alpha Strike card as a texture, made at first showing, or null when it has none. */

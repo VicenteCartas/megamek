@@ -4,6 +4,10 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 
 import jakarta.annotation.Nullable;
@@ -13,6 +17,7 @@ import megamek.client.ratgenerator.UnitAvailability;
 import megamek.client.ui.entityreadout.EntityReadout.Row;
 import megamek.common.eras.Era;
 import megamek.common.units.Entity;
+import megamek.logging.MMLogger;
 
 /**
  * A unit's availability to the Force Generator's factions as readout rows, as the unit selector's Faction Availability
@@ -20,20 +25,70 @@ import megamek.common.units.Entity;
  * availability.
  */
 final class ReadoutAvailability {
+    private static final MMLogger LOGGER = MMLogger.create(ReadoutAvailability.class);
+
     private ReadoutAvailability() {
     }
 
+    /** The rows read so far, by chassis and model: a unit's availability does not change while the game runs. */
+    private static final Map<String, List<Row>> READ = new ConcurrentHashMap<>();
+    private static final ExecutorService READER = Executors.newSingleThreadExecutor(work -> {
+        Thread thread = new Thread(work, "Readout availability");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     /**
-     * The rows of {@code entity}'s availability, none while the Force Generator is still loading or when it does not
-     * know the unit. Reads the Force Generator's eras at first, which takes a while: not on the GPU thread.
+     * {@code entity}'s availability, read only once its page is first shown: the first read loads every Force
+     * Generator era, which takes a while, so it runs on a thread of its own.
      */
-    static List<Row> of(Entity entity) {
-        UnitAvailability<Era> availability = UnitAvailability.of(entity.getFullChassis(), entity.getModel());
-        if (availability == null) {
+    static LobbyReadoutView.LaterRows later(Entity entity) {
+        String chassis = entity.getFullChassis();
+        String model = entity.getModel();
+        String key = chassis + '\n' + model;
+        return new LobbyReadoutView.LaterRows() {
+            private volatile @Nullable List<Row> read;
+
+            @Override
+            public @Nullable List<Row> rows() {
+                List<Row> mine = read;
+                return (mine != null) ? mine : READ.get(key);
+            }
+
+            @Override
+            public void read(Runnable done) {
+                READER.execute(() -> {
+                    List<Row> rows = READ.get(key);
+                    if (rows == null) {
+                        rows = of(chassis, model);
+                        // Not kept while the Force Generator is still loading: a later readout reads it again
+                        if (RATGenerator.getInstance().isInitialized()) {
+                            READ.put(key, rows);
+                        }
+                    }
+                    read = rows;
+                    done.run();
+                });
+            }
+        };
+    }
+
+    /**
+     * The rows of the unit {@code chassis} {@code model}'s availability, none while the Force Generator is still
+     * loading or when it does not know the unit. Reads the Force Generator's eras at first, which takes a while.
+     */
+    private static List<Row> of(String chassis, String model) {
+        try {
+            UnitAvailability<Era> availability = UnitAvailability.of(chassis, model);
+            if (availability == null) {
+                return List.of();
+            }
+            RATGenerator generator = RATGenerator.getInstance();
+            return rows(availability, Era::name, code -> name(generator.getFaction(code), code));
+        } catch (RuntimeException failure) {
+            LOGGER.warn(failure, "The faction availability of {} {} could not be read", chassis, model);
             return List.of();
         }
-        RATGenerator generator = RATGenerator.getInstance();
-        return rows(availability, Era::name, code -> name(generator.getFaction(code), code));
     }
 
     /** The rows of {@code availability}, the eras and factions named by {@code eraName} and {@code factionName}. */

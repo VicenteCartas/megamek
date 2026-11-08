@@ -108,6 +108,16 @@ public class RandomArmyCreator {
         public boolean padWithInfantry;
 
         /**
+         * The most infantry padding adds; a large budget would otherwise pad with hundreds
+         */
+        public int maxPadding = Integer.MAX_VALUE;
+
+        /**
+         * Set by {@link #generateArmy}: whether padding stopped at {@link #maxPadding} short of the budget
+         */
+        public boolean paddingLimited;
+
+        /**
          * Advanced options for search
          */
         public MekSearchFilter advancedSearchFilter = null;
@@ -343,10 +353,15 @@ public class RandomArmyCreator {
         units.addAll(generateArmy(allMeks, p.meks, mekBV + tankBV + baBV
               - countBV(units), allowedVariance));
 
+        p.paddingLimited = false;
         if (p.padWithInfantry) {
             int inf = 0;
             if (averageInfBV != 0) {
                 inf = (p.maxBV - countBV(units)) / averageInfBV;
+            }
+            if (inf > p.maxPadding) {
+                inf = Math.max(0, p.maxPadding);
+                p.paddingLimited = true;
             }
 
             units.addAll(generateArmy(allInfantry, inf, p.maxBV

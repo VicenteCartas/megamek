@@ -2,6 +2,7 @@
 package megamek.client.ratgenerator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -76,8 +77,20 @@ class FormationRollTest {
         FormationRoll.Plan plan = FormationRoll.plan(request(4, FormationRoll.Extra.MECHANIZED_BA, 3));
 
         assertEquals(List.of(3, 1), plan.numUnits());
-        assertTrue(plan.parameters().get(1).getRoles().isEmpty());
+        assertEquals(Set.of(MissionRole.OMNI), Set.copyOf(plan.parameters().get(0).getRoles()),
+              "the carriers are omnis");
+        assertTrue(plan.omniCarriers());
+        assertTrue(plan.parameters().get(1).getRoles().isEmpty(), "the rest are not held to it");
         assertEquals(UnitType.MEK, plan.parameters().get(1).getUnitType());
+    }
+
+    @Test
+    void withoutOmniCarriersTheSplitStaysButNoRoleIsAsked() {
+        FormationRoll.Plan plan = FormationRoll.plan(request(4, FormationRoll.Extra.MECHANIZED_BA, 3), false);
+
+        assertEquals(List.of(3, 1), plan.numUnits());
+        assertTrue(plan.parameters().get(0).getRoles().isEmpty());
+        assertFalse(plan.omniCarriers());
     }
 
     @Test
@@ -86,6 +99,7 @@ class FormationRollTest {
 
         assertEquals(List.of(4), plan.numUnits());
         assertEquals(1, plan.parameters().size());
+        assertTrue(plan.omniCarriers());
     }
 
     @Test

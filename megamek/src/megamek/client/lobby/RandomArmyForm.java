@@ -60,6 +60,11 @@ public final class RandomArmyForm {
         default @Nullable GenerationContext context() {
             return null;
         }
+
+        /** Whether its last deal stopped short of what it was asked for, at a limit of its own. */
+        default boolean cutShort() {
+            return false;
+        }
     }
 
     /** One dealt unit. */
@@ -91,6 +96,7 @@ public final class RandomArmyForm {
     private int player;
     private @Nullable Dealer dealer;
     private long dealings;
+    private boolean cutShort;
 
     /**
      * @param tables  the random assignment tables offered
@@ -199,6 +205,7 @@ public final class RandomArmyForm {
      * as Swing's do; none is silently left out.
      */
     private void deal(List<MekSummary> units) {
+        cutShort = dealer != null && dealer.cutShort();
         GenerationContext context = dealerContext();
         for (MekSummary unit : units) {
             Card card = new Card(unit);
@@ -276,6 +283,12 @@ public final class RandomArmyForm {
 
     public void clear() {
         cards.clear();
+        cutShort = false;
+    }
+
+    /** Whether the hand's last deal stopped short of what was asked for, at a limit of the generator's. */
+    public boolean cutShort() {
+        return cutShort && !cards.isEmpty();
     }
 
     /** @return the dealt units, in order, to add to the game */

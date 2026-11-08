@@ -53,7 +53,12 @@ public final class FormationRoll {
     }
 
     /** The parameters of each part of the formation and how many units each part has. */
-    public record Plan(List<Parameters> parameters, List<Integer> numUnits) { }
+    public record Plan(List<Parameters> parameters, List<Integer> numUnits) {
+        /** Whether the first part must be omnis, to carry mechanized battle armor. */
+        public boolean omniCarriers() {
+            return parameters.getFirst().getRoles().contains(MissionRole.OMNI);
+        }
+    }
 
     private FormationRoll() {
     }
@@ -67,6 +72,12 @@ public final class FormationRoll {
         Plan plan = plan(request);
         List<MekSummary> units = new ArrayList<>(formation.generateFormation(plan.parameters(), plan.numUnits(),
               request.network(), false));
+        if (units.isEmpty() && plan.omniCarriers()) {
+            // No formation with enough omnis to carry the battle armor: the formation as it comes, so it still rolls
+            plan = plan(request, false);
+            units = new ArrayList<>(formation.generateFormation(plan.parameters(), plan.numUnits(),
+                  request.network(), false));
+        }
         if (units.isEmpty() || request.extraCount() <= 0) {
             return units;
         }
@@ -92,6 +103,11 @@ public final class FormationRoll {
      * mechanized battle armor, the formation split into the omni units carrying them and the rest.
      */
     public static Plan plan(Request request) {
+        return plan(request, true);
+    }
+
+    /** As {@link #plan(Request)}; {@code omniCarriers} says whether the battle armor's carriers must be omnis. */
+    static Plan plan(Request request, boolean omniCarriers) {
         List<Parameters> params = new ArrayList<>();
         params.add(parameters(request, request.unitType(), EnumSet.noneOf(MissionRole.class)));
         List<Integer> numUnits = new ArrayList<>();
@@ -108,7 +124,9 @@ public final class FormationRoll {
                     params.add(params.getFirst().copy());
                     numUnits.add(request.count() - extraCount);
                 }
-                params.getFirst().getRoles().add(MissionRole.MECHANIZED_BA);
+                if (omniCarriers && MissionRole.OMNI.fitsUnitType(request.unitType())) {
+                    params.getFirst().addRoles(EnumSet.of(MissionRole.OMNI));
+                }
             }
         }
         return new Plan(params, numUnits);

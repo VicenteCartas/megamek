@@ -143,22 +143,23 @@ public final class LobbyFiles {
                   Paths.get(MMConstants.USER_LOADOUTS_DIR).toAbsolutePath().toFile(),
                   Messages.getString(route.save() ? "ClientGui.LoadoutSaveDialog.title"
                         : "ClientGui.LoadoutLoadDialog.title"),
-                  "adf files (*.adf)", List.of("adf"), null);
+                  Messages.getString("Lobby.files.loadoutFiles"), List.of("adf"), null);
             case SAVE_UNIT_LIST -> new Ask(route, folders.saveList,
                   Messages.getString("ClientGUI.saveUnitListFileDialog.title"),
                   Messages.getString("ClientGUI.descriptionMULFiles"), List.of(MUL),
                   (name == null) ? null : name + '.' + MUL);
             case LOAD_UNIT_LIST -> new Ask(route, folders.loadList,
-                  Messages.getString("ClientGUI.openUnitListFileDialog.title"), "MUL files", List.of(MUL, "mmu"),
-                  null);
+                  Messages.getString("ClientGUI.openUnitListFileDialog.title"),
+                  Messages.getString("Lobby.files.unitListFiles"), List.of(MUL, "mmu"), null);
             case EXPORT_SPRITE -> new Ask(route, null, Messages.getString("ExportUnitSpriteDialog.title"),
                   Messages.getString("Lobby.files.pngFiles"), List.of("png"), (name == null) ? null : name + ".png");
             case EXPORT_FORCE -> new Ask(route, folders.saveList,
                   Messages.getString("ForceGeneratorDialog.exportMUL.title"),
                   Messages.getString("ClientGUI.descriptionMULFiles"), List.of(MUL),
                   (name == null) ? null : name + '.' + MUL);
-            case EXPORT_STATS -> new Ask(route, folders.saveList, Messages.getString("Save.text"), "MUL files",
-                  List.of(STATS), (name == null) ? null : name + '.' + STATS);
+            case EXPORT_STATS -> new Ask(route, folders.saveList, Messages.getString("Save.text"),
+                  Messages.getString("Lobby.files.mmuFiles"), List.of(STATS),
+                  (name == null) ? null : name + '.' + STATS);
             case SAVE_GAME, LOAD_GAME -> new Ask(route, new File(MMConstants.SAVEGAME_DIR).getAbsoluteFile(),
                   Messages.getString(route.save() ? "Lobby.files.saveGame" : "Lobby.files.loadGame"),
                   Messages.getString("Lobby.files.saveGames"), List.of(SAVE_GZ, SAVE), null);

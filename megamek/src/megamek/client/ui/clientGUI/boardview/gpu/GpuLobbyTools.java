@@ -14,6 +14,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -131,6 +132,8 @@ final class GpuLobbyTools {
     /** The readout of the lobby's units that shows, as the GPU thread made it, and its units' ids; null when none. */
     private volatile @Nullable LobbyReadoutView liveReadout;
     private volatile @Nullable List<Integer> liveIds;
+    /** What the open readout of the lobby's units was last read from, so it is read again only once that changes. */
+    private volatile @Nullable List<Shown> liveShown;
     private @Nullable Timer readoutRefresh;
 
     GpuLobbyTools(GpuLobbyWindow window) {
@@ -882,10 +885,12 @@ final class GpuLobbyTools {
             dossiers.add(dossier(unit));
         }
         List<Integer> ids = units.stream().map(Entity::getId).toList();
+        List<Shown> shown = units.stream().map(Shown::of).toList();
         open(dialogs -> {
             LobbyReadoutView view = dialogs.readout(dossiers).page(page);
             liveReadout = view;
             liveIds = ids;
+            liveShown = shown;
         });
     }
 
@@ -910,6 +915,7 @@ final class GpuLobbyTools {
         if (view == null || showingReadout() != view) {
             liveReadout = null;
             liveIds = null;
+            liveShown = null;
             return;
         }
         SwingUtilities.invokeLater(() -> updateReadout(view));
@@ -928,15 +934,23 @@ final class GpuLobbyTools {
             return;
         }
         Game game = client().getGame();
-        List<LobbyReadoutView.Dossier> dossiers = new ArrayList<>();
+        List<Shown> now = new ArrayList<>();
+        List<Entity> units = new ArrayList<>();
         for (int id : ids) {
             Entity unit = game.getEntity(id);
             if (unit != null && gui().lobbyCommands().canSeeAll(List.of(unit))) {
-                dossiers.add(dossier(unit));
+                now.add(Shown.of(unit));
+                units.add(unit);
             }
         }
-        if (dossiers.isEmpty()) {
+        // Nothing the readout shows has changed: keep its dossiers rather than read them all again
+        if (units.isEmpty() || now.equals(liveShown)) {
             return;
+        }
+        liveShown = now;
+        List<LobbyReadoutView.Dossier> dossiers = new ArrayList<>();
+        for (Entity unit : units) {
+            dossiers.add(dossier(unit));
         }
         GpuHost.post(() -> {
             if (showingReadout() == view) {
@@ -979,9 +993,31 @@ final class GpuLobbyTools {
         }
         List<List<EntityReadout.Row>> pages = List.of(RequisitionReadout.summary(unit), RequisitionReadout.tro(unit),
               rows(() -> ReadoutCalculationReport.battleValue(unit)), rows(() -> ReadoutCalculationReport.cost(unit)),
-              alphaStrike.rows(), rows(() -> ReadoutAvailability.of(unit)));
+              alphaStrike.rows());
         return new LobbyReadoutView.Dossier(unit.getId(), unit.getShortName(), line, sprite, pages,
-              alphaStrike.card());
+              alphaStrike.card(), ReadoutAvailability.later(unit));
+    }
+
+    /**
+     * What a readout of {@code unit} shows it from: the server sends a changed unit as a new one, and its owner and
+     * camouflage show on its line and sprite.
+     */
+    private record Shown(Entity unit, @Nullable String owner, Camouflage camouflage) {
+        static Shown of(Entity unit) {
+            Player owner = unit.getOwner();
+            return new Shown(unit, (owner == null) ? null : owner.getName(), unit.getCamouflageOrElseOwners());
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof Shown shown && shown.unit == unit && Objects.equals(shown.owner, owner)
+                  && Objects.equals(shown.camouflage, camouflage);
+        }
+
+        @Override
+        public int hashCode() {
+            return System.identityHashCode(unit);
+        }
     }
 
     private static List<EntityReadout.Row> rows(java.util.function.Supplier<List<EntityReadout.Row>> report) {

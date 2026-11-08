@@ -108,6 +108,7 @@ class RandomArmyFormTest {
         boolean whole;
         boolean counts = true;
         boolean deals = true;
+        boolean shortHand;
         int dealt = 3;
         GenerationContext context;
         final List<Integer> asked = new ArrayList<>();
@@ -142,6 +143,24 @@ class RandomArmyFormTest {
         public GenerationContext context() {
             return context;
         }
+
+        @Override
+        public boolean cutShort() {
+            return shortHand;
+        }
+    }
+
+    @Test
+    void aHandCutShortIsReportedUntilCleared() {
+        Stub dealer = new Stub();
+        form.dealer(dealer);
+        form.roll();
+        assertFalse(form.cutShort());
+        dealer.shortHand = true;
+        form.roll();
+        assertTrue(form.cutShort());
+        form.clear();
+        assertFalse(form.cutShort(), "nothing dealt, nothing cut short");
     }
 
     @Test

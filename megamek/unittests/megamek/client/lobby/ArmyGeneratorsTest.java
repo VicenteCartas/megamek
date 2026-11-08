@@ -92,6 +92,26 @@ class ArmyGeneratorsTest {
         assertEquals(2, rest.size(), "a kept unit counts toward its kind");
     }
 
+    @Test
+    void paddingStopsAtItsCapAndSaysSo() {
+        MekSummary infantry = unit("Rifles", ASUnitType.CI, 50, 3000);
+        infantry.setUnitType(UnitType.getTypeName(UnitType.INFANTRY));
+        MekSummary[] roster = { unit("Mek", ASUnitType.BM, 1000, 3040), infantry };
+        BattleValueArmy army = new BattleValueArmy(() -> roster, 3050);
+        army.count(BattleValueArmy.Kind.MEK, 1);
+        army.bv(0, BattleValueArmy.MAX_BV);
+        army.pad(true);
+
+        List<MekSummary> dealt = army.deal(0, List.of());
+
+        assertTrue(army.cutShort());
+        assertEquals(BattleValueArmy.MAX_PADDING, dealt.stream().filter(unit -> unit == infantry).count());
+
+        army.bv(0, 3000);
+        army.deal(0, List.of());
+        assertFalse(army.cutShort(), "a budget the padding fills is not cut short");
+    }
+
     // ---- Balanced ----
 
     @Test

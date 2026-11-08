@@ -41,6 +41,8 @@ public final class BattleValueArmy implements RandomArmyForm.Dealer {
 
     /** The most units of one kind an army asks for. */
     public static final int MAX_COUNT = 12;
+    /** The most infantry padding adds to an army, so a large budget does not deal hundreds of cards. */
+    public static final int MAX_PADDING = 4 * MAX_COUNT;
     public static final int MAX_BV = 100_000;
     public static final int MIN_YEAR = 1950;
     public static final int MAX_YEAR = 3250;
@@ -53,6 +55,7 @@ public final class BattleValueArmy implements RandomArmyForm.Dealer {
     private int maxYear;
     private boolean canon;
     private boolean pad;
+    private boolean cutShort;
     private @Nullable Predicate<MekSummary> filter;
     private @Nullable List<MekSummary> pool;
 
@@ -192,6 +195,7 @@ public final class BattleValueArmy implements RandomArmyForm.Dealer {
 
     @Override
     public List<MekSummary> deal(int count, List<MekSummary> kept) {
+        cutShort = false;
         int[] wanted = counts.clone();
         int keptBV = 0;
         for (MekSummary unit : kept) {
@@ -215,8 +219,17 @@ public final class BattleValueArmy implements RandomArmyForm.Dealer {
         parameters.maxYear = maxYear;
         parameters.canon = canon;
         parameters.padWithInfantry = pad;
+        parameters.maxPadding = MAX_PADDING;
         parameters.tech = TechConstants.T_ALL;
-        return RandomArmyCreator.generateArmy(parameters, pool().toArray(new MekSummary[0]));
+        List<MekSummary> army = RandomArmyCreator.generateArmy(parameters, pool().toArray(new MekSummary[0]));
+        cutShort = parameters.paddingLimited;
+        return army;
+    }
+
+    /** Whether the last army dealt stopped padding at {@link #MAX_PADDING} infantry, short of its budget. */
+    @Override
+    public boolean cutShort() {
+        return cutShort;
     }
 
     /** A unit of the same kind and about the same Battle Value, so the army stays within its budget. */

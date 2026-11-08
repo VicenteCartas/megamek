@@ -927,6 +927,14 @@ final class LobbyRandomArmyView {
         images.clear();
         cardControls.clear();
         List<RandomArmyForm.Card> cards = form.cards();
+        if (form.cutShort()) {
+            Label limited = kit.typeLabel(Messages.getString("Lobby.randomArmy.paddingLimited",
+                  BattleValueArmy.MAX_PADDING), "small", "text.secondary");
+            limited.setName("army-cut-short");
+            limited.setWrap(true);
+            hand.add(limited).colspan(Math.max(1, columns)).width(cardWidth * columns).left()
+                  .padBottom(space("md")).row();
+        }
         if (cards.isEmpty()) {
             Label empty = kit.typeLabel(Messages.getString(emptyKey()), "body", "text.muted");
             empty.setName("army-empty");
