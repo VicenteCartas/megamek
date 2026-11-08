@@ -1549,12 +1549,26 @@ work for Swing, and item 11 is under investigation.
          random army does) and Help (the Readme and the skinning guide in `LobbyDocumentView`). In the lounge these
          menu items behave as before. `GameOptionsDialog`, `PlayerSettingsDialog`, `MMReadMeHelpDialog` and
          `HelpDialog` left `SWING_DIALOGS`. Checks: `ReinforcementsTest`, `BattleMenuCardsSmokeTest`.
+       - Done: the Game Master's small editors and notices are native cards over the battle (`GpuBattleTools`, views
+         in `LobbyGameMasterViews`, models in `megamek.client.lobby`), and their Swing dialogs are deleted:
+         - Map note (`MapNoteForm`): its text and who reads it; hot keys are ignored while it shows.
+         - The Game Master vote (`LobbyGameMaster`): the ballots, a voter's Yes/No and Send (`/allowGM`,
+           `/denyGM`), and Withdraw for the requester (`/cancelGM`, also on closing). The open card is filled again
+           on each poll update and closes when the poll ends. The appointment notice follows a passed vote.
+         - Command form (`ClientCommandForm`): built from the command's arguments (kick, and the Game Master
+           commands with the target hex) and confirmed before it sends the same chat command.
+         - Player setup (`GameMasterPlayerSetup`): player, team and deployment zone, sent as before. Reinforce from
+           file uses the unit file chooser; Reinforce from the generator opens the native Force Generator for that
+           player (`GpuLobbyTools.randomArmy(player)`), so `RandomArmyDialog` left the allowlist too. The Swing
+           class stays for the lounge.
+         - Building (`BuildingEditForm`): structure, type, class, basement, CF, armor, height, fuel magnitude and
+           the fluff image with a tileset preview; Apply, Remove and Restore send the same `BuildingEditSpec`.
+         - Hex terrain brush (`HexBrush`, `GpuHexBrushPanel`): a panel beside the board, not a card. While it
+           paints, board clicks paint hexes (one or seven), marked on the board, and the phase ignores them. Apply
+           and Undo send the same `HexEditSpec`.
+         - Checks: `MapNoteFormTest`, `ClientCommandFormTest`, `GameMasterPlayerSetupTest`, `BuildingEditFormTest`,
+         `HexBrushTest`, `LobbyGameMasterTest`, `GameMasterCardsSmokeTest`.
        - The board's remaining Swing dialogs, the `SWING_DIALOGS` allowlist (R6/U2), by size of the port:
-         - Small, the Game Master's editors and notices (next PR): hex (`HexEditDialog`), building
-           (`BuildingEditDialog`), note (`NoteDialog`), the Game Master vote (`GameMasterVoteDialog`) and appointment
-           notice (`GameMasterAppointedDialog`), the command form (`ClientCommandDialog`: kick and Game Master
-           commands) and Game Master player setup (`GameMasterPlayerSetupDialog`). The player setup still opens the
-           Swing `RandomArmyDialog`, which stays on the allowlist until it is native.
          - Medium: the reinforcement unit selector (`MegaMekUnitSelectorDialog`) and its `UnitLoadingDialog`, Edit
            Bots (`EditBotsDialog`) and a bot's settings (`BotConfigDialog`), the Nova network view
            (`NovaNetworkViewDialog`), Network information (`NetworkInformationDialog`) and the accessibility window

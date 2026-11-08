@@ -3,6 +3,7 @@ package megamek.client.lobby;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -143,5 +144,28 @@ class LobbyGameMasterTest {
 
         assertEquals(Seat.HELD, seat.seat());
         assertTrue(seat.ballots().isEmpty());
+    }
+
+    @Test
+    void aVoterMayCastAndChangeTheirBallotButTheRequesterHasNone() {
+        allow(true);
+        Poll poll = new Poll(2, List.of(1, 2, 3), VoteThreshold.UNANIMOUS);
+        poll.castVote(1, true);
+
+        LobbyGameMaster voter = LobbyGameMaster.of(game, local, poll);
+        assertTrue(voter.votesSelf());
+        assertEquals(new Ballot("Local", Choice.YES, true), voter.selfBallot());
+
+        LobbyGameMaster requester = LobbyGameMaster.of(game, other, poll);
+        assertFalse(requester.votesSelf());
+        assertTrue(requester.requestedBySelf());
+        assertFalse(LobbyGameMaster.of(game, local, null).votesSelf());
+        assertNull(LobbyGameMaster.of(game, local, null).selfBallot());
+    }
+
+    @Test
+    void aBallotIsCastWithTheAllowAndDenyCommands() {
+        assertEquals("/allowGM", LobbyGameMaster.voteCommand(true));
+        assertEquals("/denyGM", LobbyGameMaster.voteCommand(false));
     }
 }

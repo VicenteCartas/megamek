@@ -41,7 +41,7 @@ import javax.swing.JMenuItem;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
-import megamek.client.ui.dialogs.ClientCommandDialog;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -59,7 +59,7 @@ import megamek.server.commands.RemoveSmokeCommand;
 
 /**
  * Builds the Game Master special commands menu: one entry per server command that only a Game Master may run, each
- * opening the {@link ClientCommandDialog} that builds an input form from the command's own argument definitions.
+ * opening the native command card that builds an input form from the command's own argument definitions.
  *
  * <p>The menu is shared by the board context menu ({@link MapMenu}), which passes the hex that was clicked, and the
  * game commands strip ({@link GameCommandsMenu}), which has no hex context and passes {@code null}. Each gets the
@@ -82,7 +82,7 @@ public final class GameMasterCommandMenu {
      * Builds the Game Master special commands menu. The caller is responsible for only offering it to a player who
      * actually holds the Game Master role - the server rejects these commands from anyone else.
      *
-     * @param clientGUI The client GUI the command dialogs are shown on
+     * @param clientGUI The client GUI the command cards are shown on
      * @param coords    The hex the commands should act on, or {@code null} when the menu is opened without a hex,
      *                  which limits it to the board-wide commands
      *
@@ -93,8 +93,11 @@ public final class GameMasterCommandMenu {
         Board board = (coords == null) ? null : clientGUI.getClient().getGame().getBoard();
         for (ClientServerCommand command : commandsFor(coords, board)) {
             JMenuItem commandItem = new JMenuItem(command.getLongName());
-            commandItem.addActionListener(event ->
-                  new ClientCommandDialog(clientGUI.getFrame(), clientGUI, command, coords).setVisible(true));
+            commandItem.addActionListener(event -> {
+                if (!GpuBoardWindow.showClientCommand(clientGUI, command, coords)) {
+                    LOGGER.warn("No battle window to show the {} form over", command.getName());
+                }
+            });
             menu.add(commandItem);
         }
         return menu;

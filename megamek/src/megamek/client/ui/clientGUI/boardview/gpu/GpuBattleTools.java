@@ -1,8 +1,13 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.Graphics;
+import java.awt.Image;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -14,18 +19,44 @@ import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import jakarta.annotation.Nullable;
+import megamek.client.event.BoardViewEvent;
+import megamek.client.event.BoardViewListenerAdapter;
+import megamek.client.lobby.BuildingEditForm;
+import megamek.client.lobby.ClientCommandForm;
+import megamek.client.lobby.GameMasterPlayerSetup;
 import megamek.client.lobby.GameOptionsForm;
+import megamek.client.lobby.HexBrush;
+import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyError;
 import megamek.client.lobby.LobbyFiles;
+import megamek.client.lobby.LobbyGameMaster;
+import megamek.client.lobby.MapNoteForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
+import megamek.client.ui.tileset.HexTileset;
+import megamek.client.ui.tileset.TilesetManager;
+import megamek.common.Hex;
+import megamek.common.Player;
+import megamek.common.RangeType;
+import megamek.common.SpecialHexDisplay;
+import megamek.common.board.Board;
+import megamek.common.board.BuildingEditSpec;
+import megamek.common.board.Coords;
+import megamek.common.board.HexEditSpec;
 import megamek.common.containers.MunitionTree;
+import megamek.common.event.GameListenerAdapter;
+import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.loaders.MekSummary;
 import megamek.common.options.GameOptions;
 import megamek.common.options.IBasicOption;
+import megamek.common.units.Terrains;
+import megamek.common.util.Distractable;
 import megamek.logging.MMLogger;
+import megamek.server.commands.ClientServerCommand;
 
 
 /**
@@ -45,6 +76,9 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
     private final Supplier<LobbyNativeDialogs> cards;
     private final LobbyFiles files;
     private final GpuLobbyTools tools;
+    private @Nullable LobbyGameMasterViews.VoteCard voteCard;
+    private @Nullable LobbyGameMaster shownVote;
+    private @Nullable GpuHexBrushPanel brushPanel;
 
     /**
      * @param gpu     runs work on the GPU thread
@@ -157,6 +191,309 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
     /** Shows an HTML guide a chapter at a time. */
     void help(String title, File file) {
         tools.helpDocument(title, file);
+    }
+
+    // ---- The Game Master's cards ----
+
+    private LobbyPromptViews.Edt edtFor(String what) {
+        return (work, then) -> edt(what, work, then);
+    }
+
+    /**
+     * Edits the local player's note on a hex, sent as the Swing dialog sent it once Done is pressed.
+     *
+     * @param closed runs on the Swing thread once the card has closed, however it closed
+     */
+    void mapNote(SpecialHexDisplay note, Coords coords, int boardId, Runnable closed) {
+        MapNoteForm form = new MapNoteForm(note);
+        Runnable onSwing = () -> SwingUtilities.invokeLater(closed);
+        gpu.accept(() -> {
+            LobbyNativeDialogs dialogs = cards.get();
+            if (dialogs == null) {
+                onSwing.run();
+            } else {
+                dialogs.mapNote(form, edtFor("map note"),
+                      shown -> gui.getClient().sendSpecialHexDisplayAppend(coords, boardId, shown), onSwing);
+            }
+        });
+    }
+
+    /**
+     * Shows the running Game Master vote, or fills the card that shows it again: a voter casts or changes their
+     * ballot, the requester may withdraw, and closing the card withdraws the requester's request as the Swing dialog's
+     * close did. A voter who closes it sees it again on the next ballot.
+     */
+    void gameMasterVote(LobbyGameMaster vote) {
+        gpu.accept(() -> {
+            shownVote = vote;
+            if (voteCard != null) {
+                voteCard.fill(vote);
+                return;
+            }
+            nativeDialog(dialogs -> {
+                LobbyGameMasterViews.VoteCard[] card = new LobbyGameMasterViews.VoteCard[1];
+                card[0] = dialogs.gameMasterVote(vote, new LobbyGameMasterViews.VoteActions() {
+                    @Override
+                    public void vote(boolean yes) {
+                        chat(LobbyGameMaster.voteCommand(yes));
+                    }
+
+                    @Override
+                    public void withdraw() {
+                        chat(LobbyCommands.GAME_MASTER_WITHDRAW_COMMAND);
+                    }
+                }, () -> {
+                    if (voteCard == card[0]) {
+                        voteCard = null;
+                        if (shownVote != null && shownVote.requestedBySelf()) {
+                            chat(LobbyCommands.GAME_MASTER_WITHDRAW_COMMAND);
+                        }
+                    }
+                });
+                voteCard = card[0];
+            });
+        });
+    }
+
+    /** Takes the vote's card away, as the vote has ended; nothing is sent. */
+    void closeGameMasterVote() {
+        gpu.accept(() -> {
+            LobbyGameMasterViews.VoteCard card = voteCard;
+            voteCard = null;
+            shownVote = null;
+            LobbyNativeDialogs dialogs = cards.get();
+            if (card != null && dialogs != null) {
+                dialogs.closeDialog(card.dialog());
+            }
+        });
+    }
+
+    /** Any thread: sends a chat command on the Swing thread. */
+    private void chat(String command) {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing()) {
+                gui.getClient().sendChat(command);
+            }
+        });
+    }
+
+    /** Tells who the vote made Game Master and how the role is given up, as the Swing notice did. */
+    void gameMasterAppointed(String name) {
+        String text = GpuBoardWindow.plainText(Messages.getString("GameMasterVoteDialog.passed.message", name));
+        open(dialogs -> dialogs.error(Messages.getString("GameMasterVoteDialog.passed.title"), text,
+              Messages.getString("Okay"), null, null));
+    }
+
+    /** Shows a command's arguments as a form, opened on {@code coords} when a hex was clicked. */
+    void clientCommand(ClientServerCommand command, @Nullable Coords coords) {
+        ClientCommandForm form = new ClientCommandForm(command, gui.getClient().getGame(), coords);
+        open(dialogs -> dialogs.clientCommand(form, edtFor("command"), gui.getClient()::sendChat));
+    }
+
+    /** Sets a player's team and deployment zone, opened on {@code player} or the first one offered. */
+    void playerSetup(@Nullable Player player) {
+        GameMasterPlayerSetup setup = new GameMasterPlayerSetup(gui.getClient().getGame(),
+              gui.getClient().getLocalPlayerNumber(), player);
+        Consumer<Player> fromGenerator = tools::randomArmy;
+        open(dialogs -> dialogs.playerSetup(setup, edtFor("player setup"), gui.getClient()::sendChat,
+              gui::reinforceFromFile, fromGenerator));
+    }
+
+    /** Puts up, changes or takes away the building in a hex. */
+    void building(Coords coords) {
+        Board board = gui.getClient().getGame().getBoard();
+        BuildingEditForm form = new BuildingEditForm(coords, board.getBoardId(), board.getBuildingAt(coords),
+              board.getHex(coords), new BuildingEditForm.Host() {
+                  @Override
+                  public void sendBuildingEdit(BuildingEditSpec spec) {
+                      gui.getClient().sendBuildingEdit(spec);
+                  }
+
+                  @Override
+                  public List<Integer> fluffLevels(Hex building) {
+                      return gui.getTilesetManager().definedFluffLevels(building, Terrains.BLDG_FLUFF);
+                  }
+              });
+        open(dialogs -> dialogs.building(form, edtFor("building"),
+              (hex, drawn) -> SwingUtilities.invokeLater(() -> {
+                  BufferedImage picture = closing() ? null : buildingPicture(hex);
+                  gpu.accept(() -> drawn.accept(picture));
+              }), () -> {}));
+    }
+
+    /** The building drawn as the board's tileset would draw it, or null when it has nothing for it. */
+    private @Nullable BufferedImage buildingPicture(Hex hex) {
+        try {
+            TilesetManager tileset = gui.getTilesetManager();
+            Image base = tileset.baseFor(hex);
+            List<Image> supers = tileset.supersFor(hex);
+            if (base == null && (supers == null || supers.isEmpty())) {
+                return null;
+            }
+            BufferedImage canvas = new BufferedImage(HexTileset.HEX_W, HexTileset.HEX_H, BufferedImage.TYPE_INT_ARGB);
+            Graphics graphics = canvas.getGraphics();
+            try {
+                if (base != null) {
+                    graphics.drawImage(base, 0, 0, null);
+                }
+                if (supers != null) {
+                    for (Image layer : supers) {
+                        graphics.drawImage(layer, 0, 0, null);
+                    }
+                }
+            } finally {
+                graphics.dispose();
+            }
+            return canvas;
+        } catch (RuntimeException failure) {
+            // A picture that cannot be drawn must not keep the Game Master from placing a building
+            LOGGER.debug("The building's picture could not be drawn: {}", failure.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Opens the terrain brush on a hex, beside the board so that clicking the board paints; a brush already open
+     * closes first.
+     */
+    void hexBrush(Coords coords) {
+        int boardId = gui.getClient().getGame().getBoard().getBoardId();
+        BrushBoard board = new BrushBoard(boardId);
+        HexBrush brush = new HexBrush(boardId, coords, board);
+        gpu.accept(() -> {
+            if (brushPanel != null) {
+                brushPanel.close();
+            }
+            LobbyNativeDialogs dialogs = cards.get();
+            if (dialogs == null) {
+                SwingUtilities.invokeLater(board::release);
+                return;
+            }
+            GpuHexBrushPanel[] panel = new GpuHexBrushPanel[1];
+            board.clicked = clicked -> gpu.accept(() -> {
+                if (panel[0] != null && brushPanel == panel[0]) {
+                    brush.brushHex(clicked);
+                    panel[0].update();
+                }
+            });
+            panel[0] = new GpuHexBrushPanel(dialogs.kit(), dialogs.stage(), brush, new GpuHexBrushPanel.Host() {
+                @Override
+                public void painting(boolean on) {
+                    SwingUtilities.invokeLater(() -> board.painting(on));
+                }
+
+                @Override
+                public void closed() {
+                    if (brushPanel == panel[0]) {
+                        brushPanel = null;
+                    }
+                    SwingUtilities.invokeLater(board::release);
+                }
+            });
+            brushPanel = panel[0];
+        });
+    }
+
+    /**
+     * How the brush reaches the board, as the Swing dialog reached it: a left click on a hex paints while painting is
+     * on, the phase display is kept from reading that click as an order, and the painted hexes are marked. Swing
+     * thread, except that the brush reads hexes from the GPU thread.
+     */
+    private final class BrushBoard implements HexBrush.Host {
+        private static final int ALL_HEX_BORDERS = 63;
+        private final int boardId;
+        private final List<TacticalMark> marks = new ArrayList<>();
+        private volatile Consumer<Coords> clicked = coords -> {};
+        private boolean painting;
+        private @Nullable Distractable suppressed;
+        private final BoardViewListenerAdapter listener = new BoardViewListenerAdapter() {
+            @Override
+            public void hexMoused(BoardViewEvent event) {
+                if (event.getType() == BoardViewEvent.BOARD_HEX_CLICKED && event.getButton() == MouseEvent.BUTTON1
+                      && event.getCoords() != null) {
+                    clicked.accept(event.getCoords());
+                }
+            }
+        };
+        private final GameListenerAdapter phases = new GameListenerAdapter() {
+            @Override
+            public void gamePhaseChange(GamePhaseChangeEvent event) {
+                if (painting) {
+                    SwingUtilities.invokeLater(() -> painting(painting));
+                }
+            }
+        };
+
+        BrushBoard(int boardId) {
+            this.boardId = boardId;
+            gui.getClient().getGame().addGameListener(phases);
+        }
+
+        /** Turns board clicks into painting or hands them back, catching the phase display that shows now. */
+        void painting(boolean on) {
+            painting = on;
+            for (BoardClientState state : gui.boardStates()) {
+                state.removeBoardViewListener(listener);
+                if (on) {
+                    state.addBoardViewListener(listener);
+                }
+            }
+            if (suppressed != null) {
+                suppressed.setIgnoringEvents(false);
+                suppressed = null;
+            }
+            if (on && gui.getCurrentPanel() instanceof Distractable display) {
+                suppressed = display;
+                suppressed.setIgnoringEvents(true);
+            }
+        }
+
+        /** Lets go of the board: no more painting, no marks, no phase listening. */
+        void release() {
+            gui.getClient().getGame().removeGameListener(phases);
+            painting(false);
+            showMarksNow(List.of());
+        }
+
+        @Override
+        public @Nullable Hex hex(Coords coords) {
+            Board board = gui.getClient().getGame().getBoard(boardId);
+            return board != null && board.contains(coords) ? board.getHex(coords) : null;
+        }
+
+        @Override
+        public boolean occupied(Coords coords) {
+            return !gui.getClient().getGame().getEntitiesVector(coords, boardId).isEmpty();
+        }
+
+        @Override
+        public void sendHexEdit(HexEditSpec spec) {
+            SwingUtilities.invokeLater(() -> {
+                if (!closing()) {
+                    gui.getClient().sendHexEdit(spec);
+                }
+            });
+        }
+
+        @Override
+        public void showMarks(Collection<Coords> painted) {
+            List<Coords> copy = List.copyOf(painted);
+            SwingUtilities.invokeLater(() -> showMarksNow(copy));
+        }
+
+        private void showMarksNow(List<Coords> painted) {
+            List<BoardClientState> states = gui.boardStates();
+            if (states.isEmpty()) {
+                return;
+            }
+            BoardClientState state = states.get(0);
+            state.removeMarks(marks);
+            marks.clear();
+            for (Coords coords : painted) {
+                marks.add(new TacticalMark.WeaponRange(coords, ALL_HEX_BORDERS, RangeType.RANGE_SHORT));
+            }
+            state.addMarks(marks);
+        }
     }
 
     /** Any thread: has {@code open} open a card on the GPU thread over the battle, unless the battle has none. */

@@ -71,9 +71,6 @@ import megamek.client.ui.dialogs.BotCommands.BotMoveOrderDialog;
 import megamek.client.ui.dialogs.BotCommands.BotOrderFacingDialog;
 import megamek.client.ui.dialogs.BotCommands.BotOrdersMenuBuilder;
 import megamek.client.ui.dialogs.BotCommands.BotWaypointMenuBuilder;
-import megamek.client.ui.dialogs.BuildingEditDialog;
-import megamek.client.ui.dialogs.HexEditDialog;
-import megamek.client.ui.dialogs.NoteDialog;
 import megamek.client.ui.dialogs.TurretFacingDialog;
 import megamek.client.ui.entityreadout.LiveReadoutDialog;
 import megamek.client.ui.enums.DialogResult;
@@ -456,12 +453,12 @@ public class MapMenu extends JPopupMenu {
                     ""));
         JMenuItem item = new JMenuItem(Messages.getString("NoteDialog.action"));
         item.addActionListener(evt -> {
-            NoteDialog nd = new NoteDialog(gui.frame, finalNote);
-            gui.getBoardState().setShouldIgnoreKeys(true);
-            nd.setVisible(true);
-            gui.getBoardState().setShouldIgnoreKeys(false);
-            if (nd.isAccepted()) {
-                client.sendSpecialHexDisplayAppend(coords, boardLocation.boardId(), finalNote);
+            BoardClientState boardState = gui.getBoardState();
+            boardState.setShouldIgnoreKeys(true);
+            if (!GpuBoardWindow.editNote(gui, finalNote, coords, boardLocation.boardId(),
+                  () -> boardState.setShouldIgnoreKeys(false))) {
+                boardState.setShouldIgnoreKeys(false);
+                logger.warn("No battle window to edit the note over");
             }
         });
         menu.add(item);
@@ -846,7 +843,11 @@ public class MapMenu extends JPopupMenu {
     /** Opens the Building dialog on the hex that was right-clicked, to put one up, change it or remove it. */
     private JMenuItem createBuildingMenuItem() {
         JMenuItem item = new JMenuItem(Messages.getString("Gamemaster.cmd.building.longName"));
-        item.addActionListener(event -> new BuildingEditDialog(gui.getFrame(), gui, coords).setVisible(true));
+        item.addActionListener(event -> {
+                if (!GpuBoardWindow.editBuilding(gui, coords)) {
+                    logger.warn("No battle window to edit the building over");
+                }
+            });
         return item;
     }
 
@@ -855,7 +856,11 @@ public class MapMenu extends JPopupMenu {
         // named from the command rather than from the dialog's title, so this entry reads the same as the one on the
         // Commands button and carries the same mark
         JMenuItem item = new JMenuItem(Messages.getString("Gamemaster.cmd.changeTerrain.longName"));
-        item.addActionListener(event -> new HexEditDialog(gui.getFrame(), gui, coords).setVisible(true));
+        item.addActionListener(event -> {
+                if (!GpuBoardWindow.editHex(gui, coords)) {
+                    logger.warn("No battle window to edit the hex over");
+                }
+            });
         return item;
     }
 

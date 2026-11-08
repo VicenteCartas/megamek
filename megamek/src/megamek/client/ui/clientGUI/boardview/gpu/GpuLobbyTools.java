@@ -524,6 +524,14 @@ final class GpuLobbyTools {
 
     /** Opens the random army once the tables are read, as they are on a thread of their own at start. */
     void randomArmy() {
+        randomArmy(null);
+    }
+
+    /**
+     * Opens the random army as above, its units going to {@code recipient} when they may: the Game Master's player
+     * setup hands over the player just set up, who may not be on a team yet.
+     */
+    void randomArmy(@Nullable Player recipient) {
         RandomUnitGenerator generator = RandomUnitGenerator.getInstance();
         if (!generator.isInitialized()) {
             message(Messages.getString("Lobby.randomArmy.title"),
@@ -535,7 +543,7 @@ final class GpuLobbyTools {
                         ratWait.stop();
                         ratWait = null;
                         if (!window.closing()) {
-                            randomArmy();
+                            randomArmy(recipient);
                         }
                     }
                 });
@@ -546,7 +554,7 @@ final class GpuLobbyTools {
         Player local = client().getLocalPlayer();
         Set<String> bots = gui().getLocalBots().keySet();
         List<String> players = UnitRecipients.availableTo(local, client().getGame().getPlayersList(), bots,
-              !client().getGame().getPhase().isLounge(), null).stream().map(Player::getName).toList();
+              !client().getGame().getPhase().isLounge(), recipient).stream().map(Player::getName).toList();
         List<String> tables = new ArrayList<>();
         generator.getRatList().forEachRemaining(tables::add);
         RandomArmyForm form = new RandomArmyForm(tables, generator.getChosenRAT(), players,
@@ -554,6 +562,9 @@ final class GpuLobbyTools {
                   generator.setChosenRAT(table);
                   return generator.generate(count, table);
               });
+        if (recipient != null) {
+            form.player(players.indexOf(recipient.getName()));
+        }
         RatBrowser browser = new RatBrowser(RatBrowser.of(generator.getRatTree()));
         int year = client().getGame().getOptions().intOption(OptionsConstants.ALLOWED_YEAR);
         int lastTab = MathUtility.parseInt(

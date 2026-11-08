@@ -41,8 +41,7 @@ import javax.swing.JPopupMenu;
 import jakarta.annotation.Nullable;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
-import megamek.client.ui.dialogs.ClientCommandDialog;
-import megamek.client.ui.dialogs.GameMasterPlayerSetupDialog;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.common.Player;
 import megamek.common.options.OptionsConstants;
 import megamek.logging.MMLogger;
@@ -199,10 +198,10 @@ public class GameCommandsMenu {
     }
 
     /**
-     * Creates the Kick Player item. Instead of sending a fixed chat command, it opens the {@link ClientCommandDialog}
+     * Creates the Kick Player item. Instead of sending a fixed chat command, it opens the native command card's
      * input form built from {@link KickCommand}'s own argument definitions: the player to kick and, on a passworded
      * server, the server password. The command is built without a server or game manager, because only its name, help
-     * text and argument definitions are read here; the kick itself is run by the server after the dialog sends it as
+     * text and argument definitions are read here; the kick itself is run by the server after the card sends it as
      * a chat command.
      *
      * @return The created menu item
@@ -210,9 +209,11 @@ public class GameCommandsMenu {
     private JMenuItem createKickItem() {
         JMenuItem kickItem = new JMenuItem(Messages.getString("GameCommands.KickPlayer.title"));
         kickItem.setToolTipText(Messages.getString("GameCommands.KickPlayer.tooltip"));
-        kickItem.addActionListener(event ->
-              new ClientCommandDialog(clientGUI.getFrame(), clientGUI, new KickCommand(null, null), null)
-                    .setVisible(true));
+        kickItem.addActionListener(event -> {
+            if (!GpuBoardWindow.showClientCommand(clientGUI, new KickCommand(null, null), null)) {
+                LOGGER.warn("No battle window to show the kick form over");
+            }
+        });
         return kickItem;
     }
 
@@ -252,7 +253,7 @@ public class GameCommandsMenu {
     }
 
     /**
-     * Opens the dialog that puts a player on a team and gives them a deployment zone.
+     * Opens the card that puts a player on a team and gives them a deployment zone.
      *
      * <p>Offered here rather than on a hex, because it is about a player rather than a place. It is what brings
      * somebody who joined a running game into it: without a team they are left out of the turn order, and without a
@@ -262,8 +263,11 @@ public class GameCommandsMenu {
      */
     private JMenuItem createPlayerSetupItem() {
         JMenuItem item = new JMenuItem(Messages.getString("GameMasterPlayerSetupDialog.title"));
-        item.addActionListener(event ->
-              new GameMasterPlayerSetupDialog(clientGUI.getFrame(), clientGUI, null).setVisible(true));
+        item.addActionListener(event -> {
+            if (!GpuBoardWindow.showPlayerSetup(clientGUI, null)) {
+                LOGGER.warn("No battle window to show the player setup over");
+            }
+        });
         return item;
     }
 

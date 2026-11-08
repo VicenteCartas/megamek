@@ -399,7 +399,6 @@ public class ClientGUI extends AbstractClientGUI
     private RoundsInAirDialog roundsInAirDialog;
     private RandomArmyDialog randomArmyDialog;
     /** The poll a running Game Master vote is taken in; open only while a vote runs. */
-    private GameMasterVoteDialog gameMasterVoteDialog;
     /**
      * Save and Open dialogs for MegaMek Unit List (mul) files.
      */
@@ -871,36 +870,30 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     /**
-     * Opens, follows and closes the Game Master vote dialog as the server shares the vote's state: the dialog opens
-     * when a vote is called, follows the ballots as they come in, and closes when the vote resolves. The outcome itself
-     * is announced in the chat. While the libGDX lobby is up, its Game Master seat does all of this instead.
+     * Opens, follows and closes the Game Master vote's card over the battle as the server shares the vote's state: the
+     * card opens when a vote is called, follows the ballots as they come in, and closes when the vote resolves. The
+     * outcome itself is announced in the chat. While the libGDX lobby is up, its Game Master seat does all of this
+     * instead. Queued on the event thread, which the battle window's cards are opened from.
      */
     private void updateGameMasterVoteDialog(Poll poll) {
-        if (GpuLobbyWindow.isActiveFor(this)) {
-            // The lobby's Game Master seat shows the vote and the new Game Master itself
-            if (gameMasterVoteDialog != null) {
-                gameMasterVoteDialog.dispose();
-                gameMasterVoteDialog = null;
+        SwingUtilities.invokeLater(() -> {
+            if (GpuLobbyWindow.isActiveFor(this)) {
+                // The lobby's Game Master seat shows the vote and the new Game Master itself
+                GpuBoardWindow.closeGameMasterVote(this);
+                return;
             }
-            return;
-        }
-        if (poll.getStatus().isResolved()) {
-            if (gameMasterVoteDialog != null) {
-                gameMasterVoteDialog.dispose();
-                gameMasterVoteDialog = null;
+            if (poll.getStatus().isResolved()) {
+                GpuBoardWindow.closeGameMasterVote(this);
+                if (poll.getStatus() == PollStatus.PASSED) {
+                    announceNewGameMaster(poll.getRequesterId());
+                }
+                return;
             }
-            if (poll.getStatus() == PollStatus.PASSED) {
-                announceNewGameMaster(poll.getRequesterId());
+            if (!GpuBoardWindow.showGameMasterVote(this, poll)) {
+                logger.warn("No battle window to show the Game Master vote over");
             }
-            return;
-        }
-        if (gameMasterVoteDialog == null) {
-            gameMasterVoteDialog = new GameMasterVoteDialog(frame, client);
-        }
-        gameMasterVoteDialog.update(poll);
-        gameMasterVoteDialog.setVisible(true);
+        });
     }
-
     /**
      * Keeps the Game menu's Game Master entries in step with who holds the role and whether the game allows one: Give
      * Up while the local player holds it, Become while the role is free, neither while another player has it.
@@ -946,8 +939,8 @@ public class ClientGUI extends AbstractClientGUI
     /**
      * Tells every player who won a passed Game Master vote and how the role is taken away again: the Game Master gives
      * it up (the lobby's GM Mode button or the Game menu's Give Up Game Master entry), or the host turns off Allow Game
-     * Master in the game options. Shown after the vote dialog closes, so the outcome is not just a line of chat that
-     * scrolls away. Queued on the event thread so it does not block the game event that brought the result.
+     * Master in the game options. Shown after the vote's card closes, so the outcome is not just a line of chat that
+     * scrolls away. Runs on the event thread, where the vote's update queued it.
      *
      * @param gameMasterId the id of the player the vote made Game Master
      */
@@ -956,8 +949,9 @@ public class ClientGUI extends AbstractClientGUI
         String gameMasterName = (gameMaster != null)
               ? gameMaster.getName()
               : Messages.getString("GameMasterVoteDialog.unknownPlayer");
-        SwingUtilities.invokeLater(() -> new GameMasterAppointedDialog(frame,
-              Messages.getString("GameMasterVoteDialog.passed.message", gameMasterName)).setVisible(true));
+        if (!GpuBoardWindow.announceGameMaster(this, gameMasterName)) {
+            logger.warn("No battle window to announce the new Game Master over");
+        }
     }
 
     /**
