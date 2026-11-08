@@ -4493,8 +4493,8 @@ final class GpuTerrain implements Disposable {
                 }
             }
             // Ordinary placements copy the same unchanged model nodes. Scan its vertices once per build and copy
-            // the local box before transforming it; assembled buildings retain their instance-specific node bounds.
-            BoundingBox bounds = building != null ? instance.calculateBoundingBox(new BoundingBox())
+            // the local box before transforming it; an assembled building's, once per assembly.
+            BoundingBox bounds = building != null ? building.bounds(instance)
                   : new BoundingBox(build.modelBounds.computeIfAbsent(model,
                         unused -> instance.calculateBoundingBox(new BoundingBox())));
             BoundingBox editorBounds = feature.decoration() == null ? null : new BoundingBox(bounds);
@@ -4738,7 +4738,14 @@ final class GpuTerrain implements Disposable {
                     }
                     if (parts.isEmpty()) { continue; }
                     floorInstance.transform.set(instance.transform);
-                    BoundingBox floorBounds = floorInstance.calculateBoundingBox(new BoundingBox()).mul(floorInstance.transform);
+                    // ModelBuilder recorded each part's exact box (MeshBuilder#endpart) under the floors node's
+                    // identity frame: no vertex scan per placed floor.
+                    BoundingBox floorBounds = new BoundingBox().inf();
+                    for (var part : parts) {
+                        floorBounds.ext(new BoundingBox(new Vector3(part.meshPart.center).sub(part.meshPart.halfExtents),
+                              new Vector3(part.meshPart.center).add(part.meshPart.halfExtents)));
+                    }
+                    floorBounds.mul(floorInstance.transform);
                     Prop floorProp = new Prop(tile.coords(), floorInstance, floorBounds, null, false, null, true, floorBounds.max.z);
                     floorProp.infrastructure = prop.infrastructure;
                     floorProp.openShell = open;

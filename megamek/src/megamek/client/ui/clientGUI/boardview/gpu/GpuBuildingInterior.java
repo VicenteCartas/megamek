@@ -35,6 +35,14 @@ final class GpuBuildingInterior {
 
     private GpuBuildingInterior() { }
 
+    /**
+     * One storey's floor: its triangles, the outline its slab closes at and the columns under the storey above, worked
+     * out once however many interiors share it.
+     */
+    record Storey(List<Vector3> triangles, Area outline, List<Vector3> columns) {
+        static Storey of(List<Vector3> triangles) { return new Storey(triangles, area(triangles), GpuBuildingInterior.columns(triangles)); }
+    }
+
     /** Weld triangle seams and reverse faces for the section graph, without depending on material normals. */
     private record Point(long x, long y) {
         static Point at(Vector3 a, Vector3 b, float z) {
@@ -256,17 +264,17 @@ final class GpuBuildingInterior {
         if (roof.isEmpty() || height <= 0 || levels < 1) {
             throw new IllegalArgumentException("Building interior needs a footprint and positive height");
         }
-        return buildStoreys(java.util.Collections.nCopies(levels, roof), height / levels, levels);
+        return buildStoreys(java.util.Collections.nCopies(levels, Storey.of(roof)), height / levels, levels);
     }
 
     /** Floors and supports stay within their own storey's shell, including setbacks above shorter neighbours. */
-    static Model buildStoreys(List<List<Vector3>> footprints, float levelHeight, int floorCount) {
+    static Model buildStoreys(List<Storey> footprints, float levelHeight, int floorCount) {
         ModelBuilder builder = new ModelBuilder();
         builder.begin();
         builder.node().id = "struts";
         Material strutMaterial = new Material("struts", ColorAttribute.createDiffuse(0.29f, 0.31f, 0.33f, 1));
         for (int level = 0; level < footprints.size(); level++) {
-            var columns = columns(footprints.get(level), levelHeight);
+            var columns = footprints.get(level).columns();
             if (columns.isEmpty()) { continue; }
             MeshPartBuilder struts = builder.part("struts-" + level, GL20.GL_TRIANGLES, ATTRIBUTES, strutMaterial);
             for (Vector3 column : columns) {
@@ -277,17 +285,19 @@ final class GpuBuildingInterior {
         builder.node().id = "floors";
         Material floorMaterial = new Material("floors", ColorAttribute.createDiffuse(0.58f, 0.56f, 0.52f, 1));
         for (int level = 0; level < floorCount; level++) {
-            if (footprints.get(level).isEmpty()) { continue; }
+            var storey = footprints.get(level);
+            if (storey.triangles().isEmpty()) { continue; }
             // Separate parts let ModelBuilder split tall structures before a mesh exceeds its vertex limit.
             MeshPartBuilder floors = builder.part("floor-" + level, GL20.GL_TRIANGLES, ATTRIBUTES, floorMaterial);
             // Ground floor clears the terrain; upper floors sit at the game's level boundaries.
             float z = (level == 0 ? 0.002f : level) * levelHeight;
-            floor(floors, footprints.get(level), z);
+            floor(floors, storey.triangles(), storey.triangles(), storey.outline(), z);
         }
         return builder.end();
     }
 
-    private static List<Vector3> columns(List<Vector3> roof, float height) {
+    /** Column positions across the storey; only their plan position matters. */
+    private static List<Vector3> columns(List<Vector3> roof) {
         BoundingBox bounds = new BoundingBox().inf();
         roof.forEach(bounds::ext);
         List<Vector3> columns = new ArrayList<>();
@@ -296,7 +306,7 @@ final class GpuBuildingInterior {
         for (int x = 0; x < across; x++) {
             for (int y = 0; y < along; y++) {
                 addColumn(columns, roof, bounds.min.x + bounds.getWidth() * (x + 0.5f) / across,
-                      bounds.min.y + bounds.getHeight() * (y + 0.5f) / along, height);
+                      bounds.min.y + bounds.getHeight() * (y + 0.5f) / along);
             }
         }
         // Small or disconnected wings can miss the grid. Give uncovered roof sections a nearby support.
@@ -304,7 +314,7 @@ final class GpuBuildingInterior {
             Vector3 center = new Vector3(roof.get(index)).add(roof.get(index + 1)).add(roof.get(index + 2)).scl(1f / 3);
             if (columns.stream().noneMatch(column -> (column.x - center.x) * (column.x - center.x)
                   + (column.y - center.y) * (column.y - center.y) < SPACING * SPACING)) {
-                addColumn(columns, roof, center.x, center.y, height);
+                addColumn(columns, roof, center.x, center.y);
             }
         }
         return columns;
@@ -318,6 +328,11 @@ final class GpuBuildingInterior {
      * {@code body} and closes at that outline. Elsewhere (an overhang, a thin deck's edge) the surface alone.
      */
     static void floor(MeshPartBuilder floors, List<Vector3> top, List<Vector3> body, float z) {
+        floor(floors, top, body, area(body), z);
+    }
+
+    /** As {@link #floor(MeshPartBuilder, List, List, float)}, with {@code body}'s outline already at hand. */
+    static void floor(MeshPartBuilder floors, List<Vector3> top, List<Vector3> body, Area outline, float z) {
         float bottom = z - SLAB;
         for (int index = 0; index < top.size(); index += 3) {
             floors.triangle(vertex(top.get(index), z, 1), vertex(top.get(index + 1), z, 1), vertex(top.get(index + 2), z, 1));
@@ -328,7 +343,7 @@ final class GpuBuildingInterior {
         }
         Vector3 first = new Vector3(), previous = new Vector3();
         float[] point = new float[6];
-        for (var path = area(body).getPathIterator(null); !path.isDone(); path.next()) {
+        for (var path = outline.getPathIterator(null); !path.isDone(); path.next()) {
             int kind = path.currentSegment(point);
             if (kind == PathIterator.SEG_MOVETO) { first.set(point[0], point[1], z); previous.set(first); continue; }
             Vector3 next = kind == PathIterator.SEG_CLOSE ? first.cpy() : new Vector3(point[0], point[1], z);
@@ -343,12 +358,12 @@ final class GpuBuildingInterior {
         return new MeshPartBuilder.VertexInfo().setPos(point.x, point.y, z).setNor(0, 0, normalZ);
     }
 
-    private static void addColumn(List<Vector3> columns, List<Vector3> roof, float x, float y, float height) {
+    private static void addColumn(List<Vector3> columns, List<Vector3> roof, float x, float y) {
         float half = STRUT_WIDTH / 2;
         // Checking the footprint keeps columns out of courtyards, gaps and concave outside corners.
         if (inside(roof, x, y) && inside(roof, x - half, y - half) && inside(roof, x + half, y - half)
               && inside(roof, x - half, y + half) && inside(roof, x + half, y + half)) {
-            columns.add(new Vector3(x, y, height));
+            columns.add(new Vector3(x, y, 0));
         }
     }
 

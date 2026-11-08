@@ -78,11 +78,12 @@ final class ConnectedKit {
     }
 
     /**
-     * A kit file's levels of detail and pieces, read and checked once and shared by terrain workers. {@code grounds}: per
-     * level of detail, each role's lowest point over its core and all its tagged pieces, the height it stands on.
+     * A kit file's levels of detail and pieces, read and checked once and shared by terrain workers. {@code pieces}: the
+     * near level's; {@code parts}: each level of detail's ({@link #parts}). {@code grounds}: per level of detail, each
+     * role's lowest point over its core and all its tagged pieces, the height it stands on.
      */
-    record Kit(List<RigidGlb.Data> lods, List<Piece> pieces, Map<String, String> roles, boolean symmetric,
-          List<Map<String, Float>> grounds) { }
+    record Kit(List<RigidGlb.Data> lods, List<Piece> pieces, List<List<Piece>> parts, Map<String, String> roles,
+          boolean symmetric, List<Map<String, Float>> grounds) { }
 
     /** Validate every node name before any assembly; a kit without tags has one core piece per role. */
     static List<Piece> parts(ModelData data) {
@@ -137,10 +138,11 @@ final class ConnectedKit {
 
     static Kit load(List<ModelData> lods) {
         List<RigidGlb.Data> data = lods.stream().map(RigidGlb.Data.class::cast).toList();
-        List<Piece> pieces = parts(data.getFirst());
+        List<List<Piece>> parts = data.stream().map(ConnectedKit::parts).toList();
+        List<Piece> pieces = parts.getFirst();
         Set<String> signature = signature(pieces);
-        for (var lod : data) {
-            require(signature(parts(lod)).equals(signature), "Kit pieces must match across LODs: " + lod.id);
+        for (int lod = 0; lod < data.size(); lod++) {
+            require(signature(parts.get(lod)).equals(signature), "Kit pieces must match across LODs: " + data.get(lod).id);
         }
         Map<String, String> roles = new LinkedHashMap<>();
         pieces.forEach(piece -> roles.putIfAbsent(piece.role(), piece.node()));
@@ -201,9 +203,10 @@ final class ConnectedKit {
             }
         }
         List<Map<String, Float>> grounds = new ArrayList<>();
-        for (var lod : data) {
+        for (int level = 0; level < data.size(); level++) {
+            var lod = data.get(level);
             Map<String, BoundingBox> bounds = new HashMap<>();
-            for (var piece : parts(lod)) {
+            for (var piece : parts.get(level)) {
                 var node = node(lod, piece.node());
                 if (node.parts.length == 0) { continue; }
                 bounds.computeIfAbsent(piece.role(), ignored -> new BoundingBox().inf()).ext(bounds(lod, node, new Matrix4()));
@@ -217,7 +220,7 @@ final class ConnectedKit {
             });
             grounds.add(Map.copyOf(ground));
         }
-        return new Kit(data, pieces, Map.copyOf(roles), symmetric, List.copyOf(grounds));
+        return new Kit(data, pieces, parts, Map.copyOf(roles), symmetric, List.copyOf(grounds));
     }
 
     private static Set<String> signature(List<Piece> pieces) {
@@ -407,7 +410,7 @@ final class ConnectedKit {
         var ground = kit.grounds().get(lod);
         int height = selected.size() - 1;
         Map<String, Map<Long, Piece>> byRole = new HashMap<>(), bends = new HashMap<>(), closedRoofs = new HashMap<>();
-        for (var piece : parts(source)) {
+        for (var piece : kit.parts().get(lod)) {
             (piece.closed() != 0 ? closedRoofs : piece.bend() ? bends : byRole).computeIfAbsent(piece.role(), ignored -> new HashMap<>())
                   .put(piece.bend() ? piece.tags() : piece.identity(), piece);
         }

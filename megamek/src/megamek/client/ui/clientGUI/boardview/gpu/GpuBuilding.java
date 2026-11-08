@@ -54,9 +54,13 @@ final class GpuBuilding implements Disposable {
     private final Map<String, Faces> faces = new HashMap<>();
     // Per piece in its authored frame: its floor cap (cap).
     private final Map<String, List<Vector3>> caps = new HashMap<>();
-    // Per placement of the pieces that shape a storey: its floor outline (storey).
-    private final Map<String, List<Vector3>> storeys = new HashMap<>();
+    // Per placement of the pieces that shape a storey: its floor (storey).
+    private final Map<String, GpuBuildingInterior.Storey> storeys = new HashMap<>();
+    // Per roof piece's placement on the plan: the outline it covers (roof).
+    private final Map<String, Area> roofs = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
+    // Per assembly: its near instance's box in its own frame (Assembly#bounds).
+    private final Map<Assembly, BoundingBox> instanceBounds = new java.util.IdentityHashMap<>();
 
     private record Interior(List<List<Vector3>> footprints, int floors) { }
     record Recipe(List<String> modules, List<Integer> reach, BuildingInteriors interiors, boolean stepped) { }
@@ -65,8 +69,13 @@ final class GpuBuilding implements Disposable {
     record Assembly(Recipe recipe, List<ConnectedKit.Placement> near, Model interior, GpuBuilding kit) {
         int lodCount() { return kit.models.size(); }
         Model model(int lod) { return kit.models.get(lod); }
-        ModelInstance instance(int lod) { return kit.instance(recipe, lod); }
+        ModelInstance instance(int lod) { return kit.instance(lod == 0 ? near : kit.placements(recipe, lod), lod); }
         boolean hit(Ray ray, Vector3 result) { return kit.hit(near, ray, result); }
+
+        /** A copy of the near instance's box in its own frame, scanned from {@code instance} once per assembly. */
+        BoundingBox bounds(ModelInstance instance) {
+            return new BoundingBox(kit.instanceBounds.computeIfAbsent(this, ignored -> instance.calculateBoundingBox(new BoundingBox())));
+        }
     }
 
     GpuBuilding(ConnectedKit.Kit kit, Function<ModelData, Model> upload) {
@@ -149,10 +158,11 @@ final class GpuBuilding implements Disposable {
         return assemblies.computeIfAbsent(recipe, key -> {
             var near = placements(key, 0);
             if (policy == BuildingInteriors.NO) { return new Assembly(key, near, null, this); }
-            var footprints = volumes(key);
+            var storeys = volumes(key, near);
             int floors = policy == BuildingInteriors.NO_FLOORS ? 1 : levels;
+            var footprints = storeys.stream().map(GpuBuildingInterior.Storey::triangles).toList();
             Model interior = interiors.computeIfAbsent(new Interior(footprints, floors),
-                  ignored -> GpuBuildingInterior.buildStoreys(footprints, LEVEL_HEIGHT, floors));
+                  ignored -> GpuBuildingInterior.buildStoreys(storeys, LEVEL_HEIGHT, floors));
             return new Assembly(key, near, interior, this);
         });
     }
@@ -167,13 +177,12 @@ final class GpuBuilding implements Disposable {
      * use their closed mid-storey wall outlines from the simplest LOD. A storey whose walls close nothing (open towards
      * connected neighbours) leaves the roof projection as it is.
      */
-    private List<List<Vector3>> volumes(Recipe recipe) {
-        var pieces = placements(recipe, 0);
+    private List<GpuBuildingInterior.Storey> volumes(Recipe recipe, List<ConnectedKit.Placement> pieces) {
         // These caps fit behind the facade, including open connection ends. Closed panel boxes describe wall strips,
         // not rooms, so only kits without floor caps need the wall-section fallback.
         boolean floorCaps = pieces.stream().anyMatch(piece -> !piece.role().startsWith("roof") && !cap(piece).isEmpty());
         var far = floorCaps ? null : placements(recipe, models.size() - 1);
-        List<List<Vector3>> result = new ArrayList<>();
+        List<GpuBuildingInterior.Storey> result = new ArrayList<>();
         for (int level = 0; level < recipe.modules().size() - 1; level++) { result.add(storey(pieces, far, level)); }
         return List.copyOf(result);
     }
@@ -184,7 +193,7 @@ final class GpuBuilding implements Disposable {
      * those beside its slab), for every storey and assembly of the kit alike; {@code far}: the wall-section fallback's
      * pieces, or null with caps.
      */
-    private List<Vector3> storey(List<ConnectedKit.Placement> pieces, List<ConnectedKit.Placement> far, int level) {
+    private GpuBuildingInterior.Storey storey(List<ConnectedKit.Placement> pieces, List<ConnectedKit.Placement> far, int level) {
         float top = level * LEVEL_HEIGHT;
         StringBuilder key = new StringBuilder(far == null ? "caps|" : "walls|");
         for (var piece : pieces) {
@@ -210,14 +219,15 @@ final class GpuBuilding implements Disposable {
             Area roof = new Area();
             for (var piece : pieces) {
                 if (piece.role().startsWith("roof") && piece.level() > level) {
-                    roof.add(GpuBuildingInterior.area(placed(piece, triangles.get(piece.node()))));
+                    roof.add(roofs.computeIfAbsent(placement(piece, null),
+                          plan -> GpuBuildingInterior.area(placed(piece, triangles.get(piece.node())))));
                 }
             }
             require(!roof.isEmpty(), kit.lods().getFirst().id + " requires a roof footprint above storey " + level);
             // Each floor follows its own shell. A lower terrace must not enlarge the floors above it.
             if (!storey.isEmpty()) { roof.intersect(storey); }
             // The ground floor's slab lies under the terrain.
-            return GpuBuildingInterior.triangles(level == 0 ? roof : clear(roof, top, pieces));
+            return GpuBuildingInterior.Storey.of(GpuBuildingInterior.triangles(level == 0 ? roof : clear(roof, top, pieces)));
         });
     }
 
@@ -289,12 +299,12 @@ final class GpuBuilding implements Disposable {
     }
 
     /** Create only the scene instance, at load/edit or a LOD transition; mesh buffers stay in the shared kit. */
-    private ModelInstance instance(Recipe recipe, int lod) {
+    private ModelInstance instance(List<ConnectedKit.Placement> pieces, int lod) {
         Model source = models.get(lod);
         ModelInstance instance = new ModelInstance(source, new String[0]);
         // Placement materials are needed for cutaway opacity; their textures remain shared.
         for (var material : source.materials) { instance.materials.add(material.copy()); }
-        for (var piece : placements(recipe, lod)) {
+        for (var piece : pieces) {
             Node node = source.getNode(piece.node()).copy();
             node.id = piece.prefix();
             // The placement turns and lifts the authored node frame.
@@ -316,6 +326,7 @@ final class GpuBuilding implements Disposable {
     /** Keep only assemblies used by installed/cached chunks, at the scene commit boundary on the GL thread. */
     void retain(Set<Assembly> live) {
         assemblies.values().removeIf(assembly -> !live.contains(assembly));
+        instanceBounds.keySet().removeIf(assembly -> !live.contains(assembly));
         Set<Model> needed = new java.util.HashSet<>();
         assemblies.values().forEach(assembly -> needed.add(assembly.interior()));
         interiors.values().removeIf(model -> {
