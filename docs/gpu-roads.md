@@ -402,6 +402,18 @@ beyond the base. The level centre of the bridge remains open below. The block's 
 and picking; `BoardBridgeSlope` omits the generated slab inside that block to avoid overlapping faces.
 Descending approaches cut the natural road bank; the bridge footing owns the actual concrete structure.
 
+A deck's height counts up from the water's surface (`level + bridge_elev`), as the game rules count it; a road
+beside it lies on its ground (`BoardRoadGrade.ground`). A road one level under a deck at the surface gets the same solid ramp
+as a dry road one level below a deck, and a ford a slight one onto its bed; two or more levels below is no approach, under
+water as on land. Legacy road exits (`BoardSceneryLayouts.roadLinks`) still link only dry ground and fords, as the game rules see them.
+Where that road lies below the water beside the deck, the bank recedes under the deck behind the ramp (`BoardRelief.deckBay`, through the road push). Its corners recede too:
+along the water's next edge where land lies below it or the water runs on through a mouth, and toward the hex's centre between two such exits of a turning deck.
+Higher ground or an outline that stays holds a corner in place, and the bank turns in steeply from it: over the road's outer metre it can stand slightly above the ramp. The low ground runs on past the hex's edge.
+
+Water standing above land keeps its outline on the hex's edge. Up to two levels, the land takes an ordinary slope's whole width on its own side and grows grass on it. That slope is land's:
+it recedes from a road below it (`BoardRelief#push`), behind containment walls where those save ground, and its corners move with it. The waterline keeps a riverside's width inside the rim wherever
+that has gone (`BoardRelief.insideRim`), with a slow wander, and mouths end the same way. A road above water has no fill to close the drop, as a road above dry ground has, so its rim comes out to the road's verge as a footing while the foot stays at the waterline.
+
 For cracks beside a road, inspect the reserved boundary and its cut faces before changing the road mask.
 For a bright seam with continuous geometry, inspect mask coordinates, material weights and normals instead.
 
@@ -496,10 +508,12 @@ of road before it repeats (`GpuAssets.roadCoverage`); one exported wider covers 
 more. Sand and snow verges and markings take their sculpted material's catalogued metres
 (`GpuAssets.sculptCoverage`), so a verge meets the ground beside it at its scale.
 
-A road through shallow (depth 0) water, a ford or a flooded street, lies on its bed in
-Enhanced (`BoardRoad.bed`); under a level or more of water it is out of sight, as in real
-water. A bridge over the water carries the road instead, and Classic's water column shows
-its liquid only. Ice on dry ground supports native roads. Supported road
+Water is a layer over the same ground: a road under water at any depth, a ford or a submerged
+city's street, runs through the same code as a dry one at the hex's `floor()` (`BoardRoad.groundShown`),
+with its reserved surface, grades, paint, stop bars and furniture. That surface takes the bed's material,
+and the coat takes the water's tint. Dry ground keeps its level beside water, so the wet hex carries a ramp
+between them (`BoardRoadGrade.edgeLevel`). A bridge over the water carries the road instead, molten liquid
+and ice hide the ground, and Classic's water column shows its liquid only. Ice on dry ground supports native roads. Supported road
 fluff uses the native material and geometry, including bent and horizontal routes.
 Roadside-tree and parking-car models contain only their objects. Parking sprites can
 provide cosmetic exits when the hex has no gameplay ROAD; existing ROAD takes

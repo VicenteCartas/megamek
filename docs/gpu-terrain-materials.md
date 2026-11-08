@@ -572,7 +572,9 @@ projection where the face lies back; the bed hardness `BoardRelief` stores per c
 vertex tints their strata by about 4 %. Tops read the top projection twice: two
 repeats (the second 2.37 times larger and turned) mixed by a world field, settling to
 the map's average far away, or two offsets of one repeat for sand, desert and volcano
-cap plates and fungus. A blended cliff takes its two strongest palette slots
+cap plates and fungus. Up close the enlarged repeat only magnified its texels: its share fades out
+as the first repeat's texels pass one screen pixel, from 2.37 a pixel to one (`enlargedShare`), so a
+full zoom reads the first repeat alone, as Medium does everywhere but desert. A blended cliff takes its two strongest palette slots
 (`blendCliff`). A blended top (`blendCovers`) leaves out slots under 2 % coverage, its
 neighbour slots take only their strongest role, and one noise read per family breaks
 the contacts.
@@ -739,7 +741,7 @@ reference and lightly sharpened. It is 1024 pixels square over 48 metres (21 tex
 its lichen, moss and gravel stretches are tens of metres across, as in the reference, so no repeat shows at play
 distance. `tundra-ground-variant` is the same place's wet hollow, from a study made with the fell-field as its
 reference: sedge, rust-red sphagnum, bearberry and small dark pools, also 1024 pixels over 48 metres, with 7 cm.
-The two carpets have their own colour and normal arrays at their full size (`GpuAssets.tundraCarpets`); the shared
+The two carpets keep their full size in the full-size arrays (`GpuAssets.fullSizeMaps`); the shared
 sculpt arrays keep a copy at their 512 grid for the carpets' finish and means, which never widens that grid. Like
 ordinary ground, each carpet is also read 2.37 times larger and turned, blended by a world field at half the weight
 ordinary ground gives it, so the carpets keep their own detail foremost. The fungal mat and mineral crust stay in the shared arrays, 512 pixels over 24 and 28 metres.
