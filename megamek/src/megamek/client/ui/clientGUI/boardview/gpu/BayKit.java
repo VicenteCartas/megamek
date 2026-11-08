@@ -185,10 +185,6 @@ final class BayKit {
                   facet(spec, wall), joints, cap, chamfer, cut, piece.walls(), partners);
             if (ground && spec.sidewalk() != null) { sidewalk(result, spec.sidewalk(), wall, keeps, goesOn[0], goesOn[1]); }
         }
-        // A storey's only: on a roof the slit between the parapets shows the deck, and a face there stood up past them.
-        if (!square && !cap && !top && piece.direction() != null && piece.walls().isEmpty()) {
-            closeJunction(result, run, piece.direction(), modelled, lod, ground);
-        }
         List<KitOutline.Wall> edges = new ArrayList<>(piece.walls());
         if (seamed) {
             for (var joint : joints) { seam(result, run.seam(), joint, piece.walls(), joints, modelled, lod, chamfer); }
@@ -348,51 +344,6 @@ final class BayKit {
         if (right[0] * face[0] + right[1] * face[1] < 0) { from = inner; to = outer; }
         result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(from, low, face), darkVertex(to, low, face), darkVertex(to, high, face),
               darkVertex(from, high, face));
-    }
-
-    /**
-     * An Angled corner whose sides both link: the neighbours across them, when they do not link each other, each end a
-     * wall at this corner square to its link (as for a wall going straight on across the side), so the two meet at 60
-     * degrees with their bays' recesses open into this hex. A dark face across the corner, from hexside to hexside at
-     * the bays' deepest recess, closes that slit; where the neighbours link each other it stands hidden inside.
-     */
-    private static void closeJunction(GeneratedMesh result, Run run, int direction, List<ModelData> modelled, int lod,
-          boolean ground) {
-        // A side's length of this run's bays (their module inside, +y): how deep and high they stand at their ends, where
-        // the neighbours' walls end.
-        var sample = new KitOutline.Wall(new double[] { 0, 0 }, new double[] { R, 0 }, KitOutline.End.OPEN, KitOutline.End.OPEN,
-              List.of(), false);
-        var laid = new GeneratedMesh();
-        lay(laid, layout(run, sample, R, 0, 0, ground, 1, 0, 0, new double[2], new ArrayList<>(), new KitOutline.Wall[2]), sample,
-              0, modelled, lod);
-        double deepest = 0, low = Double.MAX_VALUE, high = -Double.MAX_VALUE;
-        for (FloatArray part : laid.parts.values()) {
-            for (int at = 0; at < part.size; at += RigidGlb.STRIDE) {
-                if (part.items[at] > .5 && part.items[at] < R - .5) { continue; }
-                deepest = Math.max(deepest, part.items[at + 1]);
-                low = Math.min(low, part.items[at + 2]);
-                high = Math.max(high, part.items[at + 2]);
-            }
-        }
-        if (deepest <= 0 || low >= high) { return; }
-        double[] c = KitOutline.hexCorner(direction), a = along(c, KitOutline.MIDPOINTS[direction], deepest),
-              b = along(c, KitOutline.MIDPOINTS[(direction + 1) % 6], deepest);
-        // A little past each hexside, behind that neighbour's bays.
-        double width = Math.hypot(b[0] - a[0], b[1] - a[1]);
-        double[] from = along(b, a, width + .05), to = along(a, b, width + .05);
-        double[] face = normal(from, to);
-        if (face[0] * (c[0] - a[0]) + face[1] * (c[1] - a[1]) < 0) {
-            double[] swap = from; from = to; to = swap;
-            face = normal(from, to);
-        }
-        result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(from, low, face), darkVertex(to, low, face), darkVertex(to, high, face),
-              darkVertex(from, high, face));
-    }
-
-    /** The point {@code distance} from {@code p} towards {@code q}. */
-    private static double[] along(double[] p, double[] q, double distance) {
-        double length = Math.hypot(q[0] - p[0], q[1] - p[1]);
-        return new double[] { p[0] + (q[0] - p[0]) * distance / length, p[1] + (q[1] - p[1]) * distance / length };
     }
 
     private static float[] darkVertex(double[] p, double z, double[] normal) {
