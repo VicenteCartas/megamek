@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -54,15 +55,29 @@ final class GeneratedKit {
                       new File(Configuration.dataDir(), "models").toPath());
                 String name = spec.getName().replaceFirst("\\.json$", "");
                 String style = chosen.path("style").asText();
-                return ConnectedKit.load(List.copyOf(switch (style) {
+                var kit = ConnectedKit.load(List.copyOf(switch (style) {
                     case "habitat" -> HabitatKit.lods(JSON.treeToValue(chosen, HabitatKit.Spec.class), modelled, square, name, footprintScale);
                     case "bays" -> BayKit.lods(JSON.treeToValue(chosen, BayKit.Spec.class), modelled, square, name, footprintScale);
                     default -> throw new IllegalArgumentException("a variant's style is habitat or bays, not " + style);
                 }));
+                return style.equals("bays") ? seated(kit) : kit;
             } catch (IOException | RuntimeException failure) {
                 throw new IllegalArgumentException("Cannot read building kit " + spec + ": " + failure.getMessage(), failure);
             }
         })).get();
+    }
+
+    /**
+     * {@code kit} with its roofs standing on the storey under them: a bays kit lays a roof from 0 up, its edge's bevel and
+     * the deck's body reaching below, which the lowest point (ConnectedKit's ground) would lift it by.
+     */
+    private static ConnectedKit.Kit seated(ConnectedKit.Kit kit) {
+        List<Map<String, Float>> grounds = kit.grounds().stream().map(ground -> {
+            Map<String, Float> seated = new HashMap<>(ground);
+            seated.replaceAll((role, z) -> role.startsWith("roof") ? 0f : z);
+            return Map.copyOf(seated);
+        }).toList();
+        return new ConnectedKit.Kit(kit.lods(), kit.pieces(), kit.parts(), kit.roles(), kit.symmetric(), grounds);
     }
 
     /** The spec's variant named {@code name}, else its first; their names distinct, each a valid appearance key. */

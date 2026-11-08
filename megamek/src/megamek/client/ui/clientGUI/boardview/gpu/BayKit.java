@@ -229,6 +229,17 @@ final class BayKit {
                   facet(spec, wall), joints, cap, chamfer, cut, piece.walls(), partners);
             if (ground && spec.sidewalk() != null) { sidewalk(result, spec.sidewalk(), wall, keeps, goesOn[0], goesOn[1]); }
         }
+        // Closed modules: a module parted from the next at its joints has its own side along each, behind the grooves,
+        // and a seamed roof a floor under its grooves. Where the next module does not meet it exactly, these show, never
+        // the inside.
+        if (run.joints() != null && !cap) {
+            for (var joint : joints) { side(result, joint, piece.walls(), run.joints().length()); }
+        }
+        if (seamed) {
+            for (var polygon : piece.polygons()) {
+                for (var part : KitOutline.inset(polygon, piece.walls(), .5)) { underside(result, part, -chamfer - .01); }
+            }
+        }
         List<KitOutline.Wall> edges = new ArrayList<>(piece.walls());
         if (seamed) {
             for (var joint : joints) { seam(result, run.seam(), joint, piece.walls(), joints, modelled, lod, chamfer); }
@@ -391,6 +402,49 @@ final class BayKit {
         if (right[0] * face[0] + right[1] * face[1] < 0) { from = inner; to = outer; }
         result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(from, low, face), darkVertex(to, low, face), darkVertex(to, high, face),
               darkVertex(from, high, face));
+    }
+
+    /** How far in from a hex corner a closed module's side runs: what shows of it from outside. Inside, the building runs on. */
+    private static final double SIDE = 6;
+
+    /**
+     * A closed module's side along {@code joint}, {@link #SIDE} in from each of its corners: dark, a storey high, facing
+     * the next module; where a wall of the piece ends at the corner, from {@code groove} in, the depth of that wall's joint
+     * piece, so it stands behind the groove.
+     */
+    private static void side(GeneratedMesh result, KitOutline.Wall joint, List<KitOutline.Wall> walls, double groove) {
+        double[] p = joint.p(), q = joint.q();
+        double length = joint.length();
+        double from = walls.stream().anyMatch(wall -> KitOutline.close(wall.p(), p) || KitOutline.close(wall.q(), p)) ? groove : 0;
+        double to = walls.stream().anyMatch(wall -> KitOutline.close(wall.p(), q) || KitOutline.close(wall.q(), q)) ? length - groove : length;
+        if (to - from <= 2 * SIDE) {
+            sideFace(result, p, q, from, to);
+        } else {
+            sideFace(result, p, q, from, from + SIDE);
+            sideFace(result, p, q, to - SIDE, to);
+        }
+    }
+
+    /** The part of a side along p-q from {@code from} to {@code to} along it. */
+    private static void sideFace(GeneratedMesh result, double[] p, double[] q, double from, double to) {
+        if (to - from <= 1e-6) { return; }
+        double length = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        double[] a = KitOutline.lerp(p, q, from / length), b = KitOutline.lerp(p, q, to / length), n = normal(p, q);
+        result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(a, 0, n), darkVertex(b, 0, n), darkVertex(b, KitOutline.LEVEL, n),
+              darkVertex(a, KitOutline.LEVEL, n));
+    }
+
+    /** A dark floor facing up at {@code z} over a convex {@code polygon}. */
+    private static void underside(GeneratedMesh result, List<double[]> polygon, double z) {
+        double area = 0;
+        for (int i = 0; i < polygon.size(); i++) { area += KitOutline.cross(polygon.get(i), polygon.get((i + 1) % polygon.size())); }
+        List<float[]> vertices = new ArrayList<>();
+        for (int i = 0; i < polygon.size(); i++) {
+            double[] point = polygon.get(area > 0 ? i : polygon.size() - 1 - i);
+            // Facing the sun, darker than the sides: a groove's shadowed bottom.
+            vertices.add(new float[] { (float) point[0], (float) point[1], (float) z, 0, 0, 1, DARK / 3, DARK / 3, DARK / 3, 1, 0, 0 });
+        }
+        result.polygon(GeneratedMesh.BUILDING_BODY, vertices);
     }
 
     private static float[] darkVertex(double[] p, double z, double[] normal) {
