@@ -96,7 +96,8 @@ class GpuImplantBlowFacingRoutingTest {
         ClientGUI gui = routingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             JFrame frame = clientFrame(gui);
-            GpuDialogRoutingTest.set(present(gui, fixture.view, fixture.source), "presented", false);
+            // A closing window shows Swing at once; one still starting would make each prompt wait for it
+            GpuDialogRoutingTest.set(present(gui, fixture.view, fixture.source), "closing", true);
             Entity platoon = platoon();
             Entity squad = unit("Elemental BA [Laser] (Sqd5).blk");
             try {
@@ -144,7 +145,7 @@ class GpuImplantBlowFacingRoutingTest {
                       + "destroy the cockpit and kill the pilot.</center></html>]"), mek);
                 assertEquals(List.of(false, 1), onSwing(() -> implants(new SuicideImplantsDialog(frame,
                       fixture.entity), dialog -> button(dialog, "Cancel").doClick(0))));
-                assertNull(fixture.source.dialog(), "No native dialog while the window is not presented");
+                assertNull(fixture.source.dialog(), "No native dialog while the window closes");
             } finally {
                 dismiss();
                 dispose(frame);
@@ -158,7 +159,8 @@ class GpuImplantBlowFacingRoutingTest {
         ClientGUI gui = previewingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             JFrame frame = clientFrame(gui);
-            GpuDialogRoutingTest.set(present(gui, fixture.view, fixture.source), "presented", false);
+            // A closing window shows Swing at once; one still starting would make each prompt wait for it
+            GpuDialogRoutingTest.set(present(gui, fixture.view, fixture.source), "closing", true);
             try {
                 List<String> blows = new ArrayList<>();
                 assertEquals(List.of(DialogResult.CONFIRMED, 2), onSwing(() -> blow(
@@ -204,7 +206,7 @@ class GpuImplantBlowFacingRoutingTest {
                           facings(dialog).get(2).doClick(0);
                           button(dialog, "Cancel").doClick(0);
                       })).getFirst(), "Cancel turns nothing");
-                assertNull(fixture.source.dialog(), "No native dialog while the window is not presented");
+                assertNull(fixture.source.dialog(), "No native dialog while the window closes");
             } finally {
                 dismiss();
                 dispose(frame);

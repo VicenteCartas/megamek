@@ -629,13 +629,28 @@ class GpuSwingDialogGateTest {
                   + "window: javax.swing.JDialog \"Load by Crane\"", "A Swing dialog outside the allowlist opened over "
                   + "the battle window: javax.swing.JDialog \"null\""), gate.errors);
 
-            // While the window cannot ask the client's prompts (it starts or closes), they fall back to Swing, raised
+            // A prompt asked while the window starts (no board source yet) waits for it instead of showing in Swing;
+            // when the window closes instead, the prompt falls back to Swing, raised
             gate.errors.clear();
             GpuDialogRoutingTest.set(gate.window, "source", null);
-            assertTrue(gate.raised(() -> declaring.gui.confirm("Flee?", "Confirm", JOptionPane.YES_NO_OPTION,
-                  JOptionPane.QUESTION_MESSAGE), MESSAGE_BOX), "A prompt before the board source is ready");
-            GpuDialogRoutingTest.set(gate.window, "source", declaring.fixture.source);
+            Set<Window> beforeStart = onSwing(GpuSwingDialogGateTest::showing);
+            Predicate<Window> startBox = window -> !beforeStart.contains(window) && MESSAGE_BOX.test(window);
+            FutureTask<Integer> waiting = new FutureTask<>(() -> declaring.gui.confirm("Flee?", "Confirm",
+                  JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE));
+            SwingUtilities.invokeLater(waiting);
+            Thread.sleep(500);
+            assertTrue(onSwing(() -> showing().stream().noneMatch(startBox)),
+                  "A prompt before the board source is ready waits for the window");
             GpuDialogRoutingTest.set(gate.window, "closing", true);
+            Window startPrompt = gate.awaitShowing(startBox);
+            assertTrue(onSwing(startPrompt::isAlwaysOnTop), "The waiting prompt shows in Swing, raised, on closing");
+            onSwing(() -> {
+                startPrompt.setVisible(false);
+                startPrompt.dispose();
+                return null;
+            });
+            waiting.get(WAIT_SECONDS, SECONDS);
+            GpuDialogRoutingTest.set(gate.window, "source", declaring.fixture.source);
             assertTrue(gate.raised(() -> {
                 declaring.gui.doAlertDialog("Disconnected", "The server closed the connection.");
                 return null;
