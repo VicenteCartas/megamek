@@ -68,13 +68,15 @@ final class GeneratedKit {
     }
 
     /**
-     * {@code kit} with its roofs standing on the storey under them: a bays kit lays a roof from 0 up, its edge's bevel and
-     * the deck's body reaching below, which the lowest point (ConnectedKit's ground) would lift it by.
+     * {@code kit} with its roofs standing on the storey under them: a bays kit lays its near roof from 0 up, its edge's
+     * bevel and the deck's body reaching below, which the lowest point (ConnectedKit's ground) would lift it by. Farther
+     * levels keep their place against the near one's (a lower far deck stays where it stood).
      */
     private static ConnectedKit.Kit seated(ConnectedKit.Kit kit) {
+        Map<String, Float> near = kit.grounds().getFirst();
         List<Map<String, Float>> grounds = kit.grounds().stream().map(ground -> {
             Map<String, Float> seated = new HashMap<>(ground);
-            seated.replaceAll((role, z) -> role.startsWith("roof") ? 0f : z);
+            seated.replaceAll((role, z) -> role.startsWith("roof") ? z - near.get(role) : z);
             return Map.copyOf(seated);
         }).toList();
         return new ConnectedKit.Kit(kit.lods(), kit.pieces(), kit.parts(), kit.roles(), kit.symmetric(), grounds);

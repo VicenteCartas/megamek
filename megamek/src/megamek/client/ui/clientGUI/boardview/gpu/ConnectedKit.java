@@ -86,7 +86,8 @@ final class ConnectedKit {
     /**
      * A kit file's levels of detail and pieces, read and checked once and shared by terrain workers. {@code pieces}: the
      * near level's; {@code parts}: each level of detail's ({@link #parts}). {@code grounds}: per level of detail, each
-     * role's lowest point over its core and all its tagged pieces, the height it stands on.
+     * role's lowest point over its core and all its tagged pieces, the height it stands on (a generated bays kit's roofs
+     * stand at their 0 instead: GeneratedKit#seated).
      */
     record Kit(List<RigidGlb.Data> lods, List<Piece> pieces, List<List<Piece>> parts, Map<String, String> roles,
           boolean symmetric, List<Map<String, Float>> grounds) { }

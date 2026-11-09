@@ -172,7 +172,7 @@ final class BayKit {
         // A storey's other junctions at the corner, held by its corner piece linked both ways (ConnectedKit places them).
         List<Run> runs = spec.modules().get(role);
         Run run = runs.get(Math.min(lod, runs.size() - 1));
-        if (!square && !role.startsWith("roof") && piece.direction() != null && piece.walls().isEmpty()
+        if (!square && !jointed && !role.startsWith("roof") && piece.direction() != null && piece.walls().isEmpty()
               && run.bays() != null && !run.bays().isEmpty()) {
             for (var junction : KitOutline.Junction.values()) {
                 if (junction.notch()) { continue; }
@@ -232,7 +232,7 @@ final class BayKit {
         // Closed modules: a module parted from the next at its joints has its own side along each, behind the grooves,
         // and a seamed roof a floor under its grooves. Where the next module does not meet it exactly, these show, never
         // the inside.
-        if (run.joints() != null && !cap) {
+        if (run.joints() != null && !cap && !square) {
             for (var joint : joints) { side(result, joint, piece.walls(), run.joints().length()); }
         }
         if (seamed) {
@@ -408,31 +408,36 @@ final class BayKit {
     private static final double SIDE = 6;
 
     /**
-     * A closed module's side along {@code joint}, {@link #SIDE} in from each of its corners: dark, a storey high, facing
-     * the next module; where a wall of the piece ends at the corner, from {@code groove} in, the depth of that wall's joint
-     * piece, so it stands behind the groove.
+     * A closed module's side along {@code joint}, {@link #SIDE} in from each of its corners: dark, facing the next module;
+     * where a wall of the piece ends at the corner, from {@code groove} in, the depth of that wall's joint piece, so it
+     * stands behind the groove. From just over the floor (an interior floor keeps clear of wall faces at its height) up
+     * to {@code groove} under the storey's top, the floor of a roof's seam groove.
      */
     private static void side(GeneratedMesh result, KitOutline.Wall joint, List<KitOutline.Wall> walls, double groove) {
         double[] p = joint.p(), q = joint.q();
         double length = joint.length();
         double from = walls.stream().anyMatch(wall -> KitOutline.close(wall.p(), p) || KitOutline.close(wall.q(), p)) ? groove : 0;
         double to = walls.stream().anyMatch(wall -> KitOutline.close(wall.p(), q) || KitOutline.close(wall.q(), q)) ? length - groove : length;
+        double top = KitOutline.LEVEL - groove;
         if (to - from <= 2 * SIDE) {
-            sideFace(result, p, q, from, to);
+            sideFace(result, p, q, from, to, top);
         } else {
-            sideFace(result, p, q, from, from + SIDE);
-            sideFace(result, p, q, to - SIDE, to);
+            sideFace(result, p, q, from, from + SIDE, top);
+            sideFace(result, p, q, to - SIDE, to, top);
         }
     }
 
     /** The part of a side along p-q from {@code from} to {@code to} along it. */
-    private static void sideFace(GeneratedMesh result, double[] p, double[] q, double from, double to) {
+    private static void sideFace(GeneratedMesh result, double[] p, double[] q, double from, double to, double top) {
         if (to - from <= 1e-6) { return; }
         double length = Math.hypot(q[0] - p[0], q[1] - p[1]);
         double[] a = KitOutline.lerp(p, q, from / length), b = KitOutline.lerp(p, q, to / length), n = normal(p, q);
-        result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(a, 0, n), darkVertex(b, 0, n), darkVertex(b, KitOutline.LEVEL, n),
-              darkVertex(a, KitOutline.LEVEL, n));
+        result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(a, SIDE_FLOOR, n), darkVertex(b, SIDE_FLOOR, n), darkVertex(b, top, n),
+              darkVertex(a, top, n));
     }
+
+    /** Where a closed module's side starts, just over the storey's interior floor. */
+    private static final double SIDE_FLOOR = .1;
 
     /** A dark floor facing up at {@code z} over a convex {@code polygon}. */
     private static void underside(GeneratedMesh result, List<double[]> polygon, double z) {
