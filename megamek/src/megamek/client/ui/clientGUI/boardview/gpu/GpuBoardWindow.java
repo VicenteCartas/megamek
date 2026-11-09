@@ -183,10 +183,6 @@ public final class GpuBoardWindow {
     private static final List<Class<? extends Dialog>> SWING_DIALOGS = List.of(
           // R6: Client Settings, which hold the real settings (user item 3)
           megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog.class,
-          // R6: Edit Bots
-          megamek.client.ui.dialogs.buttonDialogs.EditBotsDialog.class,
-          // R6: a bot's settings, opened from Edit Bots and Player Settings
-          megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog.class,
           // R6: Network information
           megamek.client.ui.dialogs.buttonDialogs.NetworkInformationDialog.class,
           // U2: the accessibility window
@@ -1476,6 +1472,18 @@ public final class GpuBoardWindow {
         GpuBattleTools tools = battleTools(gui);
         if (tools != null) {
             tools.reinforce();
+        }
+        return tools != null;
+    }
+
+    /**
+     * EDT: shows the game's bots and dropped-out players natively over this client's battle window, to replace,
+     * edit or kick; false as above.
+     */
+    public static boolean showEditBots(ClientGUI gui) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.editBots();
         }
         return tools != null;
     }

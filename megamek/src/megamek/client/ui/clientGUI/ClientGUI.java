@@ -4784,15 +4784,24 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     void editBots() {
+        if (!inLounge() && GpuBoardWindow.showEditBots(this)) {
+            return;
+        }
         var rpd = new EditBotsDialog(frame, this);
         rpd.setVisible(true);
         if (rpd.getResult() == DialogResult.CANCELLED) {
             return;
         }
+        applyBotEdits(rpd.getNewBots(), rpd.getNewBotTypes(), rpd.getChangedBots(), rpd.getKickBots());
+    }
 
+    /**
+     * Carries out what Edit Bots chose: the ghosts to replace with a bot of the given AI and settings, the local bots
+     * whose settings changed, and the bots to kick.
+     */
+    public void applyBotEdits(Map<String, BehaviorSettings> newBotSettings, Map<String, AIType> newBotTypes,
+          Map<String, BehaviorSettings> changedBots, Set<String> kickBotNames) {
         AddBotUtil util = new AddBotUtil();
-        Map<String, BehaviorSettings> newBotSettings = rpd.getNewBots();
-        Map<String, AIType> newBotTypes = rpd.getNewBotTypes();
         for (String ghostName : newBotSettings.keySet()) {
             StringBuilder message = new StringBuilder();
             AIType aiType = newBotTypes.getOrDefault(ghostName, AIType.PRINCESS);
@@ -4823,14 +4832,12 @@ public class ClientGUI extends AbstractClientGUI
             }
         }
 
-        Map<String, BehaviorSettings> changedBots = rpd.getChangedBots();
         for (String botName : changedBots.keySet()) {
             StringBuilder message = new StringBuilder();
             util.changeBotSettings(changedBots.get(botName), botName, client, message);
             systemMessage(message.toString());
         }
 
-        Set<String> kickBotNames = rpd.getKickBots();
         for (String botName : kickBotNames) {
             StringBuilder message = new StringBuilder();
             util.kickBot(botName, client, message);

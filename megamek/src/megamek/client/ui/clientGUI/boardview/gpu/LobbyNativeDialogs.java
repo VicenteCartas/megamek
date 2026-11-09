@@ -24,6 +24,7 @@ import megamek.client.lobby.BuildingEditForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.ClientCommandForm;
+import megamek.client.lobby.EditBotsForm;
 import megamek.client.lobby.ForceNameRequest;
 import megamek.client.lobby.GameMasterPlayerSetup;
 import megamek.client.lobby.GameMasterUnitTools;
@@ -97,6 +98,7 @@ final class LobbyNativeDialogs {
     private LobbyPortraitView portraitView;
     private LobbyPlayerSettingsView settingsView;
     private LobbyBotSetupView botView;
+    private LobbyEditBotsView editBotsView;
     private LobbyConditionsView conditionsView;
     private LobbyGameOptionsView optionsView;
     private LobbyRandomMapView randomMapView;
@@ -219,6 +221,18 @@ final class LobbyNativeDialogs {
         botView = new LobbyBotSetupView(kit, dialog, form, bodyWidth(dialog, "dialog.lg"), host, this::close);
         show(dialog);
         return botView;
+    }
+
+    /**
+     * Opens the game's bots and dropped-out players as a card over the battle; each seat's bot settings open the bot
+     * setup over it.
+     */
+    LobbyEditBotsView editBots(EditBotsForm form, LobbyEditBotsView.Host host) {
+        UiDialog dialog = begin(Messages.getString("EditBotsDialog.native.title"), "dialog.lg", false,
+              () -> editBotsView = null);
+        editBotsView = new LobbyEditBotsView(kit, dialog, form, host, () -> closeDialog(dialog));
+        show(dialog);
+        return editBotsView;
     }
 
     /** Opens the planetary conditions. */
@@ -935,6 +949,10 @@ final class LobbyNativeDialogs {
 
     @Nullable LobbyBotSetupView botView() {
         return botView;
+    }
+
+    @Nullable LobbyEditBotsView editBotsView() {
+        return editBotsView;
     }
 
     @Nullable LobbyConditionsView conditionsView() {
