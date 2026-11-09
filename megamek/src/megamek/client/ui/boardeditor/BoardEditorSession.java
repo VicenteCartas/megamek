@@ -2329,7 +2329,9 @@ public final class BoardEditorSession {
             else if (!grabbed && items.size() > 1 && selection.size() == 1 && items.contains(selection.iterator().next())) {
                 selection.clear(); selection.add(hit);
             } else if (!grabbed) { selection.clear(); selection.addAll(items); }
-            selected = at; selectedObject = hit.object(); dragOrigin = grabbed ? at : null; dragX = x; dragY = y;
+            // An authored building's member hex is inspected, never dragged off: an emptied member removes the building.
+            boolean member = hit.object().isEmpty() && board().getHex(at).getBuildingReference() != null;
+            selected = at; selectedObject = hit.object(); dragOrigin = grabbed && !member ? at : null; dragX = x; dragY = y;
             movingObjects.clear();
             // Connected routes are edited by painting/erasing hexes, so a moving selection leaves its route markers in place.
             for (Selection item : selection) {

@@ -147,9 +147,11 @@ class GpuBattleView extends ApplicationAdapter {
     private final MeepleDebris.Ground debrisGround = this::debrisHeight;
     /**
      * What a collapse's pieces land on (GpuTerrain#advanceCollapses): the board as it stands, which no longer holds their
-     * structure; they look past nothing, so they land on the neighbours they fall onto.
+     * structure. Within the pile's own reach they look past a deck or building standing above their foot, as an authored
+     * building's standing shares do, which keep the tower's walls their cut gave them; beyond it they land on the
+     * neighbours they fall onto.
      */
-    private final MeepleDebris.Ground collapseGround = (x, y, from, own) -> debrisHeight(x, y, from, own, false);
+    private final MeepleDebris.Ground collapseGround = (x, y, from, own) -> debrisHeight(x, y, from, own, own);
     /** The units seen dead, in either camera: a meeple explodes only as its unit first shows dead. */
     private final Set<String> deadUnits = new HashSet<>();
     /** This frame's ghosts of exploded meeples ({@link #ghost}): the instances placed for them, by how much shows. */
@@ -2003,7 +2005,7 @@ class GpuBattleView extends ApplicationAdapter {
 
     /**
      * {@link #debrisHeight}, the pieces looking past what stands above where they started only with {@code past}: the
-     * pieces of a structure that came down land on the standing neighbours it falls onto ({@link #collapseGround}).
+     * pieces of a structure that came down look past only within their own reach ({@link #collapseGround}).
      */
     private float debrisHeight(float x, float y, float from, boolean own, boolean past) {
         var tile = BoardGeometry.tile(scene, x, y);
@@ -2031,9 +2033,7 @@ class GpuBattleView extends ApplicationAdapter {
      * change waits for the terrain to build the ground its moving parts start from (GpuTerrain#ready).
      */
     boolean preparePlaybackCamera(UnitPlayback state, BoardScene scene) {
-        var collapse = state.transition() == null || state.transition().collapses().isEmpty() ? null : state.transition();
-        if (!state.reviewing() && (state.movement() != null || state.attack() != null || state.detonation() != null
-              || collapse != null)) {
+        if (!state.reviewing() && (state.movement() != null || state.attack() != null || state.detonation() != null)) {
             boardCamera.beginPlayback();
         }
         if (state.movement() != null) {
@@ -2043,11 +2043,9 @@ class GpuBattleView extends ApplicationAdapter {
         } else if (state.detonation() != null) {
             var strike = state.detonation().result();
             boardCamera.frameLocation(BoardGeometry.center(strike.coords(), strike.elevation()), playbackCameraWidth());
-        } else if (collapse != null) {
-            // A structure comes down where the camera looks, once its pieces have taken its place.
-            boardCamera.frameLocation(GpuCollapse.middle(collapse), playbackCameraWidth());
-            return terrain.ready(collapse) && !boardCamera.isFraming();
         } else if (state.transition() != null) {
+            // A structure comes down, or an elevator moves, where it is: the camera stays where the player has it. The
+            // clock waits for the terrain to take what falls (GpuTerrain#ready).
             return terrain.ready(state.transition());
         } else {
             return true;
@@ -2132,17 +2130,17 @@ class GpuBattleView extends ApplicationAdapter {
         // Keep the last idle selection until the entire playback, including its completion hold, ends; a reviewed
         // attack is framed as a live one.
         if (playback.busy() || playback.reviewing()) {
+            // A structure coming down, or an elevator moving, leaves the camera where the player has it: no framing,
+            // and nothing to fly back to.
+            if (playback.transition() != null) {
+                cameraFollowingPlayback = false;
+                return;
+            }
             if (!playback.reviewing()) { boardCamera.beginPlayback(); }
             if (playback.detonation() != null) {
                 var strike = playback.detonation().result();
                 cameraFollowingPlayback = true;
                 boardCamera.frameLocation(BoardGeometry.center(strike.coords(), strike.elevation()), playbackCameraWidth());
-                return;
-            }
-            var transition = playback.transition();
-            if (transition != null && !transition.collapses().isEmpty()) {
-                cameraFollowingPlayback = true;
-                boardCamera.frameLocation(GpuCollapse.middle(transition), playbackCameraWidth());
                 return;
             }
             if (playback.movement() != null) {
@@ -3215,6 +3213,19 @@ class GpuBattleView extends ApplicationAdapter {
                     var object = terrain == null ? null : terrain.decorationHit(scene, boardCamera.camera.getPickRay(startX, startY,
                           0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight));
                     if (object != null) { source.editorPointer(object.coords(), 0, 0, false, object.id(), false, gestureBoardGeneration); }
+                } else if (!dragged && editorGrab != null && terrain != null) {
+                    // A click on the selected authored building selects its hex under the pointer (the hover ring's), on
+                    // that hex's Building layer, where it can be destroyed alone; a click on that hex selects the whole
+                    // building again, which a drag moves.
+                    var under = terrain.selectionHit(scene, boardCamera.camera.getPickRay(startX, startY, 0, 0,
+                          boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight));
+                    var tile = under == null ? null : scene.tile(under.coords());
+                    var member = tile == null ? null : tile.cover().reference();
+                    if (member != null && member.id().equals(editorGrab.id())) {
+                        source.editorCommand(new Command(Action.SELECT_AT, under.coords().getX() + "," + under.coords().getY(), ""),
+                              gestureBoardGeneration);
+                        source.editorCommand(new Command(Action.COMPONENT, "", "building"), gestureBoardGeneration);
+                    }
                 }
                 source.endEditorStroke();
                 reset();

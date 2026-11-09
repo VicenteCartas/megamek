@@ -1262,6 +1262,8 @@ final class GpuTerrain implements Disposable {
     private final Vector3 wind = new Vector3();
     // Pure CPU geometry may follow model lifetime; native meshes always have explicit render-thread owners.
     private final Map<Model, List<Vector3>> featureTriangles = new java.util.WeakHashMap<>();
+    /** {@link #featureTriangles} of the larger models bucketed for vertical rays ({@link TriangleGrid}). */
+    private final Map<Model, TriangleGrid> featureGrids = new java.util.WeakHashMap<>();
     private final BoundingBox shadowBounds = new BoundingBox();
     private final UnitBounds.Frame frameBounds;
     private List<BoardScene.Tile> tiles;
@@ -9223,14 +9225,66 @@ final class GpuTerrain implements Disposable {
                   new Vector3(ray.direction).rot(inverse));
             boolean found = prop.building != null ? prop.building.hit(local, hit)
                   : isFlag(prop) ? Intersector.intersectRayTriangles(local, triangles(prop.instance().model), hit)
-                  : Intersector.intersectRayTriangles(local, prop.pickingTriangles != null ? prop.pickingTriangles
-                        : featureTriangles.computeIfAbsent(prop.pickingModel, GpuTerrain::triangles), hit);
+                  : Intersector.intersectRayTriangles(local, pickingTriangles(prop, local), hit);
             if (found) {
                 hit.mul(prop.instance().transform);
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * The prop's picking triangles {@code local}, its ray in model space, can meet: for a vertical ray, as falling pieces
+     * and placement cast them, only those over its point (TriangleGrid), so an authored building share's thousands are not
+     * all tested for every piece, every step.
+     */
+    private List<Vector3> pickingTriangles(Prop prop, Ray local) {
+        if (prop.pickingTriangles != null) { return prop.pickingTriangles; }
+        var triangles = featureTriangles.computeIfAbsent(prop.pickingModel, GpuTerrain::triangles);
+        if (triangles.size() < TriangleGrid.LEAST * 3 || Math.abs(local.direction.x) > 1e-6f
+              || Math.abs(local.direction.y) > 1e-6f) { return triangles; }
+        return featureGrids.computeIfAbsent(prop.pickingModel, model -> TriangleGrid.of(triangles))
+              .at(local.origin.x, local.origin.y);
+    }
+
+    /**
+     * Triangles bucketed by their extent seen from above: a vertical ray at (x, y) meets only those of its cell, in their
+     * order, and so finds the same nearest hit as against them all.
+     */
+    private record TriangleGrid(float minX, float minY, float cell, int columns, int rows, List<List<Vector3>> cells) {
+        /** Fewer triangles than this are tested as they are. */
+        static final int LEAST = 256;
+        /** Cells along the longer side. */
+        private static final int SIDE = 24;
+
+        static TriangleGrid of(List<Vector3> triangles) {
+            var bounds = new BoundingBox().inf();
+            triangles.forEach(bounds::ext);
+            float cell = Math.max(Math.max(bounds.getWidth(), bounds.getHeight()) / SIDE, 1e-3f);
+            int columns = (int) Math.floor(bounds.getWidth() / cell) + 1, rows = (int) Math.floor(bounds.getHeight() / cell) + 1;
+            List<List<Vector3>> cells = new ArrayList<>(columns * rows);
+            for (int i = 0; i < columns * rows; i++) { cells.add(new ArrayList<>()); }
+            for (int i = 0; i + 2 < triangles.size(); i += 3) {
+                Vector3 a = triangles.get(i), b = triangles.get(i + 1), c = triangles.get(i + 2);
+                int c0 = (int) Math.floor((Math.min(a.x, Math.min(b.x, c.x)) - bounds.min.x) / cell);
+                int c1 = (int) Math.floor((Math.max(a.x, Math.max(b.x, c.x)) - bounds.min.x) / cell);
+                int r0 = (int) Math.floor((Math.min(a.y, Math.min(b.y, c.y)) - bounds.min.y) / cell);
+                int r1 = (int) Math.floor((Math.max(a.y, Math.max(b.y, c.y)) - bounds.min.y) / cell);
+                for (int row = Math.max(0, r0); row <= Math.min(rows - 1, r1); row++) {
+                    for (int column = Math.max(0, c0); column <= Math.min(columns - 1, c1); column++) {
+                        var list = cells.get(row * columns + column);
+                        list.add(a); list.add(b); list.add(c);
+                    }
+                }
+            }
+            return new TriangleGrid(bounds.min.x, bounds.min.y, cell, columns, rows, cells);
+        }
+
+        List<Vector3> at(float x, float y) {
+            int column = (int) Math.floor((x - minX) / cell), row = (int) Math.floor((y - minY) / cell);
+            return column < 0 || row < 0 || column >= columns || row >= rows ? List.of() : cells.get(row * columns + column);
+        }
     }
 
     /** Where {@link #hitProp} casts again, in turn, when its ray finds nothing: the ray itself first. */
@@ -10395,5 +10449,6 @@ final class GpuTerrain implements Disposable {
         waterExposure.dispose();
         lavaOcean.dispose();
         featureTriangles.clear();
+        featureGrids.clear();
     }
 }
