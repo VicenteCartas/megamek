@@ -26,8 +26,8 @@ import megamek.common.units.UnitRole;
 import megamek.common.units.UnitType;
 
 /**
- * What the lobby's Requisition view offers: the units the game's rules allow, as the unit selector dialog
- * ({@code MegaMekUnitSelectorDialog}) reads them (its year, tech level, era-based levels, canon only and invalid units),
+ * What the Requisition offers: the units the game's rules allow (its year, tech level, era-based levels, canon only
+ * and invalid units),
  * narrowed to a category, the Commander's filters and a search, sorted by name. It needs no toolkit, so it can run on
  * any thread; the view filters on a thread of its own.
  */

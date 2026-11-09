@@ -134,7 +134,6 @@ import megamek.client.ui.dialogs.phaseDisplay.NovaNetworkViewDialog;
 import megamek.client.ui.dialogs.randomArmy.RandomArmyDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
-import megamek.client.ui.dialogs.unitSelectorDialogs.MegaMekUnitSelectorDialog;
 import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.panels.CommonSettingsPane;
 import megamek.client.ui.panels.ReceivingGameDataPanel;
@@ -226,6 +225,7 @@ public class ClientGUI extends AbstractClientGUI
     // unit list submenu
     public static final String FILE_UNITS_REINFORCE = "fileUnitsReinforce";
     public static final String FILE_UNITS_REINFORCE_RAT = "fileUnitsReinforceRAT";
+    public static final String FILE_UNITS_REINFORCE_REQUISITION = "fileUnitsReinforceRequisition";
     public static final String FILE_REFRESH_CACHE = "fileRefreshCache";
     public static final String FILE_REBUILD_CACHE = "fileRebuildCache";
     public static final String FILE_UNITS_OPEN = "fileUnitsOpen";
@@ -394,7 +394,6 @@ public class ClientGUI extends AbstractClientGUI
     // some dialogs...
     private GameOptionsDialog gameOptionsDialog;
     private NetworkInformationDialog networkInformationDialog;
-    private MegaMekUnitSelectorDialog mekSelectorDialog;
     private PlayerListDialog playerListDialog;
     private RoundsInAirDialog roundsInAirDialog;
     private RandomArmyDialog randomArmyDialog;
@@ -1353,13 +1352,6 @@ public class ClientGUI extends AbstractClientGUI
         if (getForceDisplayDialog() != null) {
             getForceDisplayDialog().setLocation(0, 0);
         }
-        if (getMekSelectorDialog() != null) {
-            // This one reads the GUIP every time it goes visible, so need to set those directly.
-            GUIP.setMekSelectorSizeHeight(getMekSelectorDialog().getHeight());
-            GUIP.setMekSelectorSizeWidth(getMekSelectorDialog().getWidth());
-            GUIP.setMekSelectorPosX(0);
-            GUIP.setMekSelectorPosY(0);
-        }
         if (getRoundsInAirDialog() != null) {
             getRoundsInAirDialog().setBounds(0,
                                              0,
@@ -1496,13 +1488,21 @@ public class ClientGUI extends AbstractClientGUI
                 }
                 ignoreHotKeys = false;
                 break;
+            case FILE_UNITS_REINFORCE_REQUISITION:
+                if (client.getLocalPlayer().getTeam() == Player.TEAM_UNASSIGNED) {
+                    addToast(ToastLevel.ERROR,
+                          Messages.getString("ClientGUI.openUnitListFileDialog.noReinforceMessage"));
+                    return;
+                }
+                if (!GpuBoardWindow.showRequisition(this, null)) {
+                    logger.warn("No battle window to show the Requisition over");
+                }
+                break;
             case FILE_REFRESH_CACHE:
                 refreshUnitCache();
-                refreshMekSelector();
                 break;
             case FILE_REBUILD_CACHE:
                 rebuildUnitCache();
-                refreshMekSelector();
                 break;
             case VIEW_CLIENT_SETTINGS:
                 showSettings();
@@ -1885,22 +1885,6 @@ public class ClientGUI extends AbstractClientGUI
             networkInformationDialog = new NetworkInformationDialog(this);
         }
         return networkInformationDialog;
-    }
-
-    public MegaMekUnitSelectorDialog getMekSelectorDialog() {
-        if (mekSelectorDialog == null) {
-            UnitLoadingDialog unitLoadingDialog = new UnitLoadingDialog(frame);
-            unitLoadingDialog.setVisible(true);
-            mekSelectorDialog = new MegaMekUnitSelectorDialog(this, unitLoadingDialog);
-            refreshMekSelector();
-        }
-        return mekSelectorDialog;
-    }
-
-    private void refreshMekSelector() {
-        if (mekSelectorDialog != null) {
-            new Thread(mekSelectorDialog, Messages.getString("ClientGUI.mekSelectorDialog")).start();
-        }
     }
 
     public void switchPanel(GamePhase phase) {

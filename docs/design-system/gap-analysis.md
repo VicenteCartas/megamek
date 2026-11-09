@@ -1569,13 +1569,21 @@ work for Swing, and item 11 is under investigation.
          - Checks: `MapNoteFormTest`, `ClientCommandFormTest`, `GameMasterPlayerSetupTest`, `BuildingEditFormTest`,
          `HexBrushTest`, `LobbyGameMasterTest`, `GameMasterCardsSmokeTest`.
        - The board's remaining Swing dialogs, the `SWING_DIALOGS` allowlist (R6/U2), by size of the port:
-         - Medium: the reinforcement unit selector (`MegaMekUnitSelectorDialog`) and its `UnitLoadingDialog`, Edit
-           Bots (`EditBotsDialog`) and a bot's settings (`BotConfigDialog`), the Nova network view
+         - Medium: Edit Bots (`EditBotsDialog`) and a bot's settings (`BotConfigDialog`), the Nova network view
            (`NovaNetworkViewDialog`), Network information (`NetworkInformationDialog`) and the accessibility window
            (`AccessibilityDialog`).
+         - Small: the cache progress (`UnitLoadingDialog`) behind File > Refresh and Rebuild Unit Cache.
          - Big: Client Settings (`CommonSettingsDialog`, several PRs; also the map editor's), and the map editor's
            About.
          - Developer only: the conditions editor behind the Tuning utility (`PlanetaryConditionsDialog`).
+       - Done: the Game Master's reinforcements come from the lobby's Requisition, shown as a card over the battle
+         (`GpuBattleRequisition`): from Reinforce from the Requisition in the Game Master menu, or from the player
+         setup for that player. It offers the players `UnitRecipients` allows in game, refreshes as players and
+         units change, and its units arrive next round as reinforcements (`Reinforcements.prepare`, now also in
+         `LobbyCommands.addUnits`). Added units show as plain chips, since a sent reinforcement is not taken back
+         from the card. Its Load list and Random army sources open the unit file chooser and the native Force
+         Generator. The Swing `MegaMekUnitSelectorDialog` is deleted. Covered by `LobbyCommandsTest`,
+         `GameMasterCardsSmokeTest` and `LobbyRecipientSmokeTest`.
        - The "Save First?" question when leaving a battle is native since #39.
        - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
          thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser
