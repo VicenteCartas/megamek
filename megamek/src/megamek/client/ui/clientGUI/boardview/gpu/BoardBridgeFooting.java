@@ -464,15 +464,14 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
             // A level road landing on a natural bank that falls away below its edge stands on an abutment (Enhanced). Set
             // into a bank that is no cliff (#abutted) wherever the ground falls under the deck's end; where that bank never
             // firms up under the terminal blocks, as on a neck between cliffs, the abutment carries them. Otherwise
-            // (!BRIDGE_CONCRETE_ABUTMENT_ON_SLOPES) only where the bank's corners fall away: over a cliff's drop the cliff
-            // itself comes out under the deck's end (BoardRelief#ends).
+            // (!BRIDGE_CONCRETE_ABUTMENT_ON_SLOPES) only where the bank's corners fall away and it is no cliff (#incline):
+            // over a cliff's drop the cliff itself comes out under the deck's end (BoardRelief#ends).
             float underside = gate.z - BoardBridge.SLAB * scale;
             boolean seated = !columns && abutted(tile, next, d) && falls(List.of(ground,
                   ground(scene, tile, lod, surfaces, columns).foundation()), underside, along, -BoardRelief.metres(.5f),
                   start[0], start[1], new Vector3(start[1]).lerp(start[2], .5f), start[2], start[3]);
             boolean abutment = seated || !BRIDGE_CONCRETE_ABUTMENT_ON_SLOPES && !bare && !ramp && !columns
-                  && gate.z - BoardGeometry.groundZ(tile) <= 2.5f * BoardGeometry.level()
-                  && next.surface() != BoardScene.Surface.CONCRETE
+                  && incline(tile, next, d) && next.surface() != BoardScene.Surface.CONCRETE
                   && falls(List.of(ground), underside, along, BoardRelief.metres(.5f), start[0], start[3]);
             if (seated && !firm) { reach = BoardRelief.metres(1); }
             float length = block.size().y * scale;
@@ -712,11 +711,9 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
 
     /**
      * Whether the tile's built deck lands toward {@code d} level on its natural bank {@code next}, by its road, where the
-     * bank falls to the deck's hex as no cliff: at most two levels above its surface and no cliff-top side
-     * ({@link BoardRim#high}), and at most three down to its ground or bed ({@link BoardRelief#levels}); a bank a level
-     * above water two deep is no cliff, a sea cliff is. The deck's end stands on a concrete abutment wherever the ground
-     * falls away below it, and the bank's step keeps its place round it rather than coming out under the deck's end
-     * (BoardRelief#push). A cliff stays natural rock. Never without {@link #BRIDGE_CONCRETE_ABUTMENT_ON_SLOPES}. Scene
+     * bank falls to the deck's hex as no cliff ({@link #incline}). The deck's end stands on a concrete abutment wherever
+     * the ground falls away below it, and the bank's step keeps its place round it rather than coming out under the deck's
+     * end (BoardRelief#push). A cliff stays natural rock. Never without {@link #BRIDGE_CONCRETE_ABUTMENT_ON_SLOPES}. Scene
      * data only.
      */
     static boolean abutted(BoardScene.Tile tile, BoardScene.Tile next, int d) {
@@ -724,7 +721,16 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
               && BoardBridge.bank(tile, next, d) && BoardBridge.road(tile, next, d) && !BoardBridge.guideway(tile)
               && BoardBridge.family(tile) != BoardBridge.Family.NATURAL && next.surface() != BoardScene.Surface.CONCRETE
               && BoardRoadGrade.ground(next) == tile.elevation() + BoardBridge.feature(tile).elevation()
-              && !BoardRim.high(next, (d + 3) % 6, next.groundLevel() - tile.groundLevel())
+              && incline(tile, next, d);
+    }
+
+    /**
+     * Whether the bank {@code next} falls to the tile toward {@code d} as no cliff: at most two levels above its surface
+     * and no cliff-top side ({@link BoardRim#high}), and at most three down to its ground or bed
+     * ({@link BoardRelief#levels}); a bank a level above water two deep is no cliff, a sea cliff is.
+     */
+    private static boolean incline(BoardScene.Tile tile, BoardScene.Tile next, int d) {
+        return !BoardRim.high(next, (d + 3) % 6, next.groundLevel() - tile.groundLevel())
               && BoardRelief.levels(next, tile) <= 3;
     }
 
