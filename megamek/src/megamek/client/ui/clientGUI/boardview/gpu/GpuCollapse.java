@@ -28,8 +28,11 @@ import megamek.logging.MMLogger;
  */
 final class GpuCollapse implements Disposable {
     private static final MMLogger LOGGER = MMLogger.create(GpuCollapse.class);
-    /** Playback seconds its pieces lie at rest before they sink, and how long they take to sink. */
-    static final float REST_SECONDS = 2.5f, SINK_SECONDS = 1.6f;
+    /**
+     * Playback seconds its pieces lie at rest before they sink, and how long they take to sink: as the kit structures'
+     * pieces (GpuDestruction), as fast as a mek's death (user, 2026-11-09).
+     */
+    static final float REST_SECONDS = GpuDestruction.REST_SECONDS, SINK_SECONDS = GpuDestruction.SINK_SECONDS;
     /** Playback seconds after which pieces still rocking count as settled, as at zero gravity. */
     private static final float LONGEST_FALL = 6;
     /** How long the dust of the foot giving way, its column and a piece's landing last, in playback seconds. */
@@ -177,6 +180,9 @@ final class GpuCollapse implements Disposable {
         debris.sink(UnitAttack.smooth(sinking()));
         debris.pose();
     }
+
+    /** Whether its pieces have come down and settled, or never fell: the rubble under them may show (GpuDestruction#landed). */
+    boolean settled() { return failed || !Float.isNaN(settled); }
 
     /** How far its pieces have sunk away, 0 to 1. */
     private float sinking() {

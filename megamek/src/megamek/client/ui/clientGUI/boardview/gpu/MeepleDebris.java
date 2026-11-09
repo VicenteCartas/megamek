@@ -55,9 +55,10 @@ final class MeepleDebris {
     private static final float TOPPLE_OUT = 2.5f, CRUSH = 30;
     /**
      * A deck breaks from where it fails across its whole length in this many seconds, each piece turning down about its
-     * far end at this many radians per second.
+     * far end at this many radians per second: down within a second, as fast as a mek's death (user, 2026-11-09: "5.5sec
+     * for a bridge to collapse seems slow").
      */
-    private static final float SPAN_RELEASE = .3f, HINGE = 2.5f;
+    private static final float SPAN_RELEASE = .12f, HINGE = 5;
     /**
      * The strongest hit's push at full strength, in world units per second, more on its side and higher up, and the
      * spin it topples the pieces with: they fall away from it, without flying off.

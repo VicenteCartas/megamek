@@ -58,6 +58,11 @@ final class GpuDestruction implements Disposable {
     static final float GRAVITY = 450, GROUND_DRAG = 24, GROUND_SPIN_DRAG = 16;
     /** A pile rests this long once the terrain shows the rubble under it, then sinks into it over SINK_SECONDS. */
     static final float REST_SECONDS = 1.5f, SINK_SECONDS = .6f;
+    /**
+     * The rubble the rules leave rises out of the ground over this long (#rubble), from as its last pieces touch down,
+     * RISE_LEAD before its pile has settled (#settles): not before its pieces are down (user, 2026-11-09).
+     */
+    static final float RISE_SECONDS = .4f, RISE_LEAD = .3f;
     /** A time that never comes: standing, or not sinking. */
     private static final float NEVER = 1e9f;
     /** The longest a piece falls before its pile rests, as at zero gravity, where it would drift on. */
@@ -83,7 +88,8 @@ final class GpuDestruction implements Disposable {
               + "\n#define FALL_PUSH " + PUSH + "\n#define FALL_TOPPLE " + TOPPLE + "\n#define FALL_LOAD_DROP " + LOAD_DROP
               + "\n#define FALL_GROUND_DRAG " + GROUND_DRAG + "\n#define FALL_GROUND_SPIN_DRAG " + GROUND_SPIN_DRAG
               + "\n#define FALL_SINK " + SINK_SECONDS + "\n#define FALL_RELEASE_SPAN " + RELEASE_SPAN
-              + "\n#define FALL_SECONDS " + FALL_SECONDS + "\n#define FALL_PILE_LEVELS " + PILE_LEVELS + "\n";
+              + "\n#define FALL_SECONDS " + FALL_SECONDS + "\n#define FALL_PILE_LEVELS " + PILE_LEVELS
+              + "\n#define FALL_RISE " + RISE_SECONDS + "\n#define FALL_RISE_LEAD " + (REST_SECONDS + RISE_LEAD) + "\n";
     }
 
     /** A felled tree: its species, where it stands and its size (GpuTreeInstances.Stand#add). */
@@ -109,6 +115,8 @@ final class GpuDestruction implements Disposable {
          * zero, and how much later than it the front takes its last piece.
          */
         float lead, spread;
+        /** No structure falls here: its hex's rubble waits for the old path's pieces to land (#landed). */
+        boolean rubbleOnly;
 
         Fall(Coords coords, int slot, Array<Renderable> pieces, Set<GpuBuilding.Assembly> buildings, List<Tree> trees,
               Set<BoardScene.Feature> features, BoundingBox bounds) {
@@ -183,6 +191,7 @@ final class GpuDestruction implements Disposable {
         int broken = 0, all = 0;
         for (Fall fall : falls.values()) {
             for (Renderable piece : fall.pieces) {
+                if (piece.userData == GpuInstancedMesh.RUBBLE) { continue; }
                 all++;
                 if (piece.userData instanceof GpuInstancedMesh.Fragments) { broken++; }
             }
@@ -256,6 +265,42 @@ final class GpuDestruction implements Disposable {
         }
     }
 
+    /**
+     * The rubble the rules left where the hex's structure fell, scenery its chunk does not draw while the hex is taken:
+     * out of sight under the ground until the pieces are down, then risen into place as they settle, before they sink
+     * into it (tree-instances.glsl). A hex the old path breaks (GpuCollapse) has no fall here: its rubble waits for
+     * {@link #landed}. It replaces the rubble given before.
+     */
+    void rubble(Coords at, Array<Renderable> pieces, BoundingBox bounds, float middleX, float middleY) {
+        Fall fall = falls.get(at);
+        if (fall == null) {
+            // No chunk snapshot leaves anything out for it: no revision.
+            fall = new Fall(at, freeSlot(), new Array<>(), Set.of(), List.of(), Set.of(), new BoundingBox(bounds));
+            fall.rubbleOnly = true;
+            site(fall, bounds, middleX, middleY, new Vector2(), 0);
+            falls.put(at, fall);
+        }
+        for (int index = fall.pieces.size - 1; index >= 0; index--) {
+            if (fall.pieces.get(index).userData == GpuInstancedMesh.RUBBLE) { fall.pieces.removeIndex(index); }
+        }
+        for (Renderable piece : pieces) { piece.userData = GpuInstancedMesh.RUBBLE; }
+        fall.pieces.addAll(pieces);
+        write(fall);
+        changed = true;
+    }
+
+    /** The old path's pieces at the hex are down (GpuCollapse): its rubble rises now. */
+    void landed(Coords at) {
+        Fall fall = falls.get(at);
+        if (fall == null || !fall.rubbleOnly || fall.start < NEVER) { return; }
+        fall.start = clock;
+        fall.gone = Math.min(fall.gone, clock);
+        write(fall);
+    }
+
+    /** The hexes whose structures lie as pieces, or wait for their rubble ({@link #rubble}). */
+    Set<Coords> fallen() { return new HashSet<>(falls.keySet()); }
+
     /** The hex's structure gives way {@code delay} playback seconds from now, unless it already has. */
     void start(Coords at, float delay) { start(falls.get(at), delay); }
 
@@ -296,6 +341,8 @@ final class GpuDestruction implements Disposable {
      */
     private float settles(Fall fall) {
         if (!fall.trees.isEmpty()) { return fall.start + fall.spread + TREE_FALL_SECONDS; }
+        // Landed already (#landed): its rubble rises from now.
+        if (fall.rubbleOnly) { return fall.start + RISE_LEAD; }
         float level = Math.max(1e-3f, BoardGeometry.level()), height = Math.max(fall.bounds.getDepth(), level);
         // The shader's gravity: at least what brings the top down within FALL_SECONDS.
         float pull = Math.max(gravity, 2 * height / (FALL_SECONDS * FALL_SECONDS));
@@ -345,7 +392,8 @@ final class GpuDestruction implements Disposable {
      */
     void dust(GpuExplosionEffects effects) {
         List<Fall> started = new ArrayList<>();
-        for (Fall fall : falls.values()) { if (clock >= fall.start) { started.add(fall); } }
+        // The old path's collapses raise their own dust (GpuCollapse).
+        for (Fall fall : falls.values()) { if (clock >= fall.start && !fall.rubbleOnly) { started.add(fall); } }
         if (started.isEmpty()) { return; }
         float hex = BoardGeometry.height() * .5f;
         if (started.size() <= ALONE) {

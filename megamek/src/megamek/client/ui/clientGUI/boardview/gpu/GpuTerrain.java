@@ -3556,6 +3556,7 @@ final class GpuTerrain implements Disposable {
             var tile = coverScene.tile(at);
             return tile != null && tile.features().stream().anyMatch(trees::contains);
         });
+        takeRubble();
         // A chunk finished before structures came down (or were restored) draws them as they are now.
         for (Chunk chunk : chunks) {
             if (chunk.fallsRevision != destruction.revision()) { refall(chunk); }
@@ -7564,7 +7565,10 @@ final class GpuTerrain implements Disposable {
         presentFalls(transition, progress);
         collapsing.removeIf(fall -> {
             boolean dropped = fall.transition() != transition && !fall.collapse().started();
-            if (dropped) { fall.collapse().dispose(); }
+            if (dropped) {
+                fall.collapse().dispose();
+                destruction.landed(fall.coords());
+            }
             return dropped;
         });
         for (Collapsing fall : collapsing) {
@@ -7730,6 +7734,43 @@ final class GpuTerrain implements Disposable {
         }
     }
 
+    /**
+     * The rubble the rules leave where a structure fell, scenery the installed scene now draws on its hex, waits out of
+     * sight under the falling pieces and rises once they are down (GpuDestruction#rubble): at the falls' hexes and at
+     * those of the old path's collapses, whose pieces say when they land (#advanceCollapses). Its chunk draws it again
+     * once its fall is over.
+     */
+    private void takeRubble() {
+        Set<Coords> fallen = destruction.fallen();
+        for (Collapsing fall : collapsing) { fallen.add(fall.coords()); }
+        for (Coords at : fallen) {
+            int index = at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE;
+            if (at.getX() < 0 || at.getY() < 0 || index >= chunks.size()) { continue; }
+            TileMesh mesh = chunks.get(index).tileMeshes.get(at);
+            var tile = coverScene.tile(at);
+            if (mesh == null || tile == null) { continue; }
+            Array<Renderable> pieces = new Array<>();
+            BoundingBox bounds = new BoundingBox().inf();
+            Map<Material, Material> copies = new IdentityHashMap<>();
+            for (Prop prop : mesh.props) {
+                if (!rubble(prop) || rising.contains(prop)) { continue; }
+                ModelInstance drawn = prop.instance();
+                for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces, null); }
+                rising.add(prop);
+                bounds.ext(prop.bounds());
+            }
+            if (pieces.isEmpty()) { continue; }
+            var middle = BoardGeometry.center(at, tile.elevation());
+            destruction.rubble(at, pieces, bounds, middle.x, middle.y);
+        }
+    }
+
+    /** Rubble the rules leave where a structure fell: scenery its terrain owns (BoardFeatures#features), no object placed. */
+    private static boolean rubble(Prop prop) {
+        var feature = prop.decorationFeature;
+        return feature != null && feature.kind() == BoardScene.FeatureKind.SCENERY && feature.decoration() == null;
+    }
+
     /** A falling piece's copy of a drawn material: solid, whatever fade or hover cut its building wore, from both sides. */
     private static Material fallMaterial(Material drawn) {
         var copy = new Material(drawn);
@@ -7750,6 +7791,7 @@ final class GpuTerrain implements Disposable {
         if (destruction.revision() != before) {
             stampFalls();
             carried.removeIf(prop -> !destruction.taken(prop.coords));
+            rising.removeIf(prop -> !destruction.taken(prop.coords));
         }
     }
 
@@ -8227,6 +8269,8 @@ final class GpuTerrain implements Disposable {
             fall.collapse().advance(seconds, ownGround(fall.coords(), ground), gravity);
             boolean done = fall.collapse().done();
             if (done) { fall.collapse().dispose(); }
+            // Its pieces down, the rubble under them rises (#takeRubble).
+            if (done || fall.collapse().settled()) { destruction.landed(fall.coords()); }
             return done;
         });
     }
@@ -9828,11 +9872,18 @@ final class GpuTerrain implements Disposable {
      * Whether this pass draws this prop: what the zoom shows ({@link #shown}). No packed prop is small: only placed
      * objects are, and they are never packed.
      */
+    /**
+     * Rubble the rules left where a structure fell, which its chunk does not draw while its hex's fall lasts: it rises
+     * out of the ground once the pieces are down (#takeRubble). Its shadow stays in the cached map, under the pile.
+     */
+    private final Set<Prop> rising = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+
     /** Objects that stood on a falling structure (a helipad, roof fittings): they fall with it, as its pieces. */
     private final Set<Prop> carried = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
 
     private boolean drawn(Prop prop, boolean shadows) {
         if (!carried.isEmpty() && carried.contains(prop) && destruction.taken(prop.coords)) { return false; }
+        if (!shadows && !rising.isEmpty() && rising.contains(prop) && destruction.taken(prop.coords)) { return false; }
         if (!Float.isNaN(prop.floorZ) && chunks.get(prop.coords.getX() / CHUNK_SIZE * chunkRows
               + prop.coords.getY() / CHUNK_SIZE).hiddenInteriors.contains(prop.coords)) { return false; }
         return !replaced(prop) && shown(prop, shadows);

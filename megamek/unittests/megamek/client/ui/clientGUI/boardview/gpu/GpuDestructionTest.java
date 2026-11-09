@@ -78,6 +78,26 @@ class GpuDestructionTest {
         assertFalse(destruction.taken(HEX));
     }
 
+    /**
+     * Rubble where the old path broke a structure (a bridge's span) stays out of its chunk, risen by its slot, until its
+     * pieces land, however long they take; then it rises, and its chunk draws it again once the slot has rested and gone.
+     */
+    @Test
+    void rubbleWaitsForTheOldPathsPiecesToLand() {
+        var destruction = new GpuDestruction(new GpuLavaLighting(null), (name, level) -> null);
+        var bounds = new BoundingBox(new Vector3(-20, -20, 0), new Vector3(20, 20, 6));
+        destruction.rubble(HEX, new Array<Renderable>(), bounds, 0, 0);
+        destruction.committed(at -> false, (at, trees) -> true);
+        run(destruction, 30);
+        assertTrue(destruction.taken(HEX), "Its rubble waits under the ground while the pieces are in the air");
+        destruction.landed(HEX);
+        run(destruction, GpuDestruction.RISE_SECONDS);
+        assertTrue(destruction.taken(HEX), "Risen, it lies under the pieces as they rest");
+        run(destruction, GpuDestruction.REST_SECONDS + GpuDestruction.SINK_SECONDS);
+        assertFalse(destruction.taken(HEX), "Its chunk draws it again");
+        assertTrue(destruction.isEmpty());
+    }
+
     /** The terrain may show the rubble before the structure gives way (its transition still framing): it sinks after. */
     @Test
     void rubbleShownBeforeTheFallStillLetsItsPileSink() {

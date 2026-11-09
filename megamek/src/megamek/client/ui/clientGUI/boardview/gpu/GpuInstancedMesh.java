@@ -30,7 +30,9 @@ final class GpuInstancedMesh extends Mesh {
      * then {@link #FELLED} or {@link #STANDING}. Null for every other batch, which nothing moves.
      */
     float[] piece;
-    static final float PIECES = 1, FELLED = 2, STANDING = 3;
+    static final float PIECES = 1, FELLED = 2, STANDING = 3, RISES = 4;
+    /** A piece's userData that makes it rubble rising out of the ground under its hex's pile ({@link #RISES}). */
+    static final Object RUBBLE = new Object();
     /** The floats of {@link #piece} before a broken part's fragments' table (KitFragments). */
     static final int PIECE = 7;
 
@@ -51,7 +53,7 @@ final class GpuInstancedMesh extends Mesh {
         result[3] = part.halfExtents.x;
         result[4] = part.halfExtents.y;
         result[5] = part.halfExtents.z;
-        result[6] = PIECES;
+        result[6] = sample.userData == RUBBLE ? RISES : PIECES;
         System.arraycopy(table, 0, result, PIECE, table.length);
         return result;
     }

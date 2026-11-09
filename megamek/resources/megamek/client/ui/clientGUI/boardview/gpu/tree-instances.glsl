@@ -128,15 +128,28 @@ void treeFall(vec4 fall, vec4 site, vec4 tail) {
     fallShift = a_instance0.xyz - vec3(0.0, 0.0, (site.w - site.z) * .7 * sinking * sinking * (3.0 - 2.0 * sinking));
 }
 
+// Rubble the rules left where a structure fell (GpuDestruction#rubble): out of sight under the ground until its pieces
+// are down, then it rises into place as they settle, before they sink into it. Its slot's sink time says when.
+void riseBegin(float sinks) {
+    float rise = clamp((u_destruct.x - sinks + FALL_RISE_LEAD) / FALL_RISE, 0.0, 1.0);
+    if (rise >= 1.0) { return; }
+    falling = true;
+    fallTurn = mat3(1.0);
+    fallPivot = vec3(0.0);
+    float depth = 2.0 * abs(u_pieceHalf.z * instanceScale().z) + .25 * u_destruct.z;
+    fallShift = vec3(0.0, 0.0, -depth * (1.0 - rise * rise * (3.0 - 2.0 * rise)));
+}
+
 // A tree's LOD dissolve (GpuTreeInstances.Stand#detail): a falling tree's instance holds its slot instead, and none.
 float instanceDissolve() {
     return abs(u_piece.w - 2.0) < .5 ? 0.0 : a_instance1.w;
 }
 
 void fallBegin() {
-    if (u_piece.w > 2.5) { swayBegin(); return; }
+    if (abs(u_piece.w - 3.0) < 0.5) { swayBegin(); return; }
     if (u_destructSlots.y == 0 || u_piece.w < 0.5 || a_instance1.w < 0.5) { return; }
     int texel = u_destructSlots.x + (int(a_instance1.w + 0.5) - 1) * FALL_TEXELS;
+    if (u_piece.w > 3.5) { riseBegin(texelFetch(u_lavaLights, lavaTexel(texel + 2), 0).x); return; }
     vec4 fall = texelFetch(u_lavaLights, lavaTexel(texel), 0);     // start, flags, push away from the hit
     float clock = u_destruct.x;
     if (clock < fall.x) { return; }

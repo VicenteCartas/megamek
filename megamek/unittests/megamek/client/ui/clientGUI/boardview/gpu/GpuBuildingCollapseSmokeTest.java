@@ -41,8 +41,11 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuBuildingCollapseSmokeTest {
     private static final float FRAME = 1 / 60f;
-    /** Frames after the swap the review captures: about .3 to 3 real seconds at 1x. */
-    private static final int[] CAPTURES = { 0, 18, 36, 54, 78, 108, 150, 200 };
+    /**
+     * Frames after the swap the review captures, at 1x: the fall over about .3 to 3 real seconds, then its pile on the
+     * rubble risen under it, and sinking into it.
+     */
+    private static final int[] CAPTURES = { 0, 18, 36, 54, 78, 108, 150, 200, 260, 330, 380 };
 
     /** A structure brought down at {@code at} and, in the same capture, at {@code more}. */
     private record Scenario(String name, Coords at, boolean ac20, Coords... more) { }
