@@ -979,6 +979,11 @@ class GpuBattleView extends ApplicationAdapter {
             // What it brings down falls with its front; Instant shows only the outcome.
             if (history.speed() != UnitMotion.Speed.INSTANT) { terrain.strike(detonation); }
         }
+        // A nuclear round fired in combat: what its attack brought down falls with its front (GpuTerrain#strike); Instant
+        // and a review show only the outcome.
+        attackEffects.artilleryStrikes((result, landing) -> {
+            if (history.speed() != UnitMotion.Speed.INSTANT && !playback.reviewing()) { terrain.strike(result, landing); }
+        });
         // Blasts run on the playback clock: they pause with it and follow its speed, at 1x in real time.
         float blastSeconds = animationSeconds() * GpuArtilleryBlast.SECONDS_PER_PLAYBACK;
         attackEffects.advance(blastSeconds);

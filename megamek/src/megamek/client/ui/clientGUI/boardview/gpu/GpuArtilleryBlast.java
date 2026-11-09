@@ -253,6 +253,8 @@ final class GpuArtilleryBlast {
         boolean orbital;
         /** Its scorch has been handed to the terrain (scorches). */
         boolean scorched;
+        /** Its attack's collapses have been handed to the terrain (strikes). */
+        boolean struck;
 
         Blast(Vector3 ground, @Nullable Vector3 opening, @Nullable ResolvedAttack.Shot profile,
               @Nullable UnitAttack attack, int key, AreaEffectHelper.FuelAirStrength fuelAirStrength,
@@ -733,6 +735,21 @@ final class GpuArtilleryBlast {
      * over its Degradation in hexes, where the damage reaches nothing, and its crater twice its Crater Depth (the rules'
      * one level less every two hexes).
      */
+    /**
+     * Each nuclear round's blast, once, as it goes off: its attack's result and the hex it landed in, whose collapses
+     * fall with its front (GpuTerrain#strike).
+     */
+    void strikes(java.util.function.BiConsumer<megamek.common.ResolvedAttack, Coords> receiver) {
+        for (Blast blast : blasts) {
+            if (blast.struck || blast.nuke == null || blast.attack == null || blast.targetHex == null || blast.seconds < 0) {
+                continue;
+            }
+            blast.struck = true;
+            var result = blast.attack.event.result();
+            if (!result.collapses().isEmpty()) { receiver.accept(result, blast.targetHex); }
+        }
+    }
+
     void scorches(Consumer<GpuGroundDamage.Scorch> receiver) {
         for (Blast blast : blasts) {
             if (blast.nuke == null || blast.scorched || blast.seconds < 0) { continue; }

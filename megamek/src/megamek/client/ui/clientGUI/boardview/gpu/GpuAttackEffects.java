@@ -438,6 +438,11 @@ final class GpuAttackEffects implements Disposable {
         artilleryBlasts.scorches(receiver);
     }
 
+    /** Each nuclear round's blast, once, as it goes off: its attack's result and the hex it landed in. */
+    void artilleryStrikes(java.util.function.BiConsumer<megamek.common.ResolvedAttack, Coords> receiver) {
+        artilleryBlasts.strikes(receiver);
+    }
+
     void setSmokeLight(Color light) {
         flames.setSmokeLight(light);
         missiles.setSmokeLight(light);

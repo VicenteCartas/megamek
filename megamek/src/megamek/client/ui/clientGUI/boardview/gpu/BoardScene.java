@@ -1114,6 +1114,17 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         /** The hit that brought a structure down, which its collapse falls away from when it follows that hit. */
         record Hit(float strength, Waypoint from) { }
 
+        /**
+         * The hit a detonation deals the structure at {@code at}: whole inside its crater, else as its damage there would
+         * (an AC/20's 20 a hit at full strength); null where it pushes nothing.
+         */
+        static Hit blast(megamek.common.NuclearDetonation strike, Coords at) {
+            int distance = strike.coords().distance(at);
+            float damage = strike.degradation() < 1 ? 0 : strike.baseDamage() - distance * strike.degradation();
+            float strength = distance < 2 * strike.craterDepth() ? 1 : Math.min(1, (damage - 10) / 10);
+            return strength > 0 ? new Hit(strength, new Waypoint(strike.coords(), strike.elevation(), 0)) : null;
+        }
+
         TileTransition {
             changes = List.copyOf(changes);
             collapses = List.copyOf(collapses);
@@ -1164,7 +1175,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return new Collapse(old.coords(), old, hit == null ? 0 : hit.strength(), hit == null ? null : hit.from(), loads);
         }
 
-        /** Whether the tile holds what can come down: a building, a fuel tank or a bridge span, not its ruin. */
+        /** Whether the tile holds what can come down: a building, a fuel tank or a bridge span. */
         static boolean structure(Tile tile) {
             return tile.cover().structure() > 0 && tile.cover().structure() != Cover.INDUSTRIAL
                   || tile.features().stream().anyMatch(feature -> "bridge".equals(feature.asset()) && !feature.ruined());

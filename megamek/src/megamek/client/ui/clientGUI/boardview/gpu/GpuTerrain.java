@@ -7855,6 +7855,27 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
+     * A nuclear round's blast going off now (a Davy Crockett-M fired in combat): what its attack brought down falls with
+     * its front from where it landed, as a scheduled strike's does, not at the phase's end.
+     */
+    void strike(megamek.common.ResolvedAttack result, Coords landing) {
+        var stats = GpuArtilleryBlast.nuclearStats(result.shot());
+        var ground = coverScene == null ? null : coverScene.tile(landing);
+        if (stats == null || ground == null) { return; }
+        // At the hex's level: the round's impact height adds its target's, which would drive the structures down.
+        var record = new megamek.common.NuclearDetonation(result.id(), coverScene.boardId(), landing, ground.elevation(),
+              stats.baseDamage, stats.degradation, stats.secondaryRadius, stats.craterDepth);
+        List<BoardScene.TileTransition.Collapse> falls = new ArrayList<>();
+        for (var at : result.collapses()) {
+            var tile = at.boardId() == coverScene.boardId() ? coverScene.tile(at.coords()) : null;
+            if (tile != null && BoardScene.TileTransition.structure(tile)) {
+                falls.add(BoardScene.TileTransition.collapse(coverScene, tile, BoardScene.TileTransition.blast(record, at.coords())));
+            }
+        }
+        if (!falls.isEmpty()) { strike(new BoardScene.Detonation(record, falls)); }
+    }
+
+    /**
      * Fells the hex's trees the blast clears ({@code grove}, as its scene's features): they leave their chunk's stand to
      * fall away from ground zero (GpuDestruction). The chunk that drew them, or null where none stands.
      */

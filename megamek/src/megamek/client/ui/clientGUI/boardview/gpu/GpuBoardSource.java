@@ -714,14 +714,10 @@ final class GpuBoardSource implements BoardSource {
         structureHits.clear();
         structureHitsRound = view.game.getRoundCount();
         structureHitsPhase = view.game.getPhase();
-        var from = new BoardScene.Waypoint(strike.coords(), strike.elevation(), 0);
-        int crater = 2 * strike.craterDepth();
         for (var tile : before.tiles()) {
             if (!BoardScene.TileTransition.structure(tile)) { continue; }
-            int distance = strike.coords().distance(tile.coords());
-            float damage = strike.degradation() < 1 ? 0 : strike.baseDamage() - distance * strike.degradation();
-            float strength = distance < crater ? 1 : Math.min(1, (damage - 10) / 10);
-            if (strength > 0) { structureHits.put(tile.coords(), new BoardScene.TileTransition.Hit(strength, from)); }
+            var hit = BoardScene.TileTransition.blast(strike, tile.coords());
+            if (hit != null) { structureHits.put(tile.coords(), hit); }
         }
     }
 
