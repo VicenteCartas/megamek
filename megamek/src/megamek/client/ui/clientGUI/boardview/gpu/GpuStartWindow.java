@@ -256,6 +256,11 @@ public final class GpuStartWindow {
     public static void install(JFrame owner, StartScreenContent content) {
         anchor = Objects.requireNonNull(owner);
         installed = Objects.requireNonNull(content);
+        if (!owner.isDisplayable()) {
+            // The native window's thread is a daemon and AWT shuts down without a displayable window, so the hidden
+            // frame's peer is what keeps the program running while only the start screen shows
+            owner.addNotify();
+        }
         actions = null;
         hosts = null;
         connects = null;

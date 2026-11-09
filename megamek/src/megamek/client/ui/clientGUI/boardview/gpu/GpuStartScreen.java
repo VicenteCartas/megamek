@@ -578,6 +578,11 @@ final class GpuStartScreen extends ApplicationAdapter {
                 };
                 UiButton button = kit.button(style, null, item.label(), item.detail());
                 leftAligned(button);
+                for (Label detail : button.details) {
+                    // A long detail, such as a save's name, shortens rather than widen the column
+                    detail.setEllipsis(true);
+                    button.getCell(detail).minWidth(0).growX();
+                }
                 UiKit.onChange(button, () -> window.run(item.action()));
                 yield button;
             }

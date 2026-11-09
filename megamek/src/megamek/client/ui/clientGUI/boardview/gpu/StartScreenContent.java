@@ -60,4 +60,12 @@ public abstract class StartScreenContent {
     boolean gamePages() {
         return false;
     }
+
+    /**
+     * How long ago {@code epochMillis} was, as the start screen words it for a save: "just now", minutes, hours,
+     * yesterday, days, and the date beyond a week.
+     */
+    public static String ago(long epochMillis) {
+        return StartSaves.ago(epochMillis, System.currentTimeMillis());
+    }
 }
