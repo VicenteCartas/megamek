@@ -298,13 +298,13 @@ final class ConnectedKit {
 
     /**
      * How many levels from its ground the structure of {@code tile}, {@code height} levels high, connects towards each
-     * board direction: 0 without an exit there ({@link BoardScene.Cover#exits}), else its whole height, lowered by a
-     * neighbour of the same structure terrain (building or fuel tank) that connects back ({@link #arm}).
+     * board direction: 0 where it does not open there ({@link #opens}), else its whole height, lowered by a neighbour of
+     * the same structure terrain (building or fuel tank) that connects back ({@link #arm}).
      */
     static int[] reach(BoardScene scene, BoardScene.Tile tile, int height) {
         int[] result = new int[6];
         for (int direction = 0; direction < 6; direction++) {
-            if ((tile.cover().exits() & 1 << direction) == 0) { continue; }
+            if (!opens(scene, tile, direction)) { continue; }
             var neighbor = scene.neighbor(tile, direction);
             result[direction] = back(scene, tile, direction)
                   ? arm(tile, height, neighbor, Math.max(1, neighbor.cover().height())) : height;
@@ -442,9 +442,20 @@ final class ConnectedKit {
         return false;
     }
 
+    /**
+     * Whether the structure of {@code tile} opens towards {@code direction}: it has an exit there ({@link
+     * BoardScene.Cover#exits}) and no other structure stands beyond without connecting back, which closes it. Where
+     * nothing stands, as after a neighbour's collapse, it stays open.
+     */
+    private static boolean opens(BoardScene scene, BoardScene.Tile tile, int direction) {
+        if ((tile.cover().exits() & 1 << direction) == 0) { return false; }
+        var neighbor = scene.neighbor(tile, direction);
+        return neighbor == null || neighbor.cover().structure() == 0 || back(scene, tile, direction);
+    }
+
     private static boolean openEnd(BoardScene scene, BoardScene.Tile tile, int height) {
         for (int direction = 0; direction < 6; direction++) {
-            if ((tile.cover().exits() & 1 << direction) == 0) { continue; }
+            if (!opens(scene, tile, direction)) { continue; }
             var neighbor = scene.neighbor(tile, direction);
             if (!back(scene, tile, direction) || !overlaps(tile, height, neighbor, Math.max(1, neighbor.cover().height()))) {
                 return true;

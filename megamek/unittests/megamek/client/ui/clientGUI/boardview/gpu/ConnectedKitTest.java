@@ -163,17 +163,24 @@ class ConnectedKitTest {
     }
 
     @Test
-    void theHexsExitsConnectAndOnlyAStructureOfItsKindThatConnectsBackLowersThem() {
+    void theHexsExitsConnectWhereNothingStandsOrAStructureOfItsKindConnectsBackAndLowersThem() {
         Hex[] hexes = new Hex[7 * 7];
         for (int i = 0; i < hexes.length; i++) { hexes[i] = new Hex(0); }
         Coords tall = new Coords(3, 3);
-        // Exits north to a lower tank, north-east to open ground, south to a building that connects back.
-        structure(hexes, tall, Terrains.FUEL_TANK, (1 << 0) | (1 << 1) | (1 << 3), 3);
+        // Exits north to a lower tank that connects back, north-east to open ground, south-east to a tank without an
+        // exit back, south to a building that connects back.
+        structure(hexes, tall, Terrains.FUEL_TANK, (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3), 3);
         structure(hexes, tall.translated(0), Terrains.FUEL_TANK, 1 << 3, 1);
+        structure(hexes, tall.translated(2), Terrains.FUEL_TANK, 0, 1);
         structure(hexes, tall.translated(3), Terrains.BUILDING, 1, 1);
         var scene = new BoardScene(0, 7, 7, BoardTiles.captureAll(new Board(7, 7, hexes)), List.of(), List.of(),
               Entity.NONE, "", List.of());
-        assertArrayEquals(new int[] { 1, 3, 0, 3, 0, 0 }, ConnectedKit.reach(scene, scene.tile(tall), 3));
+        assertArrayEquals(new int[] { 1, 3, 0, 0, 0, 0 }, ConnectedKit.reach(scene, scene.tile(tall), 3));
+        // Without the exit to open ground, the closed ones leave nothing of its inside to show.
+        hexes[tall.getY() * 7 + tall.getX()].getTerrain(Terrains.FUEL_TANK).setExits((1 << 0) | (1 << 2) | (1 << 3));
+        scene = new BoardScene(0, 7, 7, BoardTiles.captureAll(new Board(7, 7, hexes)), List.of(), List.of(),
+              Entity.NONE, "", List.of());
+        assertFalse(ConnectedKit.open(scene, scene.tile(tall), 3));
     }
 
     @Test
