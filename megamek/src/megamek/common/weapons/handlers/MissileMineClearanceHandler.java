@@ -39,7 +39,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Vector;
 
-import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.Report;
 import megamek.common.ToHitData;
@@ -207,20 +206,8 @@ public class MissileMineClearanceHandler extends AmmoWeaponHandler {
             vPhaseReport.addAll(newReports);
         }
 
-        // Damage Terrain if applicable
-        Hex h = game.getHexOf(target);
-        newReports = new Vector<>();
-        if ((h != null) && h.hasTerrainFactor()) {
-            r = new Report(3384);
-            r.indent(2);
-            r.subject = subjectId;
-            r.add(targetPos.getBoardNum());
-            r.add(damage);
-            newReports.add(r);
-        }
-
-        // Update hex and report any changes
-        newReports.addAll(gameManager.tryClearHex(targetPos, target.getBoardId(), damage, subjectId));
+        // Damage terrain if applicable, and report any changes
+        newReports = gameManager.damageTerrain(targetPos, target.getBoardId(), damage, subjectId);
         adjustReports(newReports);
         vPhaseReport.addAll(newReports);
 

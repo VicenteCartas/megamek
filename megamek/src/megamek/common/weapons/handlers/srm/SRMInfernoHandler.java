@@ -276,39 +276,7 @@ public class SRMInfernoHandler extends SRMHandler {
     }
 
     @Override
-    protected void handleClearDamage(Vector<Report> vPhaseReport,
-          IBuilding bldg, int nDamage) {
-        if (!bSalvo) {
-            // hits!
-            Report r = new Report(2270);
-            r.subject = subjectId;
-            vPhaseReport.addElement(r);
-        }
-        // report that damage was "applied" to terrain
-        Report r = new Report(3385);
-        r.indent(2);
-        r.subject = subjectId;
-        r.add(nDamage);
-        vPhaseReport.addElement(r);
-
-        // Any clear attempt can result in accidental ignition, even
-        // weapons that can't normally start fires. that's weird.
-        // Buildings can't be accidentally ignited.
-        // TODO: change this for TacOps - now you roll another 2d6 first and on
-        // a 5 or less
-        // you do a normal ignition as though for intentional fires
-        if ((bldg != null)
-              && gameManager.tryIgniteHex(target.getPosition(), target.getBoardId(), subjectId, false,
-              true,
-              getFireTNRoll(), 5,
-              vPhaseReport)) {
-            return;
-        }
-        Vector<Report> clearReports = gameManager.tryClearHex(target.getPosition(), target.getBoardId(),
-              nDamage, subjectId);
-        if (!clearReports.isEmpty()) {
-            vPhaseReport.lastElement().newlines = 0;
-        }
-        vPhaseReport.addAll(clearReports);
+    protected boolean igniteWhileClearing(Vector<Report> vPhaseReport) {
+        return tryIgniteTarget(vPhaseReport, false, true, getFireTNRoll());
     }
 }

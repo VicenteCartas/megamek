@@ -7562,17 +7562,7 @@ public class TWGameManager extends AbstractGameManager {
             case Targetable.TYPE_HEX_CLEAR:
             case Targetable.TYPE_HEX_IGNITE:
             case Targetable.TYPE_BLDG_IGNITE:
-                // Report that damage applied to terrain, if there's TF to damage
-                Hex h = game.getBoard().getHex(t.getPosition());
-                if ((h != null) && h.hasTerrainFactor()) {
-                    r = new Report(3384);
-                    r.indent(2);
-                    r.subject = attId;
-                    r.add(t.getPosition().getBoardNum());
-                    r.add(missiles * 4);
-                    vPhaseReport.addElement(r);
-                }
-                vPhaseReport.addAll(tryClearHex(t.getPosition(), t.getBoardId(), missiles * 4, attId));
+                vPhaseReport.addAll(damageTerrain(t.getPosition(), t.getBoardId(), missiles * 4, attId));
                 tryIgniteHex(t.getPosition(), t.getBoardId(), attId, false, true, new TargetRoll(0, "inferno"), -1,
                       vPhaseReport);
                 break;
@@ -12074,6 +12064,31 @@ public class TWGameManager extends AbstractGameManager {
           TargetRoll nTargetRoll,
           int accidentTarget, Vector<Report> vPhaseReport) {
         return tryIgniteHex(c, boardId, entityId, bHotGun, bInferno, nTargetRoll, false, accidentTarget, vPhaseReport);
+    }
+
+    /**
+     * Deals {@code damage} to the terrain of the hex at {@code coords} on {@code boardId} (woods, jungle, ice, magma): a
+     * report of it where the hex has terrain to damage, then what that changed (#tryClearHex), under it.
+     */
+    public Vector<Report> damageTerrain(Coords coords, int boardId, int damage, int subjectId) {
+        Vector<Report> reports = new Vector<>();
+        Hex hex = game.getHex(coords, boardId);
+        if ((hex != null) && hex.hasTerrainFactor()) {
+            Report r = new Report(3384);
+            r.indent(2);
+            r.subject = subjectId;
+            if (subjectId == Entity.NONE) {
+                r.type = Report.PUBLIC;
+            }
+            r.add(coords.getBoardNum());
+            r.add(damage);
+            reports.add(r);
+        }
+        for (Report report : tryClearHex(coords, boardId, damage, subjectId)) {
+            report.indent(3);
+            reports.add(report);
+        }
+        return reports;
     }
 
     public Vector<Report> tryClearHex(Coords c, int nDamage, int entityId) {
@@ -19897,38 +19912,10 @@ public class TWGameManager extends AbstractGameManager {
             }
             vDesc.addAll(reports);
         }
-        if ((hex != null) && hex.hasTerrainFactor()) {
-            r = new Report(3384);
-            r.indent(2);
-            r.type = Report.PUBLIC;
-            r.add(position.getBoardNum());
-            r.add(damages[0]);
-            vDesc.add(r);
-        }
-        Vector<Report> reports = tryClearHex(position, damages[0], Entity.NONE);
-        for (Report report : reports) {
-            report.indent(3);
-        }
-        vDesc.addAll(reports);
-
-        // Handle surrounding coords
-        for (int dist = 1; dist < maxDist; dist++) {
-            List<Coords> coords = position.allAtDistance(dist);
-            for (Coords c : coords) {
-                hex = game.getHex(c, boardId);
-                if ((hex != null) && hex.hasTerrainFactor()) {
-                    r = new Report(3384);
-                    r.indent(2);
-                    r.type = Report.PUBLIC;
-                    r.add(c.getBoardNum());
-                    r.add(damages[dist]);
-                    vDesc.add(r);
-                }
-                reports = tryClearHex(c, damages[dist], Entity.NONE);
-                for (Report report : reports) {
-                    report.indent(3);
-                }
-                vDesc.addAll(reports);
+        // Its hex and those around it, each as hard as its damage there.
+        for (int dist = 0; dist < maxDist; dist++) {
+            for (Coords c : dist == 0 ? List.of(position) : position.allAtDistance(dist)) {
+                vDesc.addAll(damageTerrain(c, boardId, damages[dist], Entity.NONE));
             }
         }
 

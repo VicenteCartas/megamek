@@ -147,42 +147,12 @@ public class FlamerHandler extends WeaponHandler {
     }
 
     @Override
-    protected void handleClearDamage(Vector<Report> vPhaseReport, IBuilding bldg, int nDamage) {
-        if (!bSalvo) {
-            // hits!
-            Report r = new Report(2270);
-            r.subject = subjectId;
-            vPhaseReport.addElement(r);
+    protected boolean igniteWhileClearing(Vector<Report> vPhaseReport) {
+        if (!tryIgniteTarget(vPhaseReport, true, false, weaponFireRoll())) {
+            return false;
         }
-        // report that damage was "applied" to terrain
-        Report r = new Report(3385);
-        r.indent(2);
-        r.subject = subjectId;
-        r.add(nDamage);
-        vPhaseReport.addElement(r);
-
-        // Any clear attempt can result in accidental ignition, even
-        // weapons that can't normally start fires. that's weird.
-        // Buildings can't be accidentally ignited.
-        // TODO: change this for TacOps - now you roll another 2d6 first and on
-        // a 5 or less
-        // you do a normal ignition as though for intentional fires
-        if ((bldg != null)
-              && gameManager.tryIgniteHex(target.getPosition(), target.getBoardId(), subjectId, true,
-              false,
-              new TargetRoll(weaponType.getFireTN(), weaponType.getName()), 5,
-              vPhaseReport)) {
-            // Fuel-fed flamer fires are harder for firefighting engineers to put out (TO:AuE p.153).
-            game.getBoard(target.getBoardId()).markFlamerStartedFire(target.getPosition());
-            return;
-        }
-        Vector<Report> clearReports = gameManager.tryClearHex(target.getPosition(),
-              target.getBoardId(),
-              nDamage,
-              subjectId);
-        if (!clearReports.isEmpty()) {
-            vPhaseReport.lastElement().newlines = 0;
-        }
-        vPhaseReport.addAll(clearReports);
+        // Fuel-fed flamer fires are harder for firefighting engineers to put out (TO:AuE p.153).
+        game.getBoard(target.getBoardId()).markFlamerStartedFire(target.getPosition());
+        return true;
     }
 }

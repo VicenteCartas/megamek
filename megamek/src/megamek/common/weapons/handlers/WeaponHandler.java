@@ -2055,6 +2055,7 @@ public class WeaponHandler implements AttackHandler, Serializable {
             r.subject = subjectId;
             vPhaseReport.addElement(r);
         }
+        nDamage = woodsDamage(nDamage);
         // report that damage was "applied" to terrain
         Report r = new Report(3385);
         r.indent(2);
@@ -2068,9 +2069,7 @@ public class WeaponHandler implements AttackHandler, Serializable {
         // TODO: change this for TacOps - now you roll another 2d6 first and on
         // a 5 or less
         // you do a normal ignition as though for intentional fires
-        if ((bldg != null)
-              && gameManager.tryIgniteHex(target.getPosition(), target.getBoardId(), subjectId, false, false,
-              getFireTNRoll(), 5, vPhaseReport)) {
+        if ((bldg != null) && igniteWhileClearing(vPhaseReport)) {
             return;
         }
         Vector<Report> clearReports = gameManager.tryClearHex(target.getPosition(), target.getBoardId(), nDamage,
@@ -2079,6 +2078,31 @@ public class WeaponHandler implements AttackHandler, Serializable {
             vPhaseReport.lastElement().newlines = 0;
         }
         vPhaseReport.addAll(clearReports);
+    }
+
+    /** The damage {@code nDamage} deals woods and jungle as it clears them: double for fragmentation, fléchette, plasma. */
+    protected int woodsDamage(int nDamage) {
+        return nDamage;
+    }
+
+    /**
+     * The accidental ignition of the target hex a clearing attempt risks, with this weapon's fire roll; true if it caught
+     * fire, which ends the attempt.
+     */
+    protected boolean igniteWhileClearing(Vector<Report> vPhaseReport) {
+        return tryIgniteTarget(vPhaseReport, false, false, getFireTNRoll());
+    }
+
+    /** Tries to ignite the target hex as a clearing attempt does: a hot gun's or an inferno's, against {@code fireRoll}. */
+    protected final boolean tryIgniteTarget(Vector<Report> vPhaseReport, boolean hotGun, boolean inferno,
+          TargetRoll fireRoll) {
+        return gameManager.tryIgniteHex(target.getPosition(), target.getBoardId(), subjectId, hotGun, inferno, fireRoll,
+              5, vPhaseReport);
+    }
+
+    /** This weapon's own fire roll, without its ammunition's (#getFireTNRoll). */
+    protected final TargetRoll weaponFireRoll() {
+        return new TargetRoll(weaponType.getFireTN(), weaponType.getName());
     }
 
     protected void handleBuildingDamage(Vector<Report> vPhaseReport, IBuilding bldg, int nDamage,

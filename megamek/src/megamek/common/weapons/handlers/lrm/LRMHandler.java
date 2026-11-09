@@ -521,39 +521,9 @@ public class LRMHandler extends MissileWeaponHandler {
     }
 
     @Override
-    protected void handleClearDamage(Vector<Report> vPhaseReport, IBuilding bldg, int nDamage) {
-        if (!bSalvo) {
-            // hits!
-            Report r = new Report(2270);
-            r.subject = subjectId;
-            vPhaseReport.addElement(r);
-        }
-        // report that damage was "applied" to terrain
-        Report r = new Report(3385);
-        r.indent(2);
-        r.subject = subjectId;
-        r.add(nDamage);
-        vPhaseReport.addElement(r);
-
+    protected boolean igniteWhileClearing(Vector<Report> vPhaseReport) {
         // Per TO:AUE pg 181, incendiary LRM applies -4 modifier to fire ignition
-        TargetRoll targetRoll = getIncendiaryFireTN();
-
-        // Try to ignite the hex (buildings handled separately)
-        if ((bldg != null)
-              && gameManager.tryIgniteHex(target.getPosition(), target.getBoardId(), subjectId, false,
-              false,
-              targetRoll, 5,
-              vPhaseReport)) {
-            return;
-        }
-
-        // Try to clear the hex
-        Vector<Report> clearReports = gameManager.tryClearHex(target.getPosition(), target.getBoardId(),
-              nDamage, subjectId);
-        if (!clearReports.isEmpty()) {
-            vPhaseReport.lastElement().newlines = 0;
-        }
-        vPhaseReport.addAll(clearReports);
+        return tryIgniteTarget(vPhaseReport, false, false, getIncendiaryFireTN());
     }
 
     @Override

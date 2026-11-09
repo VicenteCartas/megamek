@@ -224,46 +224,14 @@ public class PlasmaRifleHandler extends AmmoWeaponHandler {
     }
 
     @Override
-    protected void handleClearDamage(Vector<Report> vPhaseReport, IBuilding bldg, int nDamage) {
-        if (!bSalvo) {
-            // hits!
-            Report report = new Report(2270);
-            report.subject = subjectId;
-            vPhaseReport.addElement(report);
-        }
+    protected int woodsDamage(int nDamage) {
+        // Plasma weapons deal double damage to woods.
+        return nDamage * 2;
+    }
 
-        nDamage *= 2; // Plasma weapons deal double damage to woods.
-
-        // report that damage was "applied" to terrain
-        Report report = new Report(3385);
-        report.indent(2);
-        report.subject = subjectId;
-        report.add(nDamage);
-        vPhaseReport.addElement(report);
-
-        // Any clear attempt can result in accidental ignition, even weapons that can't normally start fires. that's
-        // weird. Buildings can't be accidentally ignited.
-        // TODO: change this for TacOps - now you roll another 2d6 first and on a 5 or less you do a normal ignition
-        //  as though for intentional fires
-        if ((bldg != null) &&
-              gameManager.tryIgniteHex(target.getPosition(), target.getBoardId(), subjectId,
-                    true,
-                    false,
-                    new TargetRoll(weaponType.getFireTN(), weaponType.getName()),
-                    5,
-                    vPhaseReport)) {
-            return;
-        }
-
-        Vector<Report> clearReports = gameManager.tryClearHex(target.getPosition(),
-              target.getBoardId(),
-              nDamage,
-              subjectId);
-        if (!clearReports.isEmpty()) {
-            vPhaseReport.lastElement().newlines = 0;
-        }
-
-        vPhaseReport.addAll(clearReports);
+    @Override
+    protected boolean igniteWhileClearing(Vector<Report> vPhaseReport) {
+        return tryIgniteTarget(vPhaseReport, true, false, weaponFireRoll());
     }
 
     @Override

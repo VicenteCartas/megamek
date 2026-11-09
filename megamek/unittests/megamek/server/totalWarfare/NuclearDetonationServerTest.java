@@ -156,4 +156,31 @@ class NuclearDetonationServerTest {
             assertEquals(List.of(megamek.common.board.BoardLocation.of(new Coords(1, 2), 0)), explosion.collapses());
         }
     }
+
+    /** An explosion on a second board damages the woods of its own board, its hex as the hexes around it. */
+    @Test
+    void anExplosionClearsTheWoodsOfItsOwnBoard() {
+        var manager = new TWGameManager();
+        Board[] boards = new Board[2];
+        for (int id = 0; id < 2; id++) {
+            Hex[] hexes = Stream.generate(Hex::new).limit(16).toArray(Hex[]::new);
+            for (Hex hex : hexes) { hex.addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.WOODS, 1)); }
+            boards[id] = new Board();
+            boards[id].newData(4, 4, hexes, null);
+            boards[id].setBoardId(id);
+        }
+        manager.getGame().setBoard(boards[0]);
+        manager.getGame().setBoard(1, boards[1]);
+        manager.getGame().addPlayer(0, new Player(0, "Explosion test"));
+        Server server = mock(Server.class);
+        try (var servers = org.mockito.Mockito.mockStatic(Server.class)) {
+            servers.when(Server::getServerInstance).thenReturn(server);
+            manager.doExplosion(100, 50, false, new Coords(1, 1), 1, false, new java.util.Vector<>(), null, -1, false);
+        }
+        for (Coords at : List.of(new Coords(1, 1), new Coords(1, 2))) {
+            assertFalse(boards[1].getHex(at).containsTerrain(megamek.common.units.Terrains.WOODS), at + " on its board");
+            assertTrue(boards[0].getHex(at).containsTerrain(megamek.common.units.Terrains.WOODS), at + " on the other");
+        }
+    }
 }
+

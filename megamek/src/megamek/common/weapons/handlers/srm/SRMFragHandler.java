@@ -46,7 +46,6 @@ import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import megamek.common.loaders.EntityLoadingException;
-import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 import megamek.common.units.IBuilding;
 import megamek.common.weapons.DamageType;
@@ -97,43 +96,14 @@ public class SRMFragHandler extends SRMHandler {
     }
 
     @Override
-    protected void handleClearDamage(Vector<Report> vPhaseReport, IBuilding bldg, int nDamage) {
-        if (!bSalvo) {
-            // hits!
-            Report r = new Report(2270);
-            r.subject = subjectId;
-            vPhaseReport.addElement(r);
-        }
-        // report that damage was "applied" to terrain
-
+    protected int woodsDamage(int nDamage) {
         // Fragmentation does double damage to woods
-        nDamage *= 2;
+        return nDamage * 2;
+    }
 
-        Report r = new Report(3385);
-        r.indent(2);
-        r.subject = subjectId;
-        r.add(nDamage);
-        vPhaseReport.addElement(r);
-
-        // Any clear attempt can result in accidental ignition, even
-        // weapons that can't normally start fires. that's weird.
-        // Buildings can't be accidentally ignited.
-        if ((bldg != null)
-              && gameManager.tryIgniteHex(target.getPosition(), target.getBoardId(), subjectId, false,
-              false,
-              new TargetRoll(weaponType.getFireTN(), weaponType.getName()), 5,
-              vPhaseReport)) {
-            return;
-        }
-
-        Vector<Report> clearReports = gameManager.tryClearHex(target.getPosition(),
-              target.getBoardId(),
-              nDamage,
-              subjectId);
-        if (!clearReports.isEmpty()) {
-            vPhaseReport.lastElement().newlines = 0;
-        }
-        vPhaseReport.addAll(clearReports);
+    @Override
+    protected boolean igniteWhileClearing(Vector<Report> vPhaseReport) {
+        return tryIgniteTarget(vPhaseReport, false, false, weaponFireRoll());
     }
 
     @Override

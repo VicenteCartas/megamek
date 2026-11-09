@@ -37,7 +37,6 @@ package megamek.common.weapons.handlers.mekMortar;
 import java.io.Serial;
 import java.util.Vector;
 
-import megamek.common.Hex;
 import megamek.common.HitData;
 import megamek.common.Player;
 import megamek.common.Report;
@@ -173,20 +172,8 @@ public class MekMortarAirburstHandler extends AmmoWeaponHandler {
             vPhaseReport.addAll(newReports);
         }
 
-        // Damage Terrain if applicable
-        Hex h = game.getHexOf(target);
-        newReports = new Vector<>();
-        if ((h != null) && h.hasTerrainFactor()) {
-            r = new Report(3384);
-            r.indent(2);
-            r.subject = subjectId;
-            r.add(targetPos.getBoardNum());
-            r.add(numRounds);
-            newReports.add(r);
-        }
-
-        // Update hex and report any changes
-        newReports.addAll(gameManager.tryClearHex(targetPos, target.getBoardId(), numRounds, subjectId));
+        // Damage terrain if applicable, and report any changes
+        newReports = gameManager.damageTerrain(targetPos, target.getBoardId(), numRounds, subjectId);
         adjustReports(newReports);
         vPhaseReport.addAll(newReports);
 
