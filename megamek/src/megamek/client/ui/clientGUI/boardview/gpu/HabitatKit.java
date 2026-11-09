@@ -145,9 +145,14 @@ final class HabitatKit {
                     }
                 }
                 result.put(twin.getKey(), mesh);
+                // Its aviation lights beside it (GeneratedKit#lights), on the roof's plating or parapet foot.
+                if (roof && spec.aol()) {
+                    double facet = spec.cornerRadius() * Math.PI / Math.max(1, spec.cornerSegments());
+                    GeneratedKit.lights(result, twin.getKey(), outline, facet, lightDeck(spec), lod);
+                }
             }
             return result;
-        }, spec.aol() ? lod -> 2 * LEVEL + (spec.parapet() != null ? 0 : eave(spec)) : null);
+        }, spec.aol() ? lod -> lightDeck(spec) : null);
         for (var level : levels) {
             level.buildingPaint.add(spec.materials().get("wall"));
         }
@@ -304,6 +309,9 @@ final class HabitatKit {
               && (wall.start() == KitOutline.End.CORNER || wall.start() != KitOutline.End.ROUND && lod == 0);
     }
 
+    /** Where a roof's aviation lights stand: on its plating, or at its parapet's foot. */
+    private static double lightDeck(Spec spec) { return 2 * LEVEL + (spec.parapet() != null ? 0 : eave(spec)); }
+
     /** The eave's radius, 0 without one. */
     private static double eave(Spec spec) { return spec.eave() == null ? 0 : spec.eave().radius(); }
 
@@ -406,10 +414,6 @@ final class HabitatKit {
             }
         }
         fittings(geometry, modelled, lod, fitting, layout, piece, deck, spec.lone().halfLength(), footprintScale);
-        if (spec.aol()) {
-            double facet = spec.cornerRadius() * Math.PI / Math.max(1, spec.cornerSegments());
-            GeneratedKit.lights(geometry, piece, facet, deck, lod);
-        }
         return new Laid(geometry, piers);
     }
 

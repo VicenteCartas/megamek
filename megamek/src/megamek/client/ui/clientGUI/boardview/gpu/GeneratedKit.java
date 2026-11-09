@@ -123,16 +123,20 @@ final class GeneratedKit {
     private static final double LIGHT_INSET = 2.5;
 
     /**
-     * A roof piece's aviation obstruction lights ({@code aol} in its kit's spec): one on each convex corner of its walls
+     * A roof twin's aviation obstruction lights ({@code aol} in its kit's spec), as its own node {@code <twin>-aol} that
+     * ConnectedKit stands on a tall enough hex's roof: one on each convex corner of the twin's {@code piece}
      * ({@link KitOutline#convexCorners}, arcs of facets no longer than {@code facet}) within its sector, so the piece's
      * cut never halves one; its stick from {@code deck}, the roof's height, down into the roof.
      */
-    static void lights(GeneratedMesh geometry, KitOutline.Piece piece, double facet, double deck, int lod) {
+    static void lights(Map<String, GeneratedMesh> twins, String twin, KitOutline.Piece piece, double facet, double deck,
+          int lod) {
+        var lights = new GeneratedMesh();
         for (double[] corner : KitOutline.convexCorners(piece.walls(), facet, LIGHT_INSET)) {
             if (piece.direction() == null || KitOutline.inSector(piece.direction(), corner)) {
-                light(geometry, corner, deck, lod);
+                light(lights, corner, deck, lod);
             }
         }
+        if (!lights.parts.isEmpty()) { twins.put(twin + "-aol", lights); }
     }
 
     private static void light(GeneratedMesh geometry, double[] at, double deck, int lod) {

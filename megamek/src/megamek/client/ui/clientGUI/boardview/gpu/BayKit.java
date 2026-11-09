@@ -168,6 +168,10 @@ final class BayKit {
         if (closing && piece.tags().endsWith("-cap")) { return Map.of("", new GeneratedMesh()); }
         Map<String, GeneratedMesh> result = new LinkedHashMap<>();
         result.put("", module(spec, modelled, role, piece, 0, lod, square, footprintScale, fitting, layout, halfLength));
+        // A roof's aviation lights, beside each of its twins (GeneratedKit#lights).
+        boolean lit = role.startsWith("roof") && spec.roof().aol();
+        double facet = spec.cornerRadius() * Math.PI / Math.max(1, spec.cornerSegments()), deck = spec.roof().height(lod);
+        if (lit) { GeneratedKit.lights(result, "", piece, facet, deck, lod); }
         int links = closing ? KitOutline.links(piece) : 0;
         boolean fills = !role.startsWith("roof") && !piece.tags().endsWith("-cap") && joined(spec, role, lod);
         if (fills) { putFill(result, "-fill", fill(spec, modelled, role, piece, 0, lod, square)); }
@@ -177,6 +181,7 @@ final class BayKit {
                   Math.max(1, spec.cornerSegments()));
             result.put("-closed-" + closed, module(spec, modelled, role, closedPiece, closed, lod,
                   square, footprintScale, fitting, layout, halfLength));
+            if (lit) { GeneratedKit.lights(result, "-closed-" + closed, closedPiece, facet, deck, lod); }
             if (fills) { putFill(result, "-closed-" + closed + "-fill", fill(spec, modelled, role, closedPiece, closed, lod, square)); }
         }
         // At a notch its walls ending open turn the corner with the next hex's ({@link KitOutline#notched}): a twin for
@@ -184,8 +189,10 @@ final class BayKit {
         boolean jointed = spec.modules().values().stream().flatMap(List::stream).anyMatch(run -> run.joints() != null);
         int open = square || jointed || piece.tags().endsWith("-cap") ? 0 : KitOutline.openCorners(piece);
         for (int notch = open; notch > 0; notch = (notch - 1) & open) {
-            result.put("-notch-" + notch, module(spec, modelled, role, KitOutline.notched(piece, notch), 0, lod, square,
-                  footprintScale, fitting, layout, halfLength));
+            var notched = KitOutline.notched(piece, notch);
+            result.put("-notch-" + notch, module(spec, modelled, role, notched, 0, lod, square, footprintScale, fitting, layout,
+                  halfLength));
+            if (lit) { GeneratedKit.lights(result, "-notch-" + notch, notched, facet, deck, lod); }
         }
         // A storey's other junctions at the corner, held by its corner piece linked both ways (ConnectedKit places them).
         List<Run> runs = spec.modules().get(role);
@@ -284,10 +291,6 @@ final class BayKit {
         }
         if (top && layout != null) {
             HabitatKit.fittings(result, modelled, lod, fitting, layout, piece, spec.roof().height(lod), halfLength, footprintScale);
-        }
-        if (top && slab.aol()) {
-            GeneratedKit.lights(result, piece, spec.cornerRadius() * Math.PI / Math.max(1, spec.cornerSegments()),
-                  slab.height(lod), lod);
         }
         return piece.direction() != null
               ? result.clipped(KitOutline.sector(piece.direction(), KitOutline.SEAM_OVERLAP)) : result;

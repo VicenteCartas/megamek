@@ -52,7 +52,10 @@ final class ConnectedKit {
     private static final Pattern NODE = Pattern.compile(
           ".*-(base|floor|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)(-bend|-cap|-closed-[1-9][0-9]*|-notch-[1-9][0-9]*)?");
     private static final Pattern TAG = Pattern.compile("-(link|end)-(" + DIRECTION + ")");
-    private static final Pattern JUNCTION = Pattern.compile(".*-(junction-[0-9]+|fill|aol-[0-5])");
+    private static final Pattern JUNCTION = Pattern.compile(".*-(junction-[0-9]+|fill|aol(-[0-5])?)");
+
+    /** How many levels a hex stands, about 40 metres, before its roofs carry aviation lights ({@code aol} nodes). */
+    static final int LIT_LEVELS = 7;
     /** How far a link arm's far end may lie from its edge line (authored seams overlap the neighbour's slightly). */
     private static final float REACH_TOLERANCE = 1;
     private static final Map<File, BoardKit<Kit>> KITS = new ConcurrentHashMap<>();
@@ -602,6 +605,12 @@ final class ConnectedKit {
                         result.add(new Placement(piece.node(), role, level, placement(level * GpuBuilding.LEVEL_HEIGHT
                               - ground.get(role), turn + steps), piece.node() + "@" + turn + "/" + role + "-at-" + level + "/"));
                     }
+                    // A tall enough hex's roof takes its aviation lights there (GeneratedKit#lights).
+                    String lights = piece == null ? null : piece.node() + "-aol";
+                    if (lights != null && height >= LIT_LEVELS && role.startsWith("roof") && ids.contains(lights)) {
+                        result.add(new Placement(lights, role, level, placement(level * GpuBuilding.LEVEL_HEIGHT - ground.get(role),
+                              turn + steps), lights + "@" + turn + "/" + role + "-at-" + level + "/"));
+                    }
                     // A storey another stands on takes its fill there (BayKit#fill).
                     String fill = piece == null ? null : piece.node() + "-fill";
                     if (holds && level < height - 1 && ids.contains(fill)) {
@@ -613,12 +622,12 @@ final class ConnectedKit {
             }
         }
         if (junctions != null) { placeJunctions(result, kit, ids, byRole, selected, ground, junctions, steps); }
-        // Aviation lights on an Angled roof's outer elbows (GeneratedKit#lods): its corner pieces turn outwards at a side's
-        // nose where that side and both beside it are unlinked. A whole-hex roof's piece holds its own corners.
+        // Aviation lights on a tall enough Angled roof's outer elbows (GeneratedKit#lods): its corner pieces turn outwards
+        // at a side's nose where that side and both beside it are unlinked. A whole-hex roof's piece holds its own corners.
         String roof = selected.getLast();
         int top = capped ? connected[0] : connected[height - 1];
         boolean wholeTop = whole >= 0 && (capped || connected[height - 1] == connected[0]);
-        for (int side = 0; side < 6 && !wholeTop; side++) {
+        for (int side = 0; side < 6 && !wholeTop && height >= LIT_LEVELS; side++) {
             String node = source.id + "-aol-" + side;
             if ((top & (1 << side | 1 << (side + 1) % 6 | 1 << (side + 5) % 6)) == 0 && ids.contains(node)) {
                 var matrix = placement(height * GpuBuilding.LEVEL_HEIGHT - ground.get(roof), steps);
