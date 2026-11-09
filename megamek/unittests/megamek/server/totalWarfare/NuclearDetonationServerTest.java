@@ -111,4 +111,49 @@ class NuclearDetonationServerTest {
         assertEquals(0, strike.craterDepth(), "An orbital bombardment digs no crater");
         assertEquals(11, strike.baseDamage() / strike.degradation(), "Its blast reaches its radius and the hex beyond");
     }
+
+    /**
+     * A fusion engine's explosion at 0202 beside a light building at 0203 (CF 15; 25 damage a hex out): its blast between
+     * an explosion's start and completion, which names the building it brought down. Without the building it brings
+     * nothing down and sends no explosion.
+     */
+    @Test
+    void anEngineExplosionIsSentOnlyWhenItBringsSomethingDown() throws Exception {
+        for (boolean building : new boolean[] { true, false }) {
+            Hex[] hexes = Stream.generate(Hex::new).limit(16).toArray(Hex[]::new);
+            if (building) {
+                hexes[2 * 4 + 1].addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.BUILDING, 1));
+                hexes[2 * 4 + 1].addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.BLDG_CF, 15));
+                hexes[2 * 4 + 1].addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.BLDG_ELEV, 1));
+            }
+            var manager = new TWGameManager();
+            var board = new Board();
+            board.newData(4, 4, hexes, null);
+            manager.getGame().setBoard(board);
+            manager.getGame().addPlayer(0, new Player(0, "Explosion test"));
+            List<Packet> packets = new ArrayList<>();
+            Server server = mock(Server.class, call -> {
+                if (call.getMethod().getName().equals("send")) { packets.add(call.getArgument(call.getArguments().length - 1)); }
+                return null;
+            });
+            try (var servers = org.mockito.Mockito.mockStatic(Server.class)) {
+                servers.when(Server::getServerInstance).thenReturn(server);
+                manager.doFusionEngineExplosion(250, megamek.common.board.BoardLocation.of(new Coords(1, 1), 0),
+                      new java.util.Vector<>(), null);
+            }
+            var boundaries = packets.stream().filter(packet -> packet.command() == PacketCommand.NUCLEAR_DETONATION).toList();
+            if (!building) {
+                assertEquals(List.of(), boundaries, "Nothing came down");
+                continue;
+            }
+            assertEquals(2, boundaries.size());
+            assertFalse(boundaries.getFirst().getBooleanValue(1));
+            assertTrue(boundaries.getLast().getBooleanValue(1));
+            var explosion = (NuclearDetonation) boundaries.getLast().getObject(0);
+            assertEquals(NuclearDetonation.Kind.EXPLOSION, explosion.kind());
+            assertEquals(new Coords(1, 1), explosion.coords());
+            assertEquals(4, explosion.baseDamage() / explosion.degradation(), "It reaches as far as its damage table");
+            assertEquals(List.of(megamek.common.board.BoardLocation.of(new Coords(1, 2), 0)), explosion.collapses());
+        }
+    }
 }

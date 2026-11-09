@@ -19781,7 +19781,9 @@ public class TWGameManager extends AbstractGameManager {
      */
     public void doBoobyTrapExplosion(int engineRating, Coords position, Vector<Report> vDesc, Vector<Integer> vUnits) {
         int[] myDamages = { engineRating, (engineRating / 2), (engineRating / 4), (engineRating / 8) };
-        doExplosion(myDamages, false, position, 0, false, vDesc, vUnits, 5, -1, true, true);
+        // What the blast brings down is its doing (animation only).
+        explosion(position, 0, engineRating, myDamages.length,
+              () -> doExplosion(myDamages, false, position, 0, false, vDesc, vUnits, 5, -1, true, true));
     }
 
     /**
@@ -19792,7 +19794,9 @@ public class TWGameManager extends AbstractGameManager {
         // TO:AR p.76, engine explosions: nearest whole number, with exact halves rounded down.
         int[] myDamages = { (int) Math.ceil(engineRating - 0.5), (int) Math.ceil((engineRating / 10) - 0.5),
                             (int) Math.ceil((engineRating / 20) - 0.5), (int) Math.ceil((engineRating / 40) - 0.5) };
-        doExplosion(myDamages, true, location.coords(), location.boardId(), false, vDesc, vUnits, 5, -1, true, false);
+        // What the blast brings down is its doing (animation only).
+        explosion(location.coords(), location.boardId(), myDamages[0], myDamages.length, () -> doExplosion(myDamages, true,
+              location.coords(), location.boardId(), false, vDesc, vUnits, 5, -1, true, false));
     }
 
     // LEGACY replace with board id version
