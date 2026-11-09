@@ -264,7 +264,8 @@ class GpuCutoutTest {
         edges.add(new GpuCutout.Edge(new Vector3(5, 5, 0), new Vector3(7, 5, 0)));
         edges.add(new GpuCutout.Edge(new Vector3(7, 5, 0), new Vector3(7, 7, 0)));
         edges.add(new GpuCutout.Edge(new Vector3(7, 7, 0), new Vector3(5, 7, 0)));
-        var outlines = GpuCutout.outlines(edges, 1e-4f);
+        assertEquals(2, GpuCutout.outlines(edges, 1e-4f, false).size(), "Without chains, the two squares alone");
+        var outlines = GpuCutout.outlines(edges, 1e-4f, true);
         assertEquals(3, outlines.size(), "Two squares, and the open one closed");
         var closed = new java.util.ArrayList<GpuCutout.Edge>();
         for (var outline : outlines) {

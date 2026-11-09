@@ -1242,6 +1242,8 @@ final class GpuTerrain implements Disposable {
     private final GpuSurfaceScars surfaceScars = new GpuSurfaceScars(groundDamage);
     private long scarSurfaceRevision;
     private boolean combatScars = GpuGroundDamage.COMBAT_SCARS;
+    /** Whether its kit levels break into fragments ahead of their falls (#setFragments). */
+    private boolean fragments;
     /** A board the editor changes, and its samples: any surface may appear, so programs keep the biome stage. */
     private boolean editable;
     /** The shader warm-up's choice of the biome stage and crystal transmission (setLightingStages); null follows the board. */
@@ -1858,7 +1860,7 @@ final class GpuTerrain implements Disposable {
         return model;
     }
 
-    private static boolean blended(Material material) {
+    static boolean blended(Material material) {
         var blend = material.get(BlendingAttribute.class, BlendingAttribute.Type);
         return blend != null && blend.blended;
     }
@@ -2668,6 +2670,12 @@ final class GpuTerrain implements Disposable {
      * receiver's sculpt program. Off where combat cannot happen (the editor, previews).
      */
     void setCombatScars(boolean scars) { combatScars = scars; }
+
+    /**
+     * Whether its kit structures break into fragments ahead of their falls (KitFragments): in a game's own view, never
+     * in the editor, a preview or the shader warm-up, where nothing falls.
+     */
+    void setFragments(boolean breaks) { fragments = breaks; }
 
     /** Before the board builds: whether the editor changes it (editable). */
     void setEditable(boolean editing) { editable = editing; }
@@ -3552,6 +3560,7 @@ final class GpuTerrain implements Disposable {
         for (Chunk chunk : chunks) {
             if (chunk.fallsRevision != destruction.revision()) { refall(chunk); }
         }
+        cutFragments();
         editorPropsInstalled = true;
         flagScene++;
         lavaLighting.setFungus(chunks.stream().flatMap(chunk -> chunk.fungalLights.stream()).toList());
@@ -3811,6 +3820,8 @@ final class GpuTerrain implements Disposable {
         Chunk old = chunks.set(index, next);
         // A level kept while structures came down or were restored draws them as they are now.
         if (next.fallsRevision != destruction.revision()) { refall(next); }
+        // The kit levels a chunk at another detail level draws break ahead of their falls too (KitFragments).
+        cutFragments(next);
         // Level tops of one family are the same at every detail: the cache keeps their pages and forgets only the old
         // materials. Tops that follow the detail (detailTops) rebuild theirs.
         materialCache.retireTwins();
@@ -6975,6 +6986,8 @@ final class GpuTerrain implements Disposable {
     }
 
     void animate(float delta, List<ModelInstance> units, float buildingAlpha, Coords hovered, float hoverFloorZ) {
+        // A level's fragments install between falls, one a frame, after the frame's strike: no fall's frame pays for them.
+        if (fragments && destruction.isEmpty()) { assets.installFragments(); }
         float nextBuilding = MathUtils.clamp(buildingAlpha, 0, 1);
         boolean changedOpacity = nextBuilding != buildingOpacity;
         // A building faded away fully casts no shadow (renderDepth).
@@ -7621,7 +7634,10 @@ final class GpuTerrain implements Disposable {
         for (Prop prop : mesh.props) {
             if (prop.building == null || isFlag(prop)) { continue; }
             ModelInstance drawn = prop.instance();
-            for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces); }
+            // In fragments where its level's cut is in (KitFragments); else in whole modules, and the level is cut now.
+            KitFragments broken = prop.building.kit().fragments(drawn.model);
+            if (broken == null && fragments) { prop.building.kit().cutFragments(drawn.model); }
+            for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces, broken); }
             buildings.add(prop.building);
             bounds.ext(prop.bounds());
         }
@@ -7632,7 +7648,7 @@ final class GpuTerrain implements Disposable {
             if (prop.building != null || prop.tree() || isFlag(prop) || !Float.isNaN(prop.floorZ)
                   || prop.bounds().min.z < bounds.min.z + BoardGeometry.level()) { continue; }
             ModelInstance drawn = prop.instance();
-            for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces); }
+            for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces, null); }
             carried.add(prop);
         }
         var middle = BoardGeometry.center(at, change.before().elevation());
@@ -7649,7 +7665,7 @@ final class GpuTerrain implements Disposable {
     }
 
     private static void addPieces(ModelInstance instance, Node node, Map<Material, Material> copies,
-          Array<Renderable> pieces) {
+          Array<Renderable> pieces, KitFragments broken) {
         // One box for the node's parts, in its mesh's frame: they turn about it as one piece.
         BoundingBox box = new BoundingBox().inf();
         var corner = new Vector3();
@@ -7666,11 +7682,29 @@ final class GpuTerrain implements Disposable {
             Renderable piece = instance.getRenderable(new Renderable(), node, part);
             if (!GpuTreeInstances.instanceable(piece.worldTransform)) { continue; }
             piece.material = copies.computeIfAbsent(part.material, GpuTerrain::fallMaterial);
+            var fragments = broken == null ? null : broken.part(part.meshPart);
+            if (fragments != null) {
+                // Its fragments in its place: still one batch, each vertex moving with its fragment (tree-instances.glsl).
+                piece.meshPart.set(fragments.range());
+                piece.userData = fragments.fragments();
+            }
             box.getCenter(piece.meshPart.center);
             box.getDimensions(piece.meshPart.halfExtents).scl(.5f);
             pieces.add(piece);
         }
-        for (Node child : node.getChildren()) { addPieces(instance, child, copies, pieces); }
+        for (Node child : node.getChildren()) { addPieces(instance, child, copies, pieces, broken); }
+    }
+
+    /** The kit levels the installed chunks draw break into fragments on their own thread, ahead of any fall (KitFragments). */
+    private void cutFragments() {
+        for (Chunk chunk : chunks) { cutFragments(chunk); }
+    }
+
+    private void cutFragments(Chunk chunk) {
+        if (!fragments) { return; }
+        for (Prop prop : chunk.props) {
+            if (prop.building != null) { prop.building.kit().cutFragments(prop.instance().model); }
+        }
     }
 
     /** A falling piece's copy of a drawn material: solid, whatever fade or hover cut its building wore, from both sides. */
@@ -7785,6 +7819,15 @@ final class GpuTerrain implements Disposable {
 
     /** Whether the hex's structure has begun to give way. */
     boolean fallStarted(Coords at) { return destruction.started(at); }
+
+    /** Whether the kit levels drawn are still being broken into fragments for their falls (KitFragments): for tests. */
+    boolean fragmentsPending() { return assets.fragmentsPending(); }
+
+    /** The kits' installed fragments' bytes: for reports. */
+    long fragmentBytes() { return assets.fragmentBytes(); }
+
+    /** How many falling parts there are, and how many of them fall in fragments: for tests. */
+    int[] fallParts() { return destruction.parts(); }
 
     /**
      * At most this many triangles of the structures one transition brings down are cut, shared among their hexes: a finer
@@ -8012,16 +8055,11 @@ final class GpuTerrain implements Disposable {
      * the material most of it is made of, each cut's face textured across its plane a storey to a repeat.
      */
     private static MeepleShatter.Caps buildingCaps(List<MeepleShatter.Source> sources) {
-        MeepleShatter.Source body = null;
         Map<Material, Integer> sizes = new IdentityHashMap<>();
-        for (var source : sources) {
-            if (source.material().id.startsWith(GeneratedMesh.BUILDING_BODY)) { body = source; }
-            sizes.merge(source.material(), source.part().size, Integer::sum);
-        }
-        if (body == null) {
-            body = sources.stream().max(java.util.Comparator.comparingInt(source -> sizes.get(source.material()))).orElseThrow();
-        }
-        return new MeepleShatter.Caps(body.material(), body.part().mesh.getVertexAttributes(), BoardGeometry.level());
+        for (var source : sources) { sizes.merge(source.material(), source.part().size, Integer::sum); }
+        Material body = MeepleShatter.Caps.body(sources.stream().map(MeepleShatter.Source::material).toList(), sizes::get);
+        var layout = sources.stream().filter(source -> source.material() == body).reduce((first, last) -> last).orElseThrow();
+        return new MeepleShatter.Caps(body, layout.part().mesh.getVertexAttributes(), BoardGeometry.level());
     }
 
     /** Pieces whose structure the terrain now shows gone take its place, from the frame it does. */
@@ -10009,6 +10047,8 @@ final class GpuTerrain implements Disposable {
             for (Prop prop : chunk.props) {
                 if (prop.detail(pixelsPerUnit)) {
                     if (prop.decorationFeature != null || prop.translucent) { objectLevels = true; } else { packedLevels = true; }
+                    // A kit level drawn now breaks ahead of its fall too (KitFragments).
+                    if (prop.building != null && fragments) { prop.building.kit().cutFragments(prop.instance().model); }
                 }
             }
             // Buildings repack the chunk's prop caches (which also gather its placed objects again); placed objects alone

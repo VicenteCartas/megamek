@@ -121,7 +121,7 @@ class GpuBuildingCollapseSmokeTest {
                         if (scenario == 0) { boardCamera.zoom(.3f); }
                         frames = 0;
                         stage = 1;
-                    } else if (stage == 1 && frames == 20) {
+                    } else if (stage == 1 && frames >= 20 && !terrain.fragmentsPending()) {
                         capture(output, current.name() + "-0-before");
                         SwingUtilities.invokeLater(() -> {
                             if (current.ac20()) {
@@ -144,8 +144,10 @@ class GpuBuildingCollapseSmokeTest {
                         }
                         swapFrame = frames;
                         standing = falling.map(collapse -> bounds(collapse).getCenter(new Vector3())).orElse(null);
+                        int[] parts = terrain.fallParts();
                         report.add(current.name() + (standing == null ? ": falls on the GPU" : ": cut into pieces")
-                              + " " + frames + " frames after it was brought down");
+                              + " " + frames + " frames after it was brought down, " + parts[1] + " of its " + parts[0]
+                              + " parts in fragments");
                         stage = 3;
                     }
                     if (stage == 3) {

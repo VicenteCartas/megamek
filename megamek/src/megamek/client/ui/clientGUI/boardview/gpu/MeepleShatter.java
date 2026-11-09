@@ -58,12 +58,17 @@ final class MeepleShatter {
      * Where the cut planes lie. {@code burst}: all of them through the middle, as a blast breaks a meeple, k planes giving
      * up to 2^k wedges. {@code crumble}: {@code levels} near-level breaks spread up the height, as storeys part, and
      * {@code steep} near-vertical breaks spread across the footprint, as a building or a deck crumbles into pieces of
-     * about one size.
+     * about one size. With a {@code heading} (degrees about the axis; NaN for the seed's own) the steep breaks run across
+     * a wall that faces along it instead, never along it, which would peel the wall into layers: one in four slanted, to
+     * break its storey's height too, the first of them; with {@code grid} every other one turns a quarter, across walls
+     * that face both ways.
      */
-    record Planes(boolean crumble, int levels, int steep) {
-        static Planes burst(int cuts) { return new Planes(false, 0, cuts); }
+    record Planes(boolean crumble, int levels, int steep, float heading, boolean grid) {
+        static Planes burst(int cuts) { return new Planes(false, 0, cuts, Float.NaN, false); }
 
-        static Planes crumble(int levels, int steep) { return new Planes(true, levels, steep); }
+        static Planes crumble(int levels, int steep) { return new Planes(true, levels, steep, Float.NaN, false); }
+
+        static Planes across(int steep, float heading, boolean grid) { return new Planes(true, 0, steep, heading, grid); }
     }
 
     /**
@@ -79,8 +84,25 @@ final class MeepleShatter {
     /**
      * What the faces a cut opens draw with: a material, its vertex layout, and the units one texture repeat spans,
      * projected on each cut's plane. Null caps take the meeple's painted walls ({@code "paint"}) or else its first part.
+     * Without {@code chords} only what a cut's section wraps all round is closed: a chain left open, as the cut through
+     * an open sheet or a shell with no floor, is not filled across the room by its chord.
      */
-    record Caps(Material material, VertexAttributes attributes, float repeat) { }
+    record Caps(Material material, VertexAttributes attributes, float repeat, boolean chords) {
+        Caps(Material material, VertexAttributes attributes, float repeat) { this(material, attributes, repeat, true); }
+
+        /**
+         * Where a building's cuts close: in its structural body ({@link GeneratedMesh#BUILDING_BODY}), the last of
+         * {@code materials} that is, where it has one, else in the first of the materials most of it is made of.
+         */
+        static Material body(List<Material> materials, java.util.function.ToIntFunction<Material> size) {
+            Material body = null, largest = null;
+            for (Material material : materials) {
+                if (material.id.startsWith(GeneratedMesh.BUILDING_BODY)) { body = material; }
+                if (largest == null || size.applyAsInt(material) > size.applyAsInt(largest)) { largest = material; }
+            }
+            return body != null ? body : largest;
+        }
+    }
 
     /**
      * One material in one vertex layout: the source parts that share both are cut as one. A {@code skin} blends over
@@ -166,12 +188,12 @@ final class MeepleShatter {
         /** Where the cut's frame lies on the board; zero for a frame of the body's own. */
         private final Vector3 origin;
 
-        private Cut(List<Channel> channels, List<Piece> pieces, List<MeshPart> read, Vector3 origin) {
+        private Cut(List<Channel> channels, List<Piece> pieces, List<MeshPart> read, Vector3 origin, boolean supports) {
             this.channels = channels;
             this.pieces = pieces;
             this.read = read;
             this.origin = origin;
-            supports = pieces.stream().map(piece -> MeepleShatter.supports(channels, piece)).toList();
+            this.supports = supports ? pieces.stream().map(piece -> MeepleShatter.supports(channels, piece)).toList() : List.of();
         }
 
         /**
@@ -181,6 +203,14 @@ final class MeepleShatter {
         List<List<Vector3>> supports() { return supports; }
 
         int pieces() { return pieces.size(); }
+
+        /** Its channels: the parts cut, in the order given, then the caps' ({@link MeepleShatter#cut}). */
+        int channels() { return channels.size(); }
+
+        Material material(int channel) { return channels.get(channel).material; }
+
+        /** The piece's triangles in the channel, unindexed, as vertex records of the channel's layout. */
+        FloatArray triangles(int piece, int channel) { return pieces.get(piece).triangles()[channel]; }
     }
 
     /**
@@ -226,7 +256,27 @@ final class MeepleShatter {
         List<MeshPart> read = sources.stream().map(Source::part).toList();
         FloatArray[] all = triangles.toArray(FloatArray[]::new);
         var at = new Vector3(origin);
-        return () -> cut(channels, all, up, planes, seed, caps, read, at);
+        return () -> cut(channels, all, up, planes, seed, caps, read, at, true);
+    }
+
+    /**
+     * Breaks triangles already read, unindexed vertex records of {@code attributes} in one frame, each list a channel of
+     * its own, then {@code caps}' if any, in that order ({@link Cut#triangles}). It reads no mesh and works out no support
+     * points: any thread may cut ahead of time (KitFragments).
+     */
+    static Cut cut(List<Material> materials, List<FloatArray> triangles, VertexAttributes attributes, Vector3 up,
+          Planes planes, int seed, Caps caps) {
+        List<Channel> channels = new ArrayList<>();
+        List<FloatArray> all = new ArrayList<>();
+        for (int index = 0; index < materials.size(); index++) {
+            channels.add(new Channel(materials.get(index), attributes));
+            all.add(triangles.get(index));
+        }
+        if (caps != null) {
+            channels.add(new Channel(caps.material(), caps.attributes()));
+            all.add(new FloatArray());
+        }
+        return cut(channels, all.toArray(FloatArray[]::new), up, planes, seed, caps, List.of(), Vector3.Zero, false);
     }
 
     private static List<NodePart> drawnParts(Node source) {
@@ -312,7 +362,7 @@ final class MeepleShatter {
     }
 
     private static Cut cut(List<Channel> channels, FloatArray[] triangles, Vector3 up, Planes planes, int seed, Caps caps,
-          List<MeshPart> read, Vector3 origin) {
+          List<MeshPart> read, Vector3 origin, boolean supports) {
         var axis = new Vector3(up).nor();
         var whole = Piece.empty(channels.size(), List.of(axis));
         var bounds = new BoundingBox().inf();
@@ -325,7 +375,7 @@ final class MeepleShatter {
             }
         }
         List<Piece> pieces = new ArrayList<>(List.of(whole));
-        if (!bounds.isValid()) { return new Cut(channels, pieces, read, origin); }
+        if (!bounds.isValid()) { return new Cut(channels, pieces, read, origin, supports); }
         Channel faces = caps != null ? channels.getLast() : channels.stream()
               .filter(channel -> "paint".equals(channel.material.id)).findFirst().orElse(channels.getFirst());
         var across = new Vector3(axis).crs(Math.abs(axis.x) < .9f ? Vector3.X : Vector3.Y).nor();
@@ -334,7 +384,7 @@ final class MeepleShatter {
         // Section ends further apart than rounding meet: two triangles' crossings of one line, where a cap made by an
         // earlier cut only touches the middle of the other's edge.
         float tolerance = Math.max(bounds.getDimensions(point).len() * 1e-5f, 1e-6f);
-        float heading = UnitAttack.noise(seed) * 360;
+        float heading = Float.isNaN(planes.heading()) ? UnitAttack.noise(seed) * 360 : planes.heading();
         for (float[] plane : planes.crumble() ? crumble(bounds, center, axis, across, beside, planes, heading, seed)
               : burst(bounds, center, axis, across, beside, planes.steep(), heading, seed)) {
             var normal = new Vector3(plane[0], plane[1], plane[2]);
@@ -342,7 +392,7 @@ final class MeepleShatter {
             for (Piece piece : pieces) { split(channels, faces, caps, piece, normal, plane[3], tolerance, next); }
             pieces = next;
         }
-        return new Cut(channels, pieces, read, origin);
+        return new Cut(channels, pieces, read, origin, supports);
     }
 
     /** The first break runs across the axis; the others turn about it by the golden angle, steep and oblique. */
@@ -384,10 +434,15 @@ final class MeepleShatter {
             var at = new Vector3(center).mulAdd(axis, MathUtils.lerp(low, high, share) - center.dot(axis));
             result.add(new float[] { normal.x, normal.y, normal.z, normal.dot(at) });
         }
+        boolean wall = !Float.isNaN(planes.heading());
         for (int cut = 0; cut < planes.steep(); cut++) {
             int noise = seed + 59 * cut + 211;
-            float tilt = 72 + 18 * UnitAttack.noise(noise);
-            var normal = tilted(axis, across, beside, tilt, heading + cut * 137.5f);
+            // Across a wall: first a break slanted either way, through the storey's height, then upright ones, each turned a
+            // little; fewer breaks drop the upright ones first.
+            float tilt = wall && cut % 4 == 0 ? 48 + 16 * UnitAttack.noise(noise) : 72 + 18 * UnitAttack.noise(noise);
+            float turn = !wall ? cut * 137.5f : (planes.grid() && cut % 2 == 1 ? 90 : 0)
+                  + 30 * (UnitAttack.noise(noise + 2) - .5f) + (UnitAttack.noise(noise + 3) < .5f ? 180 : 0);
+            var normal = tilted(axis, across, beside, tilt, heading + turn);
             // A low-discrepancy spread: successive breaks fall in different shares of the footprint.
             float spread = ((cut * .618034f + UnitAttack.noise(noise + 1)) % 1) * 2 - 1;
             float offset = normal.dot(center) + spread * .35f * extent(bounds, normal);
@@ -486,7 +541,7 @@ final class MeepleShatter {
             var origin = new Vector3(normal).scl(offset);
             var inward = new Vector3(normal).scl(-1);
             List<GpuCutout.Edge> closed = new ArrayList<>();
-            for (List<Vector3> loop : GpuCutout.outlines(section, tolerance)) {
+            for (List<Vector3> loop : GpuCutout.outlines(section, tolerance, caps == null || caps.chords())) {
                 for (int corner = 0; corner < loop.size(); corner++) {
                     closed.add(new GpuCutout.Edge(loop.get(corner), loop.get((corner + 1) % loop.size())));
                 }

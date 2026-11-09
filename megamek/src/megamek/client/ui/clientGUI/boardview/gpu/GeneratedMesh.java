@@ -411,11 +411,7 @@ final class GeneratedMesh {
                 meshPart.primitiveType = GL20.GL_TRIANGLES;
                 meshPart.indices = new short[part.size / RigidGlb.STRIDE];
                 for (int i = 0; i < meshPart.indices.length; i++) {
-                    int offset = i * RigidGlb.STRIDE;
-                    meshPart.indices[i] = (short) (int) welded.computeIfAbsent(key(part.items, offset), ignored -> {
-                        vertices.addAll(part.items, offset, RigidGlb.STRIDE);
-                        return vertices.size / RigidGlb.STRIDE - 1;
-                    });
+                    meshPart.indices[i] = (short) weld(part.items, i * RigidGlb.STRIDE, RigidGlb.STRIDE, vertices, welded);
                 }
                 meshParts.add(meshPart);
                 if (materials.add(material)) {
@@ -450,8 +446,19 @@ final class GeneratedMesh {
         return suffix < 0 ? key : key.substring(0, suffix);
     }
 
+    /**
+     * The index in {@code vertices} of the vertex record of {@code stride} floats at {@code offset} in {@code items}: one
+     * already there with every bit the same ({@code welded}), or the record added.
+     */
+    static int weld(float[] items, int offset, int stride, FloatArray vertices, Map<Weld, Integer> welded) {
+        return welded.computeIfAbsent(key(items, offset, stride), ignored -> {
+            vertices.addAll(items, offset, stride);
+            return vertices.size / stride - 1;
+        });
+    }
+
     /** A vertex's attributes, bit for bit: two vertices weld when every bit matches. */
-    private record Weld(int[] bits) {
+    record Weld(int[] bits) {
         @Override
         public boolean equals(Object other) { return other instanceof Weld weld && Arrays.equals(bits, weld.bits); }
 
@@ -459,8 +466,8 @@ final class GeneratedMesh {
         public int hashCode() { return Arrays.hashCode(bits); }
     }
 
-    private static Weld key(float[] items, int offset) {
-        int[] bits = new int[RigidGlb.STRIDE];
+    private static Weld key(float[] items, int offset, int stride) {
+        int[] bits = new int[stride];
         for (int k = 0; k < bits.length; k++) { bits[k] = Float.floatToIntBits(items[offset + k]); }
         return new Weld(bits);
     }

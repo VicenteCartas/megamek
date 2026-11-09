@@ -22,6 +22,7 @@ import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
+import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -161,6 +162,26 @@ class MeepleShatterTest {
             }
         }
         assertTrue(checked > 0);
+    }
+
+    @Test
+    void aShellOpenBelowIsNotFilledAcrossTheRoomWithoutChords() {
+        // A storey's shell of single sheets, roofed and open below, cut upright across its long walls.
+        var shell = box(new Vector3(-20, -6, 0), new Vector3(20, 6, 18), false);
+        int stride = LAYOUT.vertexSize / Float.BYTES;
+        float[] records = new float[shell.size * stride];
+        shell.mesh.getVertices(records);
+        var walls = new Material("walls");
+        for (boolean chords : new boolean[] { true, false }) {
+            var cut = MeepleShatter.cut(List.of(walls), List.of(new FloatArray(records)), LAYOUT, Vector3.Z,
+                  MeepleShatter.Planes.across(1, 90, false), 11, new MeepleShatter.Caps(new Material("concrete"), LAYOUT, 10, chords));
+            assertEquals(2, cut.pieces(), "One break across the walls");
+            assertTrue(cut.supports().isEmpty(), "A cut ahead of time works out no support points");
+            int caps = 0;
+            for (int piece = 0; piece < cut.pieces(); piece++) { caps += cut.triangles(piece, 1).size; }
+            // With chords its section, open below, closes across the room; without, an open sheet stays open.
+            assertEquals(chords, caps > 0, "Caps with chords " + chords + ": " + caps);
+        }
     }
 
     private Model pieces(List<MeepleShatter.Source> sources, MeepleShatter.Planes planes, MeepleShatter.Caps caps) {

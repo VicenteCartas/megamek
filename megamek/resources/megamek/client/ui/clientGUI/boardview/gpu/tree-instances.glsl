@@ -40,7 +40,10 @@ uniform ivec2 u_destructSlots; // the first slot's texel, and 1 while anything f
 // The batch's piece: its node's box centre in the model's frame, and what moves its instances (GpuInstancedMesh#piece):
 // w 1 a kit's pieces falling, 2 trees falling, 3 trees standing, 0 nothing.
 uniform vec4 u_piece;
-uniform vec3 u_pieceHalf;      // that box's half size
+uniform vec4 u_pieceHalf;      // that box's half size; w: the fragments the part broke into (KitFragments), 0 whole
+// A broken part's fragments, in the order its batch's copy holds them: [2k] the box's centre and its first vertex,
+// [2k + 1] its half size. A vertex belongs to the last fragment whose first vertex it has reached.
+uniform vec4 u_fragments[2 * FALL_FRAGMENTS];
 
 // The fall's rigid motion, p' = fallShift + fallTurn (p - fallPivot), set once a vertex by fallBegin.
 bool falling = false;
@@ -142,11 +145,20 @@ void fallBegin() {
     vec4 tail = texelFetch(u_lavaLights, lavaTexel(texel + 2), 0);
     float sinks = tail.x;
     if (u_piece.w > 1.5) { treeFall(fall, site, tail); return; }
-    vec3 centre = instancePlace(u_piece.xyz);
+    // A broken part's vertex moves with its fragment (not 'half': a reserved word).
+    vec3 pivot = u_piece.xyz, size = u_pieceHalf.xyz;
+    int fragments = int(u_pieceHalf.w + 0.5);
+    if (fragments > 0) {
+        int k = 0;
+        for (int i = 1; i < fragments; i++) { k += gl_VertexID >= int(u_fragments[2 * i].w + 0.5) ? 1 : 0; }
+        pivot = u_fragments[2 * k].xyz;
+        size = u_fragments[2 * k + 1].xyz;
+    }
+    vec3 centre = instancePlace(pivot);
     // Raw inputs only, so that every pass's program draws the same numbers.
     uint seed = fallMix(floatBitsToUint(a_instance0.x) ^ fallMix(floatBitsToUint(a_instance0.y)
           ^ fallMix(floatBitsToUint(a_instance0.z) ^ fallMix(floatBitsToUint(a_instance1.x)
-          ^ fallMix(floatBitsToUint(u_piece.x) ^ fallMix(floatBitsToUint(u_piece.y) ^ floatBitsToUint(u_piece.z)))))));
+          ^ fallMix(floatBitsToUint(pivot.x) ^ fallMix(floatBitsToUint(pivot.y) ^ floatBitsToUint(pivot.z)))))));
     float level = u_destruct.z, reach = u_destruct.w, height = max(site.w - site.z, level);
     float share = clamp((centre.z - site.z) / height, 0.0, 1.0), foot = (1.0 - share) * (1.0 - share);
     vec2 outward = centre.xy - site.xy;
@@ -185,7 +197,7 @@ void fallBegin() {
     // It comes to rest on the floor, or on the wreck of the storeys below it, higher in the middle.
     float ground = site.z + min(.12 * height, FALL_PILE_LEVELS * level) * share
           * max(0.0, 1.0 - offset * offset / (reach * reach));
-    vec3 extent = abs(u_pieceHalf * instanceScale());
+    vec3 extent = abs(size * instanceScale());
     // Gravity grows with the drop: every piece is down within FALL_SECONDS (GpuDestruction#settles agrees).
     float gravity = max(u_destruct.y, 2.0 * height / (FALL_SECONDS * FALL_SECONDS));
     float drop = max(0.0, centre.z - extent.z - ground);
@@ -203,7 +215,12 @@ void fallBegin() {
     vec3 up = vec3(fallTurn[0].z, fallTurn[1].z, fallTurn[2].z);
     float below = abs(dot(up.xy, a_instance1.xy)) * extent.x + abs(dot(up.xy, vec2(-a_instance1.y, a_instance1.x))) * extent.y
           + abs(up.z) * extent.z;
-    position.z = max(position.z, ground + below);
+    // It rests on its lowest corner where it lies, not where it stood: a slab that toppled does not hover at its standing
+    // half height, nor a piece thrown off the pile at the pile's height. Landed, it settles there as it skids.
+    vec2 lies = position.xy - site.xy;
+    float rest = site.z + below + min(.12 * height, FALL_PILE_LEVELS * level) * share
+          * max(0.0, 1.0 - dot(lies, lies) / (reach * reach));
+    position.z = max(slide > 0.0 ? mix(position.z, rest, 1.0 - exp(-FALL_GROUND_DRAG * slide)) : position.z, rest);
     float sinking = clamp((clock - sinks) / FALL_SINK, 0.0, 1.0);
     position.z -= 2.0 * length(extent) * sinking * sinking * (3.0 - 2.0 * sinking);
     falling = true;

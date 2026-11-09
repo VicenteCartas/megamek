@@ -286,11 +286,11 @@ final class GpuCutout {
 
     /**
      * The outlines of directed edges in the XY plane, each edge leaving its start for its end: their closed loops, and
-     * every chain that never closes, as the cut through a shell with no floor or an open seam, closed by its chord. Ends
-     * join where they lie within {@code tolerance} of each other, as the ends of two triangles' edges do that meet at a
-     * point one of them only passes through.
+     * with {@code chains} every chain that never closes, as the cut through a shell with no floor or an open seam, closed
+     * by its chord. Ends join where they lie within {@code tolerance} of each other, as the ends of two triangles' edges
+     * do that meet at a point one of them only passes through.
      */
-    static List<List<Vector3>> outlines(List<Edge> edges, float tolerance) {
+    static List<List<Vector3>> outlines(List<Edge> edges, float tolerance, boolean chains) {
         List<Vector3> points = new ArrayList<>();
         Map<Long, List<Integer>> cells = new java.util.HashMap<>();
         Map<Integer, List<Integer>> next = new LinkedHashMap<>();
@@ -304,7 +304,9 @@ final class GpuCutout {
         }
         List<List<Integer>> outlines = new ArrayList<>();
         // A chain starts where more edges leave than arrive, and runs on until nothing leaves where it has got to.
-        for (var start : List.copyOf(balance.keySet())) {
+        // Without chains none is walked: one ending on a closed loop (a sheet flush with a solid's face) would run on
+        // through the loop and take its edges with it.
+        for (var start : chains ? List.copyOf(balance.keySet()) : List.<Integer>of()) {
             while (balance.get(start) > 0 && next.containsKey(start) && !next.get(start).isEmpty()) {
                 List<Integer> chain = new ArrayList<>(List.of(start));
                 int at = start;

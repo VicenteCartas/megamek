@@ -1499,6 +1499,23 @@ final class GpuAssets implements Disposable {
     private final Map<Object, Live> users = new java.util.IdentityHashMap<>();
 
     /**
+     * Installs one kit level's fragments that finished cutting, if any (GpuBuilding#installFragments), and says whether it
+     * did: render thread, between falls, so no fall's frame pays for it.
+     */
+    boolean installFragments() {
+        for (GpuBuilding building : buildings.values()) {
+            if (building.installFragments()) { return true; }
+        }
+        return false;
+    }
+
+    /** The installed fragments' bytes, every kit's: for reports. */
+    long fragmentBytes() { return buildings.values().stream().mapToLong(GpuBuilding::fragmentBytes).sum(); }
+
+    /** Whether a kit level is still being broken into fragments, or not installed yet: for tests. */
+    boolean fragmentsPending() { return buildings.values().stream().anyMatch(GpuBuilding::fragmentsPending); }
+
+    /**
      * Records the generated buildings, industrial plants and rail and maglev routes that {@code user}'s installed chunks draw,
      * then retires those no user of these assets draws or is still building with. On the GL thread, at a scene commit,
      * when {@code user} has no chunk build in flight.

@@ -493,6 +493,7 @@ class GpuBattleView extends ApplicationAdapter {
         probed = false;
         terrain = new GpuTerrain(unitModels, unitBounds);
         terrain.setCombatScars(source.isGameplay());
+        terrain.setFragments(source.isGameplay());
         terrain.setEditable(source.isEditor());
         offscreenLinks = new GpuGlsl.Preparation();
         GpuGlsl.linkOffscreen(offscreenLinks);

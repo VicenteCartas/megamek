@@ -40,6 +40,8 @@ final class GpuDestruction implements Disposable {
     static final int LOADED = 1;
     /** A slot's flag: a blast's front brings it down, piece by piece as it passes (#blastFrom). */
     static final int BLAST = 2;
+    /** A falling part breaks into at most this many fragments (KitFragments), its batch's table in the shader. */
+    static final int FRAGMENTS = 16;
     /**
      * The collapse's physics, in playback seconds and world units: the crushed foot bursts out this fast, the storeys
      * above spill out and tumble up to these rates and topple outward; a hit at full strength pushes and topples them
@@ -75,6 +77,7 @@ final class GpuDestruction implements Disposable {
     /** The fall's numbers as GLSL constants, so that the shader and {@link #settles} agree. */
     static String defines() {
         return "#define FALL_TEXELS " + TEXELS + "\n#define FALL_LOADED " + LOADED + "\n#define FALL_BLAST " + BLAST
+              + "\n#define FALL_FRAGMENTS " + FRAGMENTS
               + "\n#define FALL_CRUSH " + CRUSH
               + "\n#define FALL_SPILL " + SPILL + "\n#define FALL_TUMBLE " + TUMBLE + "\n#define FALL_TOPPLE_OUT " + TOPPLE_OUT
               + "\n#define FALL_PUSH " + PUSH + "\n#define FALL_TOPPLE " + TOPPLE + "\n#define FALL_LOAD_DROP " + LOAD_DROP
@@ -174,6 +177,18 @@ final class GpuDestruction implements Disposable {
 
     /** How many hexes' trees are felled, falling or lying. */
     int groveCount() { return groves.size(); }
+
+    /** How many parts fall, and how many of them in fragments (KitFragments). */
+    int[] parts() {
+        int broken = 0, all = 0;
+        for (Fall fall : falls.values()) {
+            for (Renderable piece : fall.pieces) {
+                all++;
+                if (piece.userData instanceof GpuInstancedMesh.Fragments) { broken++; }
+            }
+        }
+        return new int[] { all, broken };
+    }
 
     /**
      * Takes the hex's structure from its chunk: {@code pieces} stand where it stood until {@link #start}. {@code floor}

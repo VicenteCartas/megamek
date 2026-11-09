@@ -138,6 +138,8 @@ class GpuNuclearCollapseSmokeTest {
                 private final List<String> stageNames = new ArrayList<>();
                 private final List<Long> stageTimes = new ArrayList<>();
                 private String slowest = "", takeStages = "";
+                /** At the flash: the falling parts, and how many of them fall in fragments. */
+                private int[] fallParts = { 0, 0 };
                 private double slowestMs;
                 /** Programs linked after loading: at the flash, before this frame, and over the wave. */
                 private int linksAtFlash = -1, linksBefore;
@@ -195,7 +197,7 @@ class GpuNuclearCollapseSmokeTest {
                         boardCamera.center(BoardGeometry.center(groundZero, before.getHex(groundZero).getLevel()));
                         frames = 0;
                         stage = 1;
-                    } else if (stage == 1 && frames == 60) {
+                    } else if (stage == 1 && frames >= 60 && !terrain.fragmentsPending()) {
                         capture(output, "0-before");
                         SwingUtilities.invokeLater(() -> {
                             fixture.game.processGameEvent(new GameNuclearDetonationEvent(fixture.game, server.detonation, false));
@@ -229,6 +231,7 @@ class GpuNuclearCollapseSmokeTest {
                             // The flash: the frame that took the city from its chunks.
                             contact = frames;
                             takeMs = ms;
+                            fallParts = terrain.fallParts();
                             takeStages = stages(now, links);
                             linksAtFlash = links;
                         }
@@ -293,6 +296,8 @@ class GpuNuclearCollapseSmokeTest {
                           + takeStages);
                     report.add("the slowest wave frame's stages over 2 ms: " + slowest);
                     report.add("hexes whose trees the strike felled: " + felledHexes);
+                    report.add("falling parts: " + fallParts[0] + ", in fragments: " + fallParts[1] + "; fragment meshes "
+                          + ((GpuTerrain) field(this, "terrain")).fragmentBytes() / 1024 + " KiB");
                     report.add("programs linked from the flash on: "
                           + (GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading() - linksAtFlash));
                 }

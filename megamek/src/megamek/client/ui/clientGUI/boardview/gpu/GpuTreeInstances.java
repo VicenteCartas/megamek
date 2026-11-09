@@ -23,6 +23,7 @@ import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.RenderableProvider;
 import com.badlogic.gdx.graphics.g3d.Shader;
+import com.badlogic.gdx.graphics.g3d.model.MeshPart;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.graphics.g3d.Attributes;
@@ -113,13 +114,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
          * mirror images ({@code mirrored}) takes the clockwise winding as the front ({@link GpuInstancedMesh#mirrored}).
          */
         Batch(Renderable source, boolean mirrored) {
-            FloatArray vertices = new FloatArray();
-            ShortArray indices = new ShortArray();
-            GpuPropBatch.copyVertices(source.meshPart.mesh, source.meshPart.offset, source.meshPart.size, vertices, indices);
-            // Parts share a GLB vertex buffer; compact the indexed range instead of copying unrelated variants.
-            MeshBuilder builder = new MeshBuilder();
-            builder.begin(source.meshPart.mesh.getVertexAttributes(), source.meshPart.primitiveType);
-            builder.addMesh(vertices.items, indices.items, 0, indices.size);
+            MeshBuilder builder = compacted(source.meshPart);
             mesh = new GpuInstancedMesh(builder.getNumVertices(), builder.getNumIndices(), builder.getAttributes());
             mesh.mirrored = mirrored;
             builder.end(mesh);
@@ -444,6 +439,21 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         public void dispose() { batch.dispose(); }
     }
 
+    /**
+     * A part's own copy, built but not ended: its indexed range compacted, as parts share a GLB vertex buffer. Its
+     * vertices are numbered as its indices first reach them, which a broken part's fragments' table counts on
+     * (KitFragments).
+     */
+    static MeshBuilder compacted(MeshPart part) {
+        FloatArray vertices = new FloatArray();
+        ShortArray indices = new ShortArray();
+        GpuPropBatch.copyVertices(part.mesh, part.offset, part.size, vertices, indices);
+        MeshBuilder builder = new MeshBuilder();
+        builder.begin(part.mesh.getVertexAttributes(), part.primitiveType);
+        builder.addMesh(vertices.items, indices.items, 0, indices.size);
+        return builder;
+    }
+
     private final BiFunction<String, Integer, Model> models;
     /** Whether its trees are felled ones (GpuDestruction), whose instances name their slots instead of a dissolve. */
     private final boolean felled;
@@ -571,11 +581,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         for (int i = 0; i < placed.batches.size(); i++) {
             Batch batch = batch(placed.batches.get(i), placed.samples.get(i));
             if (batch.data.isEmpty()) { gathered.add(batch); }
-            if (placed.pieces.get(i) && batch.mesh.piece == null) {
-                var part = placed.samples.get(i).meshPart;
-                batch.mesh.piece = new float[] { part.center.x, part.center.y, part.center.z,
-                      part.halfExtents.x, part.halfExtents.y, part.halfExtents.z, GpuInstancedMesh.PIECES };
-            }
+            if (placed.pieces.get(i) && batch.mesh.piece == null) { batch.mesh.piece = GpuInstancedMesh.piece(placed.samples.get(i)); }
             batch.data.addAll(placed.data.get(i));
         }
     }
@@ -652,7 +658,10 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         data.add(m[Matrix4.M00] / horizontal, m[Matrix4.M10] / horizontal, m[Matrix4.M22], owner);
     }
 
-    /** A debris batch's piece for the draw (tree-instances.glsl: u_piece, u_pieceHalf); 0 for every other batch. */
+    /**
+     * A debris batch's piece for the draw (tree-instances.glsl: u_piece, u_pieceHalf, whose w counts a broken part's
+     * fragments, and their table u_fragments); 0 for every other batch.
+     */
     static void registerPiece(BaseShader shader) {
         shader.register("u_piece", new BaseShader.LocalSetter() {
             @Override
@@ -665,7 +674,18 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 float[] piece = piece(renderable);
-                if (piece != null) { target.set(id, piece[3], piece[4], piece[5]); }
+                if (piece != null) {
+                    target.set(id, piece[3], piece[4], piece[5], (piece.length - GpuInstancedMesh.PIECE) / 8f);
+                }
+            }
+        });
+        shader.register("u_fragments", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                float[] piece = piece(renderable);
+                if (piece != null && piece.length > GpuInstancedMesh.PIECE && target.has(id)) {
+                    target.program.setUniform4fv(target.loc(id), piece, GpuInstancedMesh.PIECE, piece.length - GpuInstancedMesh.PIECE);
+                }
             }
         });
     }

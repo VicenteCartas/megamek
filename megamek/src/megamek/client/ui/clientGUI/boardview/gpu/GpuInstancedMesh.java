@@ -31,6 +31,30 @@ final class GpuInstancedMesh extends Mesh {
      */
     float[] piece;
     static final float PIECES = 1, FELLED = 2, STANDING = 3;
+    /** The floats of {@link #piece} before a broken part's fragments' table (KitFragments). */
+    static final int PIECE = 7;
+
+    /**
+     * A falling part's fragments ({@link KitFragments}), carried in its renderable's userData: per fragment its box's
+     * centre and its first vertex in the batch's copy of the part, then its half size and 0.
+     */
+    record Fragments(float[] table) { }
+
+    /** A falling piece's {@link #piece}: its node's box, {@link #PIECES}, then its fragments' table where it broke. */
+    static float[] piece(com.badlogic.gdx.graphics.g3d.Renderable sample) {
+        var part = sample.meshPart;
+        float[] table = sample.userData instanceof Fragments fragments ? fragments.table() : new float[0];
+        float[] result = new float[PIECE + table.length];
+        result[0] = part.center.x;
+        result[1] = part.center.y;
+        result[2] = part.center.z;
+        result[3] = part.halfExtents.x;
+        result[4] = part.halfExtents.y;
+        result[5] = part.halfExtents.z;
+        result[6] = PIECES;
+        System.arraycopy(table, 0, result, PIECE, table.length);
+        return result;
+    }
 
     GpuInstancedMesh(int vertices, int indices, VertexAttributes attributes) {
         super(true, vertices, indices, attributes);
