@@ -1964,8 +1964,13 @@ class GpuBattleView extends ApplicationAdapter {
         }
         var detonation = playback.detonation();
         if (push.isZero() && detonation != null) {
-            push.mulAdd(away(at, BoardGeometry.center(detonation.result().coords(), detonation.result().elevation())),
-                  NUCLEAR_DAMAGE);
+            var blast = detonation.result();
+            // A strike throws everyone; a conventional explosion only those its damage reaches, as hard as it is there.
+            float damage = blast.kind() != megamek.common.NuclearDetonation.Kind.EXPLOSION ? NUCLEAR_DAMAGE
+                  : blast.baseDamage() - blast.coords().distance(unit.location().coords()) * (float) blast.degradation();
+            if (damage > 0) {
+                push.mulAdd(away(at, BoardGeometry.center(blast.coords(), blast.elevation())), damage);
+            }
         }
         if (push.isZero(1e-6f) && cause == null) { return null; }
         var recent = recentHit(unit);

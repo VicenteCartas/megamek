@@ -249,8 +249,12 @@ final class GpuArtilleryBlast {
         boolean marksReported;
         /** A nuclear round's stats (its blast area, crater), null for every other round. */
         NukeStats nuke;
-        /** An orbital bombardment's blast: no mushroom cloud, a lance of fire from the sky (GpuArtilleryBlast#nuclear). */
-        boolean orbital;
+        /**
+         * What a server-confirmed blast is (GpuArtilleryBlast#nuclear, #explosion): an orbital bombardment's has no
+         * mushroom cloud but a lance of fire from the sky, a conventional explosion's a fireball and its ring. Null for
+         * a round's blast.
+         */
+        megamek.common.NuclearDetonation.Kind kind;
         /** Its scorch has been handed to the terrain (scorches). */
         boolean scorched;
         /** Its attack's collapses have been handed to the terrain (strikes). */
@@ -634,14 +638,14 @@ final class GpuArtilleryBlast {
 
     /** Scheduled stock/custom strike using its server-resolved blast parameters, with no invented weapon or unit. */
     void detonateNuclear(Vector3 ground, NukeStats stats, int key) {
-        detonateNuclear(ground, stats, key, false);
+        detonateNuclear(ground, stats, key, megamek.common.NuclearDetonation.Kind.NUCLEAR);
     }
 
     /** With {@code orbital} an orbital bombardment's: a lance of fire from the sky instead of a mushroom cloud. */
-    void detonateNuclear(Vector3 ground, NukeStats stats, int key, boolean orbital) {
+    void detonateNuclear(Vector3 ground, NukeStats stats, int key, megamek.common.NuclearDetonation.Kind kind) {
         detonate(ground, null, null, null, key, stats);
         for (Blast blast : blasts) {
-            if (blast.key == key) { blast.orbital = orbital; }
+            if (blast.key == key) { blast.kind = kind; }
         }
     }
 
@@ -652,7 +656,7 @@ final class GpuArtilleryBlast {
         }
         if (blasts.size() == MAX_BLASTS) {
             // A nuclear front times what it brings down: the oldest other blast makes way first.
-            Blast oldest = blasts.stream().filter(blast -> blast.nuke == null).findFirst().orElse(blasts.getFirst());
+            Blast oldest = blasts.stream().filter(blast -> !nuclear(blast)).findFirst().orElse(blasts.getFirst());
             LOGGER.debug("[ArtilleryBlast] {} blasts already drawing, the oldest makes way", MAX_BLASTS);
             blasts.remove(oldest);
         }
@@ -727,7 +731,7 @@ final class GpuArtilleryBlast {
     /** Ages every blast and retires those whose smoke has cleared. */
     void advance(float seconds) {
         for (Blast blast : blasts) { blast.seconds += seconds; }
-        blasts.removeIf(blast -> blast.seconds >= (blast.nuke != null ? NUCLEAR_SECONDS : SECONDS));
+        blasts.removeIf(blast -> blast.seconds >= (nuclear(blast) ? NUCLEAR_SECONDS : SECONDS));
     }
 
     /**
@@ -741,7 +745,7 @@ final class GpuArtilleryBlast {
      */
     void strikes(java.util.function.BiConsumer<megamek.common.ResolvedAttack, Coords> receiver) {
         for (Blast blast : blasts) {
-            if (blast.struck || blast.nuke == null || blast.attack == null || blast.targetHex == null || blast.seconds < 0) {
+            if (blast.struck || !nuclear(blast) || blast.attack == null || blast.targetHex == null || blast.seconds < 0) {
                 continue;
             }
             blast.struck = true;
@@ -752,7 +756,7 @@ final class GpuArtilleryBlast {
 
     void scorches(Consumer<GpuGroundDamage.Scorch> receiver) {
         for (Blast blast : blasts) {
-            if (blast.nuke == null || blast.scorched || blast.seconds < 0) { continue; }
+            if (!nuclear(blast) || blast.scorched || blast.seconds < 0) { continue; }
             blast.scorched = true;
             receiver.accept(new GpuGroundDamage.Scorch(blast.ground.cpy(), nuclearRadius(blast.nuke),
                   2 * blast.nuke.craterDepth * BoardGeometry.height()));
@@ -775,7 +779,7 @@ final class GpuArtilleryBlast {
         Flash brightest = Flash.NONE;
         for (Blast blast : blasts) {
             float seconds = blast.seconds;
-            if (blast.nuke == null || seconds < 0 || seconds > 6) { continue; }
+            if (!nuclear(blast) || seconds < 0 || seconds > 6) { continue; }
             float rise = Math.min(1, seconds / .05f), after = Math.max(0, seconds - .05f);
             float intensity = 6 * rise * (.8f * (float) Math.exp(-after / .18f) + .2f * (float) Math.exp(-after / 1.2f));
             if (intensity > brightest.intensity()) {
@@ -822,17 +826,26 @@ final class GpuArtilleryBlast {
      */
     int shocks(float[] out) {
         int count = 0;
-        for (int index = blasts.size() - 1; index >= 0 && count < MAX_SHOCKS; index--) {
-            Blast blast = blasts.get(index);
-            if (blast.nuke == null || blast.seconds < 0) { continue; }
-            float radius = nuclearRadius(blast.nuke);
-            out[count * 4] = blast.ground.x;
-            out[count * 4 + 1] = blast.ground.y;
-            out[count * 4 + 2] = radius;
-            out[count * 4 + 3] = blast.seconds * SHOCK_SECONDS / shockSeconds(radius);
-            count++;
+        // The nuclear fronts first, which also spread their scorch; a conventional explosion's moves the plants alone, its
+        // radius negative (terrain-shocks.glsl).
+        for (boolean explosions : new boolean[] { false, true }) {
+            for (int index = blasts.size() - 1; index >= 0 && count < MAX_SHOCKS; index--) {
+                Blast blast = blasts.get(index);
+                if (blast.nuke == null || blast.seconds < 0 || nuclear(blast) == explosions) { continue; }
+                float radius = nuclearRadius(blast.nuke);
+                out[count * 4] = blast.ground.x;
+                out[count * 4 + 1] = blast.ground.y;
+                out[count * 4 + 2] = explosions ? -radius : radius;
+                out[count * 4 + 3] = blast.seconds * SHOCK_SECONDS / shockSeconds(radius);
+                count++;
+            }
         }
         return count;
+    }
+
+    /** A nuclear strike's or an orbital bombardment's blast, or a round's nuclear one; not a conventional explosion's. */
+    private static boolean nuclear(Blast blast) {
+        return blast.nuke != null && blast.kind != megamek.common.NuclearDetonation.Kind.EXPLOSION;
     }
 
     /** A nuclear blast area's radius in world units: where its damage, falling by the Degradation per hex, ends. */
@@ -847,8 +860,13 @@ final class GpuArtilleryBlast {
     /** Queues the volumes of every live blast. */
     void emit(GpuExplosionEffects explosions) {
         for (Blast blast : blasts) {
+            if (blast.nuke != null && blast.kind == megamek.common.NuclearDetonation.Kind.EXPLOSION) {
+                explosion(explosions, blast.ground, blast.nuke, blast.seconds, blast.drawSeed);
+                continue;
+            }
             if (blast.nuke != null) {
-                nuclear(explosions, blast.ground, nuclearRadius(blast.nuke), blast.seconds, blast.drawSeed, blast.orbital);
+                nuclear(explosions, blast.ground, nuclearRadius(blast.nuke), blast.seconds, blast.drawSeed,
+                      blast.kind == megamek.common.NuclearDetonation.Kind.ORBITAL);
                 continue;
             }
             var scatter = new Scatter(blast.pieces, blast.landings, blast.heading, blast.opening, blast.intensity);
@@ -1322,26 +1340,45 @@ final class GpuArtilleryBlast {
                   BRIGHT_FIRE, Vector3.Zero);
         }
         if (!orbital) { mushroom(explosions, ground, radius * .42f, seconds * SECONDS / NUCLEAR_SECONDS, seed); }
-        float front = seconds / shockSeconds(radius);
-        if (front < 1) {
-            // The front slows as it spreads; its dust thins toward the edge of the blast area.
-            float reach = shockReach(seconds, radius);
-            int puffs = 96;
-            for (int puff = 0; puff < puffs; puff++) {
-                float bearing = (puff + random(seed, puff + 300)) * MathUtils.PI2 / puffs;
-                // The dust it throws up rolls into a wall that rises behind it.
-                point.set(ground).add(MathUtils.cos(bearing) * reach, MathUtils.sin(bearing) * reach,
-                      radius * .02f * front);
-                explosions.addFlat(point, radius * (.045f + .05f * front), front, 0, .5f * fadeOut(front, .35f),
-                      seed + puff * 7, EARTH, .5f);
-            }
-        }
+        shockRing(explosions, ground, radius, seconds, seed, 96);
         float ring = (seconds - .3f) / 2.6f;
         if (!orbital && ring > 0 && ring < 1) {
             point.set(ground).add(0, 0, radius * .3f);
             explosions.addFlat(point, radius * (.15f + .2f * ring), ring, 0, .5f * MathUtils.sin(ring * MathUtils.PI),
                   seed + 41, FUEL_HAZE, .1f);
         }
+    }
+
+    /**
+     * The shock front's dust, {@code puffs} around it: it slows as it spreads and thins toward the edge of the blast
+     * area (#shockReach), the ring the falls keep to (GpuTerrain#strike).
+     */
+    private void shockRing(GpuExplosionEffects explosions, Vector3 ground, float radius, float seconds, int seed, int puffs) {
+        float front = seconds / shockSeconds(radius);
+        if (front >= 1) { return; }
+        float reach = shockReach(seconds, radius);
+        for (int puff = 0; puff < puffs; puff++) {
+            float bearing = (puff + random(seed, puff + 300)) * MathUtils.PI2 / puffs;
+            // The dust it throws up rolls into a wall that rises behind it.
+            point.set(ground).add(MathUtils.cos(bearing) * reach, MathUtils.sin(bearing) * reach, radius * .02f * front);
+            explosions.addFlat(point, radius * (.045f + .05f * front), front, 0, .5f * fadeOut(front, .35f),
+                  seed + puff * 7, EARTH, .5f);
+        }
+    }
+
+    /**
+     * A conventional explosion that brought structures down (a fuel tank, an ammunition store): a fireball sized by its
+     * damage and its smoke, and the shock front its falls keep to; no flash, mushroom or scorch.
+     */
+    private void explosion(GpuExplosionEffects explosions, Vector3 ground, NukeStats blast, float seconds, int seed) {
+        if (seconds < 0 || seconds >= SECONDS) { return; }
+        float size = BoardGeometry.height() * .55f
+              * MathUtils.clamp((float) blast.baseDamage / REFERENCE_DAMAGE, .35f, 1.6f);
+        fireball(explosions, ground, size, seconds, seed);
+        smokeColumn(explosions, ground, size, seconds, seed, 1.9f);
+        float radius = nuclearRadius(blast);
+        shockRing(explosions, ground, radius, seconds, seed,
+              Math.min(96, 12 * Math.max(1, Math.round(radius / BoardGeometry.height()))));
     }
 
     /** A bright, billowing fireball that lingers before going dark, over a base of black smoke. */

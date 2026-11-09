@@ -210,11 +210,11 @@ final class UnitPlayback {
                     combatTerrainRelease = terrainRelease();
                     if (attack.shot()) { volley.add(attack, 0); }
                     collectVolley();
-                } else if (active instanceof BoardScene.Detonation) {
+                } else if (active instanceof BoardScene.Detonation detonation) {
                     combatSeconds = 0;
                     combatContact = DETONATION_CONTACT_SECONDS;
                     combatTerrainRelease = combatContact;
-                    combatDuration = GpuArtilleryBlast.SHOCK_SECONDS;
+                    combatDuration = duration(detonation.result());
                     detonationStarted = false;
                 } else if (active instanceof BoardScene.Conversion change) {
                     conversion = new UnitConversion(change);
@@ -289,6 +289,9 @@ final class UnitPlayback {
                       // A unit that died in its own movement, as a fall, dies as it lands.
                       || active instanceof BoardScene.Movement move && pending.peekFirst() instanceof BoardScene.Combat death
                             && death.result().kind() == megamek.common.ResolvedAttack.Kind.DEATH && death.entityId() == move.entityId()
+                      // An explosion goes off as what set it off ends, the next of a chain as the last one's falls do.
+                      || pending.peekFirst() instanceof BoardScene.Detonation next
+                            && next.result().kind() == megamek.common.NuclearDetonation.Kind.EXPLOSION
                       // So does one the structure it stood on or in crushed as it came down.
                       || active instanceof BoardScene.TileTransition change && pending.peekFirst() instanceof BoardScene.Combat crushed
                             && crushed.result().kind() == megamek.common.ResolvedAttack.Kind.DEATH
@@ -626,6 +629,16 @@ final class UnitPlayback {
     int activeEntityId() { return active == null ? -1 : active.entityId(); }
 
     double holdSeconds() { return hold; }
+
+    /**
+     * How long a detonation plays, in playback seconds: a strike's whole front; a conventional explosion's front over its
+     * few hexes and the fall of what it brought down.
+     */
+    static double duration(megamek.common.NuclearDetonation result) {
+        if (result.kind() != megamek.common.NuclearDetonation.Kind.EXPLOSION) { return GpuArtilleryBlast.SHOCK_SECONDS; }
+        return DETONATION_CONTACT_SECONDS + GpuArtilleryBlast.shockSeconds(GpuArtilleryBlast.nuclearRadius(result.stats()))
+              / GpuArtilleryBlast.SECONDS_PER_PLAYBACK + BoardScene.TileTransition.COLLAPSE_SECONDS;
+    }
 
     boolean paused() { return paused; }
 

@@ -7827,9 +7827,11 @@ final class GpuTerrain implements Disposable {
                 if (destruction.taken(collapse.coords())) { continue; }
                 var middle = BoardGeometry.center(collapse.coords(), collapse.before().elevation());
                 float distance = Vector2.dst(middle.x, middle.y, groundZero.x, groundZero.y);
-                // Stronger toward the epicentre: up to four heavy hits' push beside it, one at the blast's edge.
+                // Stronger toward the epicentre: up to four heavy hits' push beside it, one at the blast's edge. A
+                // conventional explosion pushes as its hit does (TileTransition#blast), never more than a heavy hit.
                 float near = 1 - MathUtils.clamp(distance / radius, 0, 1);
-                Chunk chunk = takeFall(collapse, 1 + 3 * near * near);
+                Chunk chunk = takeFall(collapse, result.kind() == megamek.common.NuclearDetonation.Kind.EXPLOSION ? 0
+                      : 1 + 3 * near * near);
                 if (chunk == null) { continue; }
                 taken.add(chunk);
                 destruction.blastFrom(collapse.coords(), groundZero.x, groundZero.y,

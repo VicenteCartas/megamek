@@ -181,7 +181,11 @@ final class GpuBoardSource implements BoardSource {
     /** Packet-bounded presentation capture only; the game continues to apply its authoritative strike updates. */
     private record NuclearCapture(megamek.common.NuclearDetonation strike, Frame before,
           List<BoardScene.Animation> consequences) { }
-    private NuclearCapture nuclearCapture;
+    /**
+     * The detonations being captured, innermost first: an explosion inside another blast (a fuel tank a strike set off)
+     * plays after the blast that holds it.
+     */
+    private final java.util.ArrayDeque<NuclearCapture> captures = new java.util.ArrayDeque<>();
     /** EDT-owned menu request; the selection flag scopes this capture, not the game's acting unit. */
     private Coords contextCoords;
     private int contextUnitId = Entity.NONE;
@@ -296,12 +300,14 @@ final class GpuBoardSource implements BoardSource {
                     Frame next = capture();
                     synchronized (GpuBoardSource.this) {
                         if (event.completed()) {
-                            if (nuclearCapture == null || !nuclearCapture.strike().id().equals(result.id())) { return; }
-                            var before = nuclearCapture.before();
+                            if (captures.isEmpty() || !captures.peek().strike().id().equals(result.id())) { return; }
+                            var capture = captures.peek();
+                            var before = capture.before();
                             publishScene(next, true);
-                            var consequences = nuclearCapture.consequences();
-                            nuclearCapture = null;
-                            recordBlast(result, before.scene());
+                            var consequences = capture.consequences();
+                            captures.pop();
+                            // A conventional explosion names all it brings down; the hits of what set it off stay.
+                            if (result.kind() != megamek.common.NuclearDetonation.Kind.EXPLOSION) { recordBlast(result, before.scene()); }
                             var after = before.boardGeneration() == next.boardGeneration() ? next.scene() : null;
                             var falls = strikeCollapses(result, before.scene(), after);
                             var felled = strikeFelled(result, before.scene(), after);
@@ -320,7 +326,7 @@ final class GpuBoardSource implements BoardSource {
                                   .forEach(GpuBoardSource.this::queueAnimation);
                         } else {
                             publishScene(next, true);
-                            nuclearCapture = new NuclearCapture(result, next, new ArrayList<>());
+                            captures.push(new NuclearCapture(result, next, new ArrayList<>()));
                             if (receivedAttacks.size() > 2048) { receivedAttacks.removeFirst(); }
                         }
                     }
@@ -729,12 +735,14 @@ final class GpuBoardSource implements BoardSource {
     private List<BoardScene.TileTransition.Collapse> strikeCollapses(megamek.common.NuclearDetonation strike,
           BoardScene before, BoardScene after) {
         Map<Coords, BoardScene.TileTransition.Collapse> falls = new LinkedHashMap<>();
-        var crater = after == null ? null : BoardScene.TileTransition.of(before, after, structureHits::get);
+        var crater = after == null ? null : BoardScene.TileTransition.of(before, after,
+              at -> BoardScene.TileTransition.blast(strike, at));
         if (crater != null) { crater.collapses().forEach(collapse -> falls.put(collapse.coords(), collapse)); }
         for (var at : strike.collapses()) {
             var tile = at.boardId() == strike.boardId() ? before.tile(at.coords()) : null;
             if (tile != null && BoardScene.TileTransition.structure(tile) && !falls.containsKey(at.coords())) {
-                falls.put(at.coords(), BoardScene.TileTransition.collapse(before, tile, structureHits.get(at.coords())));
+                falls.put(at.coords(), BoardScene.TileTransition.collapse(before, tile,
+                      BoardScene.TileTransition.blast(strike, at.coords())));
             }
         }
         return List.copyOf(falls.values());
@@ -794,7 +802,7 @@ final class GpuBoardSource implements BoardSource {
             for (int index = 0; index < pendingEvents.size(); index++) {
                 if (pendingEvents.get(index) instanceof BoardScene.Movement move && move.entityId() == id) { moved = index; }
             }
-            if (moved < 0 || nuclearCapture != null) {
+            if (moved < 0 || !captures.isEmpty()) {
                 queueAnimation(death);
                 continue;
             }
@@ -809,9 +817,9 @@ final class GpuBoardSource implements BoardSource {
     private synchronized void queueAnimation(BoardScene.Animation animation) {
         // A concealment drops what it follows: the deaths received before it go first.
         if (animation instanceof BoardScene.Concealed) { queueDeaths(true); }
-        if (nuclearCapture != null) {
+        if (!captures.isEmpty()) {
             // One final checkpoint follows the flash. Deaths keep their captured victims and play afterwards.
-            if (!(animation instanceof BoardScene.SceneUpdate)) { nuclearCapture.consequences().add(animation); }
+            if (!(animation instanceof BoardScene.SceneUpdate)) { captures.peek().consequences().add(animation); }
             return;
         }
         if (animation instanceof BoardScene.SceneUpdate
@@ -834,7 +842,7 @@ final class GpuBoardSource implements BoardSource {
         if (frame != null && frame.scene() == null) { frame = null; }
         // A nuclear strike's captures leave what it brings down to its completion, which plays it right after its flash.
         var lifts = frame != null && frame.boardGeneration() == next.boardGeneration()
-              ? BoardScene.TileTransition.of(frame.scene(), next.scene(), nuclearCapture == null ? structureHits::get : null)
+              ? BoardScene.TileTransition.of(frame.scene(), next.scene(), captures.isEmpty() ? structureHits::get : null)
               : null;
         boolean collapses = lifts != null && !lifts.collapses().isEmpty();
         if (collapses && holdCollapse(detectGear)) { return; }
@@ -1182,7 +1190,7 @@ final class GpuBoardSource implements BoardSource {
     }
 
     public synchronized Frame takeFrame() {
-        Frame result = (nuclearCapture == null ? frame : nuclearCapture.before()).withTimeline(List.copyOf(pendingEvents));
+        Frame result = (captures.isEmpty() ? frame : captures.peekLast().before()).withTimeline(List.copyOf(pendingEvents));
         pendingEvents.clear();
         animationsTaken = animationsQueued;
         return result;
@@ -1203,7 +1211,7 @@ final class GpuBoardSource implements BoardSource {
                 synchronized (this) {
                     pendingEvents.clear();
                     deaths.clear();
-                    nuclearCapture = null;
+                    captures.clear();
                     structureHits.clear();
                     collapseHeldSince = 0;
                 }
@@ -1227,7 +1235,7 @@ final class GpuBoardSource implements BoardSource {
             synchronized (this) {
                 pendingEvents.clear();
                 deaths.clear();
-                nuclearCapture = null;
+                captures.clear();
                 structureHits.clear();
                 collapseHeldSince = 0;
                 receivedAttacks.clear();
@@ -2260,7 +2268,7 @@ final class GpuBoardSource implements BoardSource {
         synchronized (this) {
             pendingEvents.clear();
             deaths.clear();
-            nuclearCapture = null;
+            captures.clear();
         }
     }
     private long animationsQueued;

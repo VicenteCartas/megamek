@@ -1,5 +1,6 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-// The live nuclear blasts' shock fronts (GpuArtilleryBlast#shocks): ground zero, the blast area's radius and the front's
+// The live blasts' shock fronts (GpuArtilleryBlast#shocks): ground zero, the blast area's radius (negative for a
+// conventional explosion's, which moves the plants alone and spreads no scorch) and the front's
 // clock, on which every front reaches R (sqrt(1 + 3 t / SHOCK_SECONDS) - 1) (GpuArtilleryBlast#shockReach): plants bend,
 // survivors sway and the scorch spreads as it passes.
 #ifndef SHOCKS_DECLARED
@@ -36,10 +37,10 @@ vec2 shockWind(vec2 world) {
     for (int i = 0; i < u_shockCount; i++) {
         vec2 away = world - u_shocks[i].xy;
         float d = length(away);
-        if (d >= u_shocks[i].z || d < 1e-3) { continue; }
-        float since = u_shocks[i].w - shockArrival(d, u_shocks[i].z);
+        if (d >= abs(u_shocks[i].z) || d < 1e-3) { continue; }
+        float since = u_shocks[i].w - shockArrival(d, abs(u_shocks[i].z));
         if (since <= 0.0) { continue; }
-        float near = 1.0 - d / u_shocks[i].z;
+        float near = 1.0 - d / abs(u_shocks[i].z);
         float gust = (1.0 - exp(-since / .04)) * exp(-since / .9) * cos(since * 2.6);
         wind += away / d * 3.0 * near * near * gust;
     }
