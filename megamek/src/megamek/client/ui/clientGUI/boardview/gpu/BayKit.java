@@ -81,7 +81,19 @@ final class BayKit {
     private enum Meeting { NONE, ENDS, CONTINUES }
 
     /** A wall end's meeting and the joint it meets ({@code null}: none in the piece). */
-    private record Meet(Meeting kind, KitOutline.Wall joint) { }
+    private record Meet(Meeting kind, KitOutline.Wall joint) {
+        /**
+         * Whether {@code wall} ends on its joint at a slant, as a closed link's wall along its hexside meets the next
+         * joint: a joint piece, made for a square end, would leave its groove open into the module there.
+         */
+        boolean slants(KitOutline.Wall wall) { return kind == Meeting.ENDS && joint != null && !square(wall, joint); }
+    }
+
+    /** Whether a wall meets a joint square; the kit's float outline leaves walls a hair off. */
+    private static boolean square(KitOutline.Wall wall, KitOutline.Wall joint) {
+        double[] u = KitOutline.direction(wall), v = KitOutline.direction(joint);
+        return Math.abs(u[0] * v[0] + u[1] * v[1]) < 1e-3;
+    }
 
     /** A piece laid at {@code start} along the wall, stretched by {@code scale}. */
     private record Placed(double start, String piece, double scale) { }
@@ -307,8 +319,9 @@ final class BayKit {
     /**
      * Lays {@code run} along {@code wall}, {@code inset} inside its line: a cut, corner, round or notch end goes on
      * {@link KitOutline#EXTEND} past (the piece's cut or the wall's mitre trims it), an open or joint end stops square.
-     * Where its module ends ({@link #meet}) it stops, its joint pieces there (a cap's room left empty)
-     * and a seamed roof's edge mitred to the joint; where a joint continues it, it goes on {@code chamfer}, unmitred. At
+     * Where its module ends ({@link #meet}) it stops, its joint pieces there (a cap's room left empty; a storey's wall
+     * ending on the joint at a slant goes on instead, cut on the joint's line) and a seamed roof's edge mitred to the
+     * joint; where a joint continues it, it goes on {@code chamfer}, unmitred. At
      * the piece's {@code cut} or an open end (the next hex's wall goes on) its end bays go on a hair under the next
      * piece's, the bays beyond a cut stopping exactly on it; a mitred corner is closed ({@link #closeMitre}), a notch's by
      * the run's first bay laid on past it on both walls.
@@ -326,7 +339,10 @@ final class BayKit {
         for (int k = 0; k < 2; k++) {
             double[] point = k == 0 ? p : wall.q();
             KitOutline.End end = k == 0 ? wall.start() : wall.end();
-            reach[k] = switch (meets[k].kind()) {
+            // A storey's wall ending on its joint at a slant goes on and is cut on the joint's line, where the next
+            // module's wall or side meets it; no joint piece.
+            boolean slants = run.joints() != null && meets[k].slants(wall);
+            reach[k] = slants ? EXTEND : switch (meets[k].kind()) {
                 case ENDS -> 0;
                 case CONTINUES -> chamfer;
                 case NONE -> goesOn(end) ? EXTEND : 0;
@@ -335,8 +351,17 @@ final class BayKit {
                   || end == KitOutline.End.OPEN && joints.isEmpty() && run.joints() == null) {
                 laps[k] = KitOutline.SEAM_OVERLAP / 2;
             }
-            if (meets[k].kind() == Meeting.CONTINUES) { keeps.removeIf(keep -> Math.abs(keep.at(point[0], point[1])) < 1e-6); }
-            if (meets[k].kind() == Meeting.ENDS && run.joints() != null) { pads[k] = run.joints().length(); }
+            if (meets[k].kind() == Meeting.CONTINUES || slants) {
+                keeps.removeIf(keep -> Math.abs(keep.at(point[0], point[1])) < 1e-6);
+            }
+            if (slants) {
+                var joint = meets[k].joint();
+                double[] from = joint.p(), v = KitOutline.direction(joint), far = k == 0 ? wall.q() : p;
+                double side = Math.signum(KitOutline.cross(v, new double[] { far[0] - from[0], far[1] - from[1] }));
+                keeps.add((x, y) -> side * KitOutline.cross(v, new double[] { x - from[0], y - from[1] }));
+            } else if (meets[k].kind() == Meeting.ENDS && run.joints() != null) {
+                pads[k] = run.joints().length();
+            }
             if (meets[k].kind() == Meeting.ENDS && run.seam() != null && meets[k].joint() != null) {
                 var joint = meets[k].joint();
                 keeps.add(KitOutline.mitre(point, normal(p, wall.q()), normal(joint.p(), joint.q()), k == 0 ? wall.q() : p));
@@ -413,30 +438,36 @@ final class BayKit {
 
     /**
      * A closed module's side along {@code joint}, {@link #SIDE} in from each of its corners: dark, facing the next module;
-     * where a wall of the piece ends at the corner, from {@code groove} in, the depth of that wall's joint piece, so it
-     * stands behind the groove. From just over the floor (an interior floor keeps clear of wall faces at its height) up
+     * where a wall of the piece ends square at the corner, from {@code groove} in, the depth of that wall's joint piece,
+     * so it stands behind the groove. From just over the floor (an interior floor keeps clear of wall faces at its height) up
      * to {@code groove} under the storey's top, the floor of a roof's seam groove.
      */
     private static void side(GeneratedMesh result, KitOutline.Wall joint, List<KitOutline.Wall> walls, double groove) {
         double[] p = joint.p(), q = joint.q();
         double length = joint.length();
-        double from = walls.stream().anyMatch(wall -> KitOutline.close(wall.p(), p) || KitOutline.close(wall.q(), p)) ? groove : 0;
-        double to = walls.stream().anyMatch(wall -> KitOutline.close(wall.p(), q) || KitOutline.close(wall.q(), q)) ? length - groove : length;
+        double from = grooved(p, joint, walls) ? groove : 0, to = grooved(q, joint, walls) ? length - groove : length;
         double top = KitOutline.LEVEL - groove;
         if (to - from <= 2 * SIDE) {
-            sideFace(result, p, q, from, to, top);
+            sideFace(result, p, q, from, to, SIDE_FLOOR, top);
         } else {
-            sideFace(result, p, q, from, from + SIDE, top);
-            sideFace(result, p, q, to - SIDE, to, top);
+            sideFace(result, p, q, from, from + SIDE, SIDE_FLOOR, top);
+            sideFace(result, p, q, to - SIDE, to, SIDE_FLOOR, top);
         }
     }
 
-    /** The part of a side along p-q from {@code from} to {@code to} along it. */
-    private static void sideFace(GeneratedMesh result, double[] p, double[] q, double from, double to, double top) {
+    /** Whether a wall of the piece ends square on {@code joint} at {@code at}: its joint piece's groove lies there. */
+    private static boolean grooved(double[] at, KitOutline.Wall joint, List<KitOutline.Wall> walls) {
+        return walls.stream().anyMatch(wall -> (KitOutline.close(wall.p(), at) || KitOutline.close(wall.q(), at))
+              && square(wall, joint));
+    }
+
+    /** The part of a side along p-q from {@code from} to {@code to} along it, {@code bottom} to {@code top}. */
+    private static void sideFace(GeneratedMesh result, double[] p, double[] q, double from, double to, double bottom,
+          double top) {
         if (to - from <= 1e-6) { return; }
         double length = Math.hypot(q[0] - p[0], q[1] - p[1]);
         double[] a = KitOutline.lerp(p, q, from / length), b = KitOutline.lerp(p, q, to / length), n = normal(p, q);
-        result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(a, SIDE_FLOOR, n), darkVertex(b, SIDE_FLOOR, n), darkVertex(b, top, n),
+        result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(a, bottom, n), darkVertex(b, bottom, n), darkVertex(b, top, n),
               darkVertex(a, top, n));
     }
 
@@ -446,10 +477,15 @@ final class BayKit {
     /**
      * The far side of a seamed roof's groove along {@code joint}: its floor and a back, {@code depth} into the next hex,
      * facing this module. Under a neighbour as tall it lies beneath that roof's own seam bevel; beside a taller one it
-     * closes the groove against the neighbour's open storey.
+     * closes the groove against the neighbour's open storey. It stops {@code depth} short of the joint's ends, where
+     * that roof's bevel stops at a wall's joint piece (whose back closes the groove) or turns along its next seam.
      */
     private static void pocket(GeneratedMesh result, KitOutline.Wall joint, double depth) {
-        double[] p = joint.p(), q = joint.q(), n = normal(p, q), back = { -n[0], -n[1] };
+        double length = joint.length();
+        if (length <= 2 * depth) { return; }
+        double[] p = KitOutline.lerp(joint.p(), joint.q(), depth / length),
+              q = KitOutline.lerp(joint.p(), joint.q(), 1 - depth / length);
+        double[] n = normal(p, q), back = { -n[0], -n[1] };
         double[] pp = { p[0] + n[0] * depth, p[1] + n[1] * depth }, qq = { q[0] + n[0] * depth, q[1] + n[1] * depth };
         underside(result, List.of(p, q, qq, pp), -depth);
         result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(qq, -depth, back), darkVertex(pp, -depth, back), darkVertex(pp, 0, back),
@@ -467,7 +503,9 @@ final class BayKit {
 
     /**
      * Where another storey stands on this one (ConnectedKit places it), its joint pieces' top corners filled to the
-     * crossing their bottoms have: {@code <joint piece>-fill} at each wall end where its module ends at a joint.
+     * crossing their bottoms have: {@code <joint piece>-fill} at each wall end where its module ends square at a joint.
+     * At a joint's end without one (the module turns on along the next joint, as at a notch, or its wall slants there),
+     * the next module's groove opens onto its storey line ({@link #closeEnd}).
      */
     private static GeneratedMesh fill(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece, int closed,
           int lod, boolean square) {
@@ -475,15 +513,38 @@ final class BayKit {
         Run run = runs.get(Math.min(lod, runs.size() - 1));
         List<KitOutline.Wall> joints = KitOutline.joints(square, KitOutline.links(piece) & ~closed);
         var result = new GeneratedMesh();
+        double groove = run.joints().length();
+        for (var joint : square ? List.<KitOutline.Wall>of() : joints) {
+            for (boolean start : new boolean[] { true, false }) {
+                if (!grooved(start ? joint.p() : joint.q(), joint, piece.walls())) { closeEnd(result, joint, start, groove); }
+            }
+        }
         for (var wall : piece.walls()) {
             List<Placed> placed = new ArrayList<>();
-            if (meet(wall, true, joints).kind() == Meeting.ENDS) { placed.add(new Placed(0, run.joints().start() + "-fill", 1)); }
-            if (meet(wall, false, joints).kind() == Meeting.ENDS) {
+            Meet start = meet(wall, true, joints), end = meet(wall, false, joints);
+            if (start.kind() == Meeting.ENDS && !start.slants(wall)) { placed.add(new Placed(0, run.joints().start() + "-fill", 1)); }
+            if (end.kind() == Meeting.ENDS && !end.slants(wall)) {
                 placed.add(new Placed(wall.length() - run.joints().length(), run.joints().end() + "-fill", 1));
             }
             lay(result, placed, wall, 0, modelled, lod);
         }
         return piece.direction() != null ? result.clipped(KitOutline.sector(piece.direction(), KitOutline.SEAM_OVERLAP)) : result;
+    }
+
+    /**
+     * A stacked storey's joint end without a square wall: its side on up to the side above, and a floor at its top
+     * {@code groove} square into the module. A shorter neighbour's roof pocket stops that short of the end, and a closed
+     * wall over the neighbour's roof has its bottom groove there.
+     */
+    private static void closeEnd(GeneratedMesh result, KitOutline.Wall joint, boolean start, double groove) {
+        double length = joint.length();
+        double[] p = joint.p(), q = joint.q(), at = start ? p : q, u = KitOutline.direction(joint), n = normal(p, q);
+        double along = start ? groove : -groove;
+        sideFace(result, p, q, start ? 0 : length - groove, start ? groove : length, KitOutline.LEVEL - groove,
+              KitOutline.LEVEL + SIDE_FLOOR);
+        double[] a = { at[0] + u[0] * along, at[1] + u[1] * along };
+        underside(result, List.of(at, a, new double[] { a[0] - n[0] * groove, a[1] - n[1] * groove },
+              new double[] { at[0] - n[0] * groove, at[1] - n[1] * groove }), KitOutline.LEVEL);
     }
 
     /** A dark floor facing up at {@code z} over a convex {@code polygon}. */
