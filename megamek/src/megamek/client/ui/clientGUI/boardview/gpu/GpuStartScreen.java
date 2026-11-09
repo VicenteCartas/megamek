@@ -881,6 +881,12 @@ final class GpuStartScreen extends ApplicationAdapter {
                             showPage(parent(page));
                         }
                     }
+                    case Keys.NUM_1, Keys.NUMPAD_1 -> {
+                        if (page != Page.MAIN || !motion || restoreStart != null) {
+                            return false;
+                        }
+                        replay();
+                    }
                     default -> {
                         return false;
                     }
@@ -910,6 +916,16 @@ final class GpuStartScreen extends ApplicationAdapter {
     private void skip() {
         skipped = true;
         pageShownAt = -1;
+    }
+
+    /** Plays the intro again from the greeting, to watch it while tuning it. */
+    private void replay() {
+        skipped = false;
+        pageShownAt = -1;
+        start = System.nanoTime();
+        tipShownAt = 0;
+        settledRate = false;
+        Gdx.graphics.setForegroundFPS(GpuBoardWindow.DEFAULT_VSYNC ? 0 : 60);
     }
 
     private void move(int step) {

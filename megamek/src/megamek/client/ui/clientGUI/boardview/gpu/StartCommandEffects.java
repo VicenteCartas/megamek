@@ -91,8 +91,9 @@ final class StartCommandEffects implements Disposable {
           """.formatted(RAY_SAMPLES);
 
     /**
-     * The art's screens (green) left as painted but for a faint line rolling down them, as a display refreshes, and now
-     * and then a blip that pings and fades, as on a plot.
+     * The art's screens (green) left as painted but for a faint line rolling down each at its own time (alpha holds each
+     * screen's phase), as a display refreshes, and now and then a hex contact that pings with a hexagonal ripple, as on
+     * a hex map.
      */
     private static final String MONITORS_FRAGMENT = """
           uniform sampler2D u_texture;
@@ -101,24 +102,30 @@ final class StartCommandEffects implements Disposable {
           uniform vec2 u_cells;
           varying vec2 v_texCoords;
           """ + NOISE + """
+          float hexDistance(vec2 p) {
+              p = abs(p);
+              return max(dot(p, vec2(0.5, 0.8660254)), p.y);
+          }
           void main() {
               vec4 mask = texture2D(u_texture, v_texCoords);
               if (mask.g < 0.02) {
                   discard;
               }
-              float roll = fract(v_texCoords.y * 8.0 - u_time * 0.12);
+              float roll = fract(v_texCoords.y * 8.0 - u_time * 0.1 + mask.a * 8.0);
               float scan = (1.0 - smoothstep(0.0, 0.012, abs(roll - 0.5))) * 0.14
                     + smoothstep(0.3, 0.5, roll) * step(roll, 0.5) * 0.03;
               vec2 cellUv = v_texCoords * u_cells;
               vec2 cell = floor(cellUv);
               float seed = hash(cell);
               float blip = 0.0;
-              if (seed > 0.82) {
-                  vec2 spot = vec2(hash(cell + 17.0), hash(cell + 31.0)) * 0.6 + 0.2;
-                  float phase = fract(u_time / (2.5 + 3.0 * seed) + seed * 7.0);
-                  float fade = 1.0 - smoothstep(0.0, 0.45, phase);
-                  float d = length(cellUv - cell - spot);
-                  blip = fade * (1.0 - smoothstep(0.08, 0.2, d)) * 0.8;
+              if (seed > 0.84) {
+                  vec2 spot = vec2(hash(cell + 17.0), hash(cell + 31.0)) * 0.3 + 0.35;
+                  float phase = fract(u_time / (3.0 + 3.0 * seed) + seed * 7.0);
+                  float d = hexDistance(cellUv - cell - spot);
+                  float contact = (1.0 - smoothstep(0.0, 0.5, phase)) * (1.0 - smoothstep(0.07, 0.1, d));
+                  float reach = 0.06 + 0.24 * smoothstep(0.0, 0.7, phase);
+                  float ripple = (1.0 - smoothstep(0.0, 0.025, abs(d - reach))) * (1.0 - smoothstep(0.1, 0.7, phase));
+                  blip = contact * 0.9 + ripple * 0.5;
               }
               gl_FragColor = vec4(0.6, 1.0, 0.94, clamp(mask.g * (scan + blip) * u_strength, 0.0, 0.7));
           }
@@ -153,9 +160,9 @@ final class StartCommandEffects implements Disposable {
                   gl_FragColor = vec4(texture2D(u_texture, v_uv).rgb * v_color.rgb, v_color.a);
               } else {
                   vec2 d = min(v_uv, 1.0 - v_uv);
-                  float edge = 1.0 - smoothstep(0.0, 0.07, min(d.x, d.y));
-                  float seam = 1.0 - smoothstep(0.0, 0.025, abs(v_uv.y - 0.5));
-                  gl_FragColor = vec4(v_color.rgb + u_edge * (edge * 0.55 + seam * 0.2), v_color.a);
+                  float edge = 1.0 - smoothstep(0.0, 0.025, min(d.x, d.y));
+                  float seam = 1.0 - smoothstep(0.0, 0.01, abs(v_uv.y - 0.5));
+                  gl_FragColor = vec4(v_color.rgb + u_edge * (edge * 0.35 + seam * 0.12), v_color.a);
               }
           }
           """;
@@ -244,13 +251,16 @@ final class StartCommandEffects implements Disposable {
             lightU = (float) opening.u();
             lightV = (float) opening.v();
         }
+        int[] screenNumbers = screens(screen, width, height);
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int i = y * width + x;
                 // Only the opening the shafts stream from lights them; others would cast shafts from the wrong place
                 float lit = hasLight && opening.inside()[i] ? light[i] : 0;
-                image.setRGB(x, y, 0xFF000000 | (byteOf(lit) << 16) | (byteOf(screen[i]) << 8) | byteOf(shade[i]));
+                float phase = screenNumbers[i] == 0 ? 0 : screenPhase(screenNumbers[i]);
+                image.setRGB(x, y, (byteOf(phase) << 24) | (byteOf(lit) << 16) | (byteOf(screen[i]) << 8)
+                      | byteOf(shade[i]));
             }
         }
         if (mask != null) {
@@ -288,32 +298,70 @@ final class StartCommandEffects implements Disposable {
             }
         }
         float threshold = blurred[peak] * 0.3f;
+        int[] labels = new int[light.length];
+        fill(blurred, width, height, peak, threshold, labels, 1, new int[light.length]);
         boolean[] inside = new boolean[light.length];
-        int[] queue = new int[light.length];
-        int head = 0;
-        int tail = 0;
-        inside[peak] = true;
-        queue[tail++] = peak;
         double weight = 0;
         double sumU = 0;
         double sumV = 0;
+        for (int i = 0; i < inside.length; i++) {
+            inside[i] = labels[i] == 1;
+            if (inside[i]) {
+                weight += light[i];
+                sumU += light[i] * (i % width + 0.5) / width;
+                sumV += light[i] * (i / width + 0.5) / height;
+            }
+        }
+        return weight <= 0 ? null : new Opening(inside, sumU / weight, sumV / weight);
+    }
+
+    /**
+     * Each screen in {@code glow} (0 to 1 a pixel, rows from the top) numbered from 1, a little beyond its edges so that
+     * a screen's dark map does not split it; 0 where there is none.
+     */
+    static int[] screens(float[] glow, int width, int height) {
+        int radius = Math.max(1, Math.round(width * 0.006f));
+        float[] blurred = boxBlur(boxBlur(glow, width, height, radius, true), width, height, radius, false);
+        int[] screens = new int[glow.length];
+        int[] queue = new int[glow.length];
+        int count = 0;
+        for (int i = 0; i < glow.length; i++) {
+            if (screens[i] == 0 && blurred[i] >= 0.05f) {
+                fill(blurred, width, height, i, 0.05f, screens, ++count, queue);
+            }
+        }
+        return screens;
+    }
+
+    /** When screen {@code number}'s scan line passes, as a fraction of its period: spread well apart for each screen. */
+    static float screenPhase(int number) {
+        double phase = number * 0.6180339887;
+        return (float) (phase - Math.floor(phase));
+    }
+
+    /**
+     * Marks {@code label} in {@code labels} on the pixels joined to {@code seed}, side by side, where {@code values}
+     * reach {@code threshold}; {@code queue} is scratch as long as the image.
+     */
+    private static void fill(float[] values, int width, int height, int seed, float threshold, int[] labels, int label,
+          int[] queue) {
+        int head = 0;
+        int tail = 0;
+        labels[seed] = label;
+        queue[tail++] = seed;
         while (head < tail) {
             int i = queue[head++];
             int x = i % width;
             int y = i / width;
-            weight += light[i];
-            sumU += light[i] * (x + 0.5) / width;
-            sumV += light[i] * (y + 0.5) / height;
             int[] neighbours = { x > 0 ? i - 1 : -1, x < width - 1 ? i + 1 : -1, y > 0 ? i - width : -1,
                                  y < height - 1 ? i + width : -1 };
             for (int next : neighbours) {
-                if (next >= 0 && !inside[next] && blurred[next] >= threshold) {
-                    inside[next] = true;
+                if (next >= 0 && labels[next] == 0 && values[next] >= threshold) {
+                    labels[next] = label;
                     queue[tail++] = next;
                 }
             }
         }
-        return weight <= 0 ? null : new Opening(inside, sumU / weight, sumV / weight);
     }
 
     /** One pass of a box blur {@code radius} pixels each way, along rows or columns, clamped at the edges. */
@@ -460,7 +508,7 @@ final class StartCommandEffects implements Disposable {
         batch.begin();
         monitors.setUniformf("u_time", time);
         monitors.setUniformf("u_strength", strength);
-        monitors.setUniformf("u_cells", bw / (12 * scale), bh / (12 * scale));
+        monitors.setUniformf("u_cells", bw / (24 * scale), bh / (24 * scale));
         batch.draw(mask, 0, 0, bw, bh);
         batch.end();
         batch.setShader(null);

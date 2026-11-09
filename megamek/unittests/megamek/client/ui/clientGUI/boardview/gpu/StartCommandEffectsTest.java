@@ -63,6 +63,28 @@ class StartCommandEffectsTest {
         assertNull(StartCommandEffects.opening(light, 100, 50));
     }
 
+    @Test
+    void eachScreenIsNumberedOnceEvenWithADarkMapOnIt() {
+        int width = 200;
+        int height = 100;
+        float[] glow = new float[width * height];
+        fill(glow, width, 20, 60, 20, 50);
+        fill(glow, width, 120, 170, 40, 80);
+        // A dark map line across the first screen
+        for (int y = 20; y < 50; y++) {
+            glow[y * width + 40] = 0;
+        }
+        int[] screens = StartCommandEffects.screens(glow, width, height);
+        int first = screens[30 * width + 25];
+        assertTrue(first > 0);
+        assertEquals(first, screens[30 * width + 55], "the map line does not split the screen");
+        int second = screens[60 * width + 140];
+        assertTrue(second > 0 && second != first, "the other screen is its own");
+        assertEquals(0, screens[90 * width + 100], "the wall is no screen");
+        assertTrue(Math.abs(StartCommandEffects.screenPhase(first) - StartCommandEffects.screenPhase(second)) > 0.1f,
+              "the screens scan at different times");
+    }
+
     private static void fill(float[] light, int width, int x0, int x1, int y0, int y1) {
         for (int y = y0; y < y1; y++) {
             for (int x = x0; x < x1; x++) {
