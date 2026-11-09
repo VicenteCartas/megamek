@@ -5,9 +5,11 @@ import static megamek.client.ui.gdx.UiKit.onChange;
 import static megamek.client.ui.gdx.UiKit.text;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -32,14 +34,14 @@ import megamek.common.units.Entity;
 /**
  * The aimed shot dialog (H36, R4): a modal over the board for one weapon of the acting unit and the unit it aims at
  * ({@link GpuHudState#aiming}), which the aim toggles of the weapons panel and the target cards and the weapon menu
- * open. It names the unit and the weapon, and shows the unit's paperdoll enlarged with each location's armor and,
- * under it, the weapon's roll aimed there, as the panels colour a roll; a location the rules leave out keeps its
- * number in the doll's empty look and takes no click. Where the shot strikes a Mek's rear, the record
- * sheet's rear armor doll stands beside the front one and takes the torsos, whose front armor the shot misses. A unit
- * without a paperdoll lists its locations instead. Picking a location aims the weapon there and closes; "No aimed
- * shot", which shows the roll without an aim, removes its aim and closes; Dismiss, Esc and a click beside the dialog
- * close it unchanged. Every change goes
- * through the fire orders, whose choice ({@link GpuFireOrders.Snapshot#aimChoice}) the dialog shows.
+ * open. Its title names the unit ("Aimed shot to ..."), the line under it the weapon, and it shows the unit's paperdoll
+ * enlarged with each location's armor and, under it, the weapon's roll aimed there, as the panels colour a roll,
+ * outlined in the wireframe view's green; a location the rules leave out keeps its number in the doll's empty look,
+ * outlined faintly, and takes no click. Where the shot strikes a Mek's rear, the record sheet's rear armor doll stands
+ * beside the front one and takes the torsos, whose front armor the shot misses. A unit without a paperdoll lists its
+ * locations instead. Picking a location aims the weapon there and closes; "No aimed shot", which shows the roll
+ * without an aim, removes its aim and closes; Dismiss, Esc and a click beside the dialog close it unchanged. Every
+ * change goes through the fire orders, whose choice ({@link GpuFireOrders.Snapshot#aimChoice}) the dialog shows.
  */
 final class GpuAimDialog implements GpuHud.Component {
     private static final float WIDTH = 380;
@@ -53,7 +55,7 @@ final class GpuAimDialog implements GpuHud.Component {
     private static final float DOLL_GAP = 12;
     private static final float MIN_DOLL_HEIGHT = 160;
     /** The dialog's rows besides the doll and a margin, which a low window keeps by shrinking the doll. */
-    private static final float CHROME = 230;
+    private static final float CHROME = 208;
     /** The doll's largest number; the card's is 14. */
     private static final float DOLL_FONT = 20;
     /** The button row's buttons, as the native modal dialog's (.b: min-height 36). */
@@ -61,6 +63,10 @@ final class GpuAimDialog implements GpuHud.Component {
     private static final float BUTTON_WIDTH = 88;
     /** The location buttons of a unit without a paperdoll, in this many columns. */
     private static final int LIST_COLUMNS = 2;
+    /** The outline of a location a pick may hit: the wireframe view's line green (wireframe.frag). */
+    private static final Color PHOSPHOR = new Color(.3f, 1, .45f, 1);
+    /** Every other line of the doll: its muted rail with a faint tint of that green. */
+    private static final Color PHOSPHOR_FAINT = new Color(UiTheme.RAIL).lerp(PHOSPHOR, .2f);
 
     private final UiKit ui;
     private final GpuBoardSource source;
@@ -190,7 +196,7 @@ final class GpuAimDialog implements GpuHud.Component {
     }
 
     /**
-     * The dialog for the choice: the header, the unit and the weapon line, the doll in a box the window's height
+     * The dialog for the choice: the header naming the unit, the weapon line, the doll in a box the window's height
      * allows (or the location buttons) and the buttons.
      */
     private void build(AimChoice choice, float windowHeight) {
@@ -201,19 +207,15 @@ final class GpuAimDialog implements GpuHud.Component {
         Table dialog = ui.panel();
         dialog.setName("aim-dialog");
         dialog.setTouchable(Touchable.enabled);
-        dialog.add(ui.header(text("GpuBoard.hud.aim.title"), null)).growX().row();
+        dialog.add(ui.header(text("GpuBoard.hud.aim.title", choice.unit()), null)).growX().row();
         dialog.add(new Image(ui.skin.getDrawable("rule"))).growX().height(1).row();
         Table body = new Table();
         body.pad(10, 16, 10, 16);
         body.defaults().left();
-        Label unit = ui.label(UiTheme.upper(choice.unit()), "hud-title", 16, UiTheme.TEXT);
-        unit.setName("aim-unit");
-        unit.setEllipsis(true);
-        body.add(unit).growX().minWidth(0).row();
         Label weapon = ui.label(choice.weapon(), "hud-small", 11.5f, UiTheme.MUTED);
         weapon.setName("aim-weapon");
         weapon.setWrap(true);
-        body.add(weapon).growX().minWidth(0).padTop(2).row();
+        body.add(weapon).growX().minWidth(0).row();
         GpuPaperdolls.Doll front = GpuUnitCard.doll(paperdolls, choice.record(), GpuPaperdolls.ARMOR);
         GpuPaperdolls.Doll rear = front == null || !choice.rear() ? null
               : GpuUnitCard.doll(paperdolls, choice.record(), GpuPaperdolls.REAR);
@@ -222,11 +224,13 @@ final class GpuAimDialog implements GpuHud.Component {
             Table dolls = new Table();
             doll.maxFont(DOLL_FONT);
             doll.show(front, cells(choice, doll), Map.of(), notes(choice, doll));
+            doll.lines(lit(doll), PHOSPHOR, PHOSPHOR_FAINT);
             float height = Math.max(MIN_DOLL_HEIGHT, Math.min(DOLL_HEIGHT, windowHeight - CHROME));
             dolls.add(doll).size(rearShown ? FRONT_BESIDE_REAR : DOLL_WIDTH, height);
             if (rearShown) {
                 rearDoll.maxFont(DOLL_FONT);
                 rearDoll.show(rear, cells(choice, rearDoll), Map.of(), notes(choice, rearDoll));
+                rearDoll.lines(lit(rearDoll), PHOSPHOR, PHOSPHOR_FAINT);
                 Table column = new Table();
                 column.add(ui.label(UiTheme.upper(text("GpuBoard.hud.aim.rearArmor")), "hud-caption", 10.5f,
                       UiTheme.AMBER)).row();
@@ -279,7 +283,7 @@ final class GpuAimDialog implements GpuHud.Component {
                 cell = GpuPaperdoll.cell(location.rear(), location.maxRear(), location.destroyed(),
                       location.internal(), cell.crit(), GpuPaperdoll.View.CARD);
             }
-            if (!strikes(view, index) || !choice.enabled().get(index)) {
+            if (!hits(view, index)) {
                 cell = new GpuPaperdoll.Cell(GpuPaperdoll.DamageTier.NONE, cell.text(), false, false, 0);
             }
             cells.put(location.abbr(), cell);
@@ -352,6 +356,23 @@ final class GpuAimDialog implements GpuHud.Component {
         return index >= 0 && view == (rear ? rearDoll : doll);
     }
 
+    /** Whether the doll takes the location and the weapon may aim there: its outline is lit, a click aims there. */
+    private boolean hits(GpuPaperdoll view, int index) {
+        return shown != null && index >= 0 && index < shown.enabled().size() && strikes(view, index)
+              && shown.enabled().get(index);
+    }
+
+    /** The codes of the locations the doll outlines in the wireframe green ({@link #hits}). */
+    private Set<String> lit(GpuPaperdoll view) {
+        Set<String> lit = new HashSet<>();
+        for (int index = 0; index < codes.size(); index++) {
+            if (hits(view, index)) {
+                lit.add(codes.get(index));
+            }
+        }
+        return lit;
+    }
+
     /**
      * The location under the pointer on a doll ({@code -1}: none): that doll outlines it where it takes the location
      * and the weapon may aim there, and the aimed location stays marked on the doll that takes it.
@@ -361,8 +382,7 @@ final class GpuAimDialog implements GpuHud.Component {
         if (choice == null) {
             return;
         }
-        boolean open = index >= 0 && index < choice.enabled().size() && strikes(over, index)
-              && choice.enabled().get(index);
+        boolean open = hits(over, index);
         for (GpuPaperdoll view : List.of(doll, rearDoll)) {
             view.marks(view == over && open ? codes.get(index) : "",
                   strikes(view, choice.location()) ? code(choice.location()) : "", "");

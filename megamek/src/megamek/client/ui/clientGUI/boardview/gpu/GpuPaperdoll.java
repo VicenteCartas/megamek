@@ -6,6 +6,7 @@ import static megamek.client.ui.gdx.UiTheme.alpha;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
@@ -20,8 +21,9 @@ import megamek.client.ui.gdx.UiTheme;
 /**
  * The paperdoll (unit panel design 6): the converted regions of one view ({@link GpuPaperdolls}), each filled and
  * outlined by its damage tier, one number per location fitted to its anchor (6.6), the crit dot, the breached outline,
- * a mounted shield's outline and split, and the hover, selection and linked outlines (6.5). It draws only the geometry
- * and the cells it is given, with the skin's white texel, hud font and theme colours; it knows no unit, board or HUD.
+ * a mounted shield's outline and split, and the hover, selection and linked outlines (6.5); or every line in one of
+ * two colours given ({@link #lines}). It draws only the geometry and the cells it is given, with the skin's white
+ * texel, hud font and theme colours; it knows no unit, board or HUD.
  */
 final class GpuPaperdoll extends WidgetGroup {
     /** Where a doll is shown: the card and hover card, a sheet armor doll, or the sheet structure doll (6.3). */
@@ -120,6 +122,10 @@ final class GpuPaperdoll extends WidgetGroup {
     private String hover = "";
     private String selected = "";
     private String linked = "";
+    /** The {@link #lines} colours of the lit locations and of every other line; null keeps the doll's own. */
+    private Set<String> lit = Set.of();
+    private Color litLine;
+    private Color restLine;
     // The layout: doll units to local units, and the geometry in local units.
     private float scale;
     private float left;
@@ -283,6 +289,17 @@ final class GpuPaperdoll extends WidgetGroup {
         hover = hovered;
         selected = chosen;
         linked = linkedRow;
+    }
+
+    /**
+     * Draws the outlines of the {@code litLocations} (codes; a shield is "DC" + its arm) in {@code litColour} and every
+     * other line, the hull's included, in {@code restColour}, in place of the tier, breached and shield colours: the
+     * aimed shot dialog's lines. The marks (6.5) still outline over them.
+     */
+    void lines(Set<String> litLocations, Color litColour, Color restColour) {
+        lit = Set.copyOf(litLocations);
+        litLine = litColour;
+        restLine = restColour;
     }
 
     /** The location outlined as the linked row's (6.5), "" for none. */
@@ -501,7 +518,8 @@ final class GpuPaperdoll extends WidgetGroup {
         float previous = batch.getPackedColor();
         if (hullFill != null) {
             fill(batch, hullFill, NEUTRAL, rest);
-            hullOutline.forEach(ring -> line(batch, ring, 1, UiTheme.RAIL, rest));
+            Color hullLine = ink("", UiTheme.RAIL);
+            hullOutline.forEach(ring -> line(batch, ring, 1, hullLine, rest));
         }
         List<GpuPaperdolls.Region> regions = doll.regions();
         int shield = 0;
@@ -529,16 +547,19 @@ final class GpuPaperdoll extends WidgetGroup {
         super.draw(batch, parentAlpha);
     }
 
-    /** A region's outline: a mark (selected, hovered, linked row), else breached blue, else its tier's (6.5). */
+    /**
+     * A region's outline: a mark (selected, hovered, linked row), else breached blue, else its tier's (6.5), those two
+     * in its {@link #lines} colour while they are set.
+     */
     private void outline(Batch batch, List<Ring> rings, String location, Cell cell, float alpha) {
         Color color = mark(location);
         float width = MARK_WIDTH;
         if (color == null && cell != null && cell.breached()) {
-            color = BREACHED;
+            color = ink(location, BREACHED);
             width = BREACHED_WIDTH;
         } else if (color == null) {
             DamageTier tier = cell == null ? DamageTier.NONE : cell.tier();
-            color = tier.outline;
+            color = ink(location, tier.outline);
             width = tier.width;
         }
         for (Ring ring : rings) {
@@ -548,11 +569,17 @@ final class GpuPaperdoll extends WidgetGroup {
 
     /** A mounted shield as one object: its outline in ink2 (or its mark) and the rail hairline at its split. */
     private void shield(Batch batch, int index, float alpha) {
-        Color mark = mark("DC" + doll.shields().get(index).arm());
+        String code = "DC" + doll.shields().get(index).arm();
+        Color mark = mark(code);
         for (Ring ring : shieldOutlines.get(index)) {
-            line(batch, ring, mark == null ? 1 : MARK_WIDTH, mark == null ? UiTheme.ACCENT : mark, alpha);
+            line(batch, ring, mark == null ? 1 : MARK_WIDTH, mark == null ? ink(code, UiTheme.ACCENT) : mark, alpha);
         }
-        line(batch, splits.get(index), SPLIT_WIDTH, UiTheme.RAIL, alpha);
+        line(batch, splits.get(index), SPLIT_WIDTH, ink(code, UiTheme.RAIL), alpha);
+    }
+
+    /** A line's colour: its location's {@link #lines} colour while they are set ("" for the hull), else its own. */
+    private Color ink(String location, Color own) {
+        return restLine == null ? own : lit.contains(location) ? litLine : restLine;
     }
 
     private Color mark(String location) {

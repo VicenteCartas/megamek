@@ -75,7 +75,9 @@ class GpuAimDialogSmokeTest {
             update(hud, dialog, choice);
             verify(fire).showAim(AIM);
             assertTrue(layer.isVisible());
-            assertEquals("KING CRAB", ((Label) layer.findActor("aim-unit")).getText().toString());
+            List<String> shown = texts(layer);
+            assertTrue(shown.contains("AIMED SHOT TO KING CRAB") && !shown.contains("KING CRAB"),
+                  "The title names the unit, once");
             assertEquals("8+", ((Label) layer.findActor("aim-none-roll")).getText().toString(),
                   "No aimed shot shows the roll without an aim");
             GpuPaperdoll doll = layer.findActor("aim-doll");
@@ -251,12 +253,14 @@ class GpuAimDialogSmokeTest {
         throw new AssertionError("No region " + code);
     }
 
-    /** The texts of the doll's numbers and notes. */
-    private static List<String> texts(GpuPaperdoll doll) {
+    /** The texts of the labels in the group and in the groups inside it, such as a doll's numbers and notes. */
+    private static List<String> texts(Group group) {
         List<String> texts = new ArrayList<>();
-        for (Actor child : doll.getChildren()) {
+        for (Actor child : group.getChildren()) {
             if (child instanceof Label label) {
                 texts.add(label.getText().toString());
+            } else if (child instanceof Group inner) {
+                texts.addAll(texts(inner));
             }
         }
         return texts;
