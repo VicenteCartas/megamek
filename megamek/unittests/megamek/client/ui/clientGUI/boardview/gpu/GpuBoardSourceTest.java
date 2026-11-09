@@ -729,6 +729,32 @@ class GpuBoardSourceTest {
         }
     }
 
+    /** A move that ends in its own hex plays, though the scene shows the unit there already (the late walk rule). */
+    @Test
+    void aTurnInPlacePlaysWhereTheSceneAlreadyShowsItsEnd() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Entity mek = fixture.entity;
+            Coords at = mek.getPosition();
+            Entity before = new MekFileParser(new File("testresources/megamek/common/units/Atlas AS7-D.mtf")).getEntity();
+            before.setId(mek.getId());
+            before.setPosition(at);
+            before.setFacing(0);
+            SwingUtilities.invokeAndWait(() -> {
+                mek.setFacing(3);
+                mek.setSecondaryFacing(3);
+                fixture.source.refresh();
+            });
+            fixture.source.takeFrame();
+            Vector<UnitLocation> path = new Vector<>();
+            for (int facing = 1; facing <= 3; facing++) { path.add(new UnitLocation(mek.getId(), at, facing, 0, 0)); }
+            SwingUtilities.invokeAndWait(() -> fixture.game.fireGameEvent(new GameEntityChangeEvent(fixture.game, mek, path, before)));
+            SwingUtilities.invokeAndWait(() -> { });
+            GpuBoardSource.Frame frame = fixture.source.takeFrame();
+            assertEquals(1, frame.movements().size(), "The turn plays");
+            assertEquals(3, frame.movements().getFirst().path().getLast().facing(), .001f);
+        }
+    }
+
     @Test
     void landingFighterPlaybackDescendsFromItsFlightAltitude() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {

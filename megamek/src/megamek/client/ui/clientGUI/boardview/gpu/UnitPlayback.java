@@ -131,11 +131,34 @@ final class UnitPlayback {
         if (event instanceof BoardScene.SceneUpdate && pending.peekLast() instanceof BoardScene.SceneUpdate) {
             pending.removeLast();
         }
+        if (event instanceof BoardScene.TileTransition later && later.changes().isEmpty() && mergeCollapse(later)) { return; }
         if (pending.size() >= MAX_PENDING_EVENTS) {
             // A client catching up on a large backlog snaps to the game, instead of retaining unbounded snapshots.
             finish();
         }
         pending.addLast(event);
+    }
+
+    /**
+     * One building's hexes come down in one act: its remaining hexes, which the server brings down after the first one's
+     * occupants have fallen (a capture can fall between them), join the collapse still waiting with only checkpoints and
+     * falls after it. The checkpoints and falls between them follow the joined collapse, applying and falling as it starts.
+     */
+    private boolean mergeCollapse(BoardScene.TileTransition later) {
+        List<BoardScene.Animation> queued = new ArrayList<>(pending);
+        for (int index = queued.size() - 1; index >= 0; index--) {
+            var event = queued.get(index);
+            if (event instanceof BoardScene.TileTransition earlier && earlier.changes().isEmpty()) {
+                List<BoardScene.TileTransition.Collapse> collapses = new ArrayList<>(earlier.collapses());
+                collapses.addAll(later.collapses());
+                queued.set(index, new BoardScene.TileTransition(earlier.boardId(), List.of(), collapses));
+                pending.clear();
+                pending.addAll(queued);
+                return true;
+            }
+            if (!(event instanceof BoardScene.SceneUpdate || event instanceof BoardScene.Movement move && move.forced())) { return false; }
+        }
+        return false;
     }
 
     void advance(double seconds, UnitMotion.Speed speed) {
@@ -198,12 +221,12 @@ final class UnitPlayback {
                 } else if (active instanceof BoardScene.AttachmentChange change) {
                     attachment = new UnitAttachmentMotion(change);
                     attachmentStart = 0;
-                } else if (active instanceof BoardScene.TileTransition) {
+                } else if (active instanceof BoardScene.TileTransition transition) {
                     // A scene change runs on the action clock, as a strike does; its checkpoint applies as it starts.
                     combatSeconds = 0;
                     combatContact = 0;
                     combatTerrainRelease = 0;
-                    combatDuration = BoardScene.TileTransition.SECONDS;
+                    combatDuration = transition.seconds();
                 }
             }
             if (!completed) {
@@ -266,6 +289,10 @@ final class UnitPlayback {
                       // A unit that died in its own movement, as a fall, dies as it lands.
                       || active instanceof BoardScene.Movement move && pending.peekFirst() instanceof BoardScene.Combat death
                             && death.result().kind() == megamek.common.ResolvedAttack.Kind.DEATH && death.entityId() == move.entityId()
+                      // So does one the structure it stood on or in crushed as it came down.
+                      || active instanceof BoardScene.TileTransition change && pending.peekFirst() instanceof BoardScene.Combat crushed
+                            && crushed.result().kind() == megamek.common.ResolvedAttack.Kind.DEATH
+                            && change.collapses(crushed.attacker().location().coords())
                       ? 0 : COMPLETION_HOLD_SECONDS;
                 if (stepping && active != stepFrom) {
                     // stepOnce(): one more action has played; the queue waits again.
@@ -569,6 +596,11 @@ final class UnitPlayback {
         return active instanceof BoardScene.TileTransition change ? change : null;
     }
 
+    /** Whether a structure is coming down in the scene change under way. */
+    private boolean collapsing() {
+        return active instanceof BoardScene.TileTransition change && !change.collapses().isEmpty();
+    }
+
     /** How far {@link #transition} has played, 0 to 1. */
     float transitionProgress() {
         return active instanceof BoardScene.TileTransition ? (float) Math.min(1, combatSeconds / combatDuration) : 0;
@@ -706,7 +738,9 @@ final class UnitPlayback {
             if (pending.peekFirst() instanceof BoardScene.SceneUpdate update) {
                 pending.removeFirst();
                 settledScene = update.scene();
-            } else if (attack != null && !completed && pending.peekFirst() instanceof BoardScene.Movement movement && movement.forced()) {
+            } else if ((attack != null || collapsing()) && !completed
+                  && pending.peekFirst() instanceof BoardScene.Movement movement && movement.forced()) {
+                // Behind a hit or a structure coming down: what it moved, a unit knocked back or falling, moves with it.
                 pending.removeFirst();
                 double start = combatContact;
                 boolean continuing = reactions.stream().anyMatch(reaction -> reaction.movement().entityId() == movement.entityId());

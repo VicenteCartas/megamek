@@ -256,16 +256,17 @@ final class MeepleCasualties implements Disposable {
      */
     private static void shatter(Casualty casualty, Node drawn, int cuts, int seed, Vector3 hit,
           CompletableFuture<MeepleShatter.Cut> prepared) {
-        var ready = prepared == null ? null : prepared.getNow(null);
-        Model model = ready == null ? null : MeepleShatter.model(drawn.id, drawn, ready);
+        var cut = prepared == null ? null : prepared.getNow(null);
+        Model model = cut == null ? null : MeepleShatter.model(drawn.id, drawn, cut);
         if (model == null) {
-            model = MeepleShatter.model(drawn.id, drawn, cutter(casualty.instance, drawn, cuts, seed).get());
+            cut = cutter(casualty.instance, drawn, cuts, seed).get();
+            model = MeepleShatter.model(drawn.id, drawn, cut);
         }
         Node pieces = model.nodes.first().copy();
         pieces.isAnimated = true;
         pieces.localTransform.set(drawn.globalTransform);
         casualty.instance.nodes.add(pieces);
-        casualty.debris.add(new Debris(model, new MeepleDebris(casualty.instance, pieces, hit, seed)));
+        casualty.debris.add(new Debris(model, new MeepleDebris(casualty.instance, pieces, cut.supports(), hit, seed)));
     }
 
     /** Cuts in the mesh's own coordinates, where its camouflage was projected, about the board's up there. */

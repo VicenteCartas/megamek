@@ -1182,6 +1182,8 @@ final class GpuTerrain implements Disposable {
     private EditorRoutes editorRoutes;
     /** The elevators a scene change moves this frame ({@link #present}); null while none moves. */
     private Lifts lifts;
+    /** The structures coming down, from the transition that brought them down until their pieces have sunk away. */
+    private final List<Collapsing> collapsing = new ArrayList<>();
     private final ArrayDeque<Chunk> retiredChunks = new ArrayDeque<>();
     private final Set<Coords> atlasChanges = new HashSet<>();
     private final Set<Coords> atlasTileChanges = new HashSet<>();
@@ -2443,9 +2445,13 @@ final class GpuTerrain implements Disposable {
               && terrainMaterialShadows == (environment.shadowMap != null);
     }
 
-    /** An edit's rebuild is complete but some program its new materials need still links: it waits to commit. */
+    /**
+     * An edit's rebuild is complete but some program its new materials need still links, or a structure it removes is
+     * still being cut into the pieces that take its place as it commits: it waits to commit.
+     */
     private boolean awaitingLinks() {
-        return rebuild != null && rebuild.plan != null && rebuild.remaining.isEmpty() && !familySession && !materialsReady();
+        return rebuild != null && rebuild.plan != null && rebuild.remaining.isEmpty()
+              && (!familySession && !materialsReady() || cutting());
     }
 
     /** An edit still builds or waits for its programs: the board shows the terrain from before it. */
@@ -2542,6 +2548,7 @@ final class GpuTerrain implements Disposable {
     void boardChanged() {
         surfaceScars.dispose();
         groundDamage.dispose();
+        clearCollapses();
         coverScene = null;
         lunarSource = null;
         lunarTiles = null;
@@ -3454,6 +3461,8 @@ final class GpuTerrain implements Disposable {
         }
         coverScene = scene;
         tiles = scene.tiles();
+        // The structures this commit removes break into their pieces in the very frame they go.
+        startCollapses();
         editorPropsInstalled = true;
         flagScene++;
         lavaLighting.setFungus(chunks.stream().flatMap(chunk -> chunk.fungalLights.stream()).toList());
@@ -7374,6 +7383,7 @@ final class GpuTerrain implements Disposable {
      * stay at their end until the terrain has installed its after tiles. Classic columns snap.
      */
     void present(BoardScene.TileTransition transition, float progress) {
+        presentCollapses(transition, progress);
         boolean shown = !installedColumns && coverScene != null;
         if (lifts != null && (!shown || (transition != null ? lifts.transition != transition
               : heights(lifts.transition, BoardScene.TileTransition.Change::after)))) {
@@ -7381,7 +7391,7 @@ final class GpuTerrain implements Disposable {
             lifts = null;
             refreshShadows();
         }
-        if (!shown || transition == null && lifts == null) { return; }
+        if (!shown || (transition == null || transition.changes().isEmpty()) && lifts == null) { return; }
         if (lifts == null) {
             lifts = new Lifts(transition);
             refreshShadows();
@@ -7391,11 +7401,236 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * Whether the terrain shows each hex {@code transition} moves at its lower height, from which its platform moves;
-     * Classic columns need nothing.
+     * Whether the terrain shows each hex {@code transition} moves at its lower height, from which its platform moves,
+     * Classic columns needing nothing, and each structure it brings down has given way to its pieces or waited its
+     * longest ({@link #COLLAPSE_WAIT_NANOS}).
      */
     boolean ready(BoardScene.TileTransition transition) {
-        return installedColumns || heights(transition, Lifts::lower);
+        long now = System.nanoTime();
+        return (installedColumns || heights(transition, Lifts::lower)) && collapsing.stream().noneMatch(fall ->
+              fall.transition() == transition && !fall.collapse().started() && now - fall.since() < COLLAPSE_WAIT_NANOS);
+    }
+
+    /**
+     * How long the playback waits for a collapse's pieces to take its structure's place: a rebuild slower than this
+     * lets it go on, and the structure goes when the terrain installs the hex without it, as it did before pieces fell.
+     */
+    private static final long COLLAPSE_WAIT_NANOS = 5_000_000_000L;
+
+    /**
+     * A structure coming down ({@link BoardScene.TileTransition#collapses}) at {@code coords}: read from the terrain as
+     * the transition began ({@code since}, in nanoseconds), its pieces take its place when the terrain installs the hex
+     * without it.
+     */
+    private record Collapsing(BoardScene.TileTransition transition, Coords coords, GpuCollapse collapse, long since) { }
+
+    /**
+     * Reads the structures {@code transition} brings down from the installed terrain, which still draws them, as it
+     * begins, and starts cutting them. Their pieces stay at rest until its clock runs, after the camera has framed them
+     * ({@code progress} above 0), as their occupants' falls do; once it has ended they fall on. Pieces that never took
+     * their structure's place by then (the transition was skipped) go.
+     */
+    private void presentCollapses(BoardScene.TileTransition transition, float progress) {
+        collapsing.removeIf(fall -> {
+            boolean dropped = fall.transition() != transition && !fall.collapse().started();
+            if (dropped) { fall.collapse().dispose(); }
+            return dropped;
+        });
+        for (Collapsing fall : collapsing) {
+            if (fall.transition() != transition || progress > 0) { fall.collapse().release(); }
+        }
+        if (transition == null || transition.collapses().isEmpty() || coverScene == null
+              || collapsing.stream().anyMatch(fall -> fall.transition() == transition)) { return; }
+        installedSettings.run(() -> {
+            for (var collapse : transition.collapses()) {
+                var fall = collapse(collapse);
+                if (fall != null) { collapsing.add(new Collapsing(transition, collapse.coords(), fall, System.nanoTime())); }
+            }
+        });
+    }
+
+    /** At most this many triangles of one hex's structure are cut: a finer level beyond it gives way to a coarser one. */
+    private static final int COLLAPSE_TRIANGLES = 30_000;
+    /** The pieces times the materials one hex breaks into, each a draw in the colour and shadow passes. */
+    private static final int COLLAPSE_DRAWS = 360;
+
+    /**
+     * The installed structure at the collapse's hex, read where its chunk draws it and starting to break: a building's,
+     * fuel tank's or multi-hex share's shell, or a bridge span's deck, piers, footing and the rails it carries, cut at
+     * their finest level within {@link #COLLAPSE_TRIANGLES} in solid copies of their materials (no fade, no hover cut,
+     * no glass, which shatters to nothing), closed in the building's own material or the bridge's concrete. Null when
+     * nothing is drawn there.
+     */
+    private GpuCollapse collapse(BoardScene.TileTransition.Collapse change) {
+        Coords at = change.coords();
+        BoardScene.Tile tile = coverScene.tile(at);
+        if (tile == null) { return null; }
+        TileMesh mesh = chunks.get(at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE).tileMeshes.get(at);
+        if (mesh == null) { return null; }
+        Chunk chunk = chunks.get(at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE);
+        // The cut's frame lies at the hex's foot: its coordinates stay small however far out on the board it stands.
+        var origin = BoardGeometry.center(at, tile.elevation());
+        var frame = new Matrix4().setToTranslation(-origin.x, -origin.y, -origin.z);
+        List<MeepleShatter.Source> sources = new ArrayList<>();
+        Map<Material, Material> copies = new IdentityHashMap<>();
+        boolean bridge = mesh.bridgeShape != null && BoardScene.TileTransition.structure(change.before())
+              && change.before().cover().structure() == 0;
+        // A rail or maglev beam the span carries, not one on the ground under it.
+        float deck = BoardGeometry.surfaceZ(tile) + BoardGeometry.level() * .5f;
+        for (Prop prop : mesh.props) {
+            boolean structure = prop.building != null || bridge && prop.route() && prop.bounds().min.z > deck
+                  || Float.isNaN(prop.floorZ) && ("building".equals(prop.receiver) || "fuelTank".equals(prop.receiver));
+            if (!structure || isFlag(prop)) { continue; }
+            ModelInstance drawn = finest(prop);
+            for (Node node : drawn.nodes) { addSources(node, drawn, frame, copies, sources); }
+        }
+        if (bridge) {
+            Map<Mesh, Material> drawnMaterials = new IdentityHashMap<>();
+            for (Renderable part : GpuTerrainDepth.snapshot(chunk.opaque)) { drawnMaterials.putIfAbsent(part.meshPart.mesh, part.material); }
+            for (TileRange range : mesh.ranges) {
+                Material material = drawnMaterials.get(range.mesh());
+                if (range.layer() != 0 || !range.route() || material == null) { continue; }
+                sources.add(new MeepleShatter.Source(new com.badlogic.gdx.graphics.g3d.model.MeshPart("bridge", range.mesh(),
+                      range.offset(), range.count(),
+                      GL20.GL_TRIANGLES), copies.computeIfAbsent(material, GpuTerrain::pieceMaterial), frame, 0));
+            }
+        }
+        if (sources.isEmpty()) { return null; }
+        MeepleShatter.Caps caps = bridge ? new MeepleShatter.Caps(material(assets.material("terrain/surfaces/concrete-ground"), false),
+              MeshBatch.STANDARD, BoardGeometry.width() / 5 * assets.coverage("terrain/surfaces/concrete-ground"))
+              : buildingCaps(sources);
+        // Their programs link before the terrain installs the hex without the structure (awaitingLinks), as an edit's do.
+        for (var source : sources) { prepareTerrainMaterial(source.material(), source.part().mesh.getVertexAttributes()); }
+        prepareTerrainMaterial(caps.material(), caps.attributes());
+        var bounds = new BoundingBox().inf();
+        for (var source : sources) {
+            var box = new BoundingBox();
+            source.part().mesh.calculateBoundingBox(box, source.part().offset, source.part().size);
+            bounds.ext(box.mul(source.transform()));
+        }
+        bounds.mul(new Matrix4().setToTranslation(origin));
+        float storey = BoardGeometry.level();
+        int levels = bridge ? 0 : MathUtils.clamp(Math.round(bounds.getDepth() / storey) - 1, 0, 3);
+        int channels = (int) sources.stream().map(MeepleShatter.Source::material).distinct().count() + 1;
+        int pieces = MathUtils.clamp(COLLAPSE_DRAWS / channels, 10, bridge ? 20 : 48);
+        // Steep breaks per storey band: s of them cross a band into about 1 + s + s^2 / 4 pieces.
+        int steep = MathUtils.clamp(MathUtils.ceil(2 * ((float) Math.sqrt((float) pieces / (levels + 1)) - 1)), 2, 7);
+        var base = bridge ? bounds.getCenter(new Vector3()) : new Vector3(origin.x, origin.y, bounds.min.z);
+        var loads = change.loads().stream().map(load -> BoardGeometry.center(load.coords(), load.elevation())).toList();
+        var from = change.from() == null ? null : BoardGeometry.center(change.from().coords(), change.from().elevation());
+        var fall = new MeepleDebris.Collapse(base, storey, bridge, from, change.strength(), loads);
+        boolean water = change.before().liquid().present() && !change.before().frozen();
+        return new GpuCollapse(sources, origin, MeepleShatter.Planes.crumble(levels, steep), caps, fall,
+              Math.max(bounds.getWidth(), bounds.getHeight()) * .5f, bounds.getDepth(), water, at.hashCode());
+    }
+
+    /** The prop's model at its finest level within {@link #COLLAPSE_TRIANGLES}. */
+    private static ModelInstance finest(Prop prop) {
+        int count = prop.building != null ? prop.building.lodCount() : prop.levels == null ? 1 : prop.levels.size();
+        ModelInstance level = prop.near();
+        for (int lod = 1; lod < count && triangles(level) > COLLAPSE_TRIANGLES; lod++) { level = prop.level(lod, prop.instance()); }
+        return level;
+    }
+
+    private static int triangles(ModelInstance instance) {
+        int count = 0;
+        for (Renderable part : GpuTerrainDepth.snapshot(List.of(instance))) { count += part.meshPart.size / 3; }
+        return count;
+    }
+
+    /** The drawn parts of {@code node} and its children, as sources of the cut in its frame. */
+    private static void addSources(Node node, ModelInstance instance, Matrix4 frame, Map<Material, Material> copies,
+          List<MeepleShatter.Source> sources) {
+        for (NodePart part : node.parts) {
+            // Glass is what blends in the model itself: a building faded around its occupants or the pointer still breaks.
+            Material own = instance.model.getMaterial(part.material.id);
+            if (!part.enabled || part.meshPart.primitiveType != GL20.GL_TRIANGLES || part.meshPart.size == 0
+                  || blended(own != null ? own : part.material)) { continue; }
+            var boardUV = part.material.get(GpuModelMaterial.class, GpuModelMaterial.TYPE);
+            sources.add(new MeepleShatter.Source(part.meshPart, copies.computeIfAbsent(part.material,
+                        GpuTerrain::pieceMaterial),
+                  new Matrix4(frame).mul(instance.transform).mul(node.globalTransform), boardUV == null ? 0 : boardUV.boardUV));
+        }
+        for (Node child : node.getChildren()) { addSources(child, instance, frame, copies, sources); }
+    }
+
+    /**
+     * A piece's copy of a drawn material: solid, whatever fade or hover cut its building wore; drawn from both sides, as
+     * a shell open below (a kit storey's floor belongs to its interior) shows its inside when its foot topples over; and
+     * on its mesh's UVs, which carry its board UVs once cut.
+     */
+    private static Material pieceMaterial(Material drawn) {
+        var copy = new Material(drawn);
+        opaque(copy);
+        copy.remove(GpuBuildingCutaway.TYPE);
+        copy.set(IntAttribute.createCullFace(GL20.GL_NONE));
+        var surface = copy.get(GpuModelMaterial.class, GpuModelMaterial.TYPE);
+        if (surface != null && surface.boardUV > 0) { copy.set(surface.ownUVs()); }
+        return copy;
+    }
+
+    /**
+     * Where a building's cuts close: in its structural body ({@link GeneratedMesh#BUILDING_BODY}) where it has one, else in
+     * the material most of it is made of, each cut's face textured across its plane a storey to a repeat.
+     */
+    private static MeepleShatter.Caps buildingCaps(List<MeepleShatter.Source> sources) {
+        MeepleShatter.Source body = null;
+        Map<Material, Integer> sizes = new IdentityHashMap<>();
+        for (var source : sources) {
+            if (source.material().id.startsWith(GeneratedMesh.BUILDING_BODY)) { body = source; }
+            sizes.merge(source.material(), source.part().size, Integer::sum);
+        }
+        if (body == null) {
+            body = sources.stream().max(java.util.Comparator.comparingInt(source -> sizes.get(source.material()))).orElseThrow();
+        }
+        return new MeepleShatter.Caps(body.material(), body.part().mesh.getVertexAttributes(), BoardGeometry.level());
+    }
+
+    /** Pieces whose structure the terrain now shows gone take its place, from the frame it does. */
+    private void startCollapses() {
+        for (Collapsing fall : collapsing) {
+            var tile = coverScene.tile(fall.coords());
+            if (!fall.collapse().started() && (tile == null || !BoardScene.TileTransition.structure(tile))) {
+                fall.collapse().start();
+            }
+        }
+    }
+
+    /** The falling pieces, drawn with the terrain's programs as the structures they were. */
+    private void renderCollapses(ModelBatch target, Environment lighting) {
+        for (Collapsing fall : collapsing) {
+            var instance = fall.collapse().instance();
+            if (instance != null) { target.render(instance, lighting); }
+        }
+    }
+
+    /** A collapse's pieces are still being cut: the terrain keeps its structure installed until they are. */
+    private boolean cutting() {
+        return collapsing.stream().anyMatch(fall -> !fall.collapse().ready());
+    }
+
+    /**
+     * Runs the collapses' pieces on by {@code seconds} of playback time under {@code gravity} standard gravities,
+     * landing on {@code ground}, and lets go of those that have sunk away.
+     */
+    void advanceCollapses(float seconds, MeepleDebris.Ground ground, float gravity) {
+        collapsing.removeIf(fall -> {
+            fall.collapse().advance(seconds, ground, gravity);
+            boolean done = fall.collapse().done();
+            if (done) { fall.collapse().dispose(); }
+            return done;
+        });
+    }
+
+    /** The collapses under way, whose dust the attack effects draw. */
+    List<GpuCollapse> collapses() {
+        return collapsing.stream().map(Collapsing::collapse).toList();
+    }
+
+    /** Ends every collapse at once, as Instant playback does: the terrain shows what replaced them. */
+    void clearCollapses() {
+        collapsing.forEach(fall -> fall.collapse().dispose());
+        collapsing.clear();
     }
 
     private boolean heights(BoardScene.TileTransition transition, java.util.function.Function<BoardScene.TileTransition.Change,
@@ -8562,6 +8797,7 @@ final class GpuTerrain implements Disposable {
             }
         }
         if (lifts != null) { lifts.render(batch, environment); }
+        renderCollapses(batch, environment);
         // Trees first: the opaque sorter keeps this order of shaders, so the ground hidden under crowns fails the depth
         // test instead of being shaded and painted over.
         batch.render(trees, environment);
@@ -9188,6 +9424,7 @@ final class GpuTerrain implements Disposable {
             }
             pass.render(instances);
             if (lifts != null && !shadows) { lifts.render(pass, null); }
+            if (!shadows) { renderCollapses(pass, null); }
             renderDepthUnits(camera, units, pass);
         } finally { pass.end(); }
     }
@@ -9204,10 +9441,13 @@ final class GpuTerrain implements Disposable {
 
     void renderShadows(Camera view, List<ModelInstance> units) {
         if (view != null) { updateDetail(view); }
-        if (lifts != null || !flagRevisions.isEmpty()) {
-            // Moving lifts cast like units, over the cached terrain's shadow, which leaves them out.
+        if (lifts != null || !flagRevisions.isEmpty() || !collapsing.isEmpty()) {
+            // Moving lifts and falling pieces cast like units, over the cached terrain's shadow, which leaves them out.
             units = new ArrayList<>(units);
             if (lifts != null) { units.addAll(lifts.models); }
+            for (Collapsing fall : collapsing) {
+                if (fall.collapse().instance() != null) { units.add(fall.collapse().instance()); }
+            }
             for (Chunk chunk : chunks) {
                 for (Prop prop : chunk.flags()) {
                     if (drawn(prop, true)) { units.add(prop.instance()); }
@@ -9316,6 +9556,7 @@ final class GpuTerrain implements Disposable {
     @Override
     public void dispose() {
         if (lifts != null) { lifts.dispose(); lifts = null; }
+        clearCollapses();
         meshGeneration++;
         detailWorker.shutdownNow();
         // Workers borrow chunk/asset data. ForkJoinPool.close may return once termination has started after

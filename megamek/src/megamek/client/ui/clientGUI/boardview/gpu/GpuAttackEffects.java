@@ -470,6 +470,11 @@ final class GpuAttackEffects implements Disposable {
     }
 
     void render(Camera camera, GpuEffectDepth depth, List<MeepleCasualties.Casualty> casualties) {
+        render(camera, depth, casualties, List.of());
+    }
+
+    /** With the dust of the structures coming down ({@code collapses}) beside the casualties' explosions. */
+    void render(Camera camera, GpuEffectDepth depth, List<MeepleCasualties.Casualty> casualties, List<GpuCollapse> collapses) {
         interceptionBeams.clear();
         airbursts = 0;
         explosions.begin();
@@ -478,9 +483,11 @@ final class GpuAttackEffects implements Disposable {
         flames.begin();
         beams.begin();
         projectiles.begin();
-        if (volley.isEmpty() && artilleryBlasts.size() == 0 && minefields.isEmpty() && casualties.isEmpty()) { return; }
+        if (volley.isEmpty() && artilleryBlasts.size() == 0 && minefields.isEmpty() && casualties.isEmpty()
+              && collapses.isEmpty()) { return; }
         this.camera = camera;
         casualties.forEach(casualty -> casualty.explosions(explosions));
+        collapses.forEach(collapse -> collapse.explosions(explosions, collapses.size()));
         for (var shot : volley) {
             if (shot.defensive() && shot.interception() != null) { continue; }
             if (shot.seconds < (shot.death() ? 0 : UnitAttack.ANTICIPATION_SECONDS) && !shot.chargingPpc()

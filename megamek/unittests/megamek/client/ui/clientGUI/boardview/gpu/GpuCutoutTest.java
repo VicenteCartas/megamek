@@ -251,6 +251,45 @@ class GpuCutoutTest {
         }
     }
 
+    /**
+     * A cut through rubble: what closed outlines wrap fills once even where they overlap, and a chain that never
+     * closes, the cut through a shell open at one side, closes across its chord.
+     */
+    @Test
+    void overlappingOutlinesFillTheirUnionAndOpenChainsCloseAcrossTheirChord() {
+        var edges = new java.util.ArrayList<GpuCutout.Edge>();
+        square(edges, 0, 0);
+        square(edges, 1, 1);
+        // Three sides of a 2 x 2 square at (5, 5), its fourth side missing.
+        edges.add(new GpuCutout.Edge(new Vector3(5, 5, 0), new Vector3(7, 5, 0)));
+        edges.add(new GpuCutout.Edge(new Vector3(7, 5, 0), new Vector3(7, 7, 0)));
+        edges.add(new GpuCutout.Edge(new Vector3(7, 7, 0), new Vector3(5, 7, 0)));
+        var outlines = GpuCutout.outlines(edges, 1e-4f);
+        assertEquals(3, outlines.size(), "Two squares, and the open one closed");
+        var closed = new java.util.ArrayList<GpuCutout.Edge>();
+        for (var outline : outlines) {
+            for (int corner = 0; corner < outline.size(); corner++) {
+                closed.add(new GpuCutout.Edge(outline.get(corner), outline.get((corner + 1) % outline.size())));
+            }
+        }
+        assertEquals(7 + 4, area(GpuCutout.fillNonZero(closed)), 1e-4f, "The squares' union, 4 + 4 - 1, and the closed one");
+        assertEquals(6 + 4, area(GpuCutout.fill(closed)), 1e-4f, "Even/odd leaves the overlap open");
+    }
+
+    /** A 2 x 2 square from (x, y), wound counter-clockwise. */
+    private static void square(java.util.List<GpuCutout.Edge> edges, float x, float y) {
+        Vector3[] corners = { new Vector3(x, y, 0), new Vector3(x + 2, y, 0), new Vector3(x + 2, y + 2, 0), new Vector3(x, y + 2, 0) };
+        for (int corner = 0; corner < 4; corner++) { edges.add(new GpuCutout.Edge(corners[corner], corners[(corner + 1) % 4])); }
+    }
+
+    private static float area(java.util.List<Vector3[]> spans) {
+        float area = 0;
+        for (Vector3[] span : spans) {
+            area += ((span[1].x - span[0].x) + (span[2].x - span[3].x)) * .5f * (span[2].y - span[1].y);
+        }
+        return area;
+    }
+
     private static boolean hit(MeshBuilder mesh, float x, float y, float z, float dx, float dy, float dz) {
         var ray = new Ray(new Vector3(x, y, z), new Vector3(dx, dy, dz));
         float[] vertices = vertices(mesh);

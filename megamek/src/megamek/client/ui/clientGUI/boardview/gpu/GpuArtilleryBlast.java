@@ -1496,7 +1496,7 @@ final class GpuArtilleryBlast {
     }
 
     /** 1 until {@code from}, then easing smoothly to 0 at the end of the layer's life. */
-    private static float fadeOut(float age, float from) {
+    static float fadeOut(float age, float from) {
         float fade = MathUtils.clamp((age - from) / (1 - from), 0, 1);
         return 1 - fade * fade * (3 - 2 * fade);
     }

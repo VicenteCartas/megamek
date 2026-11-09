@@ -143,6 +143,11 @@ class GpuBattleView extends ApplicationAdapter {
     private static final float NUCLEAR_DAMAGE = 200;
     private final Map<Integer, Hit> hits = new HashMap<>();
     private final MeepleDebris.Ground debrisGround = this::debrisHeight;
+    /**
+     * What a collapse's pieces land on (GpuTerrain#advanceCollapses): the board as it stands, which no longer holds their
+     * structure; they look past nothing, so they land on the neighbours they fall onto.
+     */
+    private final MeepleDebris.Ground collapseGround = (x, y, from, own) -> debrisHeight(x, y, from, own, false);
     /** The units seen dead, in either camera: a meeple explodes only as its unit first shows dead. */
     private final Set<String> deadUnits = new HashSet<>();
     /** This frame's ghosts of exploded meeples ({@link #ghost}): the instances placed for them, by how much shows. */
@@ -765,7 +770,10 @@ class GpuBattleView extends ApplicationAdapter {
         if (!fitted) { updateCameraFocus(scene, frame.centerRequest()); }
         var instantAction = history.speed() == UnitMotion.Speed.INSTANT ? playback.lastAction() : null;
         // Instant has no animation clock: finish existing casualties before their models or markers are drawn again.
-        if (history.speed() == UnitMotion.Speed.INSTANT) { casualties.dispose(); }
+        if (history.speed() == UnitMotion.Speed.INSTANT) {
+            casualties.dispose();
+            terrain.clearCollapses();
+        }
         updateSlowMotion();
         history.advance(Gdx.graphics.getDeltaTime() * timeScale, state -> preparePlaybackCamera(state, scene));
         // The impact frame's explosion and debris already use full speed, without waiting for the next frame.
@@ -914,6 +922,7 @@ class GpuBattleView extends ApplicationAdapter {
         markers.beginFrame(scene.markers(), Gdx.graphics.getDeltaTime());
         prepareUnits();
         casualties.advance(animationSeconds(), debrisGround, atmosphereSettings.gravity() / BoardAtmosphere.STANDARD_GRAVITY);
+        terrain.advanceCollapses(animationSeconds(), collapseGround, atmosphereSettings.gravity() / BoardAtmosphere.STANDARD_GRAVITY);
         applyHover();
         for (var unit : scene.units()) {
             var instance = unitInstances.get(unit.id() + ":" + unit.part());
@@ -1064,7 +1073,7 @@ class GpuBattleView extends ApplicationAdapter {
               ray -> terrain.hit(scene, ray));
         jumpJets.render(boardCamera.camera);
         pilotFlames.render(boardCamera.camera);
-        attackEffects.render(boardCamera.camera, effectDepth, casualties.casualties());
+        attackEffects.render(boardCamera.camera, effectDepth, casualties.casualties(), terrain.collapses());
         designators.render(boardCamera.camera, scene.designations(), Gdx.graphics.getDeltaTime());
         starShells.renderFlares(boardCamera.camera, atmosphere.lighting().daylight());
         if (!terrain.waterVisible()) { waterImpacts.clear(); }
@@ -1964,13 +1973,21 @@ class GpuBattleView extends ApplicationAdapter {
      * the building's roof that covered it; never past the ground. NaN off the board.
      */
     private float debrisHeight(float x, float y, float from, boolean own) {
+        return debrisHeight(x, y, from, own, true);
+    }
+
+    /**
+     * {@link #debrisHeight}, the pieces looking past what stands above where they started only with {@code past}: the
+     * pieces of a structure that came down land on the standing neighbours it falls onto ({@link #collapseGround}).
+     */
+    private float debrisHeight(float x, float y, float from, boolean own, boolean past) {
         var tile = BoardGeometry.tile(scene, x, y);
         if (tile == null) { return Float.NaN; }
         float top = (tile.elevation() + 40) * BoardGeometry.level();
         var hit = surfaceHit(x, y, top);
         float height = hit == null ? BoardGeometry.surfaceZ(tile) : top - (float) Math.sqrt(hit.distance());
         String struck = hit == null ? "ground" : hit.receiver();
-        if (height > from && ("bridge".equals(struck) || own && "building".equals(struck))) {
+        if (past && height > from && ("bridge".equals(struck) || own && "building".equals(struck))) {
             hit = surfaceHit(x, y, from);
             height = hit == null ? BoardGeometry.surfaceZ(tile) : from - (float) Math.sqrt(hit.distance());
         }
@@ -1989,7 +2006,9 @@ class GpuBattleView extends ApplicationAdapter {
      * change waits for the terrain to build the ground its moving parts start from (GpuTerrain#ready).
      */
     boolean preparePlaybackCamera(UnitPlayback state, BoardScene scene) {
-        if (!state.reviewing() && (state.movement() != null || state.attack() != null || state.detonation() != null)) {
+        var collapse = state.transition() == null || state.transition().collapses().isEmpty() ? null : state.transition();
+        if (!state.reviewing() && (state.movement() != null || state.attack() != null || state.detonation() != null
+              || collapse != null)) {
             boardCamera.beginPlayback();
         }
         if (state.movement() != null) {
@@ -1999,12 +2018,25 @@ class GpuBattleView extends ApplicationAdapter {
         } else if (state.detonation() != null) {
             var strike = state.detonation().result();
             boardCamera.frameLocation(BoardGeometry.center(strike.coords(), strike.elevation()), playbackCameraWidth());
+        } else if (collapse != null) {
+            // A structure comes down where the camera looks, once its pieces have taken its place.
+            boardCamera.frameLocation(collapseCenter(collapse), playbackCameraWidth());
+            return terrain.ready(collapse) && !boardCamera.isFraming();
         } else if (state.transition() != null) {
             return terrain.ready(state.transition());
         } else {
             return true;
         }
         return !boardCamera.isFraming();
+    }
+
+    /** The middle of the structures a transition brings down, at their ground. */
+    private static Vector3 collapseCenter(BoardScene.TileTransition transition) {
+        var center = new Vector3();
+        for (var collapse : transition.collapses()) {
+            center.add(BoardGeometry.center(collapse.coords(), collapse.before().elevation()));
+        }
+        return center.scl(1f / transition.collapses().size());
     }
 
     private float cameraWidth() { return boardCamera.camera.viewportWidth; }
@@ -2089,6 +2121,12 @@ class GpuBattleView extends ApplicationAdapter {
                 var strike = playback.detonation().result();
                 cameraFollowingPlayback = true;
                 boardCamera.frameLocation(BoardGeometry.center(strike.coords(), strike.elevation()), playbackCameraWidth());
+                return;
+            }
+            var transition = playback.transition();
+            if (transition != null && !transition.collapses().isEmpty()) {
+                cameraFollowingPlayback = true;
+                boardCamera.frameLocation(collapseCenter(transition), playbackCameraWidth());
                 return;
             }
             if (playback.movement() != null) {

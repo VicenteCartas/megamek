@@ -42,9 +42,11 @@ final class GpuExplosionEffects implements Disposable {
     }
 
     /**
-     * A volume's palette beyond the plain fireball. Each value runs from 0 to 1.
+     * A volume's palette beyond the plain fireball. Each value runs from 0 to 1, soot from -1.
      *
-     * @param soot  how dark the smoke is: 0 is the plain grey fireball smoke, 1 is the charcoal of a heavy shell
+     * @param soot  how dark the smoke is: 0 is the plain grey fireball smoke, 1 is the charcoal of a heavy shell; below
+     *              0 it pales toward dust that scatters the light, bright even where it shades itself, as a collapse's
+     *              concrete dust is
      * @param ember how long fire keeps glowing inside the smoke after the blast has cooled
      * @param dust     how far the smoke is browned toward thrown earth
      * @param violence how violently it churns, as a fuel-air blast does: its billows start small and grow large as it

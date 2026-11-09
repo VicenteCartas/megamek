@@ -192,29 +192,11 @@ final class AuthoredBoardClip {
             }
         });
         Path2D path = new Path2D.Double(Path2D.WIND_NON_ZERO);
-        for (Point start : List.copyOf(next.keySet())) {
-            List<Point> trail = new ArrayList<>();
-            Map<Point, Integer> active = new java.util.HashMap<>();
-            trail.add(start); active.put(start, 0);
-            while (!trail.isEmpty()) {
-                Point at = trail.getLast();
-                var outgoing = next.get(at);
-                if (outgoing == null || outgoing.isEmpty()) {
-                    // A touching open sheet may lead to a dead end. Backtrack without losing the solid's prefix.
-                    active.remove(trail.removeLast()); continue;
-                }
-                Point target = outgoing.removeLast();
-                Integer cycle = active.get(target);
-                if (cycle == null) { active.put(target, trail.size()); trail.add(target); continue; }
-                if (trail.size() - cycle >= 3) {
-                    path.moveTo(target.u() / 1000.0, target.z() / 1000.0);
-                    for (int i = cycle + 1; i < trail.size(); i++) {
-                        Point p = trail.get(i); path.lineTo(p.u() / 1000.0, p.z() / 1000.0);
-                    }
-                    path.closePath();
-                }
-                while (trail.size() > cycle + 1) { active.remove(trail.removeLast()); }
-            }
+        // A touching open sheet may lead to a dead end, which the loops leave out without losing the solid's.
+        for (List<Point> loop : GpuCutout.loops(next)) {
+            path.moveTo(loop.getFirst().u() / 1000.0, loop.getFirst().z() / 1000.0);
+            for (int i = 1; i < loop.size(); i++) { path.lineTo(loop.get(i).u() / 1000.0, loop.get(i).z() / 1000.0); }
+            path.closePath();
         }
         return new Area(path);
     }

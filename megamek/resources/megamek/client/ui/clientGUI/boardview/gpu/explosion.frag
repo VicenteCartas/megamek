@@ -12,8 +12,8 @@ uniform vec3 u_wind;
 uniform float u_stretch;
 // Unit direction of a thrown spike in XYZ and how far the volume is drawn out along it in W (0 keeps it round).
 uniform vec4 u_axis;
-// Palette beyond the plain fireball: soot darkens the smoke, ember keeps fire glowing inside it for longer and dust
-// browns it like thrown earth. All zero is the plain fireball.
+// Palette beyond the plain fireball: soot darkens the smoke (below zero it pales toward dust that scatters the light),
+// ember keeps fire glowing inside it for longer and dust browns it like thrown earth. All zero is the plain fireball.
 uniform vec4 u_look;
 uniform vec4 u_viewport;
 uniform mat4 u_inverseProjView;
@@ -99,10 +99,12 @@ void main() {
     float jitter = mix(0.25, 0.75, hash(vec3(gl_FragCoord.xy, u_effect.w)));
     float ember = u_look.y * 0.28;
     float cooling = u_effect.y * (1.0 - smoothstep(0.12 + ember, 0.68 + ember, u_effect.x));
-    vec3 litSmoke = mix(mix(toLinear(vec3(0.44, 0.43, 0.41)), toLinear(vec3(0.17, 0.16, 0.155)), u_look.x),
-                       toLinear(vec3(0.4, 0.32, 0.23)), u_look.z);
-    vec3 shadedSmoke = mix(mix(toLinear(vec3(0.065, 0.07, 0.08)), toLinear(vec3(0.025, 0.024, 0.025)), u_look.x),
-                           toLinear(vec3(0.08, 0.06, 0.045)), u_look.z);
+    float soot = max(u_look.x, 0.0), pale = max(-u_look.x, 0.0);
+    vec3 litSmoke = mix(mix(mix(toLinear(vec3(0.44, 0.43, 0.41)), toLinear(vec3(0.17, 0.16, 0.155)), soot),
+                            toLinear(vec3(0.78, 0.76, 0.72)), pale), toLinear(vec3(0.4, 0.32, 0.23)), u_look.z);
+    // Dust lights its own shade: light scattered inside the cloud keeps it pale where smoke goes dark.
+    vec3 shadedSmoke = mix(mix(mix(toLinear(vec3(0.065, 0.07, 0.08)), toLinear(vec3(0.025, 0.024, 0.025)), soot),
+                               toLinear(vec3(0.42, 0.4, 0.37)), pale), toLinear(vec3(0.08, 0.06, 0.045)), u_look.z);
     vec3 sun = normalize(volumeVector(u_sun));
     float transmission = 1.0;
     vec3 radiance = vec3(0.0);

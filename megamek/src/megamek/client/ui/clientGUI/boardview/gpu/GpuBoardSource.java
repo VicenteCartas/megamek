@@ -144,6 +144,17 @@ final class GpuBoardSource implements BoardSource {
      * it happened in: the next checkpoint queues them after that, where it left the unit.
      */
     private final List<BoardScene.Combat> deaths = new ArrayList<>();
+    /**
+     * EDT: the strongest hit on each building, fuel tank or bridge hex in round structureHitsRound, which its collapse
+     * falls away from when the server brings it down that round (structureHit, BoardScene.TileTransition.Hit).
+     */
+    private final Map<Coords, BoardScene.TileTransition.Hit> structureHits = new HashMap<>();
+    private int structureHitsRound = -1;
+    /**
+     * When the capture that first showed a structure brought down in the movement phase was held back, 0 for none: the
+     * server sends that collapse, and its mover's fall, before the path that walked onto it (captureMovement).
+     */
+    private long collapseHeldSince;
     private final Timer timer;
     private final GameListenerAdapter gameListener;
     private final BoardListenerAdapter boardListener;
@@ -428,6 +439,9 @@ final class GpuBoardSource implements BoardSource {
             return;
         }
         reports.moved(entity, start, path, type, view.game.getRoundCount());
+        // A collapse it caused was held back (holdCollapse): the game's unit already lies where it fell, but its walk
+        // starts where the last published scene, from before the collapse, shows it.
+        if (collapseHeldSince != 0) { start = null; }
         List<BoardScene.Waypoint> points = new ArrayList<>();
         // An airborne visual plays at the altitude the unit has now, and at the altitude it started the move at for
         // its first point and when it has just landed, so flying stays on the board through climbs and landings.
@@ -481,11 +495,22 @@ final class GpuBoardSource implements BoardSource {
             }
         }
         synchronized (this) {
-            if (view == movingView) {
+            // A walk that stopped a hex short of where the game has the unit now, which it reached by a fall the game
+            // sent first (onto a structure it broke, holdCollapse), starts there too; once the scene shows it there, the
+            // walk would replay from the rubble. A turn in place or a walk back to its hex ends in its own hex.
+            boolean shown = captured != null && !path.getLast().coords().equals(captured.location().coords())
+                  && !points.isEmpty() && samePlace(points.getFirst(), captured.location()) && frame != null
+                  && frame.scene().units().stream()
+                        .anyMatch(unit -> unit.id() == entityId && samePlace(unit.location(), captured.location()));
+            if (view == movingView && !shown) {
                 queueMovement(entity, captured, points, type, jumpMP, movementMP);
             }
             publishScene(next, false);
         }
+    }
+
+    private static boolean samePlace(BoardScene.Waypoint a, BoardScene.Waypoint b) {
+        return a.coords().equals(b.coords()) && a.elevation() == b.elevation() && !UnitMotion.changesPosture(a, b);
     }
 
     /** Split only at observed conversion steps; normal travel keeps its one continuous acceleration interval. */
@@ -564,6 +589,7 @@ final class GpuBoardSource implements BoardSource {
             receivedAttacks.removeFirst();
         }
         reports.combat(result, attacker, event.target(), view.game.getRoundCount(), view.game.getPhase());
+        recordStructureHit(result, attacker);
         if (result.kind() == megamek.common.ResolvedAttack.Kind.DEATH && frame != null
               && frame.scene().units().stream().anyMatch(unit -> unit.id() == attacker.getId() && unit.attachment() != null)) {
             return; // Exterior casualties remain on their carrier until its resolved release, rather than collapsing in midair.
@@ -613,6 +639,72 @@ final class GpuBoardSource implements BoardSource {
                   target != null && target.isConventionalInfantry(), attacker.isOffBoard(), attacker.isClan());
             if (result.kind() == megamek.common.ResolvedAttack.Kind.DEATH) { deaths.add(combat); }
             else { queueAnimation(combat); }
+        }
+    }
+
+    /**
+     * Remembers a strong hit that landed on a building, fuel tank or bridge hex, or on a unit standing in one, for the
+     * structure's collapse to fall away from (structureHits): a weapon's by its damage per hit, a physical attack's by
+     * the damage the rules give it, a death from above's from above the hex, a shell's from where it landed, in the hex
+     * it landed in and, at half its strength, beside it. Only very strong hits count: an AC/20 (20 a hit) at full
+     * strength, a Gauss rifle (15) at half; a PPC (10), a machine gun or a missile does not push a building over.
+     */
+    private void recordStructureHit(megamek.common.ResolvedAttack result, Entity attacker) {
+        if (!result.hit() || result.kind() == megamek.common.ResolvedAttack.Kind.DEATH || board == null) { return; }
+        if (view.game.getRoundCount() != structureHitsRound) {
+            structureHits.clear();
+            structureHitsRound = view.game.getRoundCount();
+        }
+        var shot = result.shot();
+        float damage = shot != null ? (float) shot.damagePerHit() : physicalDamage(result, attacker);
+        float strength = Math.min(1, (damage - 10) / 10);
+        if (strength <= 0) { return; }
+        if (shot != null && shot.artillery() && shot.impact() != null) {
+            Coords landing = shot.impact().coords();
+            var from = waypoint(landing, 0, 0);
+            recordStructureHit(landing, strength, from);
+            for (int direction = 0; direction < 6; direction++) {
+                recordStructureHit(landing.translated(direction), strength * .5f, from);
+            }
+            return;
+        }
+        Coords at = result.target().coords();
+        var from = result.kind() == megamek.common.ResolvedAttack.Kind.DFA
+              ? waypoint(at, result.target().elevation() + DFA_HEIGHT, 0)
+              : waypoint(result.attacker().coords(), result.attacker().elevation(), result.attacker().facing());
+        recordStructureHit(at, strength, from);
+    }
+
+    /** The strongest hit on the structure at {@code at} this round, null for none. */
+    private BoardScene.TileTransition.Hit structureHit(Coords at) {
+        return structureHitsRound == view.game.getRoundCount() ? structureHits.get(at) : null;
+    }
+
+    /** Levels above its target a death from above comes down from, which crushes a structure rather than tip it over. */
+    private static final int DFA_HEIGHT = 12;
+
+    private void recordStructureHit(Coords at, float strength, BoardScene.Waypoint from) {
+        Hex hex = board.getHex(at);
+        if (hex == null || !hex.containsTerrain(Terrains.BUILDING) && !hex.containsTerrain(Terrains.BRIDGE)
+              && !hex.containsTerrain(Terrains.FUEL_TANK)) { return; }
+        structureHits.merge(at, new BoardScene.TileTransition.Hit(strength, from),
+              (earlier, later) -> later.strength() >= earlier.strength() ? later : earlier);
+    }
+
+    /** The damage the rules give a physical attack, 0 for one that deals none to a structure or cannot be read. */
+    private static float physicalDamage(megamek.common.ResolvedAttack result, Entity attacker) {
+        try {
+            return switch (result.kind()) {
+                case KICK -> megamek.common.actions.KickAttackAction.getDamageFor(attacker, result.limb(), false);
+                case PUNCH -> megamek.common.actions.PunchAttackAction.getDamageFor(attacker, result.limb(), false, false);
+                case CHARGE -> megamek.common.actions.ChargeAttackAction.getDamageFor(attacker);
+                case DFA -> megamek.common.actions.DfaAttackAction.getDamageFor(attacker, false);
+                case CLUB -> attacker.getEquipment(result.equipmentIndex()) instanceof megamek.common.equipment.MiscMounted club
+                      ? megamek.common.actions.ClubAttackAction.getDamageFor(attacker, club, false, false) : 0;
+                default -> 0;
+            };
+        } catch (RuntimeException failure) {
+            return 0;
         }
     }
 
@@ -669,8 +761,25 @@ final class GpuBoardSource implements BoardSource {
     private synchronized void publishScene(Frame next, boolean detectGear) {
         if (next.scene() == null) { pendingEvents.clear(); deaths.clear(); frame = next; return; }
         if (frame != null && frame.scene() == null) { frame = null; }
+        // A nuclear strike's crater takes the buildings in it with the strike's own checkpoint: no collapse plays there.
         var lifts = frame != null && frame.boardGeneration() == next.boardGeneration()
-              ? BoardScene.TileTransition.of(frame.scene(), next.scene()) : null;
+              ? BoardScene.TileTransition.of(frame.scene(), next.scene(), nuclearCapture == null ? this::structureHit : null)
+              : null;
+        boolean collapses = lifts != null && !lifts.collapses().isEmpty();
+        if (collapses && holdCollapse(detectGear)) { return; }
+        // A collapse held back in the movement phase stays that phase's, whichever the game has moved on to since.
+        boolean moving = view.game.getPhase().isMovement() || collapseHeldSince != 0;
+        collapseHeldSince = 0;
+        if (collapses) { lifts.collapses().forEach(collapse -> structureHits.remove(collapse.coords())); }
+        // The units that stood on a structure coming down fall with it, after it starts to give way; one whose weight
+        // brings it down steps onto it first.
+        List<BoardScene.Movement> falls = new ArrayList<>();
+        List<BoardScene.Movement> steps = new ArrayList<>();
+        if (collapses && moving) { lifts = stepsOnto(lifts, next, steps, falls); }
+        Set<Integer> stepped = steps.stream().map(BoardScene.Movement::entityId).collect(Collectors.toSet());
+        if (collapses && !detectGear) {
+            falls(lifts, next).stream().filter(fall -> !stepped.contains(fall.entityId())).forEach(falls::add);
+        }
         if (detectGear && frame != null && frame.boardGeneration() == next.boardGeneration()) {
             // A unit drawn in parts moves as one: its first drawn part stands for it, never another part's hex.
             Map<Integer, BoardScene.Unit> previous = new HashMap<>();
@@ -696,23 +805,132 @@ final class GpuBoardSource implements BoardSource {
                           List.of(old.location(), unit.location()), EntityMovementType.MOVE_SAFE_THRUST, 0,
                           entity == null ? 0 : movementMP(entity, EntityMovementType.MOVE_SAFE_THRUST), unit));
                 } else if (old != null && old.attachment() == null && unit.attachment() == null
-                      && UnitMotion.forcedChange(old, unit) && !rides(lifts, old, unit)) {
+                      && UnitMotion.forcedChange(old, unit) && !rides(lifts, old, unit) && !stepped.contains(unit.id())) {
                     // No movement path accompanied this authoritative update (push, domino displacement, or fall).
-                    queueAnimation(new BoardScene.Movement(unit.id(), next.scene().boardId(),
-                          List.of(old.location(), unit.location()), EntityMovementType.MOVE_NONE, 0, 0, unit));
+                    var forced = new BoardScene.Movement(unit.id(), next.scene().boardId(),
+                          List.of(old.location(), unit.location()), EntityMovementType.MOVE_NONE, 0, 0, unit);
+                    if (collapses && lifts.collapses(old.location().coords())) { falls.add(forced); }
+                    else { queueAnimation(forced); }
                 }
             }
         }
         if (frame != null && frame.boardGeneration() == next.boardGeneration()) {
             queueAttachments(frame.scene(), next.scene());
         }
+        steps.forEach(this::queueAnimation);
         if (lifts != null) { queueAnimation(lifts); }
+        falls.forEach(this::queueAnimation);
         queueDeaths(false);
         if (frame == null || frame.boardGeneration() != next.boardGeneration() || !next.scene().samePlaybackState(frame.scene())
               || (!pendingEvents.isEmpty() && !(pendingEvents.getLast() instanceof BoardScene.SceneUpdate))) {
             queueAnimation(new BoardScene.SceneUpdate(next.scene()));
         }
         frame = next;
+    }
+
+    /** Long enough for a mover's path to follow the collapse it caused in one burst of packets, too short to be seen. */
+    private static final long COLLAPSE_HOLD_NANOS = 300_000_000L;
+
+    /**
+     * Whether to hold back a capture that shows a structure brought down in the movement phase. The server sends a
+     * collapse under a unit's weight, and that unit's fall, before the path that walked it there (MovePathHandler): the
+     * path's capture publishes the collapse after the walk (captureMovement). Any other collapse in the phase, as one at
+     * its end, only waits the hold's length.
+     */
+    private boolean holdCollapse(boolean detectGear) {
+        if (!detectGear || !view.game.getPhase().isMovement()) { return false; }
+        long now = System.nanoTime();
+        if (collapseHeldSince == 0) { collapseHeldSince = now; }
+        return now - collapseHeldSince < COLLAPSE_HOLD_NANOS;
+    }
+
+    /**
+     * The units whose weight brings down the structure they step or jump onto in the movement phase. A walker's path
+     * stops before that step, and the server sends only where it fell (MovePathHandler): it walks on from where it was
+     * last shown onto the structure's deck, or into the building at the height it came from ({@code steps}). A jump's
+     * path lands on the roof, and its walk ends there, before the fall the capture appended to it. Each stands on the
+     * structure as a load of the returned transition and falls with it ({@code falls}).
+     */
+    private BoardScene.TileTransition stepsOnto(BoardScene.TileTransition transition, Frame next,
+          List<BoardScene.Movement> steps, List<BoardScene.Movement> falls) {
+        Map<Coords, List<BoardScene.Waypoint>> loads = new HashMap<>();
+        for (var unit : next.scene().units()) {
+            var collapse = transition.collapses().stream()
+                  .filter(candidate -> candidate.coords().equals(unit.location().coords())).findFirst().orElse(null);
+            Entity entity = view.game.getEntity(unit.id());
+            if (collapse == null || entity == null || unit.sensorContact() || unit.attachment() != null) { continue; }
+            int walked = -1;
+            for (int index = 0; index < pendingEvents.size(); index++) {
+                if (pendingEvents.get(index) instanceof BoardScene.Movement move && move.entityId() == unit.id()) { walked = index; }
+            }
+            var walk = walked < 0 ? null : (BoardScene.Movement) pendingEvents.get(walked);
+            var last = walk != null ? walk.path().getLast() : frame.scene().units().stream()
+                  .filter(old -> old.id() == unit.id() && old.part() == unit.part() && !old.sensorContact())
+                  .map(BoardScene.Unit::location).findFirst().orElse(null);
+            var before = collapse.before();
+            BoardScene.Waypoint on;
+            var path = walk == null ? null : walk.path();
+            if (walk != null && last.coords().equals(collapse.coords())) {
+                // Its last pose up on the structure, before the fall.
+                int landed = -1;
+                for (int index = 0; index < path.size(); index++) {
+                    var point = path.get(index);
+                    if (point.coords().equals(collapse.coords()) && point.elevation() > before.elevation()) { landed = index; }
+                }
+                if (landed < 1) { continue; }
+                on = path.get(landed);
+                path = path.subList(0, landed + 1);
+            } else if (last != null && last.coords().distance(collapse.coords()) == 1) {
+                float floor = Math.max(unit.location().elevation(),
+                      Math.min(last.elevation(), before.elevation() + before.cover().height()));
+                float height = before.features().stream().filter(feature -> "bridge".equals(feature.asset()))
+                      .map(feature -> before.elevation() + feature.elevation()).findFirst().orElse(floor);
+                // A step turns nothing: it faces as it did, forward or backing onto it.
+                on = new BoardScene.Waypoint(collapse.coords(), height, last.facing(), last.proneCause(), last.aeroState(),
+                      unit.location().footprint(), last.form(), last.fallSide(), last.hullDown());
+                steps.add(walk != null
+                      ? new BoardScene.Movement(unit.id(), next.scene().boardId(), List.of(last, on), walk.type(),
+                            walk.jumpMP(), walk.movementMP(), unit.at(on), walk.gravity())
+                      : new BoardScene.Movement(unit.id(), next.scene().boardId(), List.of(last, on),
+                            EntityMovementType.MOVE_WALK, 0, movementMP(entity, EntityMovementType.MOVE_WALK), unit.at(on)));
+            } else { continue; }
+            // Each move leaves the unit where it ends, not where the game has it now.
+            if (walk != null) {
+                pendingEvents.set(walked, new BoardScene.Movement(walk.entityId(), walk.boardId(), path, walk.type(),
+                      walk.jumpMP(), walk.movementMP(), unit.at(path.getLast()), walk.gravity()));
+            }
+            if (on.elevation() > before.elevation()) { loads.computeIfAbsent(collapse.coords(), at -> new ArrayList<>()).add(on); }
+            if (!on.equals(unit.location())) {
+                falls.add(new BoardScene.Movement(unit.id(), next.scene().boardId(), List.of(on, unit.location()),
+                      EntityMovementType.MOVE_NONE, 0, 0, unit));
+            }
+        }
+        if (loads.isEmpty()) { return transition; }
+        return new BoardScene.TileTransition(transition.boardId(), transition.changes(), transition.collapses().stream()
+              .map(collapse -> !loads.containsKey(collapse.coords()) ? collapse : new BoardScene.TileTransition.Collapse(
+                    collapse.coords(), collapse.before(), collapse.strength(), collapse.from(),
+                    java.util.stream.Stream.concat(collapse.loads().stream(), loads.get(collapse.coords()).stream()).toList()))
+              .toList());
+    }
+
+    /**
+     * The falls of the units that stood on a structure {@code transition} brings down, for a capture that does not look
+     * for forced moves, a path's: every unit but the mover, whose path the capture has just queued.
+     */
+    private List<BoardScene.Movement> falls(BoardScene.TileTransition transition, Frame next) {
+        Map<Integer, BoardScene.Unit> before = new HashMap<>();
+        frame.scene().units().stream().filter(unit -> !unit.sensorContact()).forEach(unit -> before.putIfAbsent(unit.id(), unit));
+        List<BoardScene.Movement> result = new ArrayList<>();
+        for (var unit : next.scene().units()) {
+            var old = before.get(unit.id());
+            if (old == null || old.part() != unit.part() || unit.sensorContact() || !transition.collapses(old.location().coords())
+                  || old.attachment() != null || unit.attachment() != null || !UnitMotion.forcedChange(old, unit)
+                  || pendingEvents.stream().anyMatch(event -> event instanceof BoardScene.Movement move
+                        && move.entityId() == unit.id())) { continue; }
+            result.add(new BoardScene.Movement(unit.id(), next.scene().boardId(), List.of(old.location(), unit.location()),
+                  EntityMovementType.MOVE_NONE, 0, 0, unit));
+        }
+        return result;
     }
 
     /**
@@ -886,6 +1104,8 @@ final class GpuBoardSource implements BoardSource {
                     pendingEvents.clear();
                     deaths.clear();
                     nuclearCapture = null;
+                    structureHits.clear();
+                    collapseHeldSince = 0;
                 }
             }
         }
@@ -908,6 +1128,8 @@ final class GpuBoardSource implements BoardSource {
                 pendingEvents.clear();
                 deaths.clear();
                 nuclearCapture = null;
+                structureHits.clear();
+                collapseHeldSince = 0;
                 receivedAttacks.clear();
                 removalAttempts.clear();
                 voluntaryReleases.clear();

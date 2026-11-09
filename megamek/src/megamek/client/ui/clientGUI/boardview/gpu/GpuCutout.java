@@ -236,6 +236,18 @@ final class GpuCutout {
      * @return each span's corners: top left, top right, bottom right, bottom left
      */
     static List<Vector3[]> fill(List<Edge> edges) {
+        return fill(edges, false);
+    }
+
+    /**
+     * {@link #fill} of directed outlines by their winding instead: what any outline wraps is filled, so outlines that
+     * overlap fill their union, and a hole is an outline wound the other way.
+     */
+    static List<Vector3[]> fillNonZero(List<Edge> edges) {
+        return fill(edges, true);
+    }
+
+    private static List<Vector3[]> fill(List<Edge> edges, boolean nonZero) {
         var rows = new TreeSet<Float>();
         for (Edge edge : edges) {
             rows.add(edge.start().y);
@@ -243,20 +255,120 @@ final class GpuCutout {
         }
         List<Float> levels = new ArrayList<>(rows);
         List<Vector3[]> spans = new ArrayList<>();
+        // Bands rise: an edge joins the live ones at its lowest end and leaves them past its highest.
+        List<Edge> rising = new ArrayList<>(edges);
+        rising.sort(Comparator.comparingDouble(edge -> Math.min(edge.start().y, edge.end().y)));
+        List<Edge> live = new ArrayList<>();
+        int joined = 0;
         for (int row = 1; row < levels.size(); row++) {
             float top = levels.get(row - 1), bottom = levels.get(row);
             // Adjacent float levels can be one ULP apart; their midpoint must still lie strictly inside the band.
             double middle = (top + (double) bottom) * .5;
-            var active = edges.stream().filter(edge -> Math.min(edge.start().y, edge.end().y) < middle
-                        && Math.max(edge.start().y, edge.end().y) > middle)
+            while (joined < rising.size() && Math.min(rising.get(joined).start().y, rising.get(joined).end().y) < middle) {
+                live.add(rising.get(joined++));
+            }
+            live.removeIf(edge -> Math.max(edge.start().y, edge.end().y) <= middle);
+            var active = live.stream().filter(edge -> Math.min(edge.start().y, edge.end().y) < middle)
                   .sorted(Comparator.comparingDouble(edge -> edge.x(middle))).toList();
-            for (int span = 0; span + 1 < active.size(); span += 2) {
+            int winding = 0;
+            for (int span = 0; span + 1 < active.size(); span += nonZero ? 1 : 2) {
                 Edge left = active.get(span), right = active.get(span + 1);
+                if (nonZero) {
+                    winding += left.end().y > left.start().y ? 1 : -1;
+                    if (winding == 0) { continue; }
+                }
                 spans.add(new Vector3[] { new Vector3((float) left.x(top), top, 0), new Vector3((float) right.x(top), top, 0),
                       new Vector3((float) right.x(bottom), bottom, 0), new Vector3((float) left.x(bottom), bottom, 0) });
             }
         }
         return spans;
+    }
+
+    /**
+     * The outlines of directed edges in the XY plane, each edge leaving its start for its end: their closed loops, and
+     * every chain that never closes, as the cut through a shell with no floor or an open seam, closed by its chord. Ends
+     * join where they lie within {@code tolerance} of each other, as the ends of two triangles' edges do that meet at a
+     * point one of them only passes through.
+     */
+    static List<List<Vector3>> outlines(List<Edge> edges, float tolerance) {
+        List<Vector3> points = new ArrayList<>();
+        Map<Long, List<Integer>> cells = new java.util.HashMap<>();
+        Map<Integer, List<Integer>> next = new LinkedHashMap<>();
+        Map<Integer, Integer> balance = new java.util.HashMap<>();
+        for (Edge edge : edges) {
+            int from = point(edge.start(), tolerance, points, cells), to = point(edge.end(), tolerance, points, cells);
+            if (from == to) { continue; }
+            next.computeIfAbsent(from, ignored -> new ArrayList<>()).add(to);
+            balance.merge(from, 1, Integer::sum);
+            balance.merge(to, -1, Integer::sum);
+        }
+        List<List<Integer>> outlines = new ArrayList<>();
+        // A chain starts where more edges leave than arrive, and runs on until nothing leaves where it has got to.
+        for (var start : List.copyOf(balance.keySet())) {
+            while (balance.get(start) > 0 && next.containsKey(start) && !next.get(start).isEmpty()) {
+                List<Integer> chain = new ArrayList<>(List.of(start));
+                int at = start;
+                for (List<Integer> out = next.get(at); out != null && !out.isEmpty(); out = next.get(at)) {
+                    at = out.removeLast();
+                    chain.add(at);
+                }
+                balance.merge(start, -1, Integer::sum);
+                balance.merge(at, 1, Integer::sum);
+                if (chain.size() > 1) { outlines.add(chain); }
+            }
+        }
+        outlines.addAll(loops(next));
+        return outlines.stream().map(outline -> outline.stream().map(points::get).toList()).toList();
+    }
+
+    /** The index of the first point within {@code tolerance} of {@code at}, which becomes one if there is none. */
+    private static int point(Vector3 at, float tolerance, List<Vector3> points, Map<Long, List<Integer>> cells) {
+        int column = MathUtils.floor(at.x / tolerance), row = MathUtils.floor(at.y / tolerance);
+        for (int x = column - 1; x <= column + 1; x++) {
+            for (int y = row - 1; y <= row + 1; y++) {
+                for (int index : cells.getOrDefault(cell(x, y), List.of())) {
+                    if (points.get(index).dst2(at) <= tolerance * tolerance) { return index; }
+                }
+            }
+        }
+        points.add(at);
+        cells.computeIfAbsent(cell(column, row), ignored -> new ArrayList<>()).add(points.size() - 1);
+        return points.size() - 1;
+    }
+
+    private static long cell(int column, int row) {
+        return (long) column << 32 | row & 0xffffffffL;
+    }
+
+    /**
+     * The closed loops of a graph of directed edges, given as each point's successors, which it consumes; chains that
+     * never close are dropped.
+     */
+    static <P> List<List<P>> loops(Map<P, List<P>> next) {
+        List<List<P>> loops = new ArrayList<>();
+        for (P start : List.copyOf(next.keySet())) {
+            List<P> trail = new ArrayList<>(List.of(start));
+            Map<P, Integer> active = new java.util.HashMap<>(Map.of(start, 0));
+            while (!trail.isEmpty()) {
+                P at = trail.getLast();
+                List<P> outgoing = next.get(at);
+                if (outgoing == null || outgoing.isEmpty()) {
+                    // A dead end, as a touching open sheet's: backtrack without losing the loop before it.
+                    active.remove(trail.removeLast());
+                    continue;
+                }
+                P target = outgoing.removeLast();
+                Integer cycle = active.get(target);
+                if (cycle == null) {
+                    active.put(target, trail.size());
+                    trail.add(target);
+                    continue;
+                }
+                if (trail.size() - cycle >= 3) { loops.add(List.copyOf(trail.subList(cycle, trail.size()))); }
+                while (trail.size() > cycle + 1) { active.remove(trail.removeLast()); }
+            }
+        }
+        return loops;
     }
 
     private static int capTriangle(BoardScene.Pixels pixels, TextureRegion region, Vector3 origin, float scale,

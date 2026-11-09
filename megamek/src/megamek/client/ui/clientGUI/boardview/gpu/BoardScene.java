@@ -1062,39 +1062,93 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
     /**
      * Hexes the server changed that move from their before to their after tile on the shared timeline: raised Solaris
-     * elevators rising or sinking ({@link GpuTerrain#present}). One per checkpoint, queued just before it; the
-     * checkpoint applies as the change starts, and the change plays for {@link #SECONDS} of animation time.
+     * elevators rising or sinking ({@link GpuTerrain#present}), and structures coming down ({@link #collapses}). One per
+     * checkpoint, queued just before it; the checkpoint applies as the change starts, and the change plays for
+     * {@link #seconds} of animation time.
      */
-    record TileTransition(int boardId, List<Change> changes) implements Animation {
+    record TileTransition(int boardId, List<Change> changes, List<Collapse> collapses) implements Animation {
         static final double SECONDS = 1.5;
+        /** How long a collapse alone holds the playback: its pieces fall on and settle after it (GpuCollapse). */
+        static final double COLLAPSE_SECONDS = 1;
 
+        /** An elevator's hex. */
         record Change(Coords coords, Tile before, Tile after) { }
+
+        /**
+         * A building, fuel tank or bridge span coming down at {@code coords}, as its tile stood {@code before}: from
+         * the strongest hit on it, of {@code strength} 0 to 1 coming {@code from} where it was fired (null, 0: its own
+         * weight brings it down), with the units that stood on it as {@code loads}.
+         */
+        record Collapse(Coords coords, Tile before, float strength, Waypoint from, List<Waypoint> loads) {
+            Collapse {
+                loads = List.copyOf(loads);
+            }
+        }
+
+        /** The strongest hit on a structure this round, which its collapse falls away from. */
+        record Hit(float strength, Waypoint from) { }
 
         TileTransition {
             changes = List.copyOf(changes);
+            collapses = List.copyOf(collapses);
+        }
+
+        TileTransition(int boardId, List<Change> changes) {
+            this(boardId, changes, List.of());
         }
 
         @Override
         public int entityId() { return -1; }
 
+        /** Playback seconds it holds the queue. */
+        double seconds() { return changes.isEmpty() ? COLLAPSE_SECONDS : SECONDS; }
+
         /** The elevators the server moved between two scenes of one board; null when none moved. */
         static TileTransition of(BoardScene before, BoardScene after) {
+            return of(before, after, null);
+        }
+
+        /**
+         * The elevators the server moved and, unless {@code hits} is null, the structures it brought down between two
+         * scenes of one board, each with the strongest of {@code hits} on its hex; null when nothing moved or fell.
+         */
+        static TileTransition of(BoardScene before, BoardScene after, java.util.function.Function<Coords, Hit> hits) {
             if (before.tiles() == after.tiles() || before.width() != after.width() || before.height() != after.height()) {
                 return null;
             }
             List<Change> changes = new java.util.ArrayList<>();
+            List<Collapse> collapses = new java.util.ArrayList<>();
             for (Tile tile : after.tiles()) {
                 Tile old = before.tile(tile.coords());
                 if (old != null && old.elevation() != tile.elevation() && BoardFeatures.shaft(old) && BoardFeatures.shaft(tile)) {
                     changes.add(new Change(tile.coords(), old, tile));
+                } else if (hits != null && old != null && structure(old) && !structure(tile)) {
+                    Hit hit = hits.apply(tile.coords());
+                    // Who stood on it: on its roof, an upper floor or its deck, above the hex's ground.
+                    List<Waypoint> loads = before.units().stream().filter(unit -> !unit.sensorContact()
+                          && unit.location().coords().equals(tile.coords()) && unit.location().elevation() > old.elevation())
+                          .map(Unit::location).toList();
+                    collapses.add(new Collapse(tile.coords(), old, hit == null ? 0 : hit.strength(),
+                          hit == null ? null : hit.from(), loads));
                 }
             }
-            return changes.isEmpty() ? null : new TileTransition(after.boardId(), changes);
+            return changes.isEmpty() && collapses.isEmpty() ? null : new TileTransition(after.boardId(), changes, collapses);
+        }
+
+        /** Whether the tile holds what can come down: a building, a fuel tank or a bridge span. */
+        static boolean structure(Tile tile) {
+            return tile.cover().structure() > 0 && tile.cover().structure() != Cover.INDUSTRIAL
+                  || tile.features().stream().anyMatch(feature -> "bridge".equals(feature.asset()));
         }
 
         /** Whether {@code coords} rises or sinks in this change. */
         boolean moves(Coords coords) {
             return changes.stream().anyMatch(change -> change.coords().equals(coords));
+        }
+
+        /** Whether a structure comes down at {@code coords} in this change. */
+        boolean collapses(Coords coords) {
+            return collapses.stream().anyMatch(collapse -> collapse.coords().equals(coords));
         }
     }
 

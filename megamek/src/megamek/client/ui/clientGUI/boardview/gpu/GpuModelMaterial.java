@@ -114,6 +114,15 @@ final class GpuModelMaterial extends Attribute {
               premultiplied, boardUV, 2);
     }
 
+    /**
+     * This surface on its mesh's own UVs ({@link #boardUV} 0): for pieces broken from it that move, whose vertices carry
+     * the board UVs it was drawn with (MeepleShatter).
+     */
+    GpuModelMaterial ownUVs() {
+        return new GpuModelMaterial(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, occluder,
+              premultiplied, 0, fade);
+    }
+
     static void register(DefaultShader shader) {
         // Only ruby programs have these uniforms (modelRubyFlag), and only ruby materials draw with them.
         shader.register("u_modelRuby", new BaseShader.LocalSetter() {

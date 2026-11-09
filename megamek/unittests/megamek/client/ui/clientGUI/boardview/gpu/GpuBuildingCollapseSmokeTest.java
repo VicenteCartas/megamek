@@ -1,0 +1,217 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
+
+import java.io.File;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+import javax.swing.SwingUtilities;
+
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Graphics;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
+import megamek.client.ui.boardeditor.BoardEditorSession;
+import megamek.client.ui.boardeditor.BoardEditorSession.Action;
+import megamek.client.ui.boardeditor.BoardEditorSession.Command;
+import megamek.common.board.BoardFile;
+import megamek.common.board.Coords;
+import megamek.common.enums.GamePhase;
+import megamek.common.units.Terrains;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+
+/**
+ * Structures coming down as a game brings them down (Board.collapseBuilding, then the source's capture, the playback's
+ * collapse and the terrain's swap): a medium, a heavy, a light kit building, a fuel tank, a river bridge's span and an
+ * authored building in both its hexes each break into pieces where they stood and drop; the heavy one, hit by an AC/20
+ * from the west, falls away east. Frames go to build/gpu-board-review/building-collapse.
+ */
+@Tag("on-demand")
+class GpuBuildingCollapseSmokeTest {
+    private static final float FRAME = 1 / 60f;
+    /** Frames after the swap the review captures: about .3 to 3 real seconds at 1x. */
+    private static final int[] CAPTURES = { 0, 18, 36, 54, 78, 108, 150, 200 };
+
+    /** A structure brought down at {@code at} and, in the same capture, at {@code more}. */
+    private record Scenario(String name, Coords at, boolean ac20, Coords... more) { }
+
+    private static final List<Scenario> SCENARIOS = List.of(
+          new Scenario("medium", new Coords(2, 2), false),
+          new Scenario("heavy-ac20", new Coords(11, 3), true),
+          new Scenario("light", new Coords(11, 12), false),
+          new Scenario("fuel-tank", new Coords(3, 12), false),
+          new Scenario("bridge", new Coords(6, 8), false),
+          new Scenario("authored", new Coords(10, 8), false, new Coords(10, 7)));
+    /** The authored building, placed on level grass at the last scenario's hex, standing in its two hexes. */
+    private static final String AUTHORED = "buildings/authored/classic-church";
+
+    @Test
+    void structuresBreakWhereTheyStoodAndComeDown() throws Exception {
+        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "building-collapse");
+        Files.createDirectories(output.toPath());
+        var board = board(output);
+        var failure = new AtomicReference<Throwable>();
+        List<String> report = new ArrayList<>();
+        try (var fixture = GpuBoardFixture.create(board)) {
+            SwingUtilities.invokeAndWait(() -> {
+                // A collapse at the end of the firing phase: the movement phase holds one back for its mover's path.
+                fixture.game.setPhase(GamePhase.FIRING);
+                fixture.entity.setPosition(new Coords(8, 15));
+                fixture.source.refresh();
+            });
+            var configuration = GpuBoardWindow.configuration(false);
+            configuration.setWindowedMode(1280, 800);
+            new Lwjgl3Application(new GpuBattleView(fixture.source) {
+                private final long deadline = System.nanoTime() + 300_000_000_000L;
+                private Graphics fixedGraphics;
+                private int scenario, stage, frames, swapFrame = -1;
+                private Vector3 standing;
+
+                @Override
+                public void create() {
+                    fixedGraphics = spy(Gdx.graphics);
+                    doReturn(FRAME).when(fixedGraphics).getDeltaTime();
+                    Gdx.graphics = fixedGraphics;
+                    super.create();
+                    boardCamera.setIsometric(true);
+                }
+
+                @Override
+                public void render() {
+                    try {
+                        Gdx.graphics = fixedGraphics;
+                        super.render();
+                        assertTrue(System.nanoTime() < deadline, "The collapses must play out");
+                        if (GpuBoardTestUi.loading(this)) { return; }
+                        if (scenario == SCENARIOS.size()) {
+                            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                            Gdx.app.exit();
+                            return;
+                        }
+                        step(SCENARIOS.get(scenario));
+                    } catch (Throwable error) {
+                        failure.set(error);
+                        Gdx.app.exit();
+                    }
+                }
+
+                private void step(Scenario current) {
+                    var terrain = (GpuTerrain) field(this, "terrain");
+                    float level = fixture.game.getBoard().getHex(current.at()).getLevel();
+                    frames++;
+                    if (stage == 0) {
+                        boardCamera.center(BoardGeometry.center(current.at(), level));
+                        // Zooming multiplies: once, so every structure is seen alike.
+                        if (scenario == 0) { boardCamera.zoom(.3f); }
+                        frames = 0;
+                        stage = 1;
+                    } else if (stage == 1 && frames == 20) {
+                        capture(output, current.name() + "-0-before");
+                        SwingUtilities.invokeLater(() -> {
+                            if (current.ac20()) {
+                                @SuppressWarnings("unchecked")
+                                var hits = (Map<Coords, BoardScene.TileTransition.Hit>) field(fixture.source, "structureHits");
+                                hits.put(current.at(), new BoardScene.TileTransition.Hit(1,
+                                      new BoardScene.Waypoint(new Coords(current.at().getX() - 6, current.at().getY()), level, 0)));
+                            }
+                            fixture.game.getBoard().collapseBuilding(current.at());
+                            for (Coords also : current.more()) { fixture.game.getBoard().collapseBuilding(also); }
+                            fixture.source.refresh();
+                        });
+                        frames = 0;
+                        stage = 2;
+                    } else if (stage == 2) {
+                        var falling = terrain.collapses().stream().filter(collapse -> collapse.instance() != null).findFirst();
+                        if (falling.isEmpty()) {
+                            assertTrue(frames < 600, current.name() + " gives way to its pieces within ten seconds");
+                            return;
+                        }
+                        swapFrame = frames;
+                        standing = bounds(falling.get()).getCenter(new Vector3());
+                        stage = 3;
+                    }
+                    if (stage == 3) {
+                        int since = frames - swapFrame;
+                        for (int index = 0; index < CAPTURES.length; index++) {
+                            if (since == CAPTURES[index]) { capture(output, current.name() + "-" + (index + 1) + "-" + since); }
+                        }
+                        if (since == CAPTURES[CAPTURES.length - 1]) {
+                            var falling = terrain.collapses().stream().filter(collapse -> collapse.instance() != null).findFirst();
+                            assertTrue(falling.isPresent(), current.name() + "'s pieces still lie there " + since + " frames on");
+                            var box = bounds(falling.get());
+                            var drift = box.getCenter(new Vector3()).sub(standing);
+                            report.add(current.name() + ": pieces' middle moved " + drift + ", top now " + box.max.z);
+                            assertTrue(drift.z < 0, current.name() + " came down: " + drift);
+                            if (current.ac20()) { assertTrue(drift.x > 5, "The AC/20 from the west throws it east: " + drift); }
+                            stage = 4;
+                        }
+                    } else if (stage == 4) {
+                        if (!terrain.collapses().isEmpty()) {
+                            assertTrue(frames - swapFrame < 1800, current.name() + "'s pieces sink away");
+                            return;
+                        }
+                        capture(output, current.name() + "-9-after");
+                        assertTrue(!fixture.game.getBoard().getHex(current.at()).containsTerrain(Terrains.BUILDING));
+                        scenario++;
+                        stage = 0;
+                    }
+                }
+            }, configuration);
+        }
+        report.forEach(System.out::println);
+        if (failure.get() != null) { throw new AssertionError("Building collapse review failed", failure.get()); }
+    }
+
+    private static BoundingBox bounds(GpuCollapse collapse) {
+        return collapse.instance().calculateBoundingBox(new BoundingBox()).mul(collapse.instance().transform);
+    }
+
+    private static void capture(File output, String name) {
+        GpuBoardTestUi.capture(new File(output, name + ".png"));
+    }
+
+    /**
+     * The 16x17 Grassland with buildings and a fuel tank where its grass is level, besides its river bridge, and an
+     * authored building placed as the editor places one.
+     */
+    private static megamek.common.board.Board board(File output) throws Exception {
+        var source = new File("data/boards/AGoAC Maps/16x17 Grassland 2.board");
+        var lines = Files.readAllLines(source.toPath());
+        Map<String, String> structures = Map.of(
+              "0303", "bldg_elev:3;building:2:0;bldg_cf:40",
+              "1204", "bldg_elev:4;building:3:0;bldg_cf:90",
+              "1213", "bldg_elev:2;building:1:0;bldg_cf:15",
+              "0413", "fuel_tank_cf:45;fuel_tank_elev:2;fuel_tank_magn:80;fuel_tank:3:0");
+        List<String> edited = new ArrayList<>();
+        for (String line : lines) {
+            String hex = line.startsWith("hex ") ? line.substring(4, 8) : null;
+            if (hex != null && structures.containsKey(hex)) {
+                String[] parts = line.split(" ", 4);
+                edited.add("hex " + hex + " " + parts[2] + " \"" + structures.get(hex) + "\" \"grass\"");
+            } else {
+                edited.add(line);
+            }
+        }
+        var file = new File(output, "collapse-grassland.board");
+        Files.write(file.toPath(), edited);
+        var editor = new BoardEditorSession();
+        editor.open(file.toPath());
+        editor.command(new Command(Action.ASSET, AUTHORED), null);
+        editor.pointer(SCENARIOS.getLast().at(), 0, 0, false);
+        editor.finishStroke();
+        var saved = output.toPath().resolve("collapse-grassland.board2");
+        editor.save(saved);
+        return BoardFile.read(saved);
+    }
+}
