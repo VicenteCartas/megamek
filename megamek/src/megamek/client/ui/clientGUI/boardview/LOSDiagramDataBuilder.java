@@ -33,8 +33,10 @@
 package megamek.client.ui.clientGUI.boardview;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import megamek.client.ui.clientGUI.boardview.LOSDiagramData.HexRow;
@@ -108,25 +110,28 @@ final class LOSDiagramDataBuilder {
         Coords attackPos = attackInfo.attackPos;
         Coords targetPos = attackInfo.targetPos;
 
-        // Get the non-split path to identify which hexes are "normal"
+        // Get the default path to use when the LOS calculation exits before choosing a split side.
         List<Coords> normalPath = Coords.intervening(attackPos, targetPos);
         Set<Coords> normalPathSet = new HashSet<>(normalPath);
 
-        // Get the split-aware path to detect hex-edge LOS
+        // Get the split-aware path; each split pair must contribute exactly one diagram column.
         List<Coords> splitPath = Coords.intervening(attackPos, targetPos, true);
+        Set<Coords> selectedSplitHexSet = new HashSet<>(losEffects.getSelectedSplitHexes());
 
-        // Identify split hex pairs: hexes in the split path not in the normal path
-        Set<Coords> splitHexCoords = new HashSet<>();
-        for (Coords coord : splitPath) {
-            if (!normalPathSet.contains(coord)) {
-                splitHexCoords.add(coord);
-            }
+        List<Coords> pathCoords;
+        Map<Coords, Coords> splitAlternates;
+        if (attackPos.degree(targetPos) % 60 == 30) {
+            pathCoords = new ArrayList<>();
+            splitAlternates = new HashMap<>();
+            appendSelectedSplitPath(splitPath, normalPathSet, selectedSplitHexSet, pathCoords, splitAlternates);
+        } else {
+            pathCoords = normalPath;
+            splitAlternates = Map.of();
         }
 
-        // Build hex row data for each hex in the normal path
+        // Build one row per hex on the selected LOS path.
         List<HexRow> hexPath = new ArrayList<>();
-        for (int i = 0; i < normalPath.size(); i++) {
-            Coords coords = normalPath.get(i);
+        for (Coords coords : pathCoords) {
             Hex hex = board.getHex(coords);
             if (hex == null) {
                 continue;
@@ -150,20 +155,7 @@ final class LOSDiagramDataBuilder {
             // use the BMM adjacency rule (step function); Diagrammed uses a smooth linear interpolation.
             double losLineElevation = calculateLosLineElevation(
                   attackInfo, coords, attackPos, targetPos, losRuleMode);
-
-            // Check if this hex has a split alternate
-            boolean isSplitHex = false;
-            Coords splitAlternate = null;
-            if (i > 0 && i < normalPath.size() - 1) {
-                // Look for a split hex that would pair with this position
-                for (Coords splitCoord : splitHexCoords) {
-                    if (isAdjacentAlongPath(coords, splitCoord, attackPos, targetPos)) {
-                        isSplitHex = true;
-                        splitAlternate = splitCoord;
-                        break;
-                    }
-                }
-            }
+            Coords splitAlternate = splitAlternates.get(coords);
 
             hexPath.add(new HexRow(
                   coords,
@@ -179,8 +171,9 @@ final class LOSDiagramDataBuilder {
                   hasFields,
                   hasFire,
                   eruptingGeyser,
-                  isSplitHex,
+                  splitAlternates.containsKey(coords),
                   splitAlternate,
+                  true,
                   coords.equals(losEffects.getBlockingHex())
                         || splitAlternate != null && splitAlternate.equals(losEffects.getBlockingHex()),
                   losLineElevation
@@ -280,22 +273,35 @@ final class LOSDiagramDataBuilder {
     }
 
     /**
-     * Checks if two hexes are adjacent and both lie along the LOS path direction. Used to identify split hex pairs.
+     * Builds the selected split-aware LOS path, omitting the unselected hex from each split pair.
      */
-    private static boolean isAdjacentAlongPath(Coords hexOnPath, Coords candidate,
-          Coords attackPos, Coords targetPos) {
-        if (hexOnPath.distance(candidate) != 1) {
-            return false;
+    private static void appendSelectedSplitPath(List<Coords> splitPath, Set<Coords> normalPathSet,
+          Set<Coords> selectedSplitHexSet, List<Coords> pathCoords, Map<Coords, Coords> splitAlternates) {
+        if (splitPath.isEmpty()) {
+            return;
         }
 
-        // The candidate should be at roughly the same distance along the path
-        int hexDistFromAttacker = attackPos.distance(hexOnPath);
-        int candidateDistFromAttacker = attackPos.distance(candidate);
-        int hexDistFromTarget = targetPos.distance(hexOnPath);
-        int candidateDistFromTarget = targetPos.distance(candidate);
+        pathCoords.add(splitPath.getFirst());
+        for (int i = 1; i < splitPath.size() - 2; i += 3) {
+            Coords left = splitPath.get(i);
+            Coords right = splitPath.get(i + 1);
+            Coords selected = selectedSplitHexSet.contains(left) ? left
+                  : selectedSplitHexSet.contains(right) ? right
+                  : normalPathSet.contains(left) ? left : right;
+            Coords alternate = selected.equals(left) ? right : left;
+            pathCoords.add(selected);
+            splitAlternates.put(selected, alternate);
 
-        return Math.abs(hexDistFromAttacker - candidateDistFromAttacker) <= 1
-              && Math.abs(hexDistFromTarget - candidateDistFromTarget) <= 1;
+            int nextPathIndex = i + 2;
+            if (nextPathIndex < splitPath.size() - 1) {
+                pathCoords.add(splitPath.get(nextPathIndex));
+            }
+        }
+
+        Coords target = splitPath.getLast();
+        if (!pathCoords.getLast().equals(target)) {
+            pathCoords.add(target);
+        }
     }
 
     private static int getBuildingHeight(Hex hex) {

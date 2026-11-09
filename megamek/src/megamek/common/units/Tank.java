@@ -1409,7 +1409,7 @@ public class Tank extends Entity implements Fortifiable, RubbleClearer {
                     } else if (bRear) {
                         rv = new HitData(LOC_LEFT, false, HitData.EFFECT_VEHICLE_MOVE_DAMAGED);
                     } else {
-                        rv = new HitData(LOC_LEFT, false, HitData.EFFECT_VEHICLE_MOVE_DAMAGED);
+                        rv = new HitData(LOC_RIGHT, false, HitData.EFFECT_VEHICLE_MOVE_DAMAGED);
                     }
                     rv.setMotiveMod(motiveMod);
                     break;
