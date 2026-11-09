@@ -254,7 +254,7 @@ final class BayKit {
                   : new KitOutline.Wall[] { partner(spec, piece.direction(), wall, true, fitting == null),
                         partner(spec, piece.direction(), wall, false, fitting == null) };
             double[] goesOn = facade(result, run, wall, keeps, modelled, lod, top ? ROOF_INSET : 0, ground, outlineScale,
-                  facet(spec, wall), joints, cap, chamfer, cut, sides, partners, spec.varyBays());
+                  facet(spec, wall), joints, cap, chamfer, cut, partners, spec.varyBays());
             if (ground && spec.sidewalk() != null) { sidewalk(result, spec.sidewalk(), wall, keeps, goesOn[0], goesOn[1]); }
         }
         // Closed modules: a module parted from the next at its joints has its own side along each, behind the grooves,
@@ -336,14 +336,14 @@ final class BayKit {
      * ending on the joint at a slant goes on instead, cut on the joint's line) and a seamed roof's edge mitred to the
      * joint; where a joint continues it, it goes on {@code chamfer}, unmitred. At
      * the piece's {@code cut} or an open end (the next hex's wall goes on) its end bays go on a hair under the next
-     * piece's, the bays beyond a cut stopping exactly on it; a mitred corner is closed ({@link #closeMitre}), a notch's by
-     * the run's first bay laid on past it on both walls.
+     * piece's, the bays beyond a cut stopping exactly on it; a notch's corner is closed by the run's first bay laid on
+     * past it on both walls.
      * Returns how far it goes on before and after the wall.
      */
     private static double[] facade(GeneratedMesh result, Run run, KitOutline.Wall wall, List<GeneratedMesh.Keep> wallKeeps,
           List<ModelData> modelled, int lod, double inset, boolean ground, double outlineScale, boolean facet,
-          List<KitOutline.Wall> joints, boolean cap, double chamfer, List<GeneratedMesh.Keep> cut, List<KitOutline.Wall> walls,
-          KitOutline.Wall[] partners, boolean vary) {
+          List<KitOutline.Wall> joints, boolean cap, double chamfer, List<GeneratedMesh.Keep> cut, KitOutline.Wall[] partners,
+          boolean vary) {
         double length = wall.length();
         double[] p = wall.p(), u = KitOutline.direction(wall);
         List<GeneratedMesh.Keep> keeps = new ArrayList<>(wallKeeps);
@@ -402,48 +402,7 @@ final class BayKit {
         keeps.add((x, y) -> (x - p[0]) * u[0] + (y - p[1]) * u[1] + keepBefore);
         keeps.add((x, y) -> length + keepAfter - (x - p[0]) * u[0] - (y - p[1]) * u[1]);
         result.add(laid.clipped(keeps));
-        for (int k = 0; k < 2; k++) {
-            boolean start = k == 0;
-            KitOutline.End end = start ? wall.start() : wall.end();
-            double[] point = start ? p : wall.q();
-            if (end == KitOutline.End.CORNER) {
-                walls.stream().filter(other -> other != wall && KitOutline.close(start ? other.q() : other.p(), point)).findFirst()
-                      .ifPresent(next -> closeMitre(result, laid, wall, start, normal(next.p(), next.q())));
-            }
-        }
         return new double[] { before, after };
-    }
-
-    /**
-     * A mitred corner cuts the bays' recesses on a slant; where the next wall's bays leave the slant open, the inside
-     * showed through. A dark face on the mitre, from the wall's line to its bays' deepest recess, closes this wall's cut.
-     */
-    private static void closeMitre(GeneratedMesh result, GeneratedMesh laid, KitOutline.Wall wall, boolean start, double[] m) {
-        double[] c = start ? wall.p() : wall.q(), inside = start ? wall.q() : wall.p(), n = normal(wall.p(), wall.q());
-        double[] b = { n[0] + m[0], n[1] + m[1] };
-        double along = Math.hypot(b[0], b[1]);
-        if (along < 1e-6) { return; }
-        b[0] /= along; b[1] /= along;
-        double deepest = 0, low = Double.MAX_VALUE, high = -Double.MAX_VALUE;
-        for (FloatArray part : laid.parts.values()) {
-            for (int at = 0; at < part.size; at += RigidGlb.STRIDE) {
-                deepest = Math.max(deepest, -((part.items[at] - c[0]) * n[0] + (part.items[at + 1] - c[1]) * n[1]));
-                low = Math.min(low, part.items[at + 2]);
-                high = Math.max(high, part.items[at + 2]);
-            }
-        }
-        if (deepest <= 0 || low >= high) { return; }
-        // The mitre runs from the corner along the walls' mean normal; a point on it is `s` in from this wall's line.
-        double reach = deepest / (b[0] * n[0] + b[1] * n[1]);
-        double[] outer = c, inner = { c[0] - b[0] * reach, c[1] - b[1] * reach };
-        // Facing out of this wall's side of the mitre, towards the next wall's.
-        double[] face = { b[1], -b[0] };
-        if (face[0] * (inside[0] - c[0]) + face[1] * (inside[1] - c[1]) > 0) { face[0] = -face[0]; face[1] = -face[1]; }
-        double[] from = outer, to = inner;
-        double[] right = normal(from, to);
-        if (right[0] * face[0] + right[1] * face[1] < 0) { from = inner; to = outer; }
-        result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(from, low, face), darkVertex(to, low, face), darkVertex(to, high, face),
-              darkVertex(from, high, face));
     }
 
     /** How far in from a hex corner a closed module's side runs: what shows of it from outside. Inside, the building runs on. */
