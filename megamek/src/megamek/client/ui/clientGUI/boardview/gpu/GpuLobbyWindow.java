@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.Graphics2D;
 import java.awt.Image;
-import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -160,30 +159,15 @@ public final class GpuLobbyWindow {
     private static ClientGUI previewedFromMapSetup;
 
     private final ClientGUI gui;
-    private final LobbyDialogs swingDialogs = new LobbyDialogs(new LobbyDialogs.Host() {
+    private final GpuSceneDialogs swingDialogs = new GpuSceneDialogs(new GpuSceneDialogs.Host() {
         @Override
         public JFrame frame() {
             return gui.getFrame();
         }
 
         @Override
-        public GpuNativeDialogOwner nativeOwner() {
-            return nativeOwner;
-        }
-
-        @Override
-        public Rectangle bounds() {
-            return GpuHost.swingClientBounds();
-        }
-
-        @Override
         public void inputBlocked(boolean blocked) {
             setInputBlocked(blocked);
-        }
-
-        @Override
-        public void focus() {
-            GpuHost.focus();
         }
 
         @Override
@@ -307,7 +291,7 @@ public final class GpuLobbyWindow {
 
         @Override
         public void started(long windowHandle) {
-            nativeOwner = GpuNativeDialogOwner.forGlfwWindow(windowHandle);
+            swingDialogs.started(windowHandle);
             SwingUtilities.invokeLater(GpuLobbyWindow.this::presented);
         }
 
@@ -339,7 +323,6 @@ public final class GpuLobbyWindow {
     };
 
     private volatile boolean closing;
-    private volatile GpuNativeDialogOwner nativeOwner;
     /** The screen while its listener exists; written on the GPU thread. */
     private volatile GpuLobbyScreen screen;
     /** The newest snapshot, which a screen shows as it is created. */
@@ -1647,7 +1630,7 @@ public final class GpuLobbyWindow {
     private void chooseFileOrNone(SystemFileDialog.Request request, @Nullable String replaceKey,
           Consumer<File> chosen) {
         LOGGER.info("[LobbyFiles] The system file dialog opens: {}", request.title());
-        SystemFileDialog.show(request, () -> nativeOwner, swingDialogs::parent, this::setInputBlocked, choice -> {
+        SystemFileDialog.show(request, swingDialogs::nativeOwner, swingDialogs::parent, this::setInputBlocked, choice -> {
             LOGGER.info("[LobbyFiles] The system file dialog answered: {}", choice == null ? "cancel" : choice.file());
             if (closing || choice == null) {
                 chosen.accept(null);
@@ -1731,7 +1714,7 @@ public final class GpuLobbyWindow {
         SystemFileDialog.Request request = new SystemFileDialog.Request(RandomMapForm.settingsFolder(), title,
               new FileNameExtensionFilter(Messages.getString("ChatLounge.map.SetupXMLfiles"), "xml"), save);
         LOGGER.info("[LobbyFiles] The system file dialog opens: {}", title);
-        SystemFileDialog.show(request, () -> nativeOwner, swingDialogs::parent, this::setInputBlocked, choice -> {
+        SystemFileDialog.show(request, swingDialogs::nativeOwner, swingDialogs::parent, this::setInputBlocked, choice -> {
             try {
                 if (!closing && choice != null) {
                     chosen.accept(choice.file());
@@ -2513,10 +2496,7 @@ public final class GpuLobbyWindow {
     /** GPU thread, as the screen's listener is disposed: returns every adopted dialog to its Swing owner. */
     void disposing() {
         screen = null;
-        GpuNativeDialogOwner owner = nativeOwner;
-        if (owner != null) {
-            owner.releaseAll();
-        }
+        swingDialogs.released();
     }
 
     // ---- The scene's life ----

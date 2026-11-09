@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
@@ -26,12 +27,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The native lobby's one path for Swing dialogs ({@link LobbyDialogs}): which dialogs it takes, centring them over the
- * window, keeping them in front, blocking the lobby's input while a modal one is open and handing the focus back. The
- * window isn't needed: the dialogs get the events the toolkit would send as they show and close, and without a native
- * owner they take the floating path.
+ * The one path for a scene's Swing dialogs ({@link GpuSceneDialogs}), as the native lobby uses it: which dialogs it
+ * takes, centring them over the window, keeping them in front, blocking the scene's input while a modal one is open and
+ * handing the focus back. The window isn't needed: the dialogs get the events the toolkit would send as they show and
+ * close, and without a native owner they take the floating path.
  */
-class LobbyDialogsTest {
+class GpuSceneDialogsTest {
     private static final Rectangle WINDOW = new Rectangle(100, 200, 800, 600);
 
     private final List<Boolean> blocks = new ArrayList<>();
@@ -40,7 +41,7 @@ class LobbyDialogsTest {
     private JFrame other;
     private int focused;
     private boolean closing;
-    private LobbyDialogs dialogs;
+    private GpuSceneDialogs dialogs;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -48,15 +49,10 @@ class LobbyDialogsTest {
         SwingUtilities.invokeAndWait(() -> {
             frame = new JFrame("client");
             other = new JFrame("other");
-            dialogs = new LobbyDialogs(new LobbyDialogs.Host() {
+            dialogs = new GpuSceneDialogs(new GpuSceneDialogs.Host() {
                 @Override
                 public JFrame frame() {
                     return frame;
-                }
-
-                @Override
-                public GpuNativeDialogOwner nativeOwner() {
-                    return null;
                 }
 
                 @Override
@@ -94,8 +90,16 @@ class LobbyDialogsTest {
     }
 
     @Test
-    void theLobbyOpensItsDialogsOnTheClientFrame() throws Exception {
+    void theSceneOpensItsDialogsOnItsFrame() throws Exception {
         onEdt(() -> assertSame(frame, dialogs.parent()));
+    }
+
+    @Test
+    void withoutAStartedWindowThereIsNoNativeOwnerToRelease() throws Exception {
+        onEdt(() -> {
+            assertNull(dialogs.nativeOwner());
+            dialogs.released();
+        });
     }
 
     @Test
@@ -103,7 +107,7 @@ class LobbyDialogsTest {
         onEdt(() -> {
             JDialog dialog = dialog(frame, true);
             shown(dialog);
-            assertEquals(LobbyDialogs.centred(WINDOW, new Dimension(200, 100)), dialog.getLocation());
+            assertEquals(GpuSceneDialogs.centred(WINDOW, new Dimension(200, 100)), dialog.getLocation());
             assertEquals(new Point(400, 450), dialog.getLocation());
             assertTrue(dialog.isAlwaysOnTop());
             assertTrue(dialogs.blocked());

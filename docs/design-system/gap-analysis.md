@@ -622,18 +622,18 @@ work for Swing, and item 11 is under investigation.
      - L8 ~~Dialogs~~. Game options, player settings, bot setup, camo, unit customization, C3, map setup and the load
        and save choosers stay Swing, natively owned by the window so they stay in front of it, as the board's are.
        Those the lobby uses most move to libGDX one at a time afterwards. Every dialog the lobby opens goes through
-       one path, `LobbyDialogs`: players (player settings, camo, bot setup, the bot-connect alert, the bot window),
+       one path, `GpuSceneDialogs`: players (player settings, camo, bot setup, the bot-connect alert, the bot window),
        forces (random army, skills, random names, C3 network, load, save and print list with the MUL check, the
        unit menu's customize, C3, loadout, readout, BV and cost), battlefield (planetary conditions, game options,
        victory conditions, random map, map setup with its preview and size questions, load and save map setup,
        auto-resolve) and the prompts (`SwingLobbyPrompts`: errors, confirmations, the ready
        warning, force names, squadrons, battlefield support, unit editor, training, SBF and AS stats). Each is owned
-       by the hidden client frame or a dialog of it; `LobbyDialogs` adopts each one as it shows (also the modal
+       by the hidden client frame or a dialog of it; `GpuSceneDialogs` adopts each one as it shows (also the modal
        questions MekHQ asks with no parent, which Swing gives its shared hidden frame), centres it on the window's
        client bounds rather than the hidden frame, owns it natively (or keeps it on top where it can't), blocks the
        lobby's input while a modal one is open (the floating path did not before), and gives the window the focus
        back when the last one closes if a dialog had it. `ClientGUI.doAlertDialog` sizes its text from the window,
-       not the hidden frame. `LobbyDialogsTest` covers the path, `LobbyDialogEntryPointsTest` that no lobby file
+       not the hidden frame. `GpuSceneDialogsTest` covers the path, `LobbyDialogEntryPointsTest` that no lobby file
        opens a dialog any other way. Probe `lobby+dialog=name` opens one (`gameoptions`, `conditions`, `victory`,
        `randommap`, `mapsetup`, `loadmapsetup`, `camo`, `playersettings`, `botconfig`, `addbot`, `customize`, `c3`,
        `randomarmy`, `skills`, `names`, `loadlist`, `alert`) and photographs the window and its dialogs from the
@@ -648,7 +648,7 @@ work for Swing, and item 11 is under investigation.
        force menus are built from the model in `LobbyUnitMenu`, with `LobbyMekPopup`'s items, submenus, checks and
        permissions (a parity test compared the two before the deletion). The sort orders are in `LobbyUnitOrder`,
        and the clean-up of quirks, implants and ammunition when options change is in `LobbyUnitCleanup`. Map setup
-       is `MapSetupDialog`, a standalone Swing dialog opened through `LobbyDialogs` with the old map tab's board
+       is `MapSetupDialog`, a standalone Swing dialog opened through `GpuSceneDialogs` with the old map tab's board
        size, map choice, surprise and random boards, generator, previews, load and save and the non-tileable nag.
        Ready (with its GIF question and lobby save), auto-resolve, the battlefield's commands and the menu bar's
        burst-fire and hot-load items are in `SwingLobbyServices`. The commands the unit menus run (customize, C3,
@@ -756,7 +756,7 @@ work for Swing, and item 11 is under investigation.
        clicks the fold through the Stage, then the player and both bots chat: 2 unread, the own line not counted;
        photographed at 2560x1400 and narrow. Not checked live: the kept filters across a real restart (unit tested
        only).
-     - L13 ~~Lobby dialogs to libGDX~~, one at a time (step 6's `LobbyDialogs` list, most used first).
+     - L13 ~~Lobby dialogs to libGDX~~, one at a time (step 6's `GpuSceneDialogs` list, most used first).
        - L13a ~~Camo picker and player settings~~. Kit: `UiDialog`, the token dialog surface every later port
          reuses: a `UiModal` layer on `surface.scrim` (no dismissal on the scrim: a form wants an answer) holding
          the `UiKit.dialog` card (title, close button, a vertical-only scrolling body, a footer of leading tools and
@@ -939,7 +939,7 @@ work for Swing, and item 11 is under investigation.
        it. The in-game Game Master controls stay as they are for now.
      - ~~L14 Settings check~~. What the Swing lobby read, and where it stands now:
        - Client Settings opens from the lobby: a gear in the top bar, before Leave, and the client settings key
-         (Alt+C), as from the old lobby's menu. It opens over the lobby through `LobbyDialogs`, centred and modal,
+         (Alt+C), as from the old lobby's menu. It opens over the lobby through `GpuSceneDialogs`, centred and modal,
          and the lobby takes no input until it closes.
        - The settings take effect at once, as the Swing lobby's listeners did. The auto resolve panel refreshes the
          lobby; the camo overlay redraws the unit sprites; the GUI scale rescales the stage.
@@ -1061,7 +1061,7 @@ work for Swing, and item 11 is under investigation.
          libGDX lobby's asks are native for the error and ready-blocked messages, confirmations, force and squadron
          names (the force name with suggestion chips), a Battlefield Support Asset's crew and damage, and the train
          order.
-       - Still Swing, through `LobbyDialogs`: Add Unit (the Requisition supersedes it), the unit damage editor
+       - Still Swing, through `GpuSceneDialogs`: Add Unit (the Requisition supersedes it), the unit damage editor
          (`UnitEditorDialog`) and the GIF recording consent. The SBF and Alpha Strike stats, the unit's sprite and
          camo picker, the bot facing and role and auto-resolve are native now, and the readout has its Alpha Strike
          and Factions pages and stays live (see below).
