@@ -568,7 +568,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         for (int i = 0; i < parts.size; i++) {
             Renderable source = parts.get(i);
             int owner = owners == null ? 0 : owners.get(i);
-            Batch[] passes = batches(source);
+            // Looked up once, here: the weak lookups hold only the parts gathered one by one every pass (#add).
+            Batch[] passes = part(source);
             FloatArray instances = data.get(passes);
             if (instances == null) {
                 data.put(passes, instances = new FloatArray());
@@ -595,11 +596,12 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         }
     }
 
-    private Batch[] batches(Renderable source) {
-        return sharedLookups.computeIfAbsent(source, value -> sharedParts.computeIfAbsent(
-              new Part(value.meshPart.mesh, value.meshPart.offset, value.meshPart.size, value.material,
-                    mirrored(value.worldTransform)),
-              ignored -> new Batch[Pass.values().length]));
+    private Batch[] batches(Renderable source) { return sharedLookups.computeIfAbsent(source, this::part); }
+
+    /** A part's batches by its key: its mesh range, its material and whether it is a mirror image. */
+    private Batch[] part(Renderable value) {
+        return sharedParts.computeIfAbsent(new Part(value.meshPart.mesh, value.meshPart.offset, value.meshPart.size,
+              value.material, mirrored(value.worldTransform)), ignored -> new Batch[Pass.values().length]);
     }
 
     /** This pass's batch among a part's. */
@@ -706,14 +708,21 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
 
     /** Evict buffers for retired building interiors/modules at the scene commit boundary. */
     void retainParts(Set<Mesh> live) {
-        sharedLookups.clear();
+        Set<Batch[]> evicted = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<Batch> disposed = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
         sharedParts.entrySet().removeIf(entry -> {
             if (live.contains(entry.getKey().mesh())) { return false; }
             for (Batch batch : entry.getValue()) {
-                if (batch != null) { gathered.remove(batch); batch.dispose(); }
+                if (batch != null && disposed.add(batch)) { batch.dispose(); }
             }
+            evicted.add(entry.getValue());
             return true;
         });
+        if (evicted.isEmpty()) { return; }
+        // One search of the gathered batches for all of them, and only the evicted parts' lookups go: every other
+        // snapshot would pay its materials' hashes again next frame.
+        gathered.removeIf(disposed::contains);
+        sharedLookups.values().removeIf(evicted::contains);
     }
 
     /** Uploads what changed and supplies one renderable per part of every model this pass draws. */

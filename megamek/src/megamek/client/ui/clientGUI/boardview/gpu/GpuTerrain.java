@@ -1297,6 +1297,8 @@ final class GpuTerrain implements Disposable {
     private boolean vacuum;
     private float wetness;
     private float detailPixelsPerUnit = Float.NaN;
+    /** The mesh generation of the request that last joined a rebuild still preparing (update): joined once. */
+    private long joinedGeneration = -1;
     /** Small placed objects hide when zoomed out ({@link TreeLod#SMALL_OBJECTS}); only tests switch this off. */
     private boolean smallObjects = true;
     /** Derived per camera by updateDetail: this view skips small objects. Presentation only, never game state. */
@@ -2446,8 +2448,14 @@ final class GpuTerrain implements Disposable {
                     && scene.tiles().stream().anyMatch(GpuTerrain::hasLimb)) {
             // Coalesce continuous painting into one latest snapshot without starving the build already underway.
             // Board/geometry-setting and graphics changes still cancel work whose result no longer applies.
-            if (requested == null || !sameBoard(target, scene) || !sameSettings(targetSettings, settings)
+            // In play, on a board already shown, a change that follows another while its rebuild still prepares (a
+            // strike's scorch, a frame after its hexes) joins it: that rebuild, with no chunk built yet, starts over
+            // for both, once, instead of two rebuilds and two commits in a row.
+            boolean joins = !editable && coverScene != null && rebuild != null && rebuild.plan == null
+                  && rebuild.request.generation() == meshGeneration && meshGeneration != joinedGeneration;
+            if (requested == null || joins || !sameBoard(target, scene) || !sameSettings(targetSettings, settings)
                   || targetColumns != columns || targetTessellated != tessellation) { meshGeneration++; }
+            if (joins) { joinedGeneration = meshGeneration; }
             // These show the loading stage: their family programs build behind it. Edits keep the built ones.
             if (target == null || !sameBoard(target, scene) || !sameSettings(targetSettings, settings)
                   || targetColumns != columns || targetTessellated != tessellation) {
@@ -3627,39 +3635,30 @@ final class GpuTerrain implements Disposable {
                   chunks.stream().anyMatch(chunk -> chunk.wallBounds.isValid()));
         }
         hasCutaways = chunks.stream().anyMatch(chunk -> !chunk.cutaways.isEmpty());
-        Set<GpuBuilding.Assembly> liveBuildings = new HashSet<>();
+        // By identity, each assembly once: an assembly's own hash reads its every placement, and a city's props name
+        // the same few hundred assemblies thousands of times.
+        Set<GpuBuilding.Assembly> liveBuildings = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
         // Generated models the installed chunks draw: industrial plants, and multi-hex building shares and their glass.
         Set<Model> liveIndustrial = new HashSet<>();
         Set<Model> liveRoutes = new HashSet<>();
-        for (Chunk chunk : chunks) {
+        Set<Mesh> sharedSources = new HashSet<>();
+        List<Chunk> kept = new ArrayList<>(chunks);
+        kept.addAll(detailCache.values());
+        for (Chunk chunk : kept) {
             for (Prop prop : chunk.props) {
-                if (isFlag(prop) || prop.decorationFeature != null && BoardRail.route(prop.decorationFeature)) { liveRoutes.add(prop.instance.model); }
+                if (isFlag(prop) || prop.decorationFeature != null && BoardRail.route(prop.decorationFeature)) {
+                    liveRoutes.add(prop.instance.model);
+                }
+                if (prop.building != null) { liveBuildings.add(prop.building); }
+                if (prop.industrial || prop.levels != null) { liveIndustrial.add(prop.instance.model); }
             }
-            for (Prop prop : chunk.props) { if (prop.building != null) { liveBuildings.add(prop.building); } }
-            for (Prop prop : chunk.props) { if (prop.industrial || prop.levels != null) { liveIndustrial.add(prop.instance.model); } }
             for (ModelInstance pane : chunk.glass) { liveIndustrial.add(pane.model); }
-        }
-        for (Chunk chunk : detailCache.values()) {
-            for (Prop prop : chunk.props) {
-                if (isFlag(prop) || prop.decorationFeature != null && BoardRail.route(prop.decorationFeature)) { liveRoutes.add(prop.instance.model); }
-            }
-            for (Prop prop : chunk.props) { if (prop.building != null) { liveBuildings.add(prop.building); } }
-            for (Prop prop : chunk.props) { if (prop.industrial || prop.levels != null) { liveIndustrial.add(prop.instance.model); } }
-            for (ModelInstance pane : chunk.glass) { liveIndustrial.add(pane.model); }
+            for (Renderable part : chunk.sharedShadows) { sharedSources.add(part.meshPart.mesh); }
+            for (Renderable part : chunk.sharedProps) { sharedSources.add(part.meshPart.mesh); }
+            for (Renderable part : chunk.decorationRenderables) { sharedSources.add(part.meshPart.mesh); }
         }
         // Falling pieces borrow their kits' meshes until they have sunk.
         liveBuildings.addAll(destruction.buildings());
-        Set<Mesh> sharedSources = new HashSet<>();
-        for (Chunk chunk : chunks) {
-            for (Renderable part : chunk.sharedShadows) { sharedSources.add(part.meshPart.mesh); }
-            for (Renderable part : chunk.sharedProps) { sharedSources.add(part.meshPart.mesh); }
-            for (Renderable part : chunk.decorationRenderables) { sharedSources.add(part.meshPart.mesh); }
-        }
-        for (Chunk chunk : detailCache.values()) {
-            for (Renderable part : chunk.sharedShadows) { sharedSources.add(part.meshPart.mesh); }
-            for (Renderable part : chunk.sharedProps) { sharedSources.add(part.meshPart.mesh); }
-            for (Renderable part : chunk.decorationRenderables) { sharedSources.add(part.meshPart.mesh); }
-        }
         trees.retainParts(sharedSources);
         shadowTrees.retainParts(sharedSources);
         assets.retain(this, liveBuildings, liveIndustrial, liveRoutes);
@@ -4933,6 +4932,11 @@ final class GpuTerrain implements Disposable {
             } else if ((object != null && !standTree || prop.translucent) && !BoardRail.route(feature)) {
                 List<Model> levels = assets.objectLevels(feature.asset());
                 if (levels.stream().distinct().count() > 1) { prop.levels = levels.stream().map(drawn).toList(); }
+            } else if (object == null && feature.kind() == BoardScene.FeatureKind.SCENERY) {
+                // Terrain-owned scenery drawn as its file's own near mesh (rubble: 5,000-7,000 triangles a pile,
+                // hundreds of piles after a strike) takes the file's simpler levels by the same rule.
+                List<Model> levels = assets.objectLevels(feature.asset());
+                if (levels.getFirst() == model && levels.stream().distinct().count() > 1) { prop.levels = levels; }
             }
             prop.receiver = authored != null && feature.kind() == BoardScene.FeatureKind.BUILDING ? "building" : BoardFeatures.receiver(feature);
             chunk.props.add(prop);
