@@ -1185,7 +1185,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return new Collapse(old.coords(), old, hit == null ? 0 : hit.strength(), hit == null ? null : hit.from(), loads);
         }
 
-        /** Whether the tile holds what can come down: a building, a fuel tank or a bridge span. */
+        /** Whether the tile holds what can come down: a building, a fuel tank or a bridge span, not its ruin. */
         static boolean structure(Tile tile) {
             return tile.cover().structure() > 0 && tile.cover().structure() != Cover.INDUSTRIAL
                   || tile.features().stream().anyMatch(feature -> "bridge".equals(feature.asset()) && !feature.ruined());
