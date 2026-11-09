@@ -17,8 +17,8 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * Every Swing dialog the native lobby opens goes through {@link LobbyDialogs}: the lobby's own on its
- * {@link LobbyDialogs#parent()}, the lobby services' on the same client frame, and nothing
+ * Every Swing dialog the native lobby opens goes through {@link GpuSceneDialogs}: the lobby's own on its
+ * {@link GpuSceneDialogs#parent()}, the lobby services' on the same client frame, and nothing
  * else in the lobby watches the toolkit or opens a dialog of its own. The dialogs the lobby draws itself (a libGDX
  * {@link megamek.client.ui.gdx.UiDialog}) all open through {@link LobbyNativeDialogs}.
  */
@@ -51,7 +51,7 @@ class LobbyDialogEntryPointsTest {
                 owners(name, source, DIALOG, 2, LOBBY_OWNERS, offenders);
                 owners(name, source, HELP, 1, LOBBY_OWNERS, offenders);
                 owners(name, source, OPTION_PANE, 1, List.of(), offenders);
-                if (!name.equals("LobbyDialogs.java") && source.contains("addAWTEventListener")) {
+                if (source.contains("addAWTEventListener")) {
                     offenders.add(name + ": watches the toolkit itself");
                 }
             }
@@ -110,7 +110,7 @@ class LobbyDialogEntryPointsTest {
     @Test
     void theLobbyWindowInstallsTheHelper() throws IOException {
         String window = Files.readString(GPU.resolve("GpuLobbyWindow.java"));
-        assertTrue(window.contains("new LobbyDialogs("));
+        assertTrue(window.contains("new GpuSceneDialogs("));
         assertTrue(window.contains("swingDialogs.install()"));
         assertTrue(window.contains("swingDialogs.uninstall()"));
         assertTrue(window.contains("swingDialogs.presented()"));
@@ -140,7 +140,7 @@ class LobbyDialogEntryPointsTest {
         while (matcher.find()) {
             String owner = matcher.group(group).trim();
             String made = matcher.group();
-            if (!allowed.contains(owner) && !made.startsWith("new LobbyDialogs(")
+            if (!allowed.contains(owner) && !made.startsWith("new GpuSceneDialogs(")
                   && NATIVE.stream().noneMatch(made::startsWith)) {
                 offenders.add(name + ": " + matcher.group().trim());
             }
