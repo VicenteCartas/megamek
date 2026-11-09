@@ -1340,7 +1340,7 @@ final class GpuArtilleryBlast {
                   BRIGHT_FIRE, Vector3.Zero);
         }
         if (!orbital) { mushroom(explosions, ground, radius * .42f, seconds * SECONDS / NUCLEAR_SECONDS, seed); }
-        shockRing(explosions, ground, radius, seconds, seed, 96);
+        shockRing(explosions, ground, radius, seconds, seed, 96, .5f);
         float ring = (seconds - .3f) / 2.6f;
         if (!orbital && ring > 0 && ring < 1) {
             point.set(ground).add(0, 0, radius * .3f);
@@ -1350,10 +1350,11 @@ final class GpuArtilleryBlast {
     }
 
     /**
-     * The shock front's dust, {@code puffs} around it: it slows as it spreads and thins toward the edge of the blast
-     * area (#shockReach), the ring the falls keep to (GpuTerrain#strike).
+     * The shock front's dust, {@code puffs} around it, {@code alpha} opaque as it leaves: it slows as it spreads and thins
+     * toward the edge of the blast area (#shockReach), the ring the falls keep to (GpuTerrain#strike).
      */
-    private void shockRing(GpuExplosionEffects explosions, Vector3 ground, float radius, float seconds, int seed, int puffs) {
+    private void shockRing(GpuExplosionEffects explosions, Vector3 ground, float radius, float seconds, int seed, int puffs,
+          float alpha) {
         float front = seconds / shockSeconds(radius);
         if (front >= 1) { return; }
         float reach = shockReach(seconds, radius);
@@ -1361,7 +1362,7 @@ final class GpuArtilleryBlast {
             float bearing = (puff + random(seed, puff + 300)) * MathUtils.PI2 / puffs;
             // The dust it throws up rolls into a wall that rises behind it.
             point.set(ground).add(MathUtils.cos(bearing) * reach, MathUtils.sin(bearing) * reach, radius * .02f * front);
-            explosions.addFlat(point, radius * (.045f + .05f * front), front, 0, .5f * fadeOut(front, .35f),
+            explosions.addFlat(point, radius * (.045f + .05f * front), front, 0, alpha * fadeOut(front, .35f),
                   seed + puff * 7, EARTH, .5f);
         }
     }
@@ -1377,8 +1378,9 @@ final class GpuArtilleryBlast {
         fireball(explosions, ground, size, seconds, seed);
         smokeColumn(explosions, ground, size, seconds, seed, 1.9f);
         float radius = nuclearRadius(blast);
+        // Fainter than a strike's wall of dust (user, 2026-11-09): a tank's blast stirs the ground, it does not lift it.
         shockRing(explosions, ground, radius, seconds, seed,
-              Math.min(96, 12 * Math.max(1, Math.round(radius / BoardGeometry.height()))));
+              Math.min(96, 12 * Math.max(1, Math.round(radius / BoardGeometry.height()))), .2f);
     }
 
     /** A bright, billowing fireball that lingers before going dark, over a base of black smoke. */
