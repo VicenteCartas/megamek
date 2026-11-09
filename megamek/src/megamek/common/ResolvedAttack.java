@@ -21,11 +21,12 @@ import megamek.common.weapons.infantry.InfantryWeapon;
 /**
  * A transient, server-confirmed visual event. It is not an attack order or another damage/rules calculation.
  * {@code collapses}: the structure hexes whose construction factor this attack's damage took to zero, which the rules
- * bring down at the phase's end.
+ * bring down at the phase's end. {@code cleared}: the hexes whose woods or jungle its damage thinned or cleared.
  */
 public record ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLocation target, int targetType,
       int equipmentIndex, String equipmentName, int limb, boolean hit, List<Mount> mounts, Shot shot,
-      List<Impact> impacts, boolean crewLoss, List<BoardLocation> collapses) implements Serializable {
+      List<Impact> impacts, boolean crewLoss, List<BoardLocation> collapses, List<BoardLocation> cleared)
+      implements Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
 
@@ -33,6 +34,14 @@ public record ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLoca
         mounts = mounts == null ? singleMount(attacker, equipmentIndex) : List.copyOf(mounts);
         impacts = impacts == null ? List.of() : List.copyOf(impacts);
         collapses = collapses == null ? List.of() : List.copyOf(collapses);
+        cleared = cleared == null ? List.of() : List.copyOf(cleared);
+    }
+
+    public ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLocation target, int targetType,
+          int equipmentIndex, String equipmentName, int limb, boolean hit, List<Mount> mounts, Shot shot,
+          List<Impact> impacts, boolean crewLoss, List<BoardLocation> collapses) {
+        this(id, kind, attacker, target, targetType, equipmentIndex, equipmentName, limb, hit, mounts, shot, impacts,
+              crewLoss, collapses, List.of());
     }
 
     public ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLocation target, int targetType,
@@ -58,19 +67,25 @@ public record ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLoca
 
     public ResolvedAttack withImpacts(List<Impact> locations) {
         return new ResolvedAttack(id, kind, attacker, target, targetType, equipmentIndex, equipmentName, limb, hit,
-              mounts, shot, locations, crewLoss, collapses);
+              mounts, shot, locations, crewLoss, collapses, cleared);
     }
 
     /** The server destroyed this unit because its crew died or left, rather than because its body was destroyed. */
     public ResolvedAttack withCrewLoss(boolean lost) {
         return new ResolvedAttack(id, kind, attacker, target, targetType, equipmentIndex, equipmentName, limb, hit,
-              mounts, shot, impacts, lost, collapses);
+              mounts, shot, impacts, lost, collapses, cleared);
     }
 
     /** The structure hexes this attack brought down ({@link #collapses}). */
     public ResolvedAttack withCollapses(List<BoardLocation> hexes) {
         return new ResolvedAttack(id, kind, attacker, target, targetType, equipmentIndex, equipmentName, limb, hit,
-              mounts, shot, impacts, crewLoss, hexes);
+              mounts, shot, impacts, crewLoss, hexes, cleared);
+    }
+
+    /** The hexes whose woods or jungle this attack thinned or cleared ({@link #cleared}). */
+    public ResolvedAttack withCleared(List<BoardLocation> hexes) {
+        return new ResolvedAttack(id, kind, attacker, target, targetType, equipmentIndex, equipmentName, limb, hit,
+              mounts, shot, impacts, crewLoss, collapses, hexes);
     }
 
     public ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLocation target, int targetType,

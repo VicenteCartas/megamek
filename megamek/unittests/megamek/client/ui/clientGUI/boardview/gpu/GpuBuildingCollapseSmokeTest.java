@@ -140,7 +140,7 @@ class GpuBuildingCollapseSmokeTest {
                         SwingUtilities.invokeLater(() -> {
                             if (current.woods()) {
                                 // As an attack from the west clearing them: its hit, then the woods gone (GpuBoardSource).
-                                GpuTestSupport.set(fixture.source, "treeHitAt", current.at());
+                                GpuTestSupport.set(fixture.source, "treeHexes", java.util.Set.of(current.at()));
                                 GpuTestSupport.set(fixture.source, "treeHit", new BoardScene.TileTransition.Hit(1,
                                       new BoardScene.Waypoint(new Coords(current.at().getX() - 6, current.at().getY()), level, 0)));
                                 GpuTestSupport.set(fixture.source, "treeHitRound", fixture.game.getRoundCount());

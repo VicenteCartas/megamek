@@ -204,8 +204,9 @@ class GpuCollapseCauseTest {
     }
 
     /**
-     * The Atlas clears the light woods at 1209, shot after shot: the attack that takes the woods down names on the
-     * checkpoint after it every tree the hex had, to break away from the Atlas as its hit lands (GpuTerrain#breakTrees).
+     * The Atlas clears the light woods at 1209, shot after shot: the server names the hex on the attack that took the woods
+     * down (ResolvedAttack#cleared), whose checkpoint names every tree the hex had, to break away from the Atlas as its
+     * hit lands (GpuTerrain#breakTrees).
      */
     @Test
     void theTreesAnAttackTakesDownBreakAwayFromIt() throws Exception {
@@ -222,8 +223,12 @@ class GpuCollapseCauseTest {
               && !update.broken().isEmpty()).map(BoardScene.SceneUpdate.class::cast).toList();
         assertEquals(1, broken.size(), "One attack takes the woods down: " + brief(events));
         var update = broken.getFirst();
-        assertTrue(events.subList(0, events.indexOf(update)).stream().anyMatch(BoardScene.Combat.class::isInstance),
-              "After its shot");
+        var shots = events.subList(0, events.indexOf(update)).stream().filter(BoardScene.Combat.class::isInstance)
+              .map(BoardScene.Combat.class::cast).toList();
+        assertFalse(shots.isEmpty(), "After its shot");
+        assertEquals(List.of(BoardLocation.of(ROOF, 0)), shots.getLast().result().cleared(), "The server names the hex it cleared");
+        assertEquals(1, events.stream().filter(BoardScene.Combat.class::isInstance)
+              .filter(shot -> !((BoardScene.Combat) shot).result().cleared().isEmpty()).count(), "One shot cleared it");
         assertEquals(List.of(ROOF), update.broken().stream().map(BoardScene.Detonation.Felled::coords).toList());
         assertEquals(java.util.Set.copyOf(trees), java.util.Set.copyOf(update.broken().getFirst().trees()),
               "Every tree the woods had");

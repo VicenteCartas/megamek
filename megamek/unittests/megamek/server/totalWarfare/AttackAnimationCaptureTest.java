@@ -220,4 +220,28 @@ class AttackAnimationCaptureTest {
         return sent.stream().filter(packet -> packet.command() == PacketCommand.NUCLEAR_DETONATION
               && Boolean.TRUE.equals(packet.getObject(1))).map(packet -> (NuclearDetonation) packet.getObject(0)).toList();
     }
+
+    /**
+     * Woods an attack's damage thinned are named on it, as what it brings down is; a miss names none, and what an
+     * explosion it sets off clears is the explosion's, whose front fells its trees.
+     */
+    @Test
+    void theWoodsAnAttackClearsAreNamedOnIt() {
+        var capture = new AttackAnimationCapture();
+        var attacker = new UnitLocation(1, new Coords(1, 2), 0, 0, 0);
+        var woods = new UnitLocation(Entity.NONE, new Coords(5, 5), 0, 0, 0);
+        capture.attack(new ResolvedAttack(new UUID(6, 1), ResolvedAttack.Kind.SHOT, attacker, woods,
+              Targetable.TYPE_HEX_CLEAR, 0, "AC20", Entity.LOC_NONE, true), List.of(7));
+        capture.clear(BoardLocation.of(new Coords(5, 5), 0));
+        explode(capture, explosion(new UUID(6, 2), new Coords(5, 6)), () -> capture.clear(BoardLocation.of(new Coords(5, 7), 0)));
+        capture.clear(BoardLocation.of(new Coords(5, 5), 0));
+        capture.attack(new ResolvedAttack(new UUID(6, 3), ResolvedAttack.Kind.SHOT, attacker, woods,
+              Targetable.TYPE_HEX_CLEAR, 1, "Laser", Entity.LOC_NONE, false), List.of(7));
+        capture.clear(BoardLocation.of(new Coords(6, 6), 0));
+        var sent = new ArrayList<Packet>();
+        capture.flush(sent::add, (recipient, packet) -> sent.add(packet));
+        assertEquals(List.of(List.of(BoardLocation.of(new Coords(5, 5), 0)), List.of()), sent.stream()
+              .filter(packet -> packet.command() == PacketCommand.ENTITY_ATTACK_RESOLVED)
+              .map(packet -> ((ResolvedAttack) packet.getObject(0)).cleared()).toList());
+    }
 }

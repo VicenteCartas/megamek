@@ -29,6 +29,7 @@ final class AttackAnimationCapture {
     private final List<ResolvedAttack> attacks = new ArrayList<>();
     private final Map<UUID, List<ResolvedAttack.Impact>> impacts = new HashMap<>();
     private final Map<UUID, List<BoardLocation>> collapses = new HashMap<>();
+    private final Map<UUID, Set<BoardLocation>> cleared = new HashMap<>();
 
     private record Bracket(NuclearDetonation detonation, Set<BoardLocation> collapses) { }
     /** The detonations being resolved, innermost first: what comes down while one is open is its doing. */
@@ -120,14 +121,33 @@ final class AttackAnimationCapture {
             open.peek().collapses().add(at);
             return;
         }
+        var attack = doer();
+        if (attack != null) { collapses.computeIfAbsent(attack.id(), ignored -> new ArrayList<>()).add(at); }
+    }
+
+    /**
+     * The woods or jungle of the hex {@code at} thinned or cleared: the attack being resolved names it, which takes it as
+     * it takes a collapse (#collapse); what a detonation clears is its own, its trees felled by its front, never the
+     * attack's.
+     */
+    void clear(BoardLocation at) {
+        var attack = open.isEmpty() ? doer() : null;
+        if (attack != null) { cleared.computeIfAbsent(attack.id(), ignored -> new LinkedHashSet<>()).add(at); }
+    }
+
+    /**
+     * The attack whose doing the hex changed now is: the newest being resolved, past the deaths it caused, when it hit,
+     * or for artillery when its shell landed and went off, even scattered; null for a miss, a dud or no attack.
+     */
+    private ResolvedAttack doer() {
         for (int index = attacks.size() - 1; index >= 0; index--) {
             var attack = attacks.get(index);
             if (attack.kind() == ResolvedAttack.Kind.DEATH) { continue; }
             var shot = attack.shot();
             boolean landed = shot != null && shot.artillery() && shot.impact() != null && shot.damagePerHit() > 0;
-            if (attack.hit() || landed) { collapses.computeIfAbsent(attack.id(), ignored -> new ArrayList<>()).add(at); }
-            return;
+            return attack.hit() || landed ? attack : null;
         }
+        return null;
     }
 
     void flush(Consumer<Packet> broadcast, BiConsumer<Integer, Packet> targeted) {
@@ -135,7 +155,8 @@ final class AttackAnimationCapture {
             Packet packet = delivery.packet();
             if (packet.command() == PacketCommand.ENTITY_ATTACK_RESOLVED && packet.getObject(0) instanceof ResolvedAttack attack) {
                 packet = new Packet(packet.command(), attack.withImpacts(impacts.getOrDefault(attack.id(), attack.impacts()))
-                      .withCollapses(collapses.getOrDefault(attack.id(), attack.collapses())));
+                      .withCollapses(collapses.getOrDefault(attack.id(), attack.collapses()))
+                      .withCleared(cleared.containsKey(attack.id()) ? List.copyOf(cleared.get(attack.id())) : attack.cleared()));
             } else if (detonation(packet) instanceof NuclearDetonation detonation) {
                 if (unsent.contains(detonation.id())) { continue; }
                 if (completes(packet) && named.containsKey(detonation.id())) {

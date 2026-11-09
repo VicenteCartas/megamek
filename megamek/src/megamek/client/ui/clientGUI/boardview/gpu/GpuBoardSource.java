@@ -154,15 +154,13 @@ final class GpuBoardSource implements BoardSource {
     private int structureHitsRound = -1;
     private GamePhase structureHitsPhase;
     /**
-     * The attack being resolved, for the trees its checkpoint shows gone (publishScene): where it struck and the hit they
-     * break away from; null outside an attack's phase.
+     * The attack being resolved, for the trees its checkpoint shows gone (publishScene): the hexes whose woods the server
+     * names it thinned or cleared (ResolvedAttack#cleared) and the hit they break away from; none outside its phase.
      */
-    private Coords treeHitAt;
+    private Set<Coords> treeHexes = Set.of();
     private BoardScene.TileTransition.Hit treeHit;
     private int treeHitRound = -1;
     private GamePhase treeHitPhase;
-    /** How far from an attack's target the trees it takes down may stand: an artillery shell's area and more. */
-    private static final int TREE_HIT_REACH = 4;
     /**
      * When the capture that first showed a structure brought down in the movement phase was held back, 0 for none: the
      * server sends that collapse, and its mover's fall, before the path that walked onto it (captureMovement).
@@ -704,7 +702,8 @@ final class GpuBoardSource implements BoardSource {
         // The trees it takes down break away from it, whatever its strength (publishScene).
         var shot = result.shot();
         Coords landing = shot != null && shot.artillery() && shot.impact() != null ? shot.impact().coords() : null;
-        treeHitAt = landing != null ? landing : result.target().coords();
+        treeHexes = result.cleared().stream().filter(hex -> hex.boardId() == view.getBoardId()).map(megamek.common.board.BoardLocation::coords)
+              .collect(Collectors.toSet());
         treeHit = new BoardScene.TileTransition.Hit(1, hitFrom(result, landing));
         treeHitRound = view.game.getRoundCount();
         treeHitPhase = view.game.getPhase();
@@ -925,10 +924,11 @@ final class GpuBoardSource implements BoardSource {
         }
         // The trees the attack being resolved took down break away from it as this checkpoint shows (GpuTerrain#breakTrees);
         // a strike's its own completion fells.
-        boolean attacking = treeHit != null && view.game.getRoundCount() == treeHitRound && view.game.getPhase() == treeHitPhase;
+        boolean attacking = !treeHexes.isEmpty() && view.game.getRoundCount() == treeHitRound
+              && view.game.getPhase() == treeHitPhase;
         List<BoardScene.Detonation.Felled> broken = attacking && captures.isEmpty() && frame != null
               && frame.boardGeneration() == next.boardGeneration() && next.scene().boardId() == frame.scene().boardId()
-              ? felled(frame.scene(), next.scene(), at -> treeHitAt.distance(at) <= TREE_HIT_REACH) : List.of();
+              ? felled(frame.scene(), next.scene(), treeHexes::contains) : List.of();
         steps.forEach(this::queueAnimation);
         if (lifts != null) { queueAnimation(lifts); }
         falls.forEach(this::queueAnimation);

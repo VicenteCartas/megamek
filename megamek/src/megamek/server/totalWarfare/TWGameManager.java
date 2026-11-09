@@ -216,6 +216,12 @@ public class TWGameManager extends AbstractGameManager {
         if (capture != null) { capture.collapse(BoardLocation.of(coords, building.getBoardId())); }
     }
 
+    /** For the animation alone: the woods or jungle of the hex lost trees to the attack being resolved, if any. */
+    private void noteCleared(Coords coords, int boardId) {
+        var capture = attackAnimationCapture.get();
+        if (capture != null) { capture.clear(BoardLocation.of(coords, boardId)); }
+    }
+
     /**
      * Runs {@code resolution}, the rules' blast, between {@code detonation}'s start and completion packets (none when it
      * is null: its hex is off the board), in an attack animation capture, which names on the completion what it brought
@@ -12106,6 +12112,7 @@ public class TWGameManager extends AbstractGameManager {
         Terrain jungle = h.getTerrain(Terrains.JUNGLE);
         Terrain ice = h.getTerrain(Terrains.ICE);
         Terrain magma = h.getTerrain(Terrains.MAGMA);
+        int woodsBefore = h.terrainLevel(Terrains.WOODS), jungleBefore = h.terrainLevel(Terrains.JUNGLE);
         Report r;
         int reportType = Report.HIDDEN;
         if (entityId == Entity.NONE) {
@@ -12226,6 +12233,9 @@ public class TWGameManager extends AbstractGameManager {
             } else {
                 rail.setTerrainFactor(tf);
             }
+        }
+        if (h.terrainLevel(Terrains.WOODS) != woodsBefore || h.terrainLevel(Terrains.JUNGLE) != jungleBefore) {
+            noteCleared(c, boardId);
         }
         sendChangedHex(c, boardId);
 
