@@ -106,7 +106,7 @@ class NuclearDetonationServerTest {
         assertFalse(boundaries.getFirst().getBooleanValue(1));
         assertTrue(boundaries.getLast().getBooleanValue(1));
         var strike = (NuclearDetonation) boundaries.getFirst().getObject(0);
-        assertTrue(strike.orbital());
+        assertEquals(megamek.common.NuclearDetonation.Kind.ORBITAL, strike.kind());
         assertEquals(new Coords(1, 1), strike.coords());
         assertEquals(0, strike.craterDepth(), "An orbital bombardment digs no crater");
         assertEquals(11, strike.baseDamage() / strike.degradation(), "Its blast reaches its radius and the hex beyond");

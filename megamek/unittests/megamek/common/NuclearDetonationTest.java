@@ -21,6 +21,22 @@ import megamek.common.net.packets.Packet;
 import org.junit.jupiter.api.Test;
 
 class NuclearDetonationTest {
+    /**
+     * A conventional explosion reaches exactly as far as the rules' damage table (its radius on the client is base damage
+     * over degradation), and keeps its kind through its completion's collapses.
+     */
+    @Test
+    void anExplosionReachesAsFarAsItsDamageTable() {
+        for (int[] blast : new int[][] { { 80, 10 }, { 45, 4 }, { 300, 4 }, { 20, 4 }, { 40, 2 } }) {
+            var explosion = NuclearDetonation.explosion(UUID.randomUUID(), 0, new Coords(5, 5), 0, blast[0], blast[1]);
+            assertEquals(blast[1], explosion.baseDamage() / explosion.degradation(), "Reach of " + blast[0] + " over " + blast[1]);
+            assertTrue(explosion.baseDamage() >= blast[0]);
+            assertEquals(0, explosion.craterDepth());
+            assertEquals(NuclearDetonation.Kind.EXPLOSION,
+                  explosion.withCollapses(List.of(megamek.common.board.BoardLocation.of(new Coords(5, 6), 0))).kind());
+        }
+    }
+
     @Test
     void customStrikeSurvivesSerializationAndDispatchWithoutAnEntity() throws Exception {
         var original = new NuclearDetonation(UUID.randomUUID(), 7, new Coords(3, 8), -2, 1234, 31, 93, 2)
