@@ -25,6 +25,7 @@ import megamek.client.lobby.LobbyUnit;
 import megamek.client.lobby.RequisitionDossier;
 import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
+import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiDialog;
@@ -318,6 +319,37 @@ class LobbyTogglesSmokeTest {
             run(ui, seconds * 2);
             assertEquals(0, holder.getHeight(), .5f, "the drawer ends shut");
             assertTrue(requisition.body().findActor("lobby-requisition-drawer") == null);
+        });
+    }
+
+    @Test
+    void theDrawerShutsOntoTheTagsRowWithoutDippingBelowIt() {
+        UiTestStage.run(ui -> {
+            NoRequisitionActions actions = new NoRequisitionActions();
+            LobbyRequisitionPanel requisition = new LobbyRequisitionPanel(ui.kit, actions,
+                  key -> null, true);
+            place(ui, requisition.body());
+            float seconds = DesignTokens.shipped().duration("medium") / 1000f;
+
+            click(ui, requisition.filtersToggle());
+            run(ui, seconds * 2);
+            Group drawer = requisition.body().findActor("lobby-requisition-drawer");
+            Actor holder = drawer.getParent();
+            click(ui, chip(drawer, Messages.getString("Lobby.requisition.tech.clan")));
+            ui.draw();
+
+            click(ui, requisition.filtersToggle());
+            float lowest = Float.MAX_VALUE;
+            for (int step = 0; step < 12; step++) {
+                run(ui, seconds / 8);
+                lowest = Math.min(lowest, holder.getHeight());
+            }
+            Actor tags = requisition.body().findActor("lobby-requisition-tags");
+            assertTrue(tags != null, "the clan filter shows as a tag once the drawer is shut");
+            assertTrue(tags.getHeight() > 0);
+            assertEquals(tags.getHeight(), holder.getHeight(), .5f, "the holder ends at the tags' height");
+            assertTrue(lowest >= tags.getHeight() - .5f,
+                  "the slide never dips below the tags' row, so the results don't jump back down: " + lowest);
         });
     }
 

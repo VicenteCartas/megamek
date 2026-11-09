@@ -1,0 +1,6 @@
+{
+  "about": "A test overlay that changes a shipped role, which an overlay may not.",
+  "color": {
+    "surface.base": { "dark": "#000000", "light": "#FFFFFF", "use": "Not allowed: a shipped role." }
+  }
+}

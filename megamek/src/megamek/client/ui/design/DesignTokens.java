@@ -16,16 +16,34 @@ import java.util.Set;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
  * The suite's design tokens, read from {@code design-tokens.json}: the one source of truth that the Swing and libGDX
  * themes are built from. Read-only; colors are packed 0xAARRGGBB. No AWT, so the native toolkit can use it too.
+ *
+ * <p>An app of the suite extends them with its own roles through an overlay ({@link #addOverlay}) rather than a copy of
+ * the file: an overlay adds tokens and checks, and never changes a shipped one.</p>
  */
 public final class DesignTokens {
     /** The classpath location of the token file. */
     public static final String RESOURCE = "/megamek/client/ui/design/design-tokens.json";
 
+    /** Token groups an overlay adds named tokens to; a name the file or an earlier overlay has is an error. */
+    private static final Set<String> ADDED_TOKENS = Set.of("color", "space", "radius", "size", "opacity", "motion",
+          "typography.styles", "typography.case.roles");
+    /** Lists an overlay appends to: the upper-case and condensed roles of each presentation, and the checks. */
+    private static final Set<String> APPENDED_LISTS = Set.of("typography.case.upper.app", "typography.case.upper.game",
+          "typography.width.roles.app", "typography.width.roles.game", "checks.contrast", "checks.distinct");
+    /** An overlay's own description, which the merged tokens don't take. */
+    private static final Set<String> OVERLAY_NOTES = Set.of("version", "about");
+
     private static final Map<Palette, DesignTokens> SHIPPED = new EnumMap<>(Palette.class);
+    /** Guarded by {@link #SHIPPED}: the apps' overlays by their source, in the order they were added. */
+    private static final Map<String, JsonNode> OVERLAYS = new LinkedHashMap<>();
+    /** Guarded by {@link #SHIPPED}: the shipped file, read once. */
+    private static JsonNode shippedTree;
     private static volatile Palette activePalette = Palette.STANDARD;
 
     /** The two color modes. Native battle views are dark only for now. */
@@ -215,23 +233,131 @@ public final class DesignTokens {
         return shipped(activePalette);
     }
 
-    /** The tokens shipped with the application in {@code palette}, read once. */
+    /** The tokens shipped with the application in {@code palette}, with the apps' overlays, read once. */
     public static DesignTokens shipped(Palette palette) {
         synchronized (SHIPPED) {
             DesignTokens tokens = SHIPPED.get(palette);
             if (tokens == null) {
-                try (InputStream stream = DesignTokens.class.getResourceAsStream(RESOURCE)) {
-                    if (stream == null) {
-                        throw new IllegalStateException("Missing design token resource " + RESOURCE);
-                    }
-                    tokens = read(stream, palette);
-                } catch (IOException exception) {
-                    throw new UncheckedIOException(exception);
-                }
+                tokens = new DesignTokens(overlaid(OVERLAYS), palette);
                 SHIPPED.put(palette, tokens);
             }
             return tokens;
         }
+    }
+
+    /**
+     * Extends the shipped tokens with an app's overlay: a token file on {@code owner}'s classpath, at {@code resource},
+     * that adds the app's own color roles, text styles and roles, sizes and checks (docs/design-system/tokens.md, App
+     * overlays). Adding the same overlay again does nothing. Call it as the app starts, before its first theme is
+     * built; a theme built earlier keeps its tokens until it is built again, as after {@link #setPalette}.
+     *
+     * @throws IllegalArgumentException when the overlay changes a shipped token or one of an earlier overlay, or
+     *                                  sets anything an overlay may not
+     * @throws IllegalStateException    when the resource is missing
+     * @throws UncheckedIOException     when it can't be read
+     */
+    public static void addOverlay(Class<?> owner, String resource) {
+        String source = owner.getName() + ":" + resource;
+        JsonNode overlay;
+        try (InputStream stream = owner.getResourceAsStream(resource)) {
+            if (stream == null) {
+                throw new IllegalStateException("Missing design token overlay " + source);
+            }
+            overlay = new ObjectMapper().readTree(stream);
+        } catch (IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
+        synchronized (SHIPPED) {
+            if (OVERLAYS.containsKey(source)) {
+                return;
+            }
+            Map<String, JsonNode> overlays = new LinkedHashMap<>(OVERLAYS);
+            overlays.put(source, overlay);
+            // Fails here, as the app starts, rather than at the first theme
+            new DesignTokens(overlaid(overlays), Palette.STANDARD);
+            OVERLAYS.put(source, overlay);
+            SHIPPED.clear();
+        }
+    }
+
+    /** Under {@link #SHIPPED}: the shipped file with {@code overlays} merged in, in order. */
+    private static JsonNode overlaid(Map<String, JsonNode> overlays) {
+        if (shippedTree == null) {
+            try (InputStream stream = DesignTokens.class.getResourceAsStream(RESOURCE)) {
+                if (stream == null) {
+                    throw new IllegalStateException("Missing design token resource " + RESOURCE);
+                }
+                shippedTree = new ObjectMapper().readTree(stream);
+            } catch (IOException exception) {
+                throw new UncheckedIOException(exception);
+            }
+        }
+        JsonNode merged = shippedTree;
+        for (Map.Entry<String, JsonNode> overlay : overlays.entrySet()) {
+            merged = overlaid(merged, overlay.getValue(), overlay.getKey());
+        }
+        return merged;
+    }
+
+    /**
+     * {@code base} with {@code overlay} merged in, leaving both as they were: the overlay's tokens added to their
+     * groups and its lists appended. {@code source} names the overlay in errors.
+     *
+     * @throws IllegalArgumentException when the overlay changes a token {@code base} has, or sets anything else
+     */
+    static JsonNode overlaid(JsonNode base, JsonNode overlay, String source) {
+        if (!overlay.isObject()) {
+            throw new IllegalArgumentException("Design token overlay " + source + " is not a JSON object");
+        }
+        ObjectNode merged = base.deepCopy();
+        merge(merged, overlay, "", source);
+        return merged;
+    }
+
+    private static void merge(ObjectNode target, JsonNode overlay, String path, String source) {
+        for (Map.Entry<String, JsonNode> entry : fields(overlay)) {
+            String key = entry.getKey();
+            String at = path.isEmpty() ? key : path + "." + key;
+            JsonNode value = entry.getValue();
+            if (path.isEmpty() && OVERLAY_NOTES.contains(key)) {
+                continue;
+            }
+            JsonNode existing = target.get(key);
+            if (ADDED_TOKENS.contains(at) && value.isObject()) {
+                ObjectNode group = existing instanceof ObjectNode object ? object : target.putObject(key);
+                for (Map.Entry<String, JsonNode> token : fields(value)) {
+                    if (group.has(token.getKey())) {
+                        throw new IllegalArgumentException("Design token overlay " + source + " redefines " + at + "."
+                              + token.getKey() + "; an overlay only adds tokens");
+                    }
+                    group.set(token.getKey(), token.getValue().deepCopy());
+                }
+            } else if (APPENDED_LISTS.contains(at) && value.isArray()) {
+                ArrayNode list = existing instanceof ArrayNode array ? array : target.putArray(key);
+                for (JsonNode item : value) {
+                    list.add(item.deepCopy());
+                }
+            } else if (value.isObject() && leadsToOverlayable(at)) {
+                merge(existing instanceof ObjectNode object ? object : target.putObject(key), value, at, source);
+            } else {
+                throw new IllegalArgumentException("Design token overlay " + source + " may not set " + at);
+            }
+        }
+    }
+
+    private static boolean leadsToOverlayable(String path) {
+        String prefix = path + ".";
+        for (String overlayable : ADDED_TOKENS) {
+            if (overlayable.startsWith(prefix)) {
+                return true;
+            }
+        }
+        for (String overlayable : APPENDED_LISTS) {
+            if (overlayable.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The user's color vision palette, which {@link #shipped()} resolves; standard until set. */
@@ -255,6 +381,22 @@ public final class DesignTokens {
     /** Reads a token file in {@code palette}. */
     public static DesignTokens read(InputStream stream, Palette palette) throws IOException {
         return new DesignTokens(new ObjectMapper().readTree(stream), palette);
+    }
+
+    /**
+     * Reads a token file in {@code palette} with {@code overlays} merged in, in order, as {@link #addOverlay} would; an
+     * app's test checks its overlay this way without adding it to the shipped tokens.
+     *
+     * @throws IllegalArgumentException when an overlay changes a token or sets anything an overlay may not
+     */
+    public static DesignTokens read(InputStream stream, Palette palette, List<InputStream> overlays)
+          throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode merged = mapper.readTree(stream);
+        for (int i = 0; i < overlays.size(); i++) {
+            merged = overlaid(merged, mapper.readTree(overlays.get(i)), "overlay " + (i + 1));
+        }
+        return new DesignTokens(merged, palette);
     }
 
     /** The palette these tokens' colors are in. */
