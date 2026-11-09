@@ -132,6 +132,11 @@ final class BoardComponents {
                 component.set("appearance", appearances.get(owner).deepCopy());
             }
             if (owner.equals("building") && appearances != null) { buildingAppearance(component, appearances); }
+            // A fortified hex's strongpoint (HexAppearance.Fortification), said only while the hex is fortified.
+            if (owner.equals("scenario") && component.has("fortified") && appearances != null && appearances.has("fortification")) {
+                String look = appearances.get("fortification").path("variant").asText();
+                component.withObject("/appearance").put("fortification", look.substring("fortification/".length()));
+            }
             if (!component.isEmpty()) { components.set(owner, component); }
         });
         if (components.isEmpty()) { node.remove("components"); }
@@ -185,6 +190,14 @@ final class BoardComponents {
                 ObjectNode style = component.get("appearance").deepCopy();
                 if (owner.equals("building")) { readBuildingAppearance(style, appearances); }
                 if (!style.isEmpty()) { appearances.set(owner, style); }
+            }
+            if (visuals && owner.equals("scenario") && component.has("appearance")) {
+                JsonNode look = component.get("appearance").get("fortification");
+                require(look == null || look.isTextual() && (look.asText().equals("dug") || look.asText().equals("sandbags")),
+                      "scenario.appearance.fortification must be dug or sandbags");
+                if (look != null && look.asText().equals("sandbags")) {
+                    appearances.putObject("fortification").put("variant", HexAppearance.SANDBAGGED.variant());
+                }
             }
             if (!visuals && owner.equals("building") && BuildingInteriors.choice(hex) == BuildingInteriors.DEFAULT) {
                 var style = component.path("appearance");

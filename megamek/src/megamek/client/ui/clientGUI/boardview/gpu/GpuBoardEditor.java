@@ -1765,6 +1765,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         } else if (appearance.hasChildren()) { detail.add(appearance).row(); }
         for (var field : definition.fields()) { if (!field.optional() || snapshot.property(field.terrain()) != null) { field(field); } }
         if (definition.id().equals("pavement")) { pavementEdges(); }
+        if (definition.id().equals("scenario") && snapshot.property("fortified") != null) { fortification(); }
         if (definition.id().equals("building") && snapshot.property("building") != null) {
             if (snapshot.buildingProfileAvailable()) {
                 var profiles = List.of(new Option(UiKit.text("BoardEditor.buildingProfile.straight"), "straight"),
@@ -1897,6 +1898,29 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             button.setName("editor-pavement-edges-" + value);
             button.pressed(edges == current);
             ui.tip(button).getActor().setText(UiKit.text(key + ".tooltip"));
+            row.add(button);
+        }
+        detail.add(row).growX().row();
+    }
+
+    /**
+     * The fortified hex's strongpoint ({@link megamek.common.board.HexAppearance.Fortification}): one row of Dug in and
+     * Sandbags. Pavement and roads take sandbags only, so Dug in is off there.
+     */
+    private void fortification() {
+        heading(UiKit.text("BoardEditor.fortification"));
+        java.util.function.IntPredicate has = type -> snapshot.property(megamek.common.units.Terrains.getName(type)) != null;
+        var current = megamek.common.board.HexAppearance.fortification(snapshot.appearance(), has);
+        boolean sandbagsOnly = megamek.common.board.HexAppearance.sandbagsOnly(has);
+        Table row = new Table(); row.defaults().growX().uniformX().minWidth(0).pad(0, 2, 0, 2);
+        for (var look : megamek.common.board.HexAppearance.Fortification.values()) {
+            String value = look.name().toLowerCase(Locale.ROOT), key = "BoardEditor.fortification." + value;
+            boolean locked = sandbagsOnly && look == megamek.common.board.HexAppearance.Fortification.DUG;
+            UiButton button = button(UiKit.text(key), () -> send(Action.FORTIFICATION, value));
+            button.setName("editor-fortification-" + value);
+            button.pressed(look == current);
+            button.setDisabled(locked);
+            ui.tip(button).getActor().setText(UiKit.text(locked ? "BoardEditor.fortification.sandbagsOnly" : key + ".tooltip"));
             row.add(button);
         }
         detail.add(row).growX().row();

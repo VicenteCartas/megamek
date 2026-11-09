@@ -152,6 +152,11 @@ public final class BoardEditorSession {
          * pavement appearance (Auto as none). One undo step.
          */
         EDGES, WAY_LAYER, WAY_TRACKS, CORRIDOR,
+        /**
+         * Sets the inspected fortified hex's {@link HexAppearance.Fortification} (value "dug" or "sandbags"); pavement and
+         * roads take sandbags only. One undo step.
+         */
+        FORTIFICATION,
         /** Sets a road layer's cosmetic junction controls (target "road" or "bridgeRoad", value "stops", "signals" or "gantry"). */
         TRAFFIC_CONTROL,
         /**
@@ -858,6 +863,7 @@ public final class BoardEditorSession {
                 case DESIGN_ROTATION -> edit(hex -> rotate(hex, command.target(), command.value(),
                       TilesetScenery.buildingConnected(hex, hex.getCoords(), board()::getHex)));
                 case EDGES -> edit(hex -> setEdges(hex, command.value()));
+                case FORTIFICATION -> edit(hex -> setFortification(hex, command.value()));
                 case TRAFFIC_CONTROL -> edit(hex -> setTrafficControl(hex, command.target(), command.value()));
                 case LANES -> edit(hex -> setLanes(hex, command.target(), command.value()));
                 case RAMP -> ramp(command.target(), command.value());
@@ -3226,6 +3232,14 @@ public final class BoardEditorSession {
         HexAppearance look = HexAppearance.withSeparated(HexAppearance.of(edges), HexAppearance.separated(styles, "pavement"));
         if (look == null) { styles.remove("pavement"); } else { styles.put("pavement", look); }
         hex.setAppearance(styles);
+    }
+
+    private static void setFortification(Hex hex, String value) {
+        require(hex.containsTerrain(Terrains.FORTIFIED), Messages.getString("BoardEditor.addTerrainFirst"));
+        var fortification = HexAppearance.Fortification.valueOf(value.toUpperCase(java.util.Locale.ROOT));
+        require(fortification == HexAppearance.Fortification.SANDBAGS || !HexAppearance.sandbagsOnly(hex::containsTerrain),
+              Messages.getString("BoardEditor.fortification.sandbagsOnly"));
+        appearance(hex, "fortification", HexAppearance.of(fortification));
     }
 
     private static void setTrafficControl(Hex hex, String owner, String value) {

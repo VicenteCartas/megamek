@@ -2095,6 +2095,30 @@ class BoardEditorSessionTest {
     }
 
     /**
+     * Fortification: the Edit row sets Sandbags on a fortified hex and a saved .board2 keeps it; Dug in is stored as none,
+     * and refused where a road runs, which always takes sandbags.
+     */
+    @Test void fortificationIsChosenInEditSavedAndSandbagsOnlyOnRoads() throws Exception {
+        var session = session();
+        send(session, Action.FORTIFICATION, "", "sandbags");
+        assertEquals(Messages.getString("BoardEditor.addTerrainFirst"), session.snapshot().message());
+        send(session, Action.TERRAIN, "fortified", "1");
+        send(session, Action.FORTIFICATION, "", "sandbags");
+        assertEquals(megamek.common.board.HexAppearance.SANDBAGGED, session.board().getHex(at).getAppearance().get("fortification"));
+        Path file = directory.resolve("fortified.board2"); session.save(file);
+        assertEquals(megamek.common.board.HexAppearance.SANDBAGGED,
+              BoardFile.read(file).getHex(at).getAppearance().get("fortification"));
+        send(session, Action.FORTIFICATION, "", "dug");
+        assertTrue(session.board().getHex(at).getAppearance().isEmpty(), "Dug in is stored as none");
+        send(session, Action.TERRAIN, "road", "1");
+        send(session, Action.FORTIFICATION, "", "dug");
+        assertEquals(Messages.getString("BoardEditor.fortification.sandbagsOnly"), session.snapshot().message());
+        Hex road = session.board().getHex(at);
+        assertEquals(megamek.common.board.HexAppearance.Fortification.SANDBAGS,
+              megamek.common.board.HexAppearance.fortification(road.getAppearance(), road::containsTerrain));
+    }
+
+    /**
      * Scorched ground: a member of its card paints, the Brush's Severity switches the level, Erase takes it off, the Edit
      * row sets it in one undo step and a saved .board2 keeps it; it is a look, so the ground stays CLEAR.
      */

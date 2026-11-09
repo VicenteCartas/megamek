@@ -61,7 +61,7 @@ public record HexAppearance(String variant, String asset, String material, Doubl
     }
     public static final Set<String> OWNERS = Set.of("ground", "road", "building", "pavement", "fuelTank",
           "vegetation", "rough", "bridge", "bridgeRoad", "rail", "bridgeRail", "scorch", "footprint", "kitVariant", "buildingProfile",
-          "water");
+          "water", "fortification");
     /** Per-hex upper storeys step back above shorter neighbours; absent means keep the ground footprint. */
     public static final HexAppearance STEPPED_BUILDING = new HexAppearance("building/stepped", null, null, null);
 
@@ -277,6 +277,33 @@ public record HexAppearance(String variant, String asset, String material, Doubl
 
     /** The appearance that stores {@code footprint}; null for {@link Footprint#ANGLED}, which is stored as none. */
     public static HexAppearance of(Footprint footprint) { return footprint == Footprint.SQUARE ? SQUARE : null; }
+
+    /**
+     * A fortified hex's strongpoint (owner {@code "fortification"}): {@link #DUG} into its ground, stored as none, or a
+     * {@link #SANDBAGS} emplacement. Pavement and roads are never dug: there it is always sandbagged
+     * ({@link HexAppearance#sandbagsOnly}). Cosmetic, like the {@link Footprint}: the 3D views draw it; rules and the 2D
+     * views ignore it.
+     */
+    public enum Fortification { DUG, SANDBAGS }
+
+    public static final HexAppearance SANDBAGGED = new HexAppearance("fortification/sandbags", null, null, null);
+
+    /** Whether a hex whose terrain {@code has} (a terrain type) is never dug: its pavement or any road. */
+    public static boolean sandbagsOnly(java.util.function.IntPredicate has) {
+        return has.test(megamek.common.units.Terrains.PAVEMENT) || has.test(megamek.common.units.Terrains.ROAD);
+    }
+
+    /** How a fortified hex with {@code appearance}, whose terrain {@code has}, is drawn: sandbags where it is never dug. */
+    public static Fortification fortification(Map<String, HexAppearance> appearance, java.util.function.IntPredicate has) {
+        HexAppearance stored = appearance.get("fortification");
+        return sandbagsOnly(has) || stored != null && SANDBAGGED.variant().equals(stored.variant())
+              ? Fortification.SANDBAGS : Fortification.DUG;
+    }
+
+    /** The appearance that stores {@code fortification}; null for {@link Fortification#DUG}, which is stored as none. */
+    public static HexAppearance of(Fortification fortification) {
+        return fortification == Fortification.SANDBAGS ? SANDBAGGED : null;
+    }
 
     /**
      * The sides of a hex's {@code owner}, {@code "water"} or {@code "pavement"}, that the author parted from the same

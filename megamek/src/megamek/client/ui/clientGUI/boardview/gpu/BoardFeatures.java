@@ -1132,8 +1132,8 @@ final class BoardFeatures {
     /** The fighting holes of a dug-in platoon ({@link #withTrench}). */
     static final String TRENCH = "scenery/military/trench";
     /**
-     * A fortified hex's strongpoint, as its layout places it, dug into its ground; and, where that ground is paved, which
-     * cannot be dug, its sandbag emplacement ({@link #onGround}).
+     * A fortified hex's strongpoint, as its layout places it, dug into its ground; and its sandbag emplacement, which the
+     * author chooses and pavement and roads always get ({@link HexAppearance.Fortification}, {@link #onGround}).
      */
     static final String FORTIFICATION = "scenery/military/fortification", SANDBAGS = "scenery/military/sandbags";
 
@@ -1147,9 +1147,10 @@ final class BoardFeatures {
         return random.nextBoolean() ? asset + "-b" : asset;
     }
 
-    /** {@code asset} as built on {@code hex}'s ground: a strongpoint on pavement is sandbagged, not dug. */
+    /** {@code asset} as built on {@code hex}'s ground: a strongpoint as its {@link HexAppearance.Fortification}. */
     private static String onGround(String asset, Hex hex) {
-        return asset.equals(FORTIFICATION) && hex.containsTerrain(Terrains.PAVEMENT) ? SANDBAGS : asset;
+        return asset.equals(FORTIFICATION) && HexAppearance.fortification(hex.getAppearance(), hex::containsTerrain)
+              == HexAppearance.Fortification.SANDBAGS ? SANDBAGS : asset;
     }
     /** A Solaris elevator's shaft ({@link BoardScene.FeatureKind#SHAFT}). */
     static final String ELEVATOR_SHAFT = "elevator-shaft";
