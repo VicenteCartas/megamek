@@ -13,21 +13,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-/** A command post's flipboard turns its tiles over and lands them flat, and its light and screens are found by colour. */
+/** A command post's light and screens are found by colour, and its star map charts the systems it is given. */
 class StartCommandEffectsTest {
-
-    @Test
-    void aTileStartsOnItsBackAndLandsFlatAfterOvershooting() {
-        assertEquals(Math.PI, StartCommandEffects.flipAngle(-1), 1e-9, "waiting tiles show their backs");
-        assertEquals(Math.PI, StartCommandEffects.flipAngle(0), 1e-9);
-        assertEquals(0, StartCommandEffects.flipAngle(1), 1e-9, "landed tiles lie flat");
-        assertEquals(0, StartCommandEffects.flipAngle(2), 1e-9);
-        double least = Double.MAX_VALUE;
-        for (int i = 0; i <= 100; i++) {
-            least = Math.min(least, StartCommandEffects.flipAngle(i / 100.0));
-        }
-        assertTrue(least < 0, "the tile swings a little past flat before it settles");
-    }
 
     @Test
     void warmBrightPixelsAreLightButWhiteTubesAndShadowsAreNot() {
@@ -87,30 +74,6 @@ class StartCommandEffectsTest {
         assertEquals(0, screens[90 * width + 100], "the wall is no screen");
         assertTrue(Math.abs(StartCommandEffects.screenPhase(first) - StartCommandEffects.screenPhase(second)) > 0.1f,
               "the screens scan at different times");
-    }
-
-    @Test
-    void aSplitFlapFallsFromUpToDownAndBouncesWhereItLands() {
-        assertEquals(0, StartCommandEffects.flapAngle(-1), 1e-9, "waiting flaps stand up");
-        assertEquals(Math.PI, StartCommandEffects.flapAngle(0.75), 1e-9, "the flap lands");
-        assertTrue(StartCommandEffects.flapAngle(0.85) < Math.PI, "and bounces");
-        assertEquals(Math.PI, StartCommandEffects.flapAngle(1), 1e-9, "landed flaps hang down");
-        assertTrue(StartCommandEffects.flapAngle(0.2) < StartCommandEffects.flapAngle(0.5));
-    }
-
-    @Test
-    void theFlapsFallTopRowsFirstAndAllInTime() {
-        int cols = 40;
-        int rows = 22;
-        for (int row = 0; row < rows; row++) {
-            for (int col = 0; col < cols; col++) {
-                double start = StartCommandEffects.flapStart(col, row, cols, rows);
-                assertTrue(start >= 0 && start + StartCommandEffects.BACKS_IN + StartCommandEffects.FLAP_SPAN <= 1,
-                      "each flap lands within the reveal");
-            }
-        }
-        assertTrue(StartCommandEffects.flapStart(0, 0, cols, rows) < StartCommandEffects.flapStart(0, rows - 1, cols,
-              rows), "the top row falls before the bottom row");
     }
 
     @Test

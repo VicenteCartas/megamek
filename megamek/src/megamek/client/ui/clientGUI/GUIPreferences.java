@@ -406,6 +406,9 @@ public class GUIPreferences extends PreferenceStoreProxy {
     // NOT prefixed "Advanced" so it does not appear in the Client Settings > Advanced list - it can only be enabled by
     // manually adding RevealAllArtilleryRounds=true to clientsettings.xml.
     public static final String REVEAL_ALL_ARTILLERY_ROUNDS = "RevealAllArtilleryRounds";
+    // Hidden developer flag: key 1 on the start screen plays its intro again. Like the flag above, it can only be
+    // enabled by manually adding StartScreenReplayKey=true to clientsettings.xml.
+    public static final String START_SCREEN_REPLAY_KEY = "StartScreenReplayKey";
     public static final String PLAYER_LIST_AUTO_DISPLAY_REPORT_PHASE = "PlayerListAutoDisplayReportPhase";
     public static final String PLAYER_LIST_AUTO_DISPLAY_NON_REPORT_PHASE = "PlayerListAutoDisplayNonReportPhase";
     public static final String MINI_MAP_COLOURS = "MinimapColours";
@@ -1005,6 +1008,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(ROUNDS_IN_AIR_POS_X, 200);
         store.setDefault(ROUNDS_IN_AIR_POS_Y, 150);
         store.setDefault(REVEAL_ALL_ARTILLERY_ROUNDS, false);
+        store.setDefault(START_SCREEN_REPLAY_KEY, false);
         store.setDefault(PLAYER_LIST_AUTO_DISPLAY_REPORT_PHASE, 1);
         store.setDefault(PLAYER_LIST_AUTO_DISPLAY_NON_REPORT_PHASE, 0);
 

@@ -25,24 +25,17 @@ import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.utils.Disposable;
 
 /**
- * A command post's start screen effects ({@link StartScreenContent.Ambience#COMMAND}). The art arrives as a departures
- * board: its tiles flip over in perspective, cascading from the top left, and land with a little overshoot. It can
- * arrive instead as a hologram booting up, out of a star map the view dives through, or on a split-flap board (see
- * {@link Intro}). Once settled, soft light shafts stream from the brightest warm opening in the art through drifting
- * haze, and the art's teal screens show a faint rolling scan line and the odd blip. Both find their places in the art
- * itself, so any art works.
+ * A command post's start screen effects ({@link StartScreenContent.Ambience#COMMAND}). The intro draws a star map that
+ * charts itself behind the greeting; the view dives into it and the art boots up out of it as a hologram. Once
+ * settled, soft light shafts stream from the brightest warm opening in the art through drifting haze, and the art's
+ * teal screens show a faint rolling scan line and the odd contact. Both find their places in the art itself, so any
+ * art works.
  *
  * <p>GPU thread only. When a shader does not compile, {@link #ready} is false and the screen shows the art plainly.</p>
  */
 final class StartCommandEffects implements Disposable {
-    /** The fraction of the reveal one tile takes to flip. */
-    static final double FLIP_SPAN = 0.3;
-    /** The fraction of the reveal the tiles' backs take to fade in before the first flips. */
-    static final double BACKS_IN = 0.12;
     /** The masks are this many times smaller than the window; the shaders sample them smoothly. */
     private static final int MASK_DIVISOR = 4;
-    /** Position (3), art or tile coordinates (2), colour (4) and which face shows (1). */
-    private static final int FLOATS = 10;
     private static final int RAY_SAMPLES = 48;
 
     private static final String BATCH_VERTEX = """
@@ -139,42 +132,6 @@ final class StartCommandEffects implements Disposable {
                   blip = contact * 0.9 + ripple * 0.5;
               }
               gl_FragColor = vec4(0.6, 1.0, 0.94, clamp(mask.g * (scan + blip) * u_strength, 0.0, 0.7));
-          }
-          """;
-
-    private static final String FLIP_VERTEX = """
-          attribute vec3 a_position;
-          attribute vec2 a_texCoord0;
-          attribute vec4 a_color;
-          attribute float a_face;
-          uniform mat4 u_projTrans;
-          varying vec2 v_uv;
-          varying vec4 v_color;
-          varying float v_face;
-          void main() {
-              v_uv = a_texCoord0;
-              v_color = a_color;
-              v_face = a_face;
-              gl_Position = u_projTrans * vec4(a_position, 1.0);
-          }
-          """;
-
-    /** A tile's face shows its piece of the art; its back is a dark flap with a lit edge and a centre seam. */
-    private static final String FLIP_FRAGMENT = """
-          uniform sampler2D u_texture;
-          uniform vec3 u_edge;
-          varying vec2 v_uv;
-          varying vec4 v_color;
-          varying float v_face;
-          void main() {
-              if (v_face > 0.5) {
-                  gl_FragColor = vec4(texture2D(u_texture, v_uv).rgb * v_color.rgb, v_color.a);
-              } else {
-                  vec2 d = min(v_uv, 1.0 - v_uv);
-                  float edge = 1.0 - smoothstep(0.0, 0.025, min(d.x, d.y));
-                  float seam = 1.0 - smoothstep(0.0, 0.01, abs(v_uv.y - 0.5));
-                  gl_FragColor = vec4(v_color.rgb + u_edge * (edge * 0.35 + seam * 0.12), v_color.a);
-              }
           }
           """;
 
@@ -283,18 +240,6 @@ final class StartCommandEffects implements Disposable {
           }
           """;
 
-    /** How the art arrives. */
-    enum Intro {
-        /** A departures board whose tiles flip over in perspective. */
-        FLIPBOARD,
-        /** A hologram that flickers on and settles. */
-        HOLOGRAM,
-        /** A star map of jump routes that draws itself, which the view dives through into the art. */
-        STARMAP,
-        /** A split-flap board whose top flaps fall, row by row. */
-        SPLITFLAP
-    }
-
     /** When the star map starts drawing itself, in seconds into the intro, and how long it takes. */
     private static final double MAP_START = 0.3;
     private static final double MAP_BUILD = 2.2;
@@ -310,9 +255,6 @@ final class StartCommandEffects implements Disposable {
     private static final double JUMP = 30;
     /** How far a charted system's haze spreads, in light years. */
     private static final double HAZE = 40;
-    /** The fraction of the reveal one split flap takes to fall. */
-    static final double FLAP_SPAN = 0.3;
-
     /**
      * Star systems at {@code points} (x, y, z each), when each lights from 0 to 1, routes as pairs of indices, each
      * system's colour (r, g, b each, or null for the tint) and the one the view dives into; a {@code planar} map lies
@@ -322,19 +264,14 @@ final class StartCommandEffects implements Disposable {
           boolean planar) { }
 
     private final float[] edge;
-    private final float[] back;
-    private final PerspectiveCamera camera = new PerspectiveCamera();
     private final PerspectiveCamera mapCamera = new PerspectiveCamera();
     private ShaderProgram rays;
     private ShaderProgram monitors;
-    private ShaderProgram flip;
     private ShaderProgram hologram;
     private ShaderProgram stars;
     private Mesh starMesh;
     private StarMap shownMap;
     private StartScreenContent.StarChart chartTried;
-    private Mesh mesh;
-    private float[] vertices = new float[0];
     private Texture mask;
     private boolean hasLight;
     private float lightU;
@@ -342,15 +279,11 @@ final class StartCommandEffects implements Disposable {
     private int bw;
     private int bh;
 
-    /** {@code edge} lights the flaps' edges; {@code base} is the screen's dark field, the flaps' backs a shade above. */
-    StartCommandEffects(java.awt.Color edge, java.awt.Color base) {
+    /** {@code edge} tints the hologram's glow and the star map where it has no colours of its own. */
+    StartCommandEffects(java.awt.Color edge) {
         this.edge = new float[] { edge.getRed() / 255f, edge.getGreen() / 255f, edge.getBlue() / 255f };
-        back = new float[] { Math.min(1, base.getRed() / 255f * 1.6f + 0.04f),
-                             Math.min(1, base.getGreen() / 255f * 1.6f + 0.04f),
-                             Math.min(1, base.getBlue() / 255f * 1.6f + 0.04f) };
         rays = compile(BATCH_VERTEX, RAYS_FRAGMENT);
         monitors = compile(BATCH_VERTEX, MONITORS_FRAGMENT);
-        flip = compile(FLIP_VERTEX, FLIP_FRAGMENT);
         hologram = compile(BATCH_VERTEX, HOLOGRAM_FRAGMENT);
         stars = compile(STARS_VERTEX, STARS_FRAGMENT);
     }
@@ -367,24 +300,14 @@ final class StartCommandEffects implements Disposable {
 
     /** Whether the effects can draw; when not, the screen shows the art plainly. */
     boolean ready() {
-        return rays != null && monitors != null && flip != null && hologram != null
+        return rays != null && monitors != null && hologram != null
               && stars != null;
     }
 
-    /** After the window's size changes: a camera that shows the plane z = 0 pixel for pixel. */
+    /** After the window's size changes. */
     void resize(int width, int height) {
         bw = width;
         bh = height;
-        camera.fieldOfView = 30;
-        camera.viewportWidth = width;
-        camera.viewportHeight = height;
-        float distance = (float) (height / 2.0 / Math.tan(Math.toRadians(camera.fieldOfView / 2)));
-        camera.position.set(width / 2f, height / 2f, distance);
-        camera.lookAt(width / 2f, height / 2f, 0);
-        camera.up.set(0, 1, 0);
-        camera.near = distance / 10;
-        camera.far = distance * 2;
-        camera.update();
         mapCamera.fieldOfView = 50;
         mapCamera.viewportWidth = width;
         mapCamera.viewportHeight = height;
@@ -571,204 +494,6 @@ final class StartCommandEffects implements Disposable {
         float g = ((rgb >> 8) & 0xFF) / 255f;
         float b = (rgb & 0xFF) / 255f;
         return smoothstep(0.06f, 0.2f, Math.min(g, b) - r) * smoothstep(0.25f, 0.55f, Math.max(g, b));
-    }
-
-    /**
-     * A tile's angle about its horizontal axis {@code progress} of the way through its flip: from showing its back (pi)
-     * to flat (0), overshooting a little before it settles.
-     */
-    static double flipAngle(double progress) {
-        double p = Math.max(0, Math.min(1, progress)) - 1;
-        double overshoot = 1.4;
-        double eased = 1 + (overshoot + 1) * p * p * p + overshoot * p * p;
-        return Math.PI * (1 - eased);
-    }
-
-    /**
-     * Draws the departures board {@code progress} of the way through the reveal: {@code backdrop} is the finished screen,
-     * {@code tiles} the tiles' centres in pixels from the top left with when each starts, {@code half} half a tile's
-     * side in pixels.
-     */
-    void drawBoard(Texture backdrop, List<GpuStartScreen.Tile> tiles, float scale, double half, double progress) {
-        ensureCapacity(tiles.size() * 6);
-        float backsAlpha = (float) Math.max(0, Math.min(1, progress / BACKS_IN));
-        float r = (float) (half * scale);
-        int n = 0;
-        for (GpuStartScreen.Tile tile : tiles) {
-            double flipProgress = (progress - BACKS_IN - tile.at()) / FLIP_SPAN;
-            double angle = flipAngle(flipProgress);
-            n = tile(n, (float) (tile.x() * scale), (float) (bh - tile.y() * scale), r, angle, backsAlpha);
-        }
-        renderTiles(backdrop, n);
-    }
-
-    private void ensureCapacity(int vertexCount) {
-        int needed = vertexCount * FLOATS;
-        if (mesh == null || vertices.length < needed) {
-            if (mesh != null) {
-                mesh.dispose();
-            }
-            vertices = new float[needed];
-            mesh = new Mesh(false, vertexCount, 0, VertexAttribute.Position(), VertexAttribute.TexCoords(0),
-                  VertexAttribute.ColorUnpacked(), new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_face"));
-        }
-    }
-
-    private void renderTiles(Texture backdrop, int n) {
-        Gdx.gl.glEnable(GL20.GL_BLEND);
-        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
-        Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
-        Gdx.gl.glDisable(GL20.GL_CULL_FACE);
-        backdrop.bind(0);
-        flip.bind();
-        flip.setUniformMatrix("u_projTrans", camera.combined);
-        flip.setUniformi("u_texture", 0);
-        flip.setUniformf("u_edge", edge[0], edge[1], edge[2]);
-        mesh.setVertices(vertices, 0, n);
-        mesh.render(flip, GL20.GL_TRIANGLES, 0, n / FLOATS);
-    }
-
-    /** Adds one tile turned {@code angle} about its horizontal axis through ({@code x}, {@code y}); returns the end. */
-    private int tile(int n, float x, float y, float r, double angle, float backsAlpha) {
-        float cos = (float) Math.cos(angle);
-        float sin = (float) Math.sin(angle);
-        boolean face = cos >= 0;
-        float light = 0.55f + 0.45f * Math.abs(cos);
-        float[][] corners = { { -r, -r }, { r, -r }, { r, r }, { -r, -r }, { r, r }, { -r, r } };
-        for (float[] corner : corners) {
-            float lx = corner[0];
-            float ly = corner[1];
-            vertices[n++] = x + lx;
-            vertices[n++] = y + ly * cos;
-            vertices[n++] = ly * sin;
-            if (face) {
-                vertices[n++] = (x + lx) / bw;
-                vertices[n++] = 1 - (y + ly) / bh;
-                vertices[n++] = light;
-                vertices[n++] = light;
-                vertices[n++] = light;
-                vertices[n++] = 1;
-                vertices[n++] = 1;
-            } else {
-                vertices[n++] = (lx / r + 1) / 2;
-                vertices[n++] = (ly / r + 1) / 2;
-                vertices[n++] = back[0] * light;
-                vertices[n++] = back[1] * light;
-                vertices[n++] = back[2] * light;
-                vertices[n++] = backsAlpha;
-                vertices[n++] = 0;
-            }
-        }
-        return n;
-    }
-
-    /**
-     * Draws the split-flap board {@code progress} of the way through the reveal: small tiles whose dark top flaps fall
-     * about their middles, row by row, uncovering the art.
-     */
-    void drawSplitFlap(Texture backdrop, double progress) {
-        float side = Math.max(24, bh / 22f);
-        int cols = (int) Math.ceil(bw / side);
-        int rows = (int) Math.ceil(bh / side);
-        ensureCapacity(cols * rows * 18);
-        float backsAlpha = (float) Math.max(0, Math.min(1, progress / BACKS_IN));
-        float r = side / 2;
-        int n = 0;
-        for (int row = 0; row < rows; row++) {
-            for (int col = 0; col < cols; col++) {
-                double fall = (progress - BACKS_IN - flapStart(col, row, cols, rows)) / FLAP_SPAN;
-                n = flap(n, (col + 0.5f) * side, bh - (row + 0.5f) * side, r, fall, backsAlpha);
-            }
-        }
-        renderTiles(backdrop, n);
-    }
-
-    /** When the flap at ({@code col}, {@code row}) starts to fall, as a fraction of the reveal: top rows first. */
-    static double flapStart(int col, int row, int cols, int rows) {
-        double scatter = new Random(col * 73856093L ^ row * 19349663L).nextDouble();
-        double order = (double) row / rows * 0.75 + (double) col / cols * 0.1 + scatter * 0.15;
-        return order * (1 - BACKS_IN - FLAP_SPAN);
-    }
-
-    /**
-     * A split flap's angle about its hinge {@code progress} of the way through its fall: from up (0) to down (pi),
-     * falling faster and faster, with a little bounce where it lands.
-     */
-    static double flapAngle(double progress) {
-        if (progress <= 0) {
-            return 0;
-        }
-        if (progress >= 1) {
-            return Math.PI;
-        }
-        if (progress < 0.75) {
-            double p = progress / 0.75;
-            return Math.PI * p * p;
-        }
-        return Math.PI * (1 - 0.05 * Math.sin((progress - 0.75) / 0.25 * Math.PI));
-    }
-
-    /** Adds one split-flap tile centred on ({@code x}, {@code y}), {@code fall} of the way through its fall. */
-    private int flap(int n, float x, float y, float r, double fall, float backsAlpha) {
-        if (fall >= 1) {
-            return art(n, x - r, y - r, x + r, y + r, 1);
-        }
-        int at = n;
-        if (fall > 0) {
-            at = art(at, x - r, y, x + r, y + r, 1);
-        } else {
-            at = dark(at, x - r, y, x + r, y + r, 0.5f, 1, 1, backsAlpha);
-        }
-        at = dark(at, x - r, y - r, x + r, y, 0, 0.5f, 1, backsAlpha);
-        if (fall <= 0) {
-            return at;
-        }
-        double angle = flapAngle(fall);
-        float cos = (float) Math.cos(angle);
-        float sin = (float) Math.sin(angle);
-        float light = 0.55f + 0.45f * Math.abs(cos);
-        float tipY = y + r * cos;
-        float tipZ = r * sin;
-        float[] position = { x - r, y, 0, x + r, y, 0, x + r, tipY, tipZ, x - r, tipY, tipZ };
-        if (cos >= 0) {
-            float[] uv = { 0, 0.5f, 1, 0.5f, 1, 1, 0, 1 };
-            return quad(at, position, uv, back[0] * light, back[1] * light, back[2] * light, backsAlpha, 0);
-        }
-        // Its back is the art's bottom half, hanging from the hinge
-        float[] uv = { (x - r) / bw, 1 - y / bh, (x + r) / bw, 1 - y / bh, (x + r) / bw, 1 - (y - r) / bh,
-                       (x - r) / bw, 1 - (y - r) / bh };
-        return quad(at, position, uv, light, light, light, 1, 1);
-    }
-
-    /** Adds the art flat between ({@code x0}, {@code y0}) and ({@code x1}, {@code y1}), in pixels from the bottom. */
-    private int art(int n, float x0, float y0, float x1, float y1, float light) {
-        float[] position = { x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0 };
-        float[] uv = { x0 / bw, 1 - y0 / bh, x1 / bw, 1 - y0 / bh, x1 / bw, 1 - y1 / bh, x0 / bw, 1 - y1 / bh };
-        return quad(n, position, uv, light, light, light, 1, 1);
-    }
-
-    /** Adds a dark flap flat, with its own coordinates from {@code v0} to {@code v1} up it. */
-    private int dark(int n, float x0, float y0, float x1, float y1, float v0, float v1, float light, float alpha) {
-        float[] position = { x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0 };
-        float[] uv = { 0, v0, 1, v0, 1, v1, 0, v1 };
-        return quad(n, position, uv, back[0] * light, back[1] * light, back[2] * light, alpha, 0);
-    }
-
-    /** Adds a quad from its four corners, anticlockwise from the bottom left, as two triangles. */
-    private int quad(int n, float[] position, float[] uv, float r, float g, float b, float a, float face) {
-        for (int corner : new int[] { 0, 1, 2, 0, 2, 3 }) {
-            vertices[n++] = position[corner * 3];
-            vertices[n++] = position[corner * 3 + 1];
-            vertices[n++] = position[corner * 3 + 2];
-            vertices[n++] = uv[corner * 2];
-            vertices[n++] = uv[corner * 2 + 1];
-            vertices[n++] = r;
-            vertices[n++] = g;
-            vertices[n++] = b;
-            vertices[n++] = a;
-            vertices[n++] = face;
-        }
-        return n;
     }
 
     /** Draws the art booting up as a hologram, {@code progress} of the way through the reveal. */
@@ -1178,7 +903,7 @@ final class StartCommandEffects implements Disposable {
 
     @Override
     public void dispose() {
-        for (Disposable disposable : new Disposable[] { rays, monitors, flip, hologram, stars, starMesh, mesh,
+        for (Disposable disposable : new Disposable[] { rays, monitors, hologram, stars, starMesh,
                                                         mask }) {
             if (disposable != null) {
                 disposable.dispose();
@@ -1186,13 +911,11 @@ final class StartCommandEffects implements Disposable {
         }
         rays = null;
         monitors = null;
-        flip = null;
         hologram = null;
         stars = null;
         starMesh = null;
         shownMap = null;
         chartTried = null;
-        mesh = null;
         mask = null;
     }
 }

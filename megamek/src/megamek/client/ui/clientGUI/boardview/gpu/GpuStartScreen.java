@@ -81,8 +81,9 @@ import megamek.logging.MMLogger;
  * sliding in at the right with the version at the top left and a tip at the bottom left. Pages such as Host and
  * Connect replace the menu in the same column; Esc goes back. The art and its overlays are drawn once with Java2D and
  * uploaded; the GPU only animates on top of them. The content's {@link StartScreenContent.Ambience} picks the reveal,
- * the grid and the ambience: hexes and rising embers for a battle; for a command post, a departures board of tiles
- * flipping over in perspective, then light shafts, live screens and drifting dust ({@link StartCommandEffects}). Once
+ * the grid and the ambience: hexes and rising embers for a battle; for a command post, a star map the view dives
+ * through before the art boots up as a hologram, then light shafts, live screens and drifting dust
+ * ({@link StartCommandEffects}). Once
  * the intro has played, only the slow ambience moves, at 30 frames a second.
  */
 final class GpuStartScreen extends ApplicationAdapter {
@@ -123,8 +124,6 @@ final class GpuStartScreen extends ApplicationAdapter {
     private final boolean command;
     /** A command post's flipboard, light and screens; null for a battle or when its shaders failed. */
     private StartCommandEffects effects;
-    /** How a command post's art arrives; keys 1 to 4 pick one and play the intro again. */
-    private StartCommandEffects.Intro intro = StartCommandEffects.Intro.FLIPBOARD;
     /** The content's star chart for the star map intro, once it has come. */
     private volatile StartScreenContent.StarChart starChart;
     private final GUIPreferences preferences;
@@ -274,7 +273,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             particles.add(newParticle(true));
         }
         if (command) {
-            effects = new StartCommandEffects(mint, base);
+            effects = new StartCommandEffects(mint);
             if (!effects.ready()) {
                 effects.dispose();
                 effects = null;
@@ -887,13 +886,11 @@ final class GpuStartScreen extends ApplicationAdapter {
                             showPage(parent(page));
                         }
                     }
-                    case Keys.NUM_1, Keys.NUMPAD_1, Keys.NUM_2, Keys.NUMPAD_2, Keys.NUM_3, Keys.NUMPAD_3, Keys.NUM_4,
-                         Keys.NUMPAD_4 -> {
-                        int choice = keycode >= Keys.NUMPAD_0 ? keycode - Keys.NUMPAD_1 : keycode - Keys.NUM_1;
-                        if (page != Page.MAIN || !motion || restoreStart != null || (!command && choice > 0)) {
+                    case Keys.NUM_1, Keys.NUMPAD_1 -> {
+                        if (!preferences.getBoolean(GUIPreferences.START_SCREEN_REPLAY_KEY) || page != Page.MAIN
+                              || !motion || restoreStart != null) {
                             return false;
                         }
-                        intro = StartCommandEffects.Intro.values()[choice];
                         replay();
                     }
                     default -> {
@@ -1103,19 +1100,12 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     private void layoutTiles() {
         tiles = new ArrayList<>();
-        Random scatter = new Random(11);
         if (command) {
-            // A departures board's flaps, turning over from the top left
-            double side = Math.max(40, h / 12.0);
-            tileR = side / 2;
-            for (double cy = tileR; cy < h + tileR; cy += side) {
-                for (double cx = tileR; cx < w + tileR; cx += side) {
-                    double diagonal = (cx / w + cy / h) / 2;
-                    tiles.add(new Tile(cx, cy, (diagonal * 0.75 + scatter.nextDouble() * 0.25) * 0.58));
-                }
-            }
+            // The plotting grid's squares
+            tileR = Math.max(40, h / 12.0) / 2;
             return;
         }
+        Random scatter = new Random(11);
         tileR = Math.max(28, h / 16.0);
         double rowHeight = Math.sqrt(3) * tileR;
         int col = 0;
@@ -1377,7 +1367,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
         batch.setProjectionMatrix(pixels);
         shapes.setProjectionMatrix(pixels);
-        if (effects != null && intro == StartCommandEffects.Intro.STARMAP && t < StartTimeline.REVEAL_END) {
+        if (effects != null && t < StartTimeline.REVEAL_END) {
             effects.drawStarMap(t, starChart);
         }
         drawGreeting(t);
@@ -1404,13 +1394,9 @@ final class GpuStartScreen extends ApplicationAdapter {
             if (t >= re || (effects == null && t >= rs)) {
                 drawArt();
             } else if (t >= rs) {
+                // The art boots up as a hologram once the view has dived into the star map
                 double progress = StartTimeline.revealProgress(t);
-                switch (intro) {
-                    case FLIPBOARD -> effects.drawBoard(backdrop, tiles, scale, tileR, progress);
-                    case HOLOGRAM -> effects.drawHologram(batch, backdrop, progress, (float) t);
-                    case STARMAP -> effects.drawHologram(batch, backdrop, (progress - 0.35) / 0.65, (float) t);
-                    case SPLITFLAP -> effects.drawSplitFlap(backdrop, progress);
-                }
+                effects.drawHologram(batch, backdrop, (progress - 0.35) / 0.65, (float) t);
             }
             return;
         }
