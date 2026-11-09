@@ -85,6 +85,48 @@ class StartCommandEffectsTest {
               "the screens scan at different times");
     }
 
+    @Test
+    void aSplitFlapFallsFromUpToDownAndBouncesWhereItLands() {
+        assertEquals(0, StartCommandEffects.flapAngle(-1), 1e-9, "waiting flaps stand up");
+        assertEquals(Math.PI, StartCommandEffects.flapAngle(0.75), 1e-9, "the flap lands");
+        assertTrue(StartCommandEffects.flapAngle(0.85) < Math.PI, "and bounces");
+        assertEquals(Math.PI, StartCommandEffects.flapAngle(1), 1e-9, "landed flaps hang down");
+        assertTrue(StartCommandEffects.flapAngle(0.2) < StartCommandEffects.flapAngle(0.5));
+    }
+
+    @Test
+    void theFlapsFallTopRowsFirstAndAllInTime() {
+        int cols = 40;
+        int rows = 22;
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < cols; col++) {
+                double start = StartCommandEffects.flapStart(col, row, cols, rows);
+                assertTrue(start >= 0 && start + StartCommandEffects.BACKS_IN + StartCommandEffects.FLAP_SPAN <= 1,
+                      "each flap lands within the reveal");
+            }
+        }
+        assertTrue(StartCommandEffects.flapStart(0, 0, cols, rows) < StartCommandEffects.flapStart(0, rows - 1, cols,
+              rows), "the top row falls before the bottom row");
+    }
+
+    @Test
+    void theStarMapIsJoinedAndLightsOutwardsFromItsHub() {
+        StartCommandEffects.StarMap map = StartCommandEffects.starMap(3025L, 150);
+        float[] born = map.born();
+        int[] routes = map.routes();
+        assertEquals(450, map.points().length);
+        assertEquals(0, born[0], "the hub lights first");
+        for (int i = 1; i < born.length; i++) {
+            assertTrue(born[i] > 0 && born[i] < 1, "every system lights during the build");
+            boolean reached = false;
+            for (int k = 0; k < routes.length; k += 2) {
+                int other = routes[k] == i ? routes[k + 1] : routes[k + 1] == i ? routes[k] : -1;
+                reached |= other >= 0 && born[other] < born[i];
+            }
+            assertTrue(reached, "system " + i + " is reached by a route from one lit before it");
+        }
+    }
+
     private static void fill(float[] light, int width, int x0, int x1, int y0, int y1) {
         for (int y = y0; y < y1; y++) {
             for (int x = x0; x < x1; x++) {

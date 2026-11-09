@@ -123,6 +123,8 @@ final class GpuStartScreen extends ApplicationAdapter {
     private final boolean command;
     /** A command post's flipboard, light and screens; null for a battle or when its shaders failed. */
     private StartCommandEffects effects;
+    /** How a command post's art arrives; keys 1 to 4 pick one and play the intro again. */
+    private StartCommandEffects.Intro intro = StartCommandEffects.Intro.FLIPBOARD;
     private final GUIPreferences preferences;
     private final DesignTokens tokens = DesignTokens.shipped();
     private final java.awt.Color base = awtColor("surface.base");
@@ -881,10 +883,13 @@ final class GpuStartScreen extends ApplicationAdapter {
                             showPage(parent(page));
                         }
                     }
-                    case Keys.NUM_1, Keys.NUMPAD_1 -> {
-                        if (page != Page.MAIN || !motion || restoreStart != null) {
+                    case Keys.NUM_1, Keys.NUMPAD_1, Keys.NUM_2, Keys.NUMPAD_2, Keys.NUM_3, Keys.NUMPAD_3, Keys.NUM_4,
+                         Keys.NUMPAD_4 -> {
+                        int choice = keycode >= Keys.NUMPAD_0 ? keycode - Keys.NUMPAD_1 : keycode - Keys.NUM_1;
+                        if (page != Page.MAIN || !motion || restoreStart != null || (!command && choice > 0)) {
                             return false;
                         }
+                        intro = StartCommandEffects.Intro.values()[choice];
                         replay();
                     }
                     default -> {
@@ -1355,6 +1360,9 @@ final class GpuStartScreen extends ApplicationAdapter {
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
         batch.setProjectionMatrix(pixels);
         shapes.setProjectionMatrix(pixels);
+        if (effects != null && intro == StartCommandEffects.Intro.STARMAP && t < StartTimeline.REVEAL_END) {
+            effects.drawStarMap(t);
+        }
         drawGreeting(t);
         drawReveal(t);
     }
@@ -1379,7 +1387,13 @@ final class GpuStartScreen extends ApplicationAdapter {
             if (t >= re || (effects == null && t >= rs)) {
                 drawArt();
             } else if (t >= rs) {
-                effects.drawBoard(backdrop, tiles, scale, tileR, StartTimeline.revealProgress(t));
+                double progress = StartTimeline.revealProgress(t);
+                switch (intro) {
+                    case FLIPBOARD -> effects.drawBoard(backdrop, tiles, scale, tileR, progress);
+                    case HOLOGRAM -> effects.drawHologram(batch, backdrop, progress, (float) t);
+                    case STARMAP -> effects.drawArrival(batch, backdrop, progress);
+                    case SPLITFLAP -> effects.drawSplitFlap(backdrop, progress);
+                }
             }
             return;
         }
