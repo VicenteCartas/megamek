@@ -86,6 +86,14 @@ final class GpuGlsl {
     private static final int[][] CONTEXTS = { { 4, 6 }, { 4, 5 }, { 4, 3 }, { 4, 1 }, { 4, 0 }, { 3, 3 } };
     private static int version = MINIMUM;
     private static String context = "OpenGL 3.3";
+    /** The board's context version, read by {@link #detect()}. */
+    private static int contextMajor = 3, contextMinor = 3;
+    /**
+     * Whether this process is the shader warm-up's (GpuShaderWarmup): it keeps only binaries of programs linked inside a
+     * preparation, as the game's terrain programs are (without the parallel compiler on a context that never draws); what
+     * the game links outside one, on its window's context, it keeps itself (Intel's window kind, GpuProgramCache).
+     */
+    private static boolean warmup;
     /** The graphics card of the board's context, as its driver names it; empty until the context exists. */
     private static String renderer = "";
     /** The newest context this computer creates, found once per run. */
@@ -307,8 +315,10 @@ final class GpuGlsl {
             helperAllowed = !sharedContext;
             worker = sharedContext || !(khr || arb) ? new SharedCompiler() : null;
             if (worker == null) {
-                if (khr) { KHRParallelShaderCompile.glMaxShaderCompilerThreadsKHR(-1); }
-                else { ARBParallelShaderCompile.glMaxShaderCompilerThreadsARB(-1); }
+                // The driver's choice; the warm-up's process keeps to its few (GpuShaderWarmup.THREADS).
+                int threads = warmup ? GpuShaderWarmup.THREADS : -1;
+                if (khr) { KHRParallelShaderCompile.glMaxShaderCompilerThreadsKHR(threads); }
+                else { ARBParallelShaderCompile.glMaxShaderCompilerThreadsARB(threads); }
             }
         }
 
@@ -699,8 +709,10 @@ final class GpuGlsl {
                 clearFailedLink(gl);
                 throw new GdxRuntimeException(error);
             }
-            // The first successful check keeps the program: a worker's own, otherwise the render thread's adoption.
-            if (cache != null && !cached) {
+            // The first successful check keeps the program: a worker's own, otherwise the render thread's adoption. The
+            // warm-up's links outside a preparation are those the game links on its window's context, whose binaries are
+            // Intel's window kind (GpuProgramCache's KEY_SALT): those the game keeps itself.
+            if (cache != null && !cached && !(warmup && stalls)) {
                 cached = true;
                 cache.store(program, cacheKey);
                 timing("binary-stored");
@@ -879,6 +891,8 @@ final class GpuGlsl {
         int major = GL11.glGetInteger(GL30.GL_MAJOR_VERSION), minor = GL11.glGetInteger(GL30.GL_MINOR_VERSION);
         int chosen = select(major, minor, Integer.getInteger(CAP_PROPERTY, MAXIMUM));
         use(chosen);
+        contextMajor = major;
+        contextMinor = minor;
         context = String.format(Locale.ROOT, "OpenGL %d.%d", major, minor);
         renderer = GL11.glGetString(GL11.GL_RENDERER);
         LOGGER.info("3D board: {} on {}, shaders compiled as GLSL {}", GL11.glGetString(GL11.GL_VERSION), renderer,
@@ -898,6 +912,21 @@ final class GpuGlsl {
         intelCacheFull = SharedLibraryLoader.os == Os.Windows && intel
               && GpuProgramCache.full(GpuProgramCache.INTEL_CACHE, GpuProgramCache.INTEL_CACHE_CAP);
     }
+
+    /**
+     * The shader warm-up's process (GpuShaderWarmup), on its render thread once its context exists: the game's shading
+     * language and program cache, which it only adds to, and no link helper, since it is a process of its own.
+     */
+    static void detectWarmup(java.nio.file.Path cacheDirectory, int glsl) {
+        use(glsl);
+        warmup = true;
+        renderer = GL11.glGetString(GL11.GL_RENDERER);
+        programCache = GpuProgramCache.open(cacheDirectory, false);
+        linkHelper = null;
+    }
+
+    /** The board's context version, {major, minor}; 3.3 before {@link #detect()}. */
+    static int[] contextVersion() { return new int[] { contextMajor, contextMinor }; }
 
     /** Whether Intel's own shader cache has filled up; false on other drivers and systems. */
     static boolean intelCacheFull() { return intelCacheFull; }

@@ -1205,6 +1205,8 @@ final class GpuTerrain implements Disposable {
     private boolean combatScars = GpuGroundDamage.COMBAT_SCARS;
     /** A board the editor changes, and its samples: any surface may appear, so programs keep the biome stage. */
     private boolean editable;
+    /** The shader warm-up's choice of the biome stage and crystal transmission (setLightingStages); null follows the board. */
+    private Boolean biomeStage, crystalStage;
     private final GpuPropBatch propBatch = new GpuPropBatch();
     private final GpuFungus fungus = new GpuFungus();
     private final GpuGeysers geysers = new GpuGeysers();
@@ -2339,7 +2341,7 @@ final class GpuTerrain implements Disposable {
             crystals = scene.tiles().stream().flatMap(tile -> tile.features().stream())
                   .anyMatch(feature -> feature.asset().startsWith("crystal/"));
         }
-        environmentLighting.crystals = editable || crystals ? crystalTransmission : null;
+        environmentLighting.crystals = (crystalStage != null ? crystalStage : editable || crystals) ? crystalTransmission : null;
         if (lifts != null && !lifts.ending) { scene = scene.withTiles(lifts.lowered(scene)); }
         boolean weightless = gravity == 0;
         if (vacuum || weightless) {
@@ -2391,18 +2393,23 @@ final class GpuTerrain implements Disposable {
             }
             requested = new Request(meshGeneration, scene, settings, columns, tessellation);
             // Before anything prepares for it: whether its programs compile the biome stage.
-            GpuBiomeSurface.mark(environment, editable || biomesActive(scene));
+            GpuBiomeSurface.mark(environment, biomeStage(scene));
             retiredChunks.addAll(detailCache.values());
             detailCache.clear();
         } else if (requested == null) {
             try (TerrainSettings.Scope ignored = TerrainSettings.use(settings)) {
                 tiles = scene.tiles();
                 coverScene = scene;
-                GpuBiomeSurface.mark(environment, editable || biomesActive(scene));
+                GpuBiomeSurface.mark(environment, biomeStage(scene));
                 installedSettings = settings;
                 if (!Objects.equals(light, scene.light())) { updateLight(scene.light()); }
             }
         }
+    }
+
+    /** Whether this board's programs compile the biome stage: the warm-up's choice, else the editor's or the board's. */
+    private boolean biomeStage(BoardScene scene) {
+        return biomeStage != null ? biomeStage : editable || biomesActive(scene);
     }
 
     /** GpuBiomeSurface.active for these tiles, asked every frame of a list that changes only with the scene. */
@@ -2465,7 +2472,8 @@ final class GpuTerrain implements Disposable {
     /** The loading stage (ready, buildProgress) waits for a session's family programs; busy does not, nor tests. */
     private void startFamilySession() { familySession = true; }
 
-    private boolean familiesPending() { return familySession && familyPrograms.pending() > 0; }
+    /** Whether the load's family programs still build: the loading stage waits for them (ready), busy does not. */
+    boolean familiesPending() { return familySession && familyPrograms.pending() > 0; }
 
     /** Family programs build after the session's chunks and generic programs (refine). */
     private boolean buildingFamilies() {
@@ -2607,6 +2615,15 @@ final class GpuTerrain implements Disposable {
 
     /** Before the board builds: whether the editor changes it (editable). */
     void setEditable(boolean editing) { editable = editing; }
+
+    /**
+     * The shader warm-up (GpuShaderWarmup) compiles one sample board with the biome stage and crystal transmission or
+     * without them, whatever the board holds, for each lighting configuration a game can have. Null follows the board.
+     */
+    void setLightingStages(Boolean biomes, Boolean crystals) {
+        biomeStage = biomes;
+        crystalStage = crystals;
+    }
 
     private static boolean sameBoard(BoardScene a, BoardScene b) {
         return a.boardId() == b.boardId() && a.width() == b.width() && a.height() == b.height();

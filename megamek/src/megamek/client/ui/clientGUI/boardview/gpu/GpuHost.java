@@ -2,6 +2,8 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.Rectangle;
+import java.nio.ByteBuffer;
+import java.nio.IntBuffer;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationListener;
@@ -14,11 +16,20 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
+import com.badlogic.gdx.scenes.scene2d.utils.TransformDrawable;
+import com.badlogic.gdx.utils.BufferUtils;
+import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.gdx.DisplayScale;
+import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.ScreenFit;
 import megamek.logging.MMLogger;
 import org.lwjgl.glfw.GLFW;
+import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL30;
 
 /**
  * MegaMek's one native (libGDX) window. It runs one scene at a time (the start screen, a game's board, the map
@@ -55,6 +66,12 @@ public final class GpuHost {
         /** GPU thread: the window lost the focus. */
         default void focusLost() { }
 
+        /** Whether the scene is a board view (a game, the editor, a map preview): the shader warm-up waits meanwhile. */
+        default boolean board() { return false; }
+
+        /** GPU thread: whether the scene shows its own marker while programs link (the editor's), so the window's doesn't. */
+        default boolean marksLinks() { return false; }
+
         /**
          * Any thread: the scene has ended, its listener disposed if it was ever created; {@code failure} when it
          * ended because it failed, null otherwise. Runs once, and without OpenGL.
@@ -82,6 +99,8 @@ public final class GpuHost {
     private static ApplicationListener listener;
     /** The board skin every scene of the window shares ({@link #skin}); disposed with the window. */
     private static GpuBoardSkin skin;
+    /** Shows over every scene while programs link in the background; made when it first shows. */
+    private static LinkMarker marker;
     private static GpuWindowBounds startBounds;
     private static GpuWindowBounds normalBounds;
     private static GpuWindowBounds publishedBounds;
@@ -144,6 +163,10 @@ public final class GpuHost {
      * now. A scene asked for but not shown yet ends without starting.
      */
     static void show(Scene scene) {
+        if (scene.board()) {
+            // Its board's links come first: the warm-up ends now, not when the scene starts.
+            GpuShaderWarmup.showing(true);
+        }
         Scene replaced;
         synchronized (LOCK) {
             replaced = requested;
@@ -286,6 +309,7 @@ public final class GpuHost {
                 public void created(Lwjgl3Window window) {
                     everOpened = true;
                     GpuGlsl.detect();
+                    GpuShaderWarmup.open();
                     GpuNativeDialogOwner.Win32.useWindowIconsForClass(window.getWindowHandle());
                     fitOnScreen(window);
                     windowHandle = window.getWindowHandle();
@@ -338,6 +362,9 @@ public final class GpuHost {
         listener = null;
         // Disposed by Root.dispose, unless the window failed: its textures then went with the OpenGL context
         skin = null;
+        marker = null;
+        // No menu shows now (MekHQ goes on without the window): nothing warms until a window opens again.
+        GpuShaderWarmup.close();
         Scene shown;
         Scene waiting;
         synchronized (LOCK) {
@@ -459,6 +486,8 @@ public final class GpuHost {
         @Override
         public void create() {
             application = (Lwjgl3Application) Gdx.app;
+            // Its one program links as the window opens, never beside a board's frames.
+            marker = new LinkMarker();
         }
 
         @Override
@@ -502,11 +531,14 @@ public final class GpuHost {
                 Gdx.gl.glClearColor(.045f, .065f, .075f, 1);
                 Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
             }
+            GpuShaderWarmup.frame();
+            marker.render(current);
             guardInput();
         }
 
         private void start(Scene scene) {
             LOGGER.info("Native window scene starts: {}", scene.title());
+            GpuShaderWarmup.showing(scene.board());
             resetGl();
             Gdx.input.setInputProcessor(null);
             sceneInput = null;
@@ -595,6 +627,10 @@ public final class GpuHost {
                 skin.dispose();
                 skin = null;
             }
+            if (marker != null) {
+                marker.dispose();
+                marker = null;
+            }
         }
 
         /** Passes input to the scene, whichever processor it set last. */
@@ -657,6 +693,98 @@ public final class GpuHost {
                 InputProcessor target = target();
                 return target != null && target.scrolled(amountX, amountY);
             }
+        }
+    }
+
+    /**
+     * The window's marker while programs link in the background (the shader warm-up, the link helper, a board's links
+     * deferred beside its frames): the editor's spinner (GpuBoardEditor), translucent in the window's corner over any
+     * scene. It takes no input; the editor shows its own in its place.
+     */
+    private static final class LinkMarker implements Disposable {
+        /** Stage units, and the editor's marker's timing: quick work never flashes it. */
+        private static final float SIZE = 24, MARGIN = 12, SHOW = .3f, HIDE = .25f, OPACITY = .6f;
+        private final GpuDisplayScale displayScale = new GpuDisplayScale();
+        private final IntBuffer viewport = BufferUtils.newIntBuffer(16);
+        private final ByteBuffer depthMask = BufferUtils.newByteBuffer(16);
+        private static final int[] CAPABILITIES = { GL20.GL_DEPTH_TEST, GL20.GL_SCISSOR_TEST, GL20.GL_STENCIL_TEST,
+              GL20.GL_BLEND, GpuLinearOverlay.FRAMEBUFFER_SRGB };
+        private final boolean[] enabled = new boolean[CAPABILITIES.length];
+        private final SpriteBatch batch = new SpriteBatch(1);
+        private int unlinked = GpuShaderProvider.unlinkedDraws();
+        private float busyFor, idleFor, angle;
+        /** It failed once: the scenes go on without it. */
+        private boolean broken;
+
+        /** GPU thread, after the scene's frame. */
+        void render(Scene scene) {
+            float delta = Gdx.graphics.getDeltaTime();
+            int skipped = GpuShaderProvider.unlinkedDraws();
+            GpuLinkHelper helper = GpuGlsl.linkHelper;
+            boolean busy = skipped != unlinked || GpuShaderWarmup.busy() || helper != null && helper.busy();
+            unlinked = skipped;
+            if (busy) {
+                busyFor += delta;
+                idleFor = 0;
+            } else if ((idleFor += delta) > HIDE) {
+                busyFor = 0;
+            }
+            angle = (angle - 360 * delta) % 360;
+            if (broken || busyFor <= SHOW || scene != null && scene.marksLinks()) {
+                return;
+            }
+            try {
+                // The scenes' own skin as it is: skin() would replace one from another palette under the scene.
+                GpuBoardSkin shared = skin;
+                if (shared != null && shared.skin.has("icon-progress", Drawable.class)
+                      && shared.skin.getDrawable("icon-progress") instanceof TransformDrawable icon) {
+                    draw(icon);
+                }
+            } catch (RuntimeException | LinkageError failure) {
+                broken = true;
+                LOGGER.warn(failure, "The window's shader marker failed; it stays hidden");
+            }
+        }
+
+        /** Over whatever the scene left bound and enabled, which it gets back. */
+        private void draw(TransformDrawable icon) {
+            GL20 gl = Gdx.gl;
+            int drawing = GL11.glGetInteger(GL30.GL_DRAW_FRAMEBUFFER_BINDING);
+            int reading = GL11.glGetInteger(GL30.GL_READ_FRAMEBUFFER_BINDING);
+            gl.glGetIntegerv(GL20.GL_VIEWPORT, viewport);
+            gl.glGetBooleanv(GL20.GL_DEPTH_WRITEMASK, depthMask);
+            for (int i = 0; i < CAPABILITIES.length; i++) {
+                enabled[i] = gl.glIsEnabled(CAPABILITIES[i]);
+                gl.glDisable(CAPABILITIES[i]);
+            }
+            try {
+                gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, 0);
+                gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+                float width = Gdx.graphics.getWidth(), height = Gdx.graphics.getHeight();
+                float size = SIZE * DisplayScale.read(1, displayScale.contentScale()), margin = MARGIN * size / SIZE;
+                batch.getProjectionMatrix().setToOrtho2D(0, 0, width, height);
+                batch.begin();
+                batch.setColor(UiTheme.MUTED.r, UiTheme.MUTED.g, UiTheme.MUTED.b, OPACITY);
+                icon.draw(batch, width - margin - size, margin, size / 2, size / 2, size, size, 1, 1, angle);
+                batch.end();
+            } finally {
+                for (int i = 0; i < CAPABILITIES.length; i++) {
+                    if (enabled[i]) {
+                        gl.glEnable(CAPABILITIES[i]);
+                    } else {
+                        gl.glDisable(CAPABILITIES[i]);
+                    }
+                }
+                gl.glDepthMask(depthMask.get(0) != 0);
+                gl.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, drawing);
+                gl.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, reading);
+                gl.glViewport(viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3));
+            }
+        }
+
+        @Override
+        public void dispose() {
+            batch.dispose();
         }
     }
 

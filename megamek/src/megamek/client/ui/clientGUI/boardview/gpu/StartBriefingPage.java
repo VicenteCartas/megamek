@@ -122,6 +122,9 @@ final class StartBriefingPage {
         try {
             Scenario scenario = new ScenarioLoader(file).load();
             IGame game = scenario.createGame();
+            // The scenario's board: the shader warm-up prepares its programs while the briefing shows.
+            GpuShaderWarmup.prepare(game.getBoard(), false,
+                  game instanceof PlanetaryConditionsUsing conditions ? conditions.getPlanetaryConditions() : null);
             List<Player> players = game.getPlayersList();
             colourSides(players);
             return new Briefing(scenario, game, players.stream().map(StartBriefingPage::swatch).toList(), null);

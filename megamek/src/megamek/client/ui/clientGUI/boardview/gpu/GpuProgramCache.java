@@ -5,10 +5,12 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.DirectoryStream;
+import java.nio.file.FileVisitOption;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
@@ -19,6 +21,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -40,9 +43,9 @@ import org.lwjgl.system.MemoryUtil;
  * SHA-256 of the driver (vendor, renderer and version string, which carries the build) and both complete stages, and
  * holds the driver's binary format, a CRC-32C and the binary. A damaged entry, or one the driver rejects, is deleted
  * and the program compiles from source. A driver without binary formats (macOS may report none) caches nothing.
- * Opening the cache, and every 256 MB it writes, deletes entries unused for 30 days, then the least recently used
- * beyond 1 GB, the size of NVIDIA's and Mesa's own caches: one board takes about 55 MB per lighting configuration on
- * NVIDIA.
+ * Opening the cache, and every 512 MB it writes, deletes entries unused for 30 days, then the least recently used
+ * beyond 2 GB: the shader warm-up's sample boards (GpuShaderWarmup) fill up to half, and one board takes about 55 MB
+ * per lighting configuration on NVIDIA.
  */
 final class GpuProgramCache {
     private static final MMLogger LOGGER = MMLogger.create(GpuProgramCache.class);
@@ -50,7 +53,7 @@ final class GpuProgramCache {
     static final String PROPERTY = "megamek.gpu.programCache";
     /** {@code -Dmegamek.gpu.programCacheDir=...} keeps the entries elsewhere, so test runs never evict the player's. */
     static final String DIRECTORY_PROPERTY = "megamek.gpu.programCacheDir";
-    static final long CAPACITY = 1L << 30;
+    static final long CAPACITY = 2L << 30;
     /**
      * Part of every key. Without the parallel compiler, programs used to link on the render thread after it drew to the
      * window, and Intel's binaries keep that variant, which compiles again at its first scene draw. Programs now link
@@ -272,6 +275,9 @@ final class GpuProgramCache {
         }
     }
 
+    /** Bytes written since the directory was last pruned: all of them in a process that never prunes (GpuShaderWarmup). */
+    long unpruned() { return unpruned.get(); }
+
     /** Bytes written to the directory, by this process or for it (GpuLinkHelper): a long session prunes again. */
     void added(long bytes) {
         if (unpruned.addAndGet(bytes) > CAPACITY / 4 && pruning) {
@@ -309,19 +315,28 @@ final class GpuProgramCache {
     static void prune(Path directory, Instant now, Duration unused, long capacity) throws IOException {
         record Entry(Path file, Instant used, long size) { }
         List<Entry> entries = new ArrayList<>();
-        try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) {
-            for (Path file : files) {
+        // Times and sizes as the listing gives them: reading each file's own took five times as long on Windows, on the
+        // window's thread at launch (130 ms for 6,400 entries). A linked folder is followed, as a listing would.
+        Files.walkFileTree(directory, EnumSet.of(FileVisitOption.FOLLOW_LINKS), 1, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
                 String name = file.getFileName().toString();
-                var attributes = Files.readAttributes(file, BasicFileAttributes.class);
                 Instant used = attributes.lastModifiedTime().toInstant();
-                if (!attributes.isRegularFile()) { continue; }
+                if (!attributes.isRegularFile()) { return FileVisitResult.CONTINUE; }
                 if (ENTRY.matcher(name).matches()) {
                     entries.add(new Entry(file, used, attributes.size()));
                 } else if (PARTIAL.matcher(name).matches() && used.isBefore(now.minus(ABANDONED))) {
                     Files.deleteIfExists(file);
                 }
+                return FileVisitResult.CONTINUE;
             }
-        }
+
+            @Override
+            public FileVisitResult visitFileFailed(Path file, IOException gone) {
+                // Deleted meanwhile, by another MegaMek's pruning say.
+                return FileVisitResult.CONTINUE;
+            }
+        });
         entries.sort(Comparator.comparing(Entry::used).reversed());
         long kept = 0;
         for (Entry entry : entries) {

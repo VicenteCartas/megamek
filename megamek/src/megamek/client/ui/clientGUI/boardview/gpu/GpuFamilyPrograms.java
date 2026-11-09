@@ -65,6 +65,8 @@ final class GpuFamilyPrograms {
      * 1.1 to 4 s at Medium, 1.6 to 5.6 s at High. The link helper's links aren't counted: they hold nothing.
      */
     static final int FRESH = 4;
+    /** The share in force: the shader warm-up's process (GpuShaderWarmup), whose links no frame waits for, lifts it. */
+    static int fresh = FRESH;
 
     /**
      * Marks a material drawn by its family program. It is part of the material's mask, so the comparisons that already
@@ -304,7 +306,7 @@ final class GpuFamilyPrograms {
         int started = preparation.freshLinks();
         try {
             Runnable ask = () -> variant.sample.shader = provider.getShader(variant.sample);
-            if (!(background ? preparation.runOptional(ask) : preparation.run(ask, freshLinks < FRESH))) {
+            if (!(background ? preparation.runOptional(ask) : preparation.run(ask, freshLinks < fresh))) {
                 variant.linkKey = preparation.lastKey();
                 return null;
             }

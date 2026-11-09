@@ -803,6 +803,17 @@ public final class GpuBoardWindow {
         }
 
         @Override
+        public boolean board() {
+            return true;
+        }
+
+        @Override
+        public boolean marksLinks() {
+            // The editor shows its own beside its issues (GpuBoardEditor).
+            return editor != null;
+        }
+
+        @Override
         public void started(long windowHandle) {
             // A preview's owner stays visible, so its dialogs keep floating instead of moving to this window.
             if (!preview) {
@@ -909,6 +920,10 @@ public final class GpuBoardWindow {
                         offersLegacy2D ? this::requestLegacy2D : null,
                         preview ? this::requestEditor : null);
             startupTimer.stop();
+            // The board shown is the likeliest next one: the shader warm-up prepares it first from now on.
+            Game shown = mapGame == null ? view.getGame() : mapGame;
+            GpuShaderWarmup.prepare(mapGame == null ? view.getBoard() : mapGame.getBoard(), editor != null,
+                  shown.getPlanetaryConditions());
         } catch (RuntimeException | LinkageError failure) {
             startupFailure = failure;
             close(false);

@@ -96,6 +96,9 @@ final class GpuLinkHelper {
     /** Queued or linking; false again once its binary is in the cache, or it failed, or the helper ended. */
     boolean waiting(String key) { return waiting.contains(key); }
 
+    /** Whether any program is queued or linking. */
+    boolean busy() { return !waiting.isEmpty(); }
+
     /** Why this program doesn't compile, as the driver says it; null while it hasn't failed. */
     String failure(String key) { return failures.get(key); }
 
@@ -251,14 +254,29 @@ final class GpuLinkHelper {
     }
 
     private Process start() throws IOException {
-        var command = new ArrayList<>(List.of(launcher().toString(), "-Xmx128m", "-XX:TieredStopAtLevel=1", "-XX:+UseSerialGC",
-              "-Djava.awt.headless=true",
-              // The cache's logger must not write to the game's log files, which rotate, nor to its answers.
-              "-Dlog4j2.configurationFile=none", "-Dlog4j2.level=OFF", "-Dlog4j2.statusLoggerLevel=OFF"));
+        return start(command(List.of("-Xmx128m", "-XX:TieredStopAtLevel=1", "-XX:+UseSerialGC", "-Djava.awt.headless=true"),
+              GpuLinkHelper.class, List.of(directory.toString(), Integer.toString(major), Integer.toString(minor))));
+    }
+
+    /**
+     * The command that runs {@code main} with the game's Java and class path after {@code options}, its log4j off: its
+     * logger must not write to the game's log files, which rotate, nor to its answers. Null when there's no Java to start.
+     */
+    static List<String> command(List<String> options, Class<?> main, List<String> arguments) {
+        Path java = launcher();
+        if (java == null) { return null; }
+        var command = new ArrayList<>(List.of(java.toString()));
+        command.addAll(options);
+        command.addAll(List.of("-Dlog4j2.configurationFile=none", "-Dlog4j2.level=OFF", "-Dlog4j2.statusLoggerLevel=OFF"));
         String libraries = System.getProperty("org.lwjgl.librarypath");
         if (libraries != null) { command.add("-Dorg.lwjgl.librarypath=" + libraries); }
-        command.addAll(List.of("-cp", System.getProperty("java.class.path"), GpuLinkHelper.class.getName(), directory.toString(),
-              Integer.toString(major), Integer.toString(minor)));
+        command.addAll(List.of("-cp", System.getProperty("java.class.path"), main.getName()));
+        command.addAll(arguments);
+        return command;
+    }
+
+    /** Starts {@code command} on the game's graphics card, its error output discarded. */
+    static Process start(List<String> command) throws IOException {
         var builder = new ProcessBuilder(command);
         builder.redirectError(ProcessBuilder.Redirect.DISCARD);
         // Optimus reads the card from the process's environment, which Java's copy doesn't hold (GpuGraphicsCard.apply).
@@ -276,13 +294,13 @@ final class GpuLinkHelper {
         return Files.isExecutable(windowless) ? windowless : Files.isExecutable(plain) ? plain : null;
     }
 
-    private static void write(DataOutputStream output, String text) throws IOException {
+    static void write(DataOutputStream output, String text) throws IOException {
         byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
         output.writeInt(bytes.length);
         output.write(bytes);
     }
 
-    private static String read(DataInputStream input) throws IOException {
+    static String read(DataInputStream input) throws IOException {
         byte[] bytes = new byte[input.readInt()];
         input.readFully(bytes);
         return new String(bytes, StandardCharsets.UTF_8);
@@ -358,8 +376,12 @@ final class GpuLinkHelper {
         }
     }
 
-    /** Below normal priority on Windows, so that a frame goes first whenever both want a core. */
-    private static void lowerPriority() {
+    /**
+     * Below normal priority on Windows, so that a frame goes first whenever both want a core. Not Windows' background
+     * mode, which sets the class back to normal while starving the process's disk reads and memory: the shader
+     * warm-up's driver threads then spun on 13 cores for minutes.
+     */
+    static void lowerPriority() {
         if (Platform.get() != Platform.WINDOWS) { return; }
         long function = WinBase.GetProcAddress(WinBase.GetModuleHandle("kernel32.dll"), "SetPriorityClass");
         // The current process's pseudo handle, and BELOW_NORMAL_PRIORITY_CLASS.

@@ -212,12 +212,17 @@ final class GpuEditorTerrainPreviews implements Disposable {
                 board.setHex(new Coords(x, y), hex);
             }
         }
+        return scene(board);
+    }
+
+    /** A sample board as the 3D board draws it, without units or a game. */
+    static BoardScene scene(Board board) {
         return new BoardScene(0, board.getWidth(), board.getHeight(), BoardTiles.captureAll(board), List.of(), List.of(), -1,
               "", List.of());
     }
 
     /** A component's sample hex: its preview, a preset ("preset:id") or a look (a variant id) in a theme. */
-    private static Hex hex(BoardEditorBlueprint blueprint, String componentId, String variantId, String theme) {
+    static Hex hex(BoardEditorBlueprint blueprint, String componentId, String variantId, String theme) {
         var component = blueprint.component(componentId);
         Hex hex = new Hex(component.previewLevel(), component.preview(), theme);
         if (variantId.startsWith("preset:")) {

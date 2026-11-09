@@ -827,6 +827,8 @@ test {
     jvmArgs mmAddOpens
     // Linked GL programs stay under build/, so test runs never evict the player's (mmconf/gpu-program-cache).
     systemProperty 'megamek.gpu.programCacheDir', layout.buildDirectory.dir('gpu-program-cache').get().asFile.absolutePath
+    // Tests time and capture their own links: no shader warm-up process beside them (GpuShaderWarmup).
+    systemProperty 'megamek.gpu.shaderWarmup', 'false'
 
     finalizedBy jacocoTestReport
 }
@@ -849,6 +851,8 @@ tasks.register('gpuBoardLargeMapTest', Test) {
     systemProperty 'java.awt.headless', 'false'
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
     systemProperty 'megamek.gpu.programCacheDir', layout.buildDirectory.dir('gpu-program-cache').get().asFile.absolutePath
+    // Tests time and capture their own links: no shader warm-up process beside them (GpuShaderWarmup).
+    systemProperty 'megamek.gpu.shaderWarmup', 'false'
     systemProperty 'megamek.gpu.materialCacheFillAtOnce', 'true'
 }
 
@@ -874,6 +878,8 @@ tasks.register('gpuBoardSmoke', Test) {
     systemProperty 'java.awt.headless', 'false'
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
     systemProperty 'megamek.gpu.programCacheDir', layout.buildDirectory.dir('gpu-program-cache').get().asFile.absolutePath
+    // Tests time and capture their own links: no shader warm-up process beside them (GpuShaderWarmup).
+    systemProperty 'megamek.gpu.shaderWarmup', 'false'
     // Every frame a test reads shows the ground material cache built, never its stand-ins (GpuMaterialCache).
     systemProperty 'megamek.gpu.materialCacheFillAtOnce', 'true'
     systemProperties System.properties.findAll { it.key.toString().startsWith('megamek.gpu.') }
@@ -897,6 +903,8 @@ tasks.register('gpuBoardBenchmark', Test) {
     systemProperty 'java.awt.headless', 'false'
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
     systemProperty 'megamek.gpu.programCacheDir', layout.buildDirectory.dir('gpu-program-cache').get().asFile.absolutePath
+    // Tests time and capture their own links: no shader warm-up process beside them (GpuShaderWarmup).
+    systemProperty 'megamek.gpu.shaderWarmup', 'false'
     systemProperties System.properties.findAll { it.key.toString().startsWith('megamek.gpu.') }
     testLogging { showStandardStreams = true }
     outputs.upToDateWhen { false }

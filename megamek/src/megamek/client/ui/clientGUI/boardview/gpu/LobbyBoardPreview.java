@@ -409,7 +409,10 @@ final class LobbyBoardPreview extends Table implements Disposable {
     public void act(float delta) {
         super.act(delta);
         if (!ascendantsVisible()) { unfocus(); return; }
-        if (source == null || source.isClosed() || getStage() == null || !loadingDrawn) { return; }
+        if (source == null || source.isClosed() || getStage() == null) { return; }
+        // A board shows here: its programs come first, the shader warm-up waits (GpuShaderWarmup).
+        GpuShaderWarmup.boardDrawn();
+        if (!loadingDrawn) { return; }
         frame = source.takeFrame();
         scene = frame.scene();
         if (!menu.isVisible() && frame.context() != null) { source.inspect(null); }

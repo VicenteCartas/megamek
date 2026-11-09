@@ -1115,6 +1115,7 @@ public final class GpuLobbyWindow {
         Board board = serverBoard;
         MapSettings copy = settings == null ? null : MapSettings.getInstance(settings);
         Player localCopy = local == null ? null : local.copy();
+        var conditions = client.getGame().getPlanetaryConditions();
         int ticket = ++mapGeneration;
         Runnable bake = () -> new SwingWorker<BufferedImage, Void>() {
             @Override
@@ -1124,6 +1125,8 @@ public final class GpuLobbyWindow {
                 if (drawn == null || drawn.getWidth() <= 0 || drawn.getHeight() <= 0) {
                     return null;
                 }
+                // The game's likely board: the shader warm-up prepares its programs while the lobby shows.
+                GpuShaderWarmup.prepare(drawn, false, conditions);
                 return LobbyMapThumbnail.bake(drawn, players, localCopy, LobbyMapThumbnail.LONG_SIDE);
             }
 
