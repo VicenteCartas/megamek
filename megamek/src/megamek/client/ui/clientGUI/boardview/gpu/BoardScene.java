@@ -168,6 +168,10 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
      */
     record Cover(int woods, boolean jungle, int structure, int exits, int cf, int pristineCF, int height,
           megamek.common.board.BuildingInteriors interiors, megamek.common.board.BuildingVolumes.Reference reference) {
+        Cover {
+            if (!GpuTerrain.VISIBLE_BUILDING_INTERIORS) { interiors = megamek.common.board.BuildingInteriors.NO; }
+        }
+
         Cover(int woods, boolean jungle, int structure, int exits, int cf, int pristineCF, int height) {
             this(woods, jungle, structure, exits, cf, pristineCF, height, megamek.common.board.BuildingInteriors.YES, null);
         }

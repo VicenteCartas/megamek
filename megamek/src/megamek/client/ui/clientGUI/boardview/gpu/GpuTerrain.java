@@ -1624,6 +1624,16 @@ final class GpuTerrain implements Disposable {
             ModelInstance result = building != null ? building.instance(level) : new ModelInstance(levels.get(level));
             result.transform.set(source.transform);
             result.userData = source.userData;
+            // The placement's fade (#fade): a material that blends where its model's does not. NaN while it is solid, and
+            // for a placement of cutouts and its model's own glass alone, which has no such material.
+            float opacity = Float.NaN;
+            for (Material material : source.materials) {
+                Material own = source.model.getMaterial(material.id);
+                if (blended(material) && (own == null || !blended(own))) {
+                    opacity = material.get(BlendingAttribute.class, BlendingAttribute.Type).opacity;
+                    break;
+                }
+            }
             for (Material material : result.materials) {
                 Material previous = source.getMaterial(material.id);
                 if (building == null && previous != null) {
@@ -1633,15 +1643,22 @@ final class GpuTerrain implements Disposable {
                     continue;
                 }
                 // Cutaway state belongs to the placement and survives a visual detail change. A material the source
-                // lacks (an orchard tree's fruit, on its nearer levels only) takes it from another of the placement's
-                // materials, with the placement's culling.
+                // lacks (an orchard tree's fruit, on its nearer levels only) takes the placement's cut from another of
+                // its materials, and the placement's fade.
                 Material state = previous != null ? previous : source.materials.isEmpty() ? null : source.materials.first();
                 if (state == null) { continue; }
+                if (previous == null) {
+                    Attribute clip = state.get(GpuBuildingCutaway.TYPE);
+                    if (clip != null) { material.set(clip.copy()); }
+                    // Solid keeps the level's own blending: fade(NaN) would strip a model's own glass.
+                    if (Float.isNaN(opacity)) { culling(result, material, false); }
+                    else { fade(result, material, opacity); }
+                    continue;
+                }
                 for (long type : new long[] { BlendingAttribute.Type, DepthTestAttribute.Type, IntAttribute.CullFace, GpuBuildingCutaway.TYPE }) {
                     Attribute attribute = state.get(type);
                     if (attribute != null) { material.set(attribute.copy()); }
                 }
-                if (previous == null) { culling(result, material, state.has(BlendingAttribute.Type)); }
             }
             GpuBuilding.tint(result, source == previewInstance && previewFeature != null ? previewFeature.colours() : buildingColours);
             return result;
@@ -1656,9 +1673,7 @@ final class GpuTerrain implements Disposable {
                 var clip = material.get(GpuBuildingCutaway.class, GpuBuildingCutaway.TYPE);
                 // Every material of a hovered placement carries the clip; a missing one draws uncut, never throws.
                 if (clip != null) { material.set(new GpuBuildingCutaway(clip.floor, clip.ceiling, false)); }
-                material.remove(BlendingAttribute.Type);
-                material.remove(DepthTestAttribute.Type);
-                culling(hoverOpaque, material, false);
+                fade(hoverOpaque, material, Float.NaN);
             }
         }
 
@@ -1803,6 +1818,40 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
+     * A material's solid state. Alpha-tested GLB cards stay cutouts: LibGDX's shaders apply the test only under a
+     * blending attribute, here with blending off. Nothing else blends or skips depth writes.
+     */
+    private static void opaque(Material material) {
+        if (material.has(FloatAttribute.AlphaTest)) {
+            material.set(new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1));
+        } else { material.remove(BlendingAttribute.Type); }
+        material.remove(DepthTestAttribute.Type);
+    }
+
+    /**
+     * A cutaway placement's material faded to {@code opacity} around an occupant or hovered storey, or solid for NaN.
+     * Cutouts (an authored building's plants) stay solid with their alpha test: the model shader tests the faded alpha,
+     * so a blended cutout would lose its texels rather than fade. They go only with a building faded away fully, where
+     * the test discards all their texels.
+     */
+    private static void fade(ModelInstance instance, Material material, float opacity) {
+        if (Float.isNaN(opacity) || material.has(FloatAttribute.AlphaTest)) {
+            opaque(material);
+            culling(instance, material, false);
+            if (opacity == 0) { material.get(BlendingAttribute.class, BlendingAttribute.Type).opacity = 0; }
+            return;
+        }
+        BlendingAttribute blend = material.get(BlendingAttribute.class, BlendingAttribute.Type);
+        if (blend == null) {
+            blend = new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+            material.set(blend);
+            material.set(new DepthTestAttribute(GL20.GL_LEQUAL, false));
+            culling(instance, material, true);
+        }
+        blend.opacity = opacity;
+    }
+
+    /**
      * Whether the terrain shader ladder ({@code batch}'s createShader) draws this material with the plain or foliage
      * shader, which have instanced variants; pit, ground, sculpt, water, magma, liquid and vegetation shaders do not. The
      * ladder decides by this predicate first, so instancing and shader choice cannot disagree.
@@ -1853,6 +1902,15 @@ final class GpuTerrain implements Disposable {
 
     /** Whether sunken ground (level -1 and below) takes its family's floor material from {@link #FLOORS}. */
     static final boolean SUBLEVEL_FLOORS = true;
+
+    /**
+     * Whether buildings show their interiors: generated floors and struts, walls that fade around a unit inside and the
+     * hover cutaway. Off, every building is built and drawn closed (BoardScene.Cover#interiors is NO); the rules'
+     * interiors are unchanged, but the pointer can no longer pick an interior floor.
+     */
+    static final boolean VISIBLE_BUILDING_INTERIORS = true;
+    /** Whether hovering a building opens the pointed storey; only with {@link #VISIBLE_BUILDING_INTERIORS}. */
+    static final boolean VISIBLE_BUILDING_INTERIORS_ON_HOVER = true;
 
     /**
      * Each surface family's floor, by ordinal: what gathers in its hollows, in place of its ground from level -1 down
@@ -2163,6 +2221,8 @@ final class GpuTerrain implements Disposable {
                     for (Renderable part : GpuTerrainDepth.snapshot(List.of(prop.instance()))) {
                         if (!GpuCutoutFade.fades(part.material)) { continue; }
                         part.material = GpuCutoutFade.fadeMaterial(part.material);
+                        // A cutout stays solid and whole across a hover's cut (#fade), and so do its faded texels.
+                        part.material.remove(GpuBuildingCutaway.TYPE);
                         if (GpuTreeInstances.instanceable(part.worldTransform) && instancedShader(part.material)) {
                             culling(prop.instance().model, part.material, false, false);
                         }
@@ -2218,12 +2278,7 @@ final class GpuTerrain implements Disposable {
         private static void opaqueMaterials(Array<Renderable> renderables) {
             for (Renderable renderable : renderables) {
                 renderable.material = new Material(renderable.material);
-                // Alpha-tested GLB cards are opaque cutouts, not building transparency. LibGDX's shaders
-                // require the blending attribute even when blending is disabled to apply their alpha test.
-                if (renderable.material.has(FloatAttribute.AlphaTest)) {
-                    renderable.material.set(new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1));
-                } else { renderable.material.remove(BlendingAttribute.Type); }
-                renderable.material.remove(DepthTestAttribute.Type);
+                opaque(renderable.material);
                 // Keep authored culling, including the reversed winding of mirrored native placements.
             }
         }
@@ -6839,7 +6894,8 @@ final class GpuTerrain implements Disposable {
               ? units.stream().map(this::unitBounds).toList() : List.of();
         BoardScene.Tile hoverTile = coverScene == null || hovered == null ? null : coverScene.tile(hovered);
         // The roof is the boundary above the last interior floor, never a hover cutaway target.
-        var hoverBuilding = buildingOpacity < 1 && hoverTile != null && hoverTile.cover().interiors() != BuildingInteriors.NO ? hoverTile.features().stream().filter(feature ->
+        var hoverBuilding = VISIBLE_BUILDING_INTERIORS_ON_HOVER && buildingOpacity < 1 && hoverTile != null
+              && hoverTile.cover().interiors() != BuildingInteriors.NO ? hoverTile.features().stream().filter(feature ->
               feature.kind() == BoardScene.FeatureKind.BUILDING
                     && !BoardWall.building(hoverTile.cover(), feature)
                     && hoverFloorZ >= (hoverTile.elevation() + (GpuAuthoredBuilding.supports(feature) ? 0 : feature.elevation())) * BoardGeometry.level()
@@ -6918,25 +6974,13 @@ final class GpuTerrain implements Disposable {
                     if (prop.route()) { continue; }
                     boolean hoverShell = !prop.industrial && Float.isNaN(prop.floorZ) && prop.coords.equals(hoverCoords);
                     boolean hoverOnly = hoverShell && !occupiedHexes.containsKey(prop.coords);
+                    float opacity = !faded.contains(prop) ? Float.NaN
+                          : Float.isNaN(prop.floorZ) ? buildingOpacity : MathUtils.lerp(buildingOpacity, 1, .25f);
                     for (Material material : prop.instance().materials) {
                         if (hoverOnly) {
                             material.set(new GpuBuildingCutaway(hoverFloor, hoverCeiling, true));
                         } else { material.remove(GpuBuildingCutaway.TYPE); }
-                        if (faded.contains(prop)) {
-                            BlendingAttribute blend = material.get(BlendingAttribute.class, BlendingAttribute.Type);
-                            if (blend == null) {
-                                blend = new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
-                                material.set(blend);
-                                material.set(new DepthTestAttribute(GL20.GL_LEQUAL, false));
-                                culling(prop.instance(), material, true);
-                            }
-                            blend.opacity = Float.isNaN(prop.floorZ) ? buildingOpacity
-                                  : MathUtils.lerp(buildingOpacity, 1, .25f);
-                        } else {
-                            material.remove(BlendingAttribute.Type);
-                            material.remove(DepthTestAttribute.Type);
-                            culling(prop.instance(), material, false);
-                        }
+                        fade(prop.instance(), material, opacity);
                     }
                     if (hoverOnly) { prop.updateHoverOpaque(); }
                     else { prop.hoverOpaque = null; }
@@ -8771,7 +8815,9 @@ final class GpuTerrain implements Disposable {
             fadeBounds.ext(chunk.bounds);
             for (int i = 0; i < chunk.fadeParts.size; i++) {
                 Prop owner = chunk.fadeOwners.get(i);
-                if (!drawn(owner, false) || chunk.faded.contains(owner) || owner.scatter && !scatterVisible) { continue; }
+                // A cutout's texels go only with a building faded away fully (#fade).
+                if (!drawn(owner, false) || chunk.faded.contains(owner) && buildingOpacity == 0
+                      || owner.scatter && !scatterVisible) { continue; }
                 Renderable part = chunk.fadeParts.get(i);
                 if (GpuTreeInstances.instanceable(part.worldTransform) && instancedShader(part.material)) {
                     trees.add(part);
