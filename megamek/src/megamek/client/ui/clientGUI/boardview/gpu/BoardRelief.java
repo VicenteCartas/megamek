@@ -278,8 +278,8 @@ final class BoardRelief {
     private final Map<Corner, float[]> bayCorners = new IdentityHashMap<>();
     /** This hex's steps down to land as a water hex, by edge; -1 until asked. */
     private int rimEdges = -1;
-    /** Whether a road ends on a step's top at a corner (#landing(Corner)). */
-    private final Map<Corner, Boolean> landings = new IdentityHashMap<>();
+    /** The ground under a road that ends on a step's top at a corner (#landingFloor). */
+    private final Map<Corner, Float> landings = new IdentityHashMap<>();
     /** Whether each station or corner keeps its toe behind a containment wall; see {@link #walled(Object, Edge)}. */
     private final Map<Object, Boolean> walledRuns = new HashMap<>();
     /** Edges between neighbours, by their corners, so each is built once; see {@link #edge(Site, int)}. */
@@ -1753,15 +1753,14 @@ final class BoardRelief {
         if (surface < middle) { share = Math.min(share, needed(edge, t, point, push)); }
         // A road ending on a deep drop's top sits on a lip of rock brought out under its end, as deep as the road's cut
         // faces reach (BoardRoadCut#curtain); below it the rock keeps its place, so it overhangs the drop under the
-        // road's end instead of sliding out over the ground below.
-        float bottom = t == 0 ? edge.a.low * BoardGeometry.level() : t == 1 ? edge.b.low * BoardGeometry.level() : edge.bottom();
+        // road's end instead of sliding out over the ground below. Deep is the drop under the road's end, not a deeper
+        // one beside it: a bank the road ends on comes out whole, its corners too where a cliff falls further beside.
         float overhang = OVERHANG * BoardGeometry.level(), lip = surface - (BoardRoadGrade.FILL + .1f) * BoardGeometry.level();
-        if (lip - bottom > overhang) {
-            // All along the edge the road ends on, easing in from a corner it ends at along the edges beside.
-            float near = endsOn(edge) ? 1 : Math.max(landing(edge.a) ? 1 - smooth(t / CORNER_EASE) : 0,
-                  landing(edge.b) ? 1 - smooth((1 - t) / CORNER_EASE) : 0);
-            share *= lerp(1, smooth((z - lip + overhang) / overhang), near);
-        }
+        // All along the edge the road ends on, easing in from a corner it ends at along the edges beside.
+        float near = Math.max(endsOn(edge) && lip - edge.bottom() > overhang ? 1 : 0,
+              Math.max(lip - landingFloor(edge.a) > overhang ? 1 - smooth(t / CORNER_EASE) : 0,
+                    lip - landingFloor(edge.b) > overhang ? 1 - smooth((1 - t) / CORNER_EASE) : 0));
+        share *= lerp(1, smooth((z - lip + overhang) / overhang), near);
         point.x += push[0] * share;
         point.y += push[1] * share;
         return cutForBridges(edge, t, point);
@@ -1770,14 +1769,24 @@ final class BoardRelief {
     /** Height, in levels, below a road's end over which the rock under it overhangs the drop (#edgePoint). */
     private static final float OVERHANG = 1.5f;
 
-    /** Whether a road ends on a step's top at this corner (#landing). */
-    private boolean landing(Corner corner) {
+    /**
+     * The height of the ground under the end of a road that ends on a step's top at this corner (#landing), the lowest
+     * where several do; infinite where none does.
+     */
+    private float landingFloor(Corner corner) {
         return landings.computeIfAbsent(corner, key -> {
+            float floor = Float.POSITIVE_INFINITY;
+            // The board ends at its edge: no road ends on a step there.
+            if (Arrays.asList(key.around).contains(null)) { return floor; }
             for (Site site : key.around) {
-                if (site != null && site.road() && !site.liquid() && site.family() != CONCRETE
-                      && landing(site, new Corner[] { key })) { return true; }
+                if (!site.road() || site.liquid() || site.family() == CONCRETE) { continue; }
+                for (Site other : key.around) {
+                    if (!other.coords().equals(site.coords()) && landing(site, other, false)) {
+                        floor = Math.min(floor, other.level() * BoardGeometry.level());
+                    }
+                }
             }
-            return false;
+            return floor;
         });
     }
 
@@ -2353,9 +2362,24 @@ final class BoardRelief {
                 if (landing && (road.distance(bx, by) < clear || !across)) {
                     // Where the road crosses, and at the corners of the edge it ends on, its whole band comes out to the
                     // edge, so the road ends on its top however near the corners its reserved ground reaches.
+                    Vector3 last = null;
                     for (int k = 0; k < count; k++) {
                         Vector3 q = naturalPoint(edge, t, heights[k]);
-                        moved = Math.max(moved, Math.min(ROAD_PUSH, ((px - q.x) * gx + (py - q.y) * gy) / scale));
+                        float out = Math.min(ROAD_PUSH, ((px - q.x) * gx + (py - q.y) * gy) / scale);
+                        if (out > moved) {
+                            moved = out;
+                            last = q;
+                        }
+                    }
+                    float[] side = across || last == null ? null : deckSide(site, ends[0], px, py);
+                    float dx = side == null ? 0 : side[0] - last.x, dy = side == null ? 0 : side[1] - last.y;
+                    float out = (float) Math.hypot(dx, dy);
+                    if (out > 1e-4f) {
+                        // A corner comes out to the deck's side on the edge it lands on (#deckSide), not to the hex's
+                        // corner past it: no ledge beside the deck's end, and the steps beside keep their line.
+                        gx = dx / out;
+                        gy = dy / out;
+                        moved = Math.min(ROAD_PUSH, out / scale);
                     }
                 }
                 // Behind a wall only the slope above the wall's top recedes, so the wall stays low.
@@ -2411,18 +2435,47 @@ final class BoardRelief {
      * built deck's level end, which stands on an abutment ({@link BoardBridgeFooting#abutted}).
      */
     private boolean landing(Site site, Corner[] ends, boolean abutted) {
-        int exits = scene.tile(site.coords()).wayExits();
         for (Corner end : ends) {
             // The board ends at its edge: no road ends on a step there.
             if (Arrays.asList(end.around).contains(null)) { continue; }
             for (Site other : end.around) {
-                if (other == null || other.coords().equals(site.coords())) { continue; }
-                for (int d = 0; d < 6; d++) {
-                    if ((exits & 1 << d) != 0 && site.coords().translated(d).equals(other.coords())
-                          && (abutted ? abutted(site, other) : ends(site, other, d))) {
-                        return true;
-                    }
-                }
+                if (!other.coords().equals(site.coords()) && landing(site, other, abutted)) { return true; }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Where a site's road ending at {@code corner} (px, py) brings the corner out to: on the edge to a deck that lands on
+     * it, half a metre past the deck's side ({@link BoardBridgeFooting#abutmentHalfWidth}), where the footing looks for
+     * the bank under the deck's corners (BoardBridgeFooting#falls), so the bank still carries them; the corner itself
+     * where the road ends over a drop with no deck. Null where it ends at no hex round the corner.
+     */
+    private float[] deckSide(Site site, Corner corner, float px, float py) {
+        for (Site deck : corner.around) {
+            if (deck == null || deck == site || !landing(site, deck, false)) { continue; }
+            var tile = scene.tile(deck.coords());
+            int toBank = deck.coords().direction(site.coords());
+            if (BoardBridge.feature(tile) == null || !BoardBridge.bank(tile, scene.tile(site.coords()), toBank)) {
+                return new float[] { px, py };
+            }
+            float mx = (site.x() + deck.x()) / 2, my = (site.y() + deck.y()) / 2;
+            float ux = -(deck.y() - site.y()), uy = deck.x() - site.x(), length = (float) Math.hypot(ux, uy);
+            float s = ((px - mx) * ux + (py - my) * uy) / length;
+            float reach = Math.signum(s)
+                  * Math.min(Math.abs(s), BoardBridgeFooting.abutmentHalfWidth(tile, toBank) + metres(.5f));
+            return new float[] { mx + ux / length * reach, my + uy / length * reach };
+        }
+        return null;
+    }
+
+    /** Whether a site's road ends on the step's top towards its neighbour other (#landing(Site, Corner[], boolean)). */
+    private boolean landing(Site site, Site other, boolean abutted) {
+        int exits = scene.tile(site.coords()).wayExits();
+        for (int d = 0; d < 6; d++) {
+            if ((exits & 1 << d) != 0 && site.coords().translated(d).equals(other.coords())
+                  && (abutted ? abutted(site, other) : ends(site, other, d))) {
+                return true;
             }
         }
         return false;
