@@ -52,6 +52,28 @@ copy.
 - The default font is Roboto at the `body` size, and FlatLaf's semibold (the `h1` to `h3` headings) is Roboto Medium.
 - Keyboard focus follows [Focus](#focus): a 2-wide ring inside the edge, shown only after keyboard use.
 
+## App overlays
+
+An app of the suite (MekHQ) adds its own semantic roles, such as personnel status, morale or money up and down, in an
+overlay: a token file on its own classpath, in the same format, that holds only what it adds. MegaMek's file stays the
+one source of truth, and the app never forks it.
+
+```java
+DesignTokens.addOverlay(MekHQ.class, "/mekhq/gui/design/mekhq-tokens.json");
+```
+
+- Call it as the app starts, before its first theme is built. `DesignTokens.shipped()` returns the merged tokens from
+  then on, so the Swing themes and the libGDX kit pick the app's roles up without knowing about the overlay.
+- An overlay may **add** named tokens to `color`, `space`, `radius`, `size`, `opacity`, `motion`, `typography.styles`
+  and `typography.case.roles`. A color role can have a `colorblind` value like a shipped one.
+- It may **append** to `typography.case.upper`, `typography.width.roles` and `checks` (`contrast` and `distinct`), so
+  its roles take part in the case and width rules and its colors are checked like the shipped ones.
+- It may **not** change anything the file or an earlier overlay sets: redefining a token, the font family, the easing
+  curve or a rule is an error. `addOverlay` fails as the app starts, before the overlay is added, rather than at the
+  first theme. The overlay's own `version` and `about` are ignored.
+- An app's test can check its overlay without adding it to the shipped tokens:
+  `DesignTokens.read(base, palette, List.of(overlay))`, then `TokenChecks.run` on the result.
+
 ## Color roles
 
 Names describe a role, not a hue, so each name has one meaning in both modes. Surfaces also have an `overlay` value

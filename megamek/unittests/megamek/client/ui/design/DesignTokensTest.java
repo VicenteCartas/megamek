@@ -6,6 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -174,5 +178,96 @@ class DesignTokensTest {
             DesignTokens.setPalette(Palette.STANDARD);
         }
         assertEquals(Palette.STANDARD, DesignTokens.shipped().tokenPalette());
+    }
+
+    @Test
+    void anOverlayAddsTokensRolesAndChecksAndLeavesTheShippedOnes() throws IOException {
+        String overlay = """
+              {
+                "version": "mekhq-1",
+                "about": "An app's own roles.",
+                "color": {
+                  "money.up": { "dark": "#7FD49A", "light": "#1E6B3A", "use": "Income.",
+                                "colorblind": { "dark": "#7FB8F0", "light": "#1F5A99" } }
+                },
+                "space": { "dossier": 28 },
+                "typography": {
+                  "styles": { "ledger": { "size": 13, "weight": 400, "tracking": 0, "use": "Ledger rows." } },
+                  "case": { "roles": { "ledger": "ledger" } }
+                },
+                "checks": {
+                  "contrast": [ { "fg": ["money.up"], "bg": ["surface.panel"], "min": 3, "why": "Money text" } ]
+                }
+              }""";
+        DesignTokens shipped = DesignTokens.shipped(Palette.STANDARD);
+        DesignTokens merged = read(overlay, Palette.STANDARD);
+        DesignTokens safe = read(overlay, Palette.COLORBLIND);
+
+        assertEquals(0xFF7FD49A, merged.color("money.up", Mode.DARK));
+        assertEquals(0xFF7FB8F0, safe.color("money.up", Mode.DARK), "an overlay role has a color-blind value");
+        assertEquals(28, merged.space().get("dossier"));
+        assertEquals(13, merged.roleStyle("ledger").size());
+        assertEquals(shipped.contrastChecks().size() + 1, merged.contrastChecks().size());
+        assertEquals(shipped.version(), merged.version(), "the overlay's own version isn't the tokens'");
+        for (String name : shipped.colors().keySet()) {
+            assertEquals(shipped.colorToken(name), merged.colorToken(name), name);
+        }
+        assertFalse(DesignTokens.shipped().colors().containsKey("money.up"), "reading adds nothing to the shipped");
+        for (TokenChecks.Result result : TokenChecks.run(merged)) {
+            if (result.subject().contains("money.up")) {
+                assertTrue(result.passes(), result.subject());
+            }
+        }
+    }
+
+    @Test
+    void anOverlayExtendsTheUpperCaseAndCondensedRoles() throws IOException {
+        DesignTokens merged = read("""
+              {
+                "typography": {
+                  "styles": { "callsign": { "size": 14, "weight": 500, "tracking": 0, "capsTracking": 0.04,
+                                            "use": "Callsigns." } },
+                  "case": { "roles": { "callsign": "callsign" }, "upper": { "game": ["callsign"] } },
+                  "width": { "roles": { "game": ["callsign"] } }
+                }
+              }""", Palette.STANDARD);
+        assertTrue(merged.upperCase("callsign", Presentation.GAME));
+        assertFalse(merged.upperCase("callsign", Presentation.APP));
+        assertTrue(merged.condensed("callsign", Presentation.GAME));
+        assertTrue(merged.upperCase("button", Presentation.GAME), "the shipped upper-case roles stay");
+    }
+
+    @Test
+    void anOverlayCannotChangeWhatTheFileShips() {
+        for (String overlay : List.of(
+              "{ \"color\": { \"surface.base\": { \"dark\": \"#000000\", \"light\": \"#FFFFFF\", \"use\": \"x\" } } }",
+              "{ \"motion\": { \"easing\": [0, 0, 1, 1] } }",
+              "{ \"typography\": { \"family\": \"Comic Sans\" } }",
+              "{ \"checks\": { \"visionRule\": \"none\" } }",
+              "{ \"theme\": { } }",
+              "[ ]")) {
+            assertThrows(IllegalArgumentException.class, () -> read(overlay, Palette.STANDARD), overlay);
+        }
+        assertThrows(IllegalArgumentException.class, () -> read(
+              "{ \"typography\": { \"case\": { \"roles\": { \"ledger\": \"no.such.style\" } } } }", Palette.STANDARD),
+              "a role names a style the merged tokens have");
+    }
+
+    @Test
+    void addingABrokenOverlayFailsAsTheAppStartsAndChangesNothing() {
+        int colors = DesignTokens.shipped().colors().size();
+        assertThrows(IllegalStateException.class,
+              () -> DesignTokens.addOverlay(DesignTokensTest.class, "no-such-overlay.json"));
+        IllegalArgumentException redefining = assertThrows(IllegalArgumentException.class,
+              () -> DesignTokens.addOverlay(DesignTokensTest.class, "redefining-overlay.json"));
+        assertTrue(redefining.getMessage().contains("color.surface.base"), redefining.getMessage());
+        assertEquals(colors, DesignTokens.shipped().colors().size());
+    }
+
+    private static DesignTokens read(String overlay, Palette palette) throws IOException {
+        try (InputStream base = DesignTokens.class.getResourceAsStream(DesignTokens.RESOURCE)) {
+            return DesignTokens.read(base, palette,
+                  List.of(new ByteArrayInputStream(overlay.getBytes(StandardCharsets.UTF_8))));
+        }
     }
 }
