@@ -15,7 +15,10 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Material;
+import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.model.MeshPart;
+import com.badlogic.gdx.graphics.g3d.model.Node;
+import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelMesh;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelMeshPart;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
@@ -40,6 +43,10 @@ final class KitFragments implements Disposable {
     private static final MMLogger LOGGER = MMLogger.create(KitFragments.class);
     /** About the side of a fragment, in kit units (36 a hex, 18 a level). */
     private static final float SIDE = 8;
+    /** A tree breaks into at most this many fragments, of at least {@link #TREE_TRIANGLES} triangles each. */
+    private static final int TREE_FRAGMENTS = 12, TREE_TRIANGLES = 4;
+    /** Rounds of grouping a tree's triangles about their fragments' middles (#split). */
+    private static final int TREE_ROUNDS = 8;
     /**
      * A node's fragments hold at most this many times the vertices it has whole: the debris' vertex cost stays bounded. A
      * box a break crosses doubles, about 32 vertices more: a wall of box bays takes a slanted break and two or three
@@ -186,7 +193,7 @@ final class KitFragments implements Disposable {
                   MeepleShatter.Planes.across(steep, walls[0], walls[1] < ONE_WAY), node.id.hashCode(), caps);
             if (cut.pieces() < 2) { return; }
             if (cut.pieces() > GpuDestruction.FRAGMENTS) { continue; }
-            var packed = pack(cut, layout, body);
+            var packed = pack(Split.of(cut, body), layout);
             if (packed == null) { continue; }
             int vertices = packed.stream().mapToInt(part -> part.vertices().size / stride).sum();
             if (vertices > Math.max(VERTEX_SHARE * whole, whole + SMALL_EXTRA)) { continue; }
@@ -230,19 +237,45 @@ final class KitFragments implements Disposable {
     private record Packed(FloatArray vertices, ShortArray indices, float[] table) { }
 
     /**
-     * Per part of the cut, its fragments one after another, each welded on its own so no two share a vertex, the caps in
-     * the body's part after its own triangles; per fragment, a table entry of its box over every part and cap: centre
-     * and first vertex, half size and 0. Null when a part outgrows a batch's vertices.
+     * Fragments by part: {@code triangles[fragment][part]} vertex records, and per fragment the caps that close it
+     * ({@code caps}, null for none), drawn in the part {@code capped}.
      */
-    private static List<Packed> pack(MeepleShatter.Cut cut, VertexAttributes layout, Material body) {
+    private record Split(FloatArray[][] triangles, FloatArray[] caps, int capped) {
+        int fragments() { return triangles.length; }
+
+        int parts() { return triangles.length == 0 ? 0 : triangles[0].length; }
+
+        /** A cut's pieces, its caps drawn in the body's part. */
+        static Split of(MeepleShatter.Cut cut, Material body) {
+            int parts = cut.channels() - 1, capped = -1;
+            var triangles = new FloatArray[cut.pieces()][parts];
+            var caps = new FloatArray[cut.pieces()];
+            for (int part = 0; part < parts; part++) {
+                if (cut.material(part) == body) { capped = part; }
+            }
+            for (int piece = 0; piece < cut.pieces(); piece++) {
+                for (int part = 0; part < parts; part++) { triangles[piece][part] = cut.triangles(piece, part); }
+                caps[piece] = cut.triangles(piece, parts);
+            }
+            return new Split(triangles, caps, capped);
+        }
+    }
+
+    /**
+     * Per part, its fragments one after another, each welded on its own so no two share a vertex, the caps in their part
+     * after its own triangles; per fragment, a table entry of its box over every part and cap: centre and first vertex,
+     * half size and 0. Null when a part outgrows a batch's vertices.
+     */
+    private static List<Packed> pack(Split split, VertexAttributes layout) {
         int stride = layout.vertexSize / Float.BYTES, position = layout.findByUsage(VertexAttributes.Usage.Position).offset / Float.BYTES;
-        int pieces = cut.pieces(), caps = cut.channels() - 1;
+        int pieces = split.fragments();
         var boxes = new BoundingBox[pieces];
         var point = new Vector3();
         for (int piece = 0; piece < pieces; piece++) {
             boxes[piece] = new BoundingBox().inf();
-            for (int channel = 0; channel < cut.channels(); channel++) {
-                FloatArray records = cut.triangles(piece, channel);
+            for (int part = 0; part <= split.parts(); part++) {
+                FloatArray records = part < split.parts() ? split.triangles()[piece][part]
+                      : split.caps() == null ? new FloatArray(0) : split.caps()[piece];
                 for (int at = 0; at < records.size; at += stride) {
                     boxes[piece].ext(point.set(records.items[at + position], records.items[at + position + 1],
                           records.items[at + position + 2]));
@@ -252,7 +285,7 @@ final class KitFragments implements Disposable {
         List<Packed> result = new ArrayList<>();
         var centre = new Vector3();
         var half = new Vector3();
-        for (int channel = 0; channel < caps; channel++) {
+        for (int channel = 0; channel < split.parts(); channel++) {
             var vertices = new FloatArray();
             var indices = new ShortArray();
             float[] table = new float[8 * pieces];
@@ -268,10 +301,10 @@ final class KitFragments implements Disposable {
                 table[8 * piece + 5] = half.y;
                 table[8 * piece + 6] = half.z;
                 Map<GeneratedMesh.Weld, Integer> welded = new HashMap<>();
-                FloatArray own = cut.triangles(piece, channel);
+                FloatArray own = split.triangles()[piece][channel];
                 for (int at = 0; at < own.size; at += stride) { indices.add(GeneratedMesh.weld(own.items, at, stride, vertices, welded)); }
-                if (cut.material(channel) == body) {
-                    FloatArray closing = cut.triangles(piece, caps);
+                if (channel == split.capped() && split.caps() != null) {
+                    FloatArray closing = split.caps()[piece];
                     for (int at = 0; at < closing.size; at += stride) {
                         indices.add(GeneratedMesh.weld(closing.items, at, stride, vertices, welded));
                     }
@@ -281,6 +314,198 @@ final class KitFragments implements Disposable {
             result.add(new Packed(vertices, indices, table));
         }
         return result;
+    }
+
+    /**
+     * A tree's model in fragments for an attack that breaks it (GpuTerrain#breakTrees): its pieces grouped about up to
+     * {@link #TREE_FRAGMENTS} middles, no cut and no cap, a fragment holding every part it reaches (bark and leaves). A
+     * small connected piece (a leaf card, a twig) stays whole; a large one (a trunk with its boughs) breaks between its
+     * triangles. Copied here from the model's meshes (the render thread's), grouped on the kit cutter's thread. Null
+     * where it stays whole: colour slots, or parts of two layouts.
+     */
+    static CompletableFuture<KitFragments> splitLater(Model model) {
+        List<NodePart> drawn = new ArrayList<>();
+        for (int index = 0; index < model.nodes.size; index++) { collect(model.nodes.get(index), drawn); }
+        Map<String, Integer> uses = new HashMap<>();
+        for (NodePart part : drawn) { uses.merge(part.meshPart.id, 1, Integer::sum); }
+        Map<Mesh, float[]> vertices = new java.util.IdentityHashMap<>();
+        Map<Mesh, short[]> orders = new java.util.IdentityHashMap<>();
+        List<String> ids = new ArrayList<>();
+        List<FloatArray> triangles = new ArrayList<>();
+        List<int[]> pieces = new ArrayList<>();
+        VertexAttributes layout = null;
+        for (NodePart part : drawn) {
+            MeshPart range = part.meshPart;
+            if (!part.enabled || range.primitiveType != GL20.GL_TRIANGLES || range.size < 3 || uses.get(range.id) > 1) {
+                continue;
+            }
+            var attributes = range.mesh.getVertexAttributes();
+            if (layout != null && !layout.equals(attributes) || RigidGlb.colourSlotted(attributes)) {
+                return CompletableFuture.completedFuture(null);
+            }
+            layout = attributes;
+            int stride = layout.vertexSize / Float.BYTES;
+            float[] all = vertices.computeIfAbsent(range.mesh, mesh -> mesh.getVertices(new float[mesh.getNumVertices() * stride]));
+            short[] order = orders.computeIfAbsent(range.mesh, mesh -> {
+                short[] read = new short[mesh.getNumIndices()];
+                if (read.length > 0) { mesh.getIndices(read); }
+                return read;
+            });
+            var records = new FloatArray(range.size * stride);
+            // Its triangles' connected pieces: a triangle joins the piece of each vertex it shares.
+            int count = range.size / 3;
+            int[] piece = new int[count];
+            Map<Integer, Integer> joined = new HashMap<>();
+            for (int triangle = 0; triangle < count; triangle++) {
+                piece[triangle] = triangle;
+                for (int corner = 0; corner < 3; corner++) {
+                    int index = range.offset + 3 * triangle + corner;
+                    int vertex = order.length == 0 ? index : Short.toUnsignedInt(order[index]);
+                    records.addAll(all, vertex * stride, stride);
+                    Integer other = joined.putIfAbsent(vertex, triangle);
+                    if (other != null) { join(piece, other, triangle); }
+                }
+            }
+            for (int triangle = 0; triangle < count; triangle++) { piece[triangle] = root(piece, triangle); }
+            ids.add(range.id);
+            triangles.add(records);
+            pieces.add(piece);
+        }
+        if (layout == null) { return CompletableFuture.completedFuture(null); }
+        VertexAttributes shared = layout;
+        return CompletableFuture.supplyAsync(() -> split(ids, triangles, pieces, shared), CUTTER);
+    }
+
+    private static int root(int[] piece, int triangle) {
+        while (piece[triangle] != triangle) {
+            piece[triangle] = piece[piece[triangle]];
+            triangle = piece[triangle];
+        }
+        return triangle;
+    }
+
+    private static void join(int[] piece, int a, int b) {
+        int first = root(piece, a), second = root(piece, b);
+        if (first != second) { piece[Math.max(first, second)] = Math.min(first, second); }
+    }
+
+    /** Index loops: libGDX's Array reuses its iterators. */
+    private static void collect(Node node, List<NodePart> result) {
+        for (int index = 0; index < node.parts.size; index++) { result.add(node.parts.get(index)); }
+        for (int index = 0; index < node.getChildCount(); index++) { collect(node.getChild(index), result); }
+    }
+
+    /**
+     * Groups the parts' pieces ({@code pieces}: each triangle's connected piece in its part) about their fragments'
+     * middles, each whole in the nearest; a piece of over a fragment's share of the triangles by its triangles.
+     */
+    private static KitFragments split(List<String> ids, List<FloatArray> triangles, List<int[]> pieces,
+          VertexAttributes layout) {
+        int stride = layout.vertexSize / Float.BYTES, position = layout.findByUsage(VertexAttributes.Usage.Position).offset / Float.BYTES;
+        int total = triangles.stream().mapToInt(records -> records.size / (3 * stride)).sum();
+        var result = new KitFragments();
+        result.nodes = 1;
+        int count = Math.min(TREE_FRAGMENTS, total / TREE_TRIANGLES);
+        if (count < 2) { return result; }
+        // What moves as one: a small piece whole, a large one's triangles each. Its middle: its triangles' mean.
+        int share = Math.max(2, total / (2 * count));
+        int[] unitOf = new int[total];
+        List<float[]> sums = new ArrayList<>();
+        int at = 0;
+        for (int part = 0; part < triangles.size(); part++) {
+            FloatArray records = triangles.get(part);
+            int[] piece = pieces.get(part);
+            Map<Integer, Integer> sizes = new HashMap<>();
+            for (int root : piece) { sizes.merge(root, 1, Integer::sum); }
+            Map<Integer, Integer> units = new HashMap<>();
+            for (int triangle = 0; triangle < piece.length; triangle++, at++) {
+                int unit = sizes.get(piece[triangle]) > share ? -1 : units.getOrDefault(piece[triangle], -1);
+                if (unit < 0) {
+                    unit = sums.size();
+                    sums.add(new float[4]);
+                    if (sizes.get(piece[triangle]) <= share) { units.put(piece[triangle], unit); }
+                }
+                unitOf[at] = unit;
+                int first = 3 * stride * triangle;
+                for (int axis = 0; axis < 3; axis++) {
+                    sums.get(unit)[axis] += (records.items[first + position + axis] + records.items[first + stride + position + axis]
+                          + records.items[first + 2 * stride + position + axis]) / 3;
+                }
+                sums.get(unit)[3]++;
+            }
+        }
+        int units = sums.size();
+        if (units < 2) { return result; }
+        count = Math.min(count, units);
+        float[] middles = new float[3 * units];
+        for (int unit = 0; unit < units; unit++) {
+            for (int axis = 0; axis < 3; axis++) { middles[3 * unit + axis] = sums.get(unit)[axis] / sums.get(unit)[3]; }
+        }
+        // Spread first: each next middle the unit farthest from those chosen, from the first unit's.
+        float[] centres = new float[3 * count];
+        float[] nearest = new float[units];
+        java.util.Arrays.fill(nearest, Float.MAX_VALUE);
+        int chosen = 0;
+        for (int fragment = 0; fragment < count; fragment++) {
+            System.arraycopy(middles, 3 * chosen, centres, 3 * fragment, 3);
+            int farthest = 0;
+            for (int unit = 0; unit < units; unit++) {
+                nearest[unit] = Math.min(nearest[unit], distance2(middles, unit, centres, fragment));
+                if (nearest[unit] > nearest[farthest]) { farthest = unit; }
+            }
+            chosen = farthest;
+        }
+        int[] owner = new int[units];
+        for (int round = 0; round < TREE_ROUNDS; round++) {
+            float[] centred = new float[4 * count];
+            for (int unit = 0; unit < units; unit++) {
+                int best = 0;
+                for (int fragment = 1; fragment < count; fragment++) {
+                    if (distance2(middles, unit, centres, fragment) < distance2(middles, unit, centres, best)) {
+                        best = fragment;
+                    }
+                }
+                owner[unit] = best;
+                for (int axis = 0; axis < 3; axis++) { centred[4 * best + axis] += middles[3 * unit + axis]; }
+                centred[4 * best + 3]++;
+            }
+            for (int fragment = 0; fragment < count; fragment++) {
+                if (centred[4 * fragment + 3] == 0) { continue; }
+                for (int axis = 0; axis < 3; axis++) {
+                    centres[3 * fragment + axis] = centred[4 * fragment + axis] / centred[4 * fragment + 3];
+                }
+            }
+        }
+        // The fragments that kept triangles, in order, each part's triangles in its own.
+        int[] kept = new int[count];
+        java.util.Arrays.fill(kept, -1);
+        int fragments = 0;
+        for (int unit = 0; unit < units; unit++) {
+            if (kept[owner[unit]] < 0) { kept[owner[unit]] = fragments++; }
+        }
+        if (fragments < 2) { return result; }
+        var grouped = new FloatArray[fragments][triangles.size()];
+        for (FloatArray[] parts : grouped) {
+            for (int part = 0; part < parts.length; part++) { parts[part] = new FloatArray(); }
+        }
+        at = 0;
+        for (int part = 0; part < triangles.size(); part++) {
+            FloatArray records = triangles.get(part);
+            for (int first = 0; first + 3 * stride <= records.size; first += 3 * stride) {
+                grouped[kept[owner[unitOf[at++]]]][part].addAll(records.items, first, 3 * stride);
+            }
+        }
+        var packed = pack(new Split(grouped, null, -1), layout);
+        if (packed == null) { return result; }
+        for (int index = 0; index < packed.size(); index++) { result.place(ids.get(index), layout, packed.get(index)); }
+        result.broken = 1;
+        return result;
+    }
+
+    private static float distance2(float[] middles, int unit, float[] centres, int fragment) {
+        float x = middles[3 * unit] - centres[3 * fragment], y = middles[3 * unit + 1] - centres[3 * fragment + 1];
+        float z = middles[3 * unit + 2] - centres[3 * fragment + 2];
+        return x * x + y * y + z * z;
     }
 
     /** The part's range in the last mesh of its layout, or in a new one when it would not fit. */

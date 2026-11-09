@@ -1244,6 +1244,8 @@ final class GpuTerrain implements Disposable {
     private boolean combatScars = GpuGroundDamage.COMBAT_SCARS;
     /** Whether its kit levels break into fragments ahead of their falls (#setFragments). */
     private boolean fragments;
+    /** Each tree model an attack is about to break, split into fragments (KitFragments#splitLater): render thread. */
+    private final Map<Model, CompletableFuture<KitFragments>> treeSplits = new IdentityHashMap<>();
     /** A board the editor changes, and its samples: any surface may appear, so programs keep the biome stage. */
     private boolean editable;
     /** The shader warm-up's choice of the biome stage and crystal transmission (setLightingStages); null follows the board. */
@@ -5388,6 +5390,7 @@ final class GpuTerrain implements Disposable {
                         copy.decorationOwner = prop.decorationOwner; copy.supportTriangles = prop.supportTriangles;
                         copy.editorBounds = prop.editorBounds;
                         copy.decorationFeature = prop.decorationFeature;
+                        copy.plantFeature = prop.plantFeature;
                         copy.decorationAnchorZ = prop.decorationAnchorZ;
                         copy.receiver = prop.receiver;
                         // Its paint, which every level it draws is tinted with (level), and its lights at night.
@@ -7890,15 +7893,12 @@ final class GpuTerrain implements Disposable {
      */
     private Chunk takeTrees(BoardScene.Detonation.Felled grove, Vector3 groundZero) {
         Coords at = grove.coords();
-        int index = at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE;
-        if (at.getX() < 0 || at.getY() < 0 || index >= chunks.size()) { return null; }
-        Chunk chunk = chunks.get(index);
+        Chunk chunk = chunkOf(at);
+        if (chunk == null) { return null; }
         Set<BoardScene.Feature> features = Set.copyOf(grove.trees());
         List<GpuDestruction.Tree> trees = new ArrayList<>();
         BoundingBox bounds = new BoundingBox().inf();
-        for (Prop prop : chunk.props) {
-            if (prop.scatter || !prop.standing() || prop.plantFeature == null || !prop.coords().equals(at)
-                  || !features.contains(prop.plantFeature)) { continue; }
+        for (Prop prop : grovesTrees(chunk, grove)) {
             trees.add(new GpuDestruction.Tree(prop.treeAsset, new Matrix4(prop.instance().transform), prop.treeDiameter));
             bounds.ext(prop.bounds());
         }
@@ -7907,6 +7907,87 @@ final class GpuTerrain implements Disposable {
         var push = new Vector2(middle.x - groundZero.x, middle.y - groundZero.y);
         if (push.len2() < 1e-6f) { push.set(1, 0); }
         destruction.takeTrees(at, trees, features, bounds, middle.x, middle.y, push.nor());
+        return chunk;
+    }
+
+    /** The chunk holding the hex, null off the board. */
+    private Chunk chunkOf(Coords at) {
+        int index = at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE;
+        return at.getX() < 0 || at.getY() < 0 || index >= chunks.size() ? null : chunks.get(index);
+    }
+
+    /** The chunk's standing trees of {@code grove}: its hex's, for its scene features. */
+    private static List<Prop> grovesTrees(Chunk chunk, BoardScene.Detonation.Felled grove) {
+        Set<BoardScene.Feature> features = Set.copyOf(grove.trees());
+        List<Prop> result = new ArrayList<>();
+        for (Prop prop : chunk.props) {
+            if (prop.scatter || !prop.standing() || prop.plantFeature == null || !prop.coords().equals(grove.coords())
+                  || !features.contains(prop.plantFeature)) { continue; }
+            result.add(prop);
+        }
+        return result;
+    }
+
+    /** Splits the models of the trees an attack is about to break into their fragments, ahead of its hit (#breakTrees). */
+    void prepareBreak(List<BoardScene.Detonation.Felled> broken) {
+        if (!fragments) { return; }
+        for (var grove : broken) {
+            Chunk chunk = chunkOf(grove.coords());
+            if (chunk == null) { continue; }
+            for (Prop prop : grovesTrees(chunk, grove)) { treeSplit(prop.instance().model); }
+        }
+    }
+
+    /** The tree model's fragments where its split is in, installed; else null, its split under way. */
+    private KitFragments treeSplit(Model model) {
+        var split = treeSplits.computeIfAbsent(model, KitFragments::splitLater);
+        KitFragments done = split.isDone() && !split.isCompletedExceptionally() ? split.join() : null;
+        if (done != null) { done.install(); }
+        return done;
+    }
+
+    /**
+     * The trees an attack took down (its checkpoint's, GpuBoardSource#publishScene) break as its hit lands: each in its
+     * fragments (whole parts where its split is not in yet), they burst away from {@code hit} and out (GpuDestruction
+     * #breakTrees) and sink once the terrain shows them gone.
+     */
+    void breakTrees(List<BoardScene.Detonation.Felled> broken, BoardScene.TileTransition.Hit hit) {
+        if (coverScene == null || installedColumns || broken.isEmpty() || hit == null) { return; }
+        var from = BoardGeometry.center(hit.from().coords(), hit.from().elevation());
+        Set<Chunk> taken = new LinkedHashSet<>();
+        installedSettings.run(() -> {
+            for (var grove : broken) {
+                Chunk chunk = breakGrove(grove, from);
+                if (chunk != null) { taken.add(chunk); }
+            }
+        });
+        if (!taken.isEmpty()) {
+            taken.forEach(this::refall);
+            refreshShadows();
+        }
+        stampFalls();
+    }
+
+    private Chunk breakGrove(BoardScene.Detonation.Felled grove, Vector3 from) {
+        Coords at = grove.coords();
+        Chunk chunk = chunkOf(at);
+        if (chunk == null) { return null; }
+        Array<Renderable> pieces = new Array<>();
+        List<Matrix4> stood = new ArrayList<>();
+        BoundingBox bounds = new BoundingBox().inf();
+        Map<Material, Material> copies = new IdentityHashMap<>();
+        for (Prop prop : grovesTrees(chunk, grove)) {
+            ModelInstance drawn = prop.instance();
+            KitFragments split = fragments ? treeSplit(drawn.model) : null;
+            for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces, split); }
+            stood.add(new Matrix4(drawn.transform));
+            bounds.ext(prop.bounds());
+        }
+        if (pieces.isEmpty()) { return null; }
+        var middle = BoardGeometry.center(at, 0);
+        var push = new Vector2(middle.x - from.x, middle.y - from.y);
+        if (push.len2() < 1e-6f) { push.set(1, 0); }
+        destruction.breakTrees(at, pieces, stood, Set.copyOf(grove.trees()), bounds, middle.x, middle.y, push.nor());
         return chunk;
     }
 
@@ -10388,6 +10469,11 @@ final class GpuTerrain implements Disposable {
         if (lifts != null) { lifts.dispose(); lifts = null; }
         disposeCollapses();
         destruction.clear();
+        treeSplits.values().forEach(split -> {
+            split.cancel(false);
+            split.thenAccept(done -> { if (done != null) { done.dispose(); } });
+        });
+        treeSplits.clear();
         meshGeneration++;
         detailWorker.shutdownNow();
         // Workers borrow chunk/asset data. ForkJoinPool.close may return once termination has started after

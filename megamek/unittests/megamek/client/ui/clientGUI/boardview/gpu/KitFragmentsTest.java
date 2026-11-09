@@ -141,6 +141,106 @@ class KitFragmentsTest {
         fragments.dispose();
     }
 
+    /**
+     * A tree an attack breaks (KitFragments#splitLater): its bark and leaves split alike into a few fragments, each leaf
+     * card whole in one and every vertex in its fragment's box as the shader finds it; its trunk, one connected piece of
+     * many triangles, breaks between them.
+     */
+    @Test
+    void aTreeSplitsIntoFragmentsOfWholeLeafCards() {
+        var records = new FloatArray();
+        var indices = new ShortArray();
+        // A trunk 11 high: rings of four corners joined by quads.
+        for (int ring = 0; ring < 12; ring++) {
+            for (int corner = 0; corner < 4; corner++) {
+                double angle = corner * Math.PI / 2;
+                records.addAll((float) (.2 * Math.cos(angle)), (float) (.2 * Math.sin(angle)), ring, 1, 0, 0);
+            }
+        }
+        for (int ring = 0; ring < 11; ring++) {
+            for (int corner = 0; corner < 4; corner++) {
+                short a = (short) (4 * ring + corner), b = (short) (4 * ring + (corner + 1) % 4);
+                indices.addAll(a, b, (short) (b + 4), a, (short) (b + 4), (short) (a + 4));
+            }
+        }
+        int barkIndices = indices.size;
+        // A crown of 40 leaf cards, each its own four corners.
+        List<Vector3> cards = new ArrayList<>();
+        for (int card = 0; card < 40; card++) {
+            var centre = new Vector3((float) (3 * Math.cos(card * .8)), (float) (3 * Math.sin(card * .8)), 8 + card % 5);
+            cards.add(centre);
+            short first = (short) (records.size / 6);
+            for (float[] offset : new float[][] { { -.3f, -.3f }, { .3f, -.3f }, { .3f, .3f }, { -.3f, .3f } }) {
+                records.addAll(centre.x + offset[0], centre.y, centre.z + offset[1], 0, 1, 0);
+            }
+            indices.addAll(first, (short) (first + 1), (short) (first + 2), first, (short) (first + 2), (short) (first + 3));
+        }
+        var mesh = new Mesh(Mesh.VertexDataType.VertexArray, true, records.size / 6, indices.size,
+              VertexAttribute.Position(), VertexAttribute.Normal());
+        meshes.add(mesh);
+        mesh.setVertices(records.items, 0, records.size);
+        mesh.setIndices(indices.items, 0, indices.size);
+        var model = new com.badlogic.gdx.graphics.g3d.Model();
+        model.meshes.add(mesh);
+        var node = new com.badlogic.gdx.graphics.g3d.model.Node();
+        node.id = "tree";
+        node.parts.add(new com.badlogic.gdx.graphics.g3d.model.NodePart(
+              new MeshPart("tree/bark", mesh, 0, barkIndices, GL20.GL_TRIANGLES), new com.badlogic.gdx.graphics.g3d.Material("bark")));
+        node.parts.add(new com.badlogic.gdx.graphics.g3d.model.NodePart(
+              new MeshPart("tree/leaves", mesh, barkIndices, indices.size - barkIndices, GL20.GL_TRIANGLES),
+              new com.badlogic.gdx.graphics.g3d.Material("leaves")));
+        model.nodes.add(node);
+
+        var fragments = KitFragments.splitLater(model).join();
+        fragments.install();
+        var bark = fragments.part(part("tree/bark"));
+        var leaves = fragments.part(part("tree/leaves"));
+        assertNotNull(bark);
+        assertNotNull(leaves);
+        float[] table = leaves.fragments().table();
+        int count = table.length / 8;
+        assertTrue(count >= 4 && count <= GpuDestruction.FRAGMENTS, "It breaks into a few fragments: " + count);
+        for (int fragment = 0; fragment < count; fragment++) {
+            for (int value : new int[] { 0, 1, 2, 4, 5, 6 }) {
+                assertEquals(table[8 * fragment + value], bark.fragments().table()[8 * fragment + value],
+                      "Fragment " + fragment + " moves as one box in bark and leaves");
+            }
+        }
+        Set<Integer> trunk = new java.util.HashSet<>();
+        for (var part : List.of(bark, leaves)) {
+            var copy = GpuTreeInstances.compacted(part.range()).end();
+            meshes.add(copy);
+            float[] own = part.fragments().table();
+            var corners = corners(copy);
+            java.util.Map<Vector3, Integer> cardFragment = new java.util.HashMap<>();
+            for (int corner = 0; corner < corners.size(); corner += 3) {
+                int fragment = fragment(own, corners.get(corner).index());
+                var middle = new Vector3();
+                for (int at = corner; at < corner + 3; at++) {
+                    var vertex = corners.get(at);
+                    assertEquals(fragment, fragment(own, vertex.index()), "A triangle's corners lie in one fragment");
+                    for (int axis = 0; axis < 3; axis++) {
+                        float centre = own[8 * fragment + axis], half = own[8 * fragment + 4 + axis];
+                        float along = axis == 0 ? vertex.point().x : axis == 1 ? vertex.point().y : vertex.point().z;
+                        assertTrue(Math.abs(along - centre) <= half + 1e-3f,
+                              "Vertex " + vertex.index() + " lies in fragment " + fragment + "'s box");
+                    }
+                    middle.add(vertex.point());
+                }
+                middle.scl(1 / 3f);
+                if (part == bark) {
+                    trunk.add(fragment);
+                    continue;
+                }
+                var card = cards.stream().min(java.util.Comparator.comparing(centre -> centre.dst2(middle))).orElseThrow();
+                Integer other = cardFragment.putIfAbsent(card, fragment);
+                assertTrue(other == null || other == fragment, "The leaf card at " + card + " stays whole");
+            }
+        }
+        assertTrue(trunk.size() >= 2, "The trunk breaks: " + trunk);
+        fragments.dispose();
+    }
+
     private static MeshPart part(String id) { return new MeshPart(id, null, 0, 0, GL20.GL_TRIANGLES); }
 
     /** Which fragment the shader puts a vertex in: the last whose first vertex it has reached (tree-instances.glsl). */

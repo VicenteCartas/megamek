@@ -154,6 +154,16 @@ final class GpuBoardSource implements BoardSource {
     private int structureHitsRound = -1;
     private GamePhase structureHitsPhase;
     /**
+     * The attack being resolved, for the trees its checkpoint shows gone (publishScene): where it struck and the hit they
+     * break away from; null outside an attack's phase.
+     */
+    private Coords treeHitAt;
+    private BoardScene.TileTransition.Hit treeHit;
+    private int treeHitRound = -1;
+    private GamePhase treeHitPhase;
+    /** How far from an attack's target the trees it takes down may stand: an artillery shell's area and more. */
+    private static final int TREE_HIT_REACH = 4;
+    /**
      * When the capture that first showed a structure brought down in the movement phase was held back, 0 for none: the
      * server sends that collapse, and its mover's fall, before the path that walked onto it (captureMovement).
      */
@@ -311,7 +321,9 @@ final class GpuBoardSource implements BoardSource {
                             if (result.kind() != megamek.common.NuclearDetonation.Kind.EXPLOSION) { recordBlast(result, before.scene()); }
                             var after = before.boardGeneration() == next.boardGeneration() ? next.scene() : null;
                             var falls = strikeCollapses(result, before.scene(), after);
-                            var felled = strikeFelled(result, before.scene(), after);
+                            int reach = result.degradation() < 1 ? -1 : result.baseDamage() / result.degradation();
+                            var felled = after == null ? List.<BoardScene.Detonation.Felled>of()
+                                  : felled(before.scene(), after, at -> result.coords().distance(at) <= reach);
                             Set<Integer> concealed = consequences.stream().filter(BoardScene.Concealed.class::isInstance)
                                   .map(BoardScene.Animation::entityId).collect(Collectors.toSet());
                             consequences.stream().filter(BoardScene.Concealed.class::isInstance)
@@ -689,26 +701,35 @@ final class GpuBoardSource implements BoardSource {
      */
     private void recordStructureHit(megamek.common.ResolvedAttack result, Entity attacker) {
         if (result.kind() == megamek.common.ResolvedAttack.Kind.DEATH) { return; }
+        // The trees it takes down break away from it, whatever its strength (publishScene).
+        var shot = result.shot();
+        Coords landing = shot != null && shot.artillery() && shot.impact() != null ? shot.impact().coords() : null;
+        treeHitAt = landing != null ? landing : result.target().coords();
+        treeHit = new BoardScene.TileTransition.Hit(1, hitFrom(result, landing));
+        treeHitRound = view.game.getRoundCount();
+        treeHitPhase = view.game.getPhase();
         structureHits.clear();
         // The server names them only for a hit, or a shell that landed, even scattered.
         if (result.collapses().isEmpty()) { return; }
         structureHitsRound = view.game.getRoundCount();
         structureHitsPhase = view.game.getPhase();
-        var shot = result.shot();
         float damage = shot != null ? (float) shot.damagePerHit() : physicalDamage(result, attacker);
         float strength = Math.min(1, (damage - 10) / 10);
         if (strength <= 0) { return; }
-        Coords landing = shot != null && shot.artillery() && shot.impact() != null ? shot.impact().coords() : null;
-        Coords at = result.target().coords();
-        var from = landing != null ? waypoint(landing, 0, 0)
-              : result.kind() == megamek.common.ResolvedAttack.Kind.DFA
-                    ? waypoint(at, result.target().elevation() + DFA_HEIGHT, 0)
-                    : waypoint(result.attacker().coords(), result.attacker().elevation(), result.attacker().facing());
+        var from = hitFrom(result, landing);
         for (var hex : result.collapses()) {
             if (hex.boardId() != view.getBoardId()) { continue; }
             structureHits.put(hex.coords(), new BoardScene.TileTransition.Hit(
                   landing == null || landing.equals(hex.coords()) ? strength : strength * .5f, from));
         }
+    }
+
+    /** Where an attack's hit comes from: a shell from where it landed, a death from above from above, else its attacker. */
+    private BoardScene.Waypoint hitFrom(megamek.common.ResolvedAttack result, Coords landing) {
+        return landing != null ? waypoint(landing, 0, 0)
+              : result.kind() == megamek.common.ResolvedAttack.Kind.DFA
+                    ? waypoint(result.target().coords(), result.target().elevation() + DFA_HEIGHT, 0)
+                    : waypoint(result.attacker().coords(), result.attacker().elevation(), result.attacker().facing());
     }
 
     /** Levels above its target a death from above comes down from, which crushes a structure rather than tip it over. */
@@ -753,16 +774,14 @@ final class GpuBoardSource implements BoardSource {
     }
 
     /**
-     * The trees a strike fells in its blast area: each hex's tree features of {@code before} that stand nowhere in its
-     * checkpoint ({@code after}, null on another board, where none are known), where the rules took its woods down.
+     * The trees the rules took down between two checkpoints of one board, in the hexes {@code near}: each hex's tree
+     * features of {@code before} that stand nowhere in {@code after}, where a blast or an attack took its woods down.
      */
-    private static List<BoardScene.Detonation.Felled> strikeFelled(megamek.common.NuclearDetonation strike,
-          BoardScene before, BoardScene after) {
-        if (after == null || strike.degradation() < 1) { return List.of(); }
-        int reach = strike.baseDamage() / strike.degradation();
+    private static List<BoardScene.Detonation.Felled> felled(BoardScene before, BoardScene after,
+          java.util.function.Predicate<Coords> near) {
         List<BoardScene.Detonation.Felled> result = new ArrayList<>();
         for (var tile : before.tiles()) {
-            if (strike.coords().distance(tile.coords()) > reach) { continue; }
+            if (!near.test(tile.coords())) { continue; }
             var next = after.tile(tile.coords());
             List<BoardScene.Feature> felled = tile.features().stream()
                   .filter(tree -> tree.kind() == BoardScene.FeatureKind.TREE && (next == null || next.features().stream()
@@ -904,13 +923,19 @@ final class GpuBoardSource implements BoardSource {
         if (frame != null && frame.boardGeneration() == next.boardGeneration()) {
             queueAttachments(frame.scene(), next.scene());
         }
+        // The trees the attack being resolved took down break away from it as this checkpoint shows (GpuTerrain#breakTrees);
+        // a strike's its own completion fells.
+        boolean attacking = treeHit != null && view.game.getRoundCount() == treeHitRound && view.game.getPhase() == treeHitPhase;
+        List<BoardScene.Detonation.Felled> broken = attacking && captures.isEmpty() && frame != null
+              && frame.boardGeneration() == next.boardGeneration() && next.scene().boardId() == frame.scene().boardId()
+              ? felled(frame.scene(), next.scene(), at -> treeHitAt.distance(at) <= TREE_HIT_REACH) : List.of();
         steps.forEach(this::queueAnimation);
         if (lifts != null) { queueAnimation(lifts); }
         falls.forEach(this::queueAnimation);
         queueDeaths(false);
         if (frame == null || frame.boardGeneration() != next.boardGeneration() || !next.scene().samePlaybackState(frame.scene())
-              || (!pendingEvents.isEmpty() && !(pendingEvents.getLast() instanceof BoardScene.SceneUpdate))) {
-            queueAnimation(new BoardScene.SceneUpdate(next.scene()));
+              || (!pendingEvents.isEmpty() && !(pendingEvents.getLast() instanceof BoardScene.SceneUpdate)) || !broken.isEmpty()) {
+            queueAnimation(new BoardScene.SceneUpdate(next.scene(), broken, broken.isEmpty() ? null : treeHit));
         }
         frame = next;
     }

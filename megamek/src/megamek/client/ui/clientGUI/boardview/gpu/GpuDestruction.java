@@ -40,7 +40,7 @@ final class GpuDestruction implements Disposable {
     static final int LOADED = 1;
     /** A slot's flag: a blast's front brings it down, piece by piece as it passes (#blastFrom). */
     static final int BLAST = 2;
-    /** A slot's flag: it bursts, a fuel tank in its own explosion (#burst). */
+    /** A slot's flag: it bursts, a fuel tank in its own explosion (#burst) or trees an attack breaks (#breakTrees). */
     static final int BURST = 4;
     /** A falling part breaks into at most this many fragments (KitFragments), its batch's table in the shader. */
     static final int FRAGMENTS = 16;
@@ -122,6 +122,8 @@ final class GpuDestruction implements Disposable {
         float lead, spread;
         /** No structure falls here: its hex's rubble waits for the old path's pieces to land (#landed). */
         boolean rubbleOnly;
+        /** Where the trees an attack broke stood (#breakTrees): their chunks' stands leave them out. */
+        Set<Long> stood = Set.of();
 
         Fall(Coords coords, int slot, Array<Renderable> pieces, Set<GpuBuilding.Assembly> buildings, List<Tree> trees,
               Set<BoardScene.Feature> features, BoundingBox bounds) {
@@ -139,6 +141,8 @@ final class GpuDestruction implements Disposable {
     private final Map<Coords, Fall> falls = new LinkedHashMap<>();
     /** The hexes whose trees a blast fells, by hex: they leave their chunks' stands for {@link #fallen}. */
     private final Map<Coords, Fall> groves = new LinkedHashMap<>();
+    /** The trees attacks broke, each break a slot of its own: a volley's next one at a hex never cuts the last short. */
+    private final List<Fall> shattered = new ArrayList<>();
     /** Every felled tree, its instance naming its hex's slot + 1, and where each stood (chunks leave those out). */
     private final GpuTreeInstances.Stand fallen = new GpuTreeInstances.Stand();
     private final Set<Long> felled = new java.util.HashSet<>();
@@ -186,7 +190,14 @@ final class GpuDestruction implements Disposable {
         return fall != null && clock >= fall.start;
     }
 
-    boolean isEmpty() { return falls.isEmpty() && groves.isEmpty(); }
+    boolean isEmpty() { return falls.isEmpty() && groves.isEmpty() && shattered.isEmpty(); }
+
+    /** The falls drawn as pieces: the structures' and the trees attacks broke. */
+    private List<Fall> pieceFalls() {
+        List<Fall> result = new ArrayList<>(falls.values());
+        result.addAll(shattered);
+        return result;
+    }
 
     /** How many hexes' trees are felled, falling or lying. */
     int groveCount() { return groves.size(); }
@@ -194,7 +205,7 @@ final class GpuDestruction implements Disposable {
     /** How many parts fall, and how many of them in fragments (KitFragments). */
     int[] parts() {
         int broken = 0, all = 0;
-        for (Fall fall : falls.values()) {
+        for (Fall fall : pieceFalls()) {
             for (Renderable piece : fall.pieces) {
                 if (piece.userData == GpuInstancedMesh.RUBBLE) { continue; }
                 all++;
@@ -249,6 +260,27 @@ final class GpuDestruction implements Disposable {
         fall.texels[5] = middleY;
         fall.texels[6] = bounds.min.z;
         fall.texels[7] = bounds.max.z;
+    }
+
+    /**
+     * Breaks these trees of the hex, which an attack took down, into {@code pieces} where they stood ({@code stood}, their
+     * stands' transforms; {@code features}, their scene tile's): they leave their chunks' stands and burst at once, thrown
+     * out from the hex's middle and along {@code push}, away from the hit, then scatter and sink as its checkpoint shows
+     * them gone (#committed). {@code bounds} holds them standing.
+     */
+    void breakTrees(Coords at, Array<Renderable> pieces, List<Matrix4> stood, Set<BoardScene.Feature> features,
+          BoundingBox bounds, float middleX, float middleY, Vector2 push) {
+        Fall fall = new Fall(at, freeSlot(), pieces, Set.of(), List.of(), Set.copyOf(features), new BoundingBox(bounds));
+        Set<Long> spots = new HashSet<>();
+        for (Matrix4 transform : stood) { spots.add(spot(transform)); }
+        fall.stood = spots;
+        site(fall, bounds, middleX, middleY, push, BURST);
+        shattered.add(fall);
+        // Its chunk restands without them before the next publish (GpuTerrain#breakTrees).
+        felled.addAll(spots);
+        revision++;
+        start(fall, 0);
+        changed = true;
     }
 
     /**
@@ -349,6 +381,11 @@ final class GpuDestruction implements Disposable {
             fall.gone = clock;
             write(fall);
         });
+        for (Fall fall : shattered) {
+            if (fall.gone < NEVER || treesStanding.test(fall.coords, fall.features)) { continue; }
+            fall.gone = clock;
+            write(fall);
+        }
     }
 
     /**
@@ -378,7 +415,8 @@ final class GpuDestruction implements Disposable {
         clock += Math.max(0, seconds);
         this.gravity = GRAVITY * gravity;
         if (falls.values().removeIf(fall -> clock >= fall.sinks + SINK_SECONDS)
-              | groves.values().removeIf(fall -> clock >= fall.sinks + SINK_SECONDS)) {
+              | groves.values().removeIf(fall -> clock >= fall.sinks + SINK_SECONDS)
+              | shattered.removeIf(fall -> clock >= fall.sinks + SINK_SECONDS)) {
             changed = true;
             revision++;
         }
@@ -390,6 +428,7 @@ final class GpuDestruction implements Disposable {
     Set<Coords> taken() {
         Set<Coords> result = new HashSet<>(falls.keySet());
         result.addAll(groves.keySet());
+        for (Fall fall : shattered) { result.add(fall.coords); }
         return result;
     }
 
@@ -401,6 +440,7 @@ final class GpuDestruction implements Disposable {
         }
         falls.clear();
         groves.clear();
+        shattered.clear();
         clock = 0;
         publish();
     }
@@ -484,6 +524,7 @@ final class GpuDestruction implements Disposable {
         out.inf();
         for (Fall fall : falls.values()) { out.ext(fall.bounds); }
         for (Fall fall : groves.values()) { out.ext(fall.bounds); }
+        for (Fall fall : shattered) { out.ext(fall.bounds); }
         return out;
     }
 
@@ -527,6 +568,7 @@ final class GpuDestruction implements Disposable {
         var used = new java.util.BitSet();
         for (Fall fall : falls.values()) { used.set(fall.slot); }
         for (Fall fall : groves.values()) { used.set(fall.slot); }
+        for (Fall fall : shattered) { used.set(fall.slot); }
         return used.nextClearBit(0);
     }
 
@@ -546,12 +588,13 @@ final class GpuDestruction implements Disposable {
         if (changed) {
             pieces.clear();
             owners.clear();
-            for (Fall fall : falls.values()) {
+            for (Fall fall : pieceFalls()) {
                 pieces.addAll(fall.pieces);
                 for (int i = 0; i < fall.pieces.size; i++) { owners.add(fall.slot + 1); }
             }
             fallen.clear();
             felled.clear();
+            for (Fall fall : shattered) { felled.addAll(fall.stood); }
             for (Fall fall : groves.values()) {
                 for (Tree tree : fall.trees) {
                     fallen.add(tree.species(), tree.transform(), tree.diameter(), fall.slot + 1);
@@ -571,6 +614,7 @@ final class GpuDestruction implements Disposable {
     public void dispose() {
         falls.clear();
         groves.clear();
+        shattered.clear();
         pieces.clear();
         owners.clear();
         batches.dispose();

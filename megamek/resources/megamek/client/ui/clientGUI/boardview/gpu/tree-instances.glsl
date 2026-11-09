@@ -140,9 +140,10 @@ void riseBegin(float sinks) {
     fallShift = vec3(0.0, 0.0, -depth * (1.0 - rise * rise * (3.0 - 2.0 * rise)));
 }
 
-// A tree's LOD dissolve (GpuTreeInstances.Stand#detail): a falling tree's instance holds its slot instead, and none.
+// A tree's LOD dissolve (GpuTreeInstances.Stand#detail): a falling piece's, felled tree's or rising rubble's instance
+// holds its slot instead, and none; only a standing one (or none of the falls') dissolves.
 float instanceDissolve() {
-    return abs(u_piece.w - 2.0) < .5 ? 0.0 : a_instance1.w;
+    return u_piece.w > 0.5 && abs(u_piece.w - 3.0) > 0.5 ? 0.0 : a_instance1.w;
 }
 
 void fallBegin() {
@@ -211,9 +212,10 @@ void fallBegin() {
           + vec3(-away.y, away.x, 0.0) * FALL_TOPPLE_OUT * (0.5 + foot) * (0.5 + fallNoise(seed, 8u))
           + vec3(-pushed.y, pushed.x, 0.0) * FALL_TOPPLE * strength * (0.5 + share);
     if (burst) {
-        // Thrown up and out from its middle at 31 to 56 degrees, at most FALL_BURST_SPEED (GpuDestruction#settles),
-        // tumbling.
-        velocity = normalize(vec3(away, 0.6 + 0.9 * fallNoise(seed, 9u))) * FALL_BURST_SPEED
+        // Thrown up and out from its middle at 31 to 56 degrees, and away from a hit that pushes it (trees an attack
+        // breaks), at most FALL_BURST_SPEED (GpuDestruction#settles), tumbling.
+        vec2 thrown = strength > 1e-4 ? normalize(pushed * 1.5 + away) : away;
+        velocity = normalize(vec3(thrown, 0.6 + 0.9 * fallNoise(seed, 9u))) * FALL_BURST_SPEED
               * (0.5 + 0.5 * fallNoise(seed, 1u));
         spin = (dot(tumble, tumble) > 1e-6 ? normalize(tumble) : vec3(0.0, 0.0, 1.0)) * FALL_TUMBLE
               * (0.3 + 0.7 * fallNoise(seed, 5u));

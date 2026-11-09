@@ -43,6 +43,8 @@ final class UnitPlayback {
     /** Completed/instant shots wait only until the next render consumes their persistent cosmetic impacts. */
     private final Map<UUID, UnitAttack> completedAttacks = new LinkedHashMap<>();
     private final Map<UUID, BoardScene.Detonation> detonations = new LinkedHashMap<>();
+    /** The checkpoints shown since the last take that show trees an attack broke (#takeBrokenTrees). */
+    private final List<BoardScene.SceneUpdate> brokenTrees = new ArrayList<>();
     private boolean detonationStarted;
     private final UnitVolley volley = new UnitVolley();
     private record Reaction(BoardScene.Movement movement, double start) { }
@@ -350,6 +352,13 @@ final class UnitPlayback {
     List<BoardScene.Detonation> takeDetonations() {
         var result = List.copyOf(detonations.values());
         detonations.clear();
+        return result;
+    }
+
+    /** The checkpoints shown since the last take whose trees an attack broke, as its hit lands (GpuTerrain#breakTrees). */
+    List<BoardScene.SceneUpdate> takeBrokenTrees() {
+        var result = List.copyOf(brokenTrees);
+        brokenTrees.clear();
         return result;
     }
 
@@ -762,6 +771,7 @@ final class UnitPlayback {
     void clear() {
         completedAttacks.clear();
         detonations.clear();
+        brokenTrees.clear();
         resetQueue();
         review(null);
         paused = false;
@@ -796,6 +806,7 @@ final class UnitPlayback {
             if (pending.peekFirst() instanceof BoardScene.SceneUpdate update) {
                 pending.removeFirst();
                 settledScene = update.scene();
+                if (!update.broken().isEmpty()) { brokenTrees.add(update); }
             } else if ((attack != null || collapsing()) && !completed
                   && pending.peekFirst() instanceof BoardScene.Movement movement && movement.forced()) {
                 // Behind a hit or a structure coming down: what it moved, a unit knocked back or falling, moves with it.

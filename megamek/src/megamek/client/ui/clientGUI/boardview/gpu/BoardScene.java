@@ -1076,8 +1076,18 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     /** Visibility loss invalidates historical presentation immediately, including while playback is paused. */
     record Concealed(int entityId, int boardId) implements Animation { }
 
-    /** An immutable, visibility-filtered checkpoint in packet order; it consumes no animation time. */
-    record SceneUpdate(BoardScene scene) implements Animation {
+    /**
+     * An immutable, visibility-filtered checkpoint in packet order; it consumes no animation time. {@code broken}: the
+     * trees the attack before it took down, which break away from its {@code hit} as the checkpoint shows (GpuTerrain
+     * #breakTrees); none for any other.
+     */
+    record SceneUpdate(BoardScene scene, List<Detonation.Felled> broken, TileTransition.Hit hit) implements Animation {
+        SceneUpdate {
+            broken = List.copyOf(broken);
+        }
+
+        SceneUpdate(BoardScene scene) { this(scene, List.of(), null); }
+
         @Override
         public int entityId() { return -1; }
 

@@ -768,6 +768,12 @@ class GpuBattleView extends ApplicationAdapter {
         scene = frame.scene();
         if (unitModels != null) { unitModels.setDisplayMode(displayMode(), boardCamera.tactical()); }
         history.accept(frame.timeline(), scene, frame.reports(), this::hasInfantryTransports);
+        // The trees an attack takes down split into their pieces ahead of its hit (GpuTerrain#breakTrees).
+        for (var event : frame.timeline()) {
+            if (event instanceof BoardScene.SceneUpdate update && !update.broken().isEmpty()) {
+                terrain.prepareBreak(update.broken());
+            }
+        }
         // The editor plays Destroyed's collapse, which comes with the frame that shows the ruin (GpuMapSource#editorCommand).
         // Any other change of its tiles shows at once, as Skip to results shows it, so no collapse plays on, or lies, where
         // a structure stands again; with nothing falling the skip changes nothing.
@@ -980,6 +986,12 @@ class GpuBattleView extends ApplicationAdapter {
             attackEffects.detonate(detonation.result());
             // What it brings down falls with its front; Instant shows only the outcome.
             if (history.speed() != UnitMotion.Speed.INSTANT) { terrain.strike(detonation); }
+        }
+        // The trees an attack took down break away from it as its hit lands; Instant and a review show only the outcome.
+        for (var update : playback.takeBrokenTrees()) {
+            if (history.speed() != UnitMotion.Speed.INSTANT && !playback.reviewing()) {
+                terrain.breakTrees(update.broken(), update.hit());
+            }
         }
         // A nuclear round fired in combat: what its attack brought down falls with its front (GpuTerrain#strike); Instant
         // and a review show only the outcome.

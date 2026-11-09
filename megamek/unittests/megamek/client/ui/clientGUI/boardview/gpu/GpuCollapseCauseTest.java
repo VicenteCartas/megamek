@@ -204,6 +204,33 @@ class GpuCollapseCauseTest {
     }
 
     /**
+     * The Atlas clears the light woods at 1209, shot after shot: the attack that takes the woods down names on the
+     * checkpoint after it every tree the hex had, to break away from the Atlas as its hit lands (GpuTerrain#breakTrees).
+     */
+    @Test
+    void theTreesAnAttackTakesDownBreakAwayFromIt() throws Exception {
+        var atlas = new Coords(11, 10);
+        var frames = play("Atlas AS7-D.mtf", atlas, 0, Map.of(ROOF.getBoardNum(), "woods:1;foliage_elev:2"),
+              GamePhase.FIRING, (manager, game, attacker) -> fire(manager, game, attacker,
+                    List.of("ISAC20", "ISMediumLaser", "ISMediumLaser", "ISLRM20", "ISSRM6"), Targetable.TYPE_HEX_CLEAR,
+                    new megamek.common.HexTarget(ROOF, game.getBoard(), Targetable.TYPE_HEX_CLEAR).getId()));
+        var trees = frames.initial().scene().tile(ROOF).features().stream()
+              .filter(feature -> feature.kind() == BoardScene.FeatureKind.TREE).toList();
+        assertFalse(trees.isEmpty(), "The woods stand");
+        var events = frames.moved().timeline();
+        var broken = events.stream().filter(event -> event instanceof BoardScene.SceneUpdate update
+              && !update.broken().isEmpty()).map(BoardScene.SceneUpdate.class::cast).toList();
+        assertEquals(1, broken.size(), "One attack takes the woods down: " + brief(events));
+        var update = broken.getFirst();
+        assertTrue(events.subList(0, events.indexOf(update)).stream().anyMatch(BoardScene.Combat.class::isInstance),
+              "After its shot");
+        assertEquals(List.of(ROOF), update.broken().stream().map(BoardScene.Detonation.Felled::coords).toList());
+        assertEquals(java.util.Set.copyOf(trees), java.util.Set.copyOf(update.broken().getFirst().trees()),
+              "Every tree the woods had");
+        assertEquals(atlas, update.hit().from().coords(), "Away from the Atlas");
+    }
+
+    /**
      * An Alamo strike at 1209: its crater (a hex's ring) takes the building at 1210 and its blast brings down the
      * building at 1211, two hexes out, and the board's bridges. What its own checkpoint shows gone comes down right after
      * its flash, the crater's building among them; the rest as the phase ends (TWGameManager#applyBuildingDamage). All of
@@ -245,12 +272,17 @@ class GpuCollapseCauseTest {
 
     /** The attacker fires {@code weapons} at the structure at 1209, and the firing phase resolves, to its end. */
     private static void fire(TWGameManager manager, Game game, Entity attacker, List<String> weapons) throws Exception {
-        int building = new BuildingTarget(ROOF, game.getBoard(), false).getId();
+        fire(manager, game, attacker, weapons, Targetable.TYPE_BUILDING, new BuildingTarget(ROOF, game.getBoard(), false).getId());
+    }
+
+    /** The attacker fires {@code weapons} at the target, and the firing phase resolves, to its end. */
+    private static void fire(TWGameManager manager, Game game, Entity attacker, List<String> weapons, int targetType,
+          int target) throws Exception {
         for (String weapon : weapons) {
             int mount = attacker.getWeaponList().stream()
                   .filter(gun -> gun.getType() == EquipmentType.get(weapon) && !gun.isRearMounted())
                   .findFirst().map(attacker::getEquipmentNum).orElseThrow();
-            game.addAction(new WeaponAttackAction(MOVER, Targetable.TYPE_BUILDING, building, mount));
+            game.addAction(new WeaponAttackAction(MOVER, targetType, target, mount));
         }
         call(manager, "resolveOnlyWeaponAttacks");
         manager.assignAMS();
