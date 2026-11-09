@@ -73,6 +73,14 @@ public abstract class StartScreenContent {
         return Ambience.BATTLE;
     }
 
+    /**
+     * The prefix of the program's {@code <name>-icon-<size>x<size>.png} files in the misc images directory, which the
+     * native window shows on its title bar and taskbar button, such as "mekhq".
+     */
+    public String icons() {
+        return "megamek";
+    }
+
     /** A star system on a {@link StarChart}: where it is, in light years from Terra (coreward up), and its owner's colour. */
     public record Star(double x, double y, java.awt.Color color) { }
 

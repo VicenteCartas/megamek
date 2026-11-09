@@ -256,6 +256,8 @@ public final class GpuStartWindow {
     public static void install(JFrame owner, StartScreenContent content) {
         anchor = Objects.requireNonNull(owner);
         installed = Objects.requireNonNull(content);
+        // The window takes its icons as it opens, and its taskbar button keeps them
+        GpuBoardWindow.useIcons(content.icons());
         if (!owner.isDisplayable()) {
             // The native window's thread is a daemon and AWT shuts down without a displayable window, so the hidden
             // frame's peer is what keeps the program running while only the start screen shows
