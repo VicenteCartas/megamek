@@ -969,7 +969,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
               (hasJumpMP() &&
                     (!selectedUnit.isConventionalInfantry() ||
                           selectedUnit.getMovementMode().isJumpInfantry()) &&
-                    !(isLAM && ((LandAirMek) selectedUnit).getLAMType() == LandAirMek.LAM_STANDARD)) &&
+               (!isLAM || ((LandAirMek) selectedUnit).getConversionMode() == LandAirMek.CONV_MODE_MEK)) &&
               !(selectedUnit.isStuck() && !selectedUnit.canUnstickByJumping()));
 
         setSwimEnabled(!isAero &&
@@ -4344,6 +4344,11 @@ public class MovementDisplay extends ActionPhaseDisplay {
         final Entity currentEntity = currentEntity();
 
         if (currentEntity == null) {
+            setModeConvertEnabled(false);
+            return;
+        }
+
+        if (!currentEntity.isDeployed() || currentEntity.getPosition() == null) {
             setModeConvertEnabled(false);
             return;
         }
