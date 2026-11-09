@@ -239,6 +239,7 @@ final class BayKit {
             for (var polygon : piece.polygons()) {
                 for (var part : KitOutline.inset(polygon, piece.walls(), .5)) { underside(result, part, -chamfer - .01); }
             }
+            for (var joint : joints) { pocket(result, joint, chamfer); }
         }
         List<KitOutline.Wall> edges = new ArrayList<>(piece.walls());
         if (seamed) {
@@ -438,6 +439,19 @@ final class BayKit {
 
     /** Where a closed module's side starts, just over the storey's interior floor. */
     private static final double SIDE_FLOOR = .1;
+
+    /**
+     * The far side of a seamed roof's groove along {@code joint}: its floor and a back, {@code depth} into the next hex,
+     * facing this module. Under a neighbour as tall it lies beneath that roof's own seam bevel; beside a taller one it
+     * closes the groove against the neighbour's open storey.
+     */
+    private static void pocket(GeneratedMesh result, KitOutline.Wall joint, double depth) {
+        double[] p = joint.p(), q = joint.q(), n = normal(p, q), back = { -n[0], -n[1] };
+        double[] pp = { p[0] + n[0] * depth, p[1] + n[1] * depth }, qq = { q[0] + n[0] * depth, q[1] + n[1] * depth };
+        underside(result, List.of(p, q, qq, pp), -depth);
+        result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(qq, -depth, back), darkVertex(pp, -depth, back), darkVertex(pp, 0, back),
+              darkVertex(qq, 0, back));
+    }
 
     /** A dark floor facing up at {@code z} over a convex {@code polygon}. */
     private static void underside(GeneratedMesh result, List<double[]> polygon, double z) {
