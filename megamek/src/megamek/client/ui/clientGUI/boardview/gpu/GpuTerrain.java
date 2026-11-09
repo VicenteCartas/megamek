@@ -1372,6 +1372,9 @@ final class GpuTerrain implements Disposable {
     private final Map<Shader, Shader> prepassTwins = new IdentityHashMap<>();
     /** Tree species whose stand parts are warm-up samples, so their programs and twins build behind the loading stage. */
     private final Set<String> standSpecies = new HashSet<>();
+    /** The pile whose program stands for all rubble's, and whether it was asked for (ChunkBuild#finish). */
+    private static final String RUBBLE_PILE = "scenery/rubble/medium";
+    private boolean rubblePrepared;
     /** Whether this flush's colour draws follow a depth pre-pass (render, bindMaterial). */
     private boolean prepassed;
     /**
@@ -2488,6 +2491,8 @@ final class GpuTerrain implements Disposable {
     private static java.util.Set<String> featureModels(BoardScene scene) {
         java.util.Set<String> names = new java.util.LinkedHashSet<>();
         for (BoardScene.Tile tile : scene.tiles()) {
+            // What comes down leaves rubble: the load links its program from this pile (ChunkBuild#finish).
+            if (BoardScene.TileTransition.structure(tile)) { names.add(RUBBLE_PILE); }
             for (BoardScene.Feature feature : tile.features()) {
                 var kind = feature.kind();
                 if (kind == BoardScene.FeatureKind.SCATTER && !BoardFungus.asset(feature.asset())
@@ -4705,15 +4710,7 @@ final class GpuTerrain implements Disposable {
                 if (building == null && !BoardWall.supports(feature.asset()) && material.id.equals("wall")) {
                     material.get(TextureAttribute.class, TextureAttribute.Diffuse).scaleV = feature.height();
                 }
-                if (material.id.startsWith("geyser-") || material.id.startsWith("rubble-")
-                      || material.id.startsWith("fortified-")) {
-                    // Terrain scenery shares the ground's lighting and weather response.
-                    material.set(new Ground(.15f));
-                    if (material.id.equals("geyser-lava")) {
-                        Material lava = GpuMagmaShader.material(assets, GpuMagmaShader.LAVA, null);
-                        for (Attribute attribute : lava) { material.set(attribute.copy()); }
-                    }
-                }
+                groundScenery(material);
             }
             // Ordinary placements copy the same unchanged model nodes: copy the model's local box (GpuAssets#bounds)
             // before transforming it; an assembled building's, once per assembly. A flag's cloth moves its vertices.
@@ -5643,6 +5640,19 @@ final class GpuTerrain implements Disposable {
                         prepareTerrainMaterial(GpuTreeInstances.instancedMaterial(fallMaterial(part.material)),
                               part.meshPart.mesh.getVertexAttributes());
                     }
+                }
+            }
+            // A structure that comes down leaves rubble (Hex#destroyStructure): scenery the board may not have drawn yet,
+            // which draws loose (cacheDecorations). Its program links behind the loading stage too; every pile is built
+            // of the same materials, so one stands for all.
+            if (!rubblePrepared && !editable && chunk.tileMeshes.keySet().stream().map(scene::tile)
+                  .anyMatch(tile -> tile != null && BoardScene.TileTransition.structure(tile))) {
+                rubblePrepared = true;
+                ModelInstance pile = new ModelInstance(assets.model(RUBBLE_PILE));
+                for (Material material : pile.materials) { groundScenery(material); }
+                for (Renderable part : GpuTerrainDepth.snapshot(List.of(pile))) {
+                    opaque(part.material);
+                    prepareTerrainMaterial(part.material, part.meshPart.mesh.getVertexAttributes());
                 }
             }
             // Multi-hex buildings' glass draws blended by its .tres: its program links behind the loading stage too.
@@ -7792,6 +7802,17 @@ final class GpuTerrain implements Disposable {
             if (pieces.isEmpty()) { continue; }
             var middle = BoardGeometry.center(at, tile.elevation());
             destruction.rubble(at, pieces, bounds, middle.x, middle.y);
+        }
+    }
+
+    /** Terrain scenery's material (a geyser's, rubble's, a strongpoint's) shares the ground's lighting and weather response. */
+    private void groundScenery(Material material) {
+        if (!material.id.startsWith("geyser-") && !material.id.startsWith("rubble-")
+              && !material.id.startsWith("fortified-")) { return; }
+        material.set(new Ground(.15f));
+        if (material.id.equals("geyser-lava")) {
+            Material lava = GpuMagmaShader.material(assets, GpuMagmaShader.LAVA, null);
+            for (Attribute attribute : lava) { material.set(attribute.copy()); }
         }
     }
 
