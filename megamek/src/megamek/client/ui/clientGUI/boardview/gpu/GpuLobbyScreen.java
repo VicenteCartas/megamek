@@ -1728,18 +1728,18 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     }
 
     /**
-     * The developer switch's advanced search, a step each half second through the stage: Filters, Advanced search, a
-     * walk of at least 5 typed in, then the Alpha Strike size 4 chip or a PPC in the equipment expression; the count
-     * of matching units is logged at each step.
+     * The developer switch's advanced search, a step each half second through the stage: a pause, the strip's
+     * Advanced, a walk of at least 5 typed in, then the Alpha Strike size 4 chip or a PPC in the equipment expression;
+     * the count of matching units is logged at each step.
      */
     private void probeAdvanced(GpuLobbyProbe probe, double elapsed) {
         int found = requisition.resultsList().items().size();
         advancedAt = elapsed + .6;
         LobbyAdvancedSearchView view = requisition.advancedView();
         switch (advancedStep++) {
-            case 0 -> GpuLobbyProbeInput.click(stage, requisition.filtersToggle());
+            case 0 -> LOGGER.info("The lobby probe's advanced search starts with {} units", found);
             case 1 -> {
-                GpuLobbyProbeInput.click(stage, requisition.drawerAdvancedButton());
+                GpuLobbyProbeInput.click(stage, requisition.advancedToggle());
                 LOGGER.info("The lobby probe opened the advanced search: {}", requisition.advancedOpen());
             }
             case 2 -> {

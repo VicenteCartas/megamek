@@ -37,8 +37,9 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Clicks the Requisition's advanced search through the stage, as a pointer would: the drawer's button opens it in the
- * results' place, typed and picked criteria reach the search and show as tags, and a tag, Clear and Escape undo them.
+ * Clicks the Requisition's advanced search through the stage, as a pointer would: the filter strip's Advanced opens it
+ * in the results' place, typed and picked criteria reach the search and show as tags, and a tag, Clear and Escape undo
+ * them.
  */
 @Tag("on-demand")
 class LobbyAdvancedSearchSmokeTest {
@@ -56,13 +57,11 @@ class LobbyAdvancedSearchSmokeTest {
             run(ui, .1f);
             assertEquals(3, requisition.resultsList().items().size());
 
-            click(ui, requisition.filtersToggle());
-            run(ui, .5f);
-            assertTrue(requisition.drawerOpen());
-            click(ui, requisition.drawerAdvancedButton());
+            click(ui, requisition.advancedToggle());
             run(ui, .1f);
-            assertTrue(requisition.advancedOpen(), "the drawer's button opens the advanced search");
-            assertFalse(requisition.drawerOpen(), "and shuts the drawer");
+            assertTrue(requisition.advancedOpen(), "the strip's Advanced opens the advanced search");
+            assertTrue(requisition.advancedToggle().isChecked(), "and shows checked while it is open");
+            assertFalse(requisition.drawerOpen());
             LobbyAdvancedSearchView view = requisition.advancedView();
             assertNotNull(view);
             assertTrue(text(view.actor()).contains("3 matching units"), text(view.actor()));
@@ -109,8 +108,12 @@ class LobbyAdvancedSearchSmokeTest {
             click(ui, view.actor().findActor("lobby-requisition-advanced-done"));
             run(ui, .1f);
             assertFalse(requisition.advancedOpen(), "Done shows the results again");
-            assertTrue(requisition.filtersToggle().getText().toString().contains("2"),
-                  "the Filters count has both criteria: " + requisition.filtersToggle().getText());
+            assertFalse(requisition.advancedToggle().isChecked());
+            assertTrue(requisition.advancedToggle().getText().toString().contains("2"),
+                  "the Advanced count has both criteria: " + requisition.advancedToggle().getText());
+            assertFalse(requisition.filtersToggle().getText().toString().contains("2"),
+                  "the Filters count leaves them to Advanced: " + requisition.filtersToggle().getText());
+            assertFalse(requisition.resetButton().isDisabled(), "Reset filters is on while criteria are at work");
 
             Group tags = body.findActor("lobby-requisition-tags");
             assertNotNull(tags, "the criteria show as tags");
@@ -123,9 +126,7 @@ class LobbyAdvancedSearchSmokeTest {
             assertTrue(actions.criteria().values().containsKey(Field.QUIRKS), "and only that one");
             assertEquals(3, requisition.resultsList().items().size());
 
-            click(ui, requisition.filtersToggle());
-            run(ui, .5f);
-            click(ui, requisition.drawerAdvancedButton());
+            click(ui, requisition.advancedToggle());
             run(ui, .1f);
             view = requisition.advancedView();
             Button clear = button(view.actor(), "Clear");
@@ -133,6 +134,11 @@ class LobbyAdvancedSearchSmokeTest {
             click(ui, clear);
             run(ui, .1f);
             assertTrue(actions.criteria().isEmpty(), "Clear empties the tab's criteria");
+            click(ui, requisition.advancedToggle());
+            run(ui, .1f);
+            assertFalse(requisition.advancedOpen(), "a second click on Advanced shuts the view");
+            click(ui, requisition.advancedToggle());
+            run(ui, .1f);
             assertTrue(requisition.back(), "Escape's step shuts the view");
             assertFalse(requisition.advancedOpen());
             body.remove();
