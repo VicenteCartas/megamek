@@ -84,20 +84,22 @@ final class GpuMovePlan implements AutoCloseable {
      * planner's walk gear, the transports on its board the unit could mount ({@code Compute.canMount}) and may not
      * stand with, beside which MegaMek's click stops the path for its Mount command
      * ({@code MountPathHelper.trimToMountableTransport}). {@code facingMatters} is false for a unit that takes no turn
-     * commands ({@link #facingMatters}).
+     * commands ({@link #facingMatters}). {@code cancellable}: outside the planner, MegaMek's CANCEL has something to
+     * drop (a step of the path, a walk-on unit's placement and a jump's start included; a gear other than walking; a
+     * hex pick); always false in the planner, whose route the HUD clears itself.
      */
     record Snapshot(boolean active, boolean planner, boolean external, int entityId, Mode mode, boolean explicit,
           String gearLabel, List<Step> route, List<Step> hover, List<Step> pins, Coords destination, int facing,
           int cost, int budget, EntityMovementType type, String typeLabel, boolean auto, int heat, int tmm,
           boolean legal, List<String> warnings, boolean canUndo, boolean canPin, boolean facingMatters,
-          Map<Coords, Band> envelope, Set<Integer> mounts, int holdingRemaining) {
+          Map<Coords, Band> envelope, Set<Integer> mounts, int holdingRemaining, boolean cancellable) {
         static final Snapshot EMPTY = idle(0);
 
         /** No plan (not the local movement turn, or no unit selected), with the hold's count. */
         static Snapshot idle(int holdingRemaining) {
             return new Snapshot(false, false, false, Entity.NONE, Mode.AUTO, false, "", List.of(), List.of(),
                   List.of(), null, -1, 0, 0, EntityMovementType.MOVE_NONE, "", false, 0, 0, false, List.of(), false,
-                  false, false, Map.of(), Set.of(), holdingRemaining);
+                  false, false, Map.of(), Set.of(), holdingRemaining, false);
         }
 
         Snapshot {
@@ -207,7 +209,8 @@ final class GpuMovePlan implements AutoCloseable {
               shown.cost(), shown.budget(), shown.type(), typeLabel(shown.type(), mode), planner && (mode == Mode.AUTO),
               shown.heat(), shown.tmm(), shown.legal(), shown.warnings(), planner && canUndo(path),
               planner && pinnable(md, path), facingMatters(entity), reach, planner ? mounts(md, entity) : Set.of(),
-              held);
+              held, !planner && (path.length() > 0 || md.getGear() != MovementDisplay.GEAR_LAND
+                    || md.isSelectingHex()));
         if (!next.equals(published)) {
             published = next;
         }

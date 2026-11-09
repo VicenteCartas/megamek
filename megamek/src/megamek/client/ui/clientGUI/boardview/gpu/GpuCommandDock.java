@@ -1069,6 +1069,15 @@ final class GpuCommandDock implements GpuHud.Component {
         chosen.add(id);
     }
 
+    /** Esc's step in the physical attack: releases the chosen options, undeclared; false when none is chosen. */
+    boolean releaseChosen() {
+        if (chosen.isEmpty()) {
+            return false;
+        }
+        chosen.clear();
+        return true;
+    }
+
     /** Runs the phase command with this id, as the frame last showed it, while it is enabled. */
     private void run(String id) {
         run(command(id));

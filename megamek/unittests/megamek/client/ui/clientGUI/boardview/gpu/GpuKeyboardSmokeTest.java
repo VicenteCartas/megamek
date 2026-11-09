@@ -48,6 +48,7 @@ class GpuKeyboardSmokeTest {
             // The view reads the preferences through the accessor; the test rebinds through the field.
             when(source.uiPreferences()).thenAnswer(invocation -> source.uiPreferences);
             when(source.takeFrame()).thenAnswer(invocation -> fixture.source.takeFrame());
+            when(source.scenarioAtmosphere()).thenAnswer(invocation -> fixture.source.scenarioAtmosphere());
             new Lwjgl3Application(new GpuBattleView(source) {
                 private int tick;
 

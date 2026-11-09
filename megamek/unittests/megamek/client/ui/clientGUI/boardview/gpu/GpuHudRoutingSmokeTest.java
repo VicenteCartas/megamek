@@ -155,8 +155,9 @@ class GpuHudRoutingSmokeTest {
      * A1: for every phase and every default bind exactly one handler runs: the HUD (consumed, never forwarded and no
      * camera move), the camera, or Swing (one press and one release, with the modifiers of the press); Swing's GUI scale
      * keys reach none, as the GUI scale is Swing's alone. The phase
-     * displays' own binds (TURN_*, UNDO_*, CANCEL, MOVE_*, TWIST_*) therefore never run twice, and Esc with nothing to
-     * close opens the Menu, except in MegaMek's own movement turn, where it reaches the movement display.
+     * displays' own binds (TURN_*, UNDO_*, CANCEL, MOVE_*, TWIST_*) therefore never run twice. Esc with nothing to
+     * close clears the selection or opens the Menu; MegaMek's own movement turn gets it only while its display has a
+     * path, gear or hex pick to drop, which the scenarios' empty plans do not have.
      */
     @Test
     void everyKeyReachesExactlyOneHandlerInEveryPhase() throws Exception {
@@ -168,6 +169,11 @@ class GpuHudRoutingSmokeTest {
                 for (Key key : keys) {
                     Handler expected = expected(scenario, key, routing.hud.state.logOpen());
                     assertEquals(expected, routing.press(key), scenario + ", " + key.binds());
+                    if (key.binds().contains(KeyCommandBind.CANCEL)) {
+                        // With nothing else to close, Esc cleared the selection: the next keys start from it again.
+                        routing.hud.state.restoreSelection();
+                        routing.view.render();
+                    }
                 }
             }
         });
@@ -782,9 +788,10 @@ class GpuHudRoutingSmokeTest {
 
     /**
      * The card's ✕, on the selected unit as on an inspected one, clears the
-     * selection. In the local turn no unit is then selected at all: no card, no dock, no selected row; a hex does
-     * nothing, an enemy is only inspected, and the keys of MegaMek's current unit stay with the HUD while a menu-bar
-     * bind still reaches MegaMek. A click on the own unit selects it again, afresh.
+     * selection. In the local turn no unit is then selected at all: no card, no unit commands in the dock (it keeps
+     * only the chat), no selected row; a hex does nothing, an enemy is only inspected, and the keys of MegaMek's
+     * current unit stay with the HUD while a menu-bar bind still reaches MegaMek. A click on the own unit selects it
+     * again, afresh.
      */
     @Test
     void theCardsCloseButtonClearsTheSelection() throws Exception {
@@ -794,13 +801,14 @@ class GpuHudRoutingSmokeTest {
             for (Scenario scenario : List.of(SCENARIOS.get(2), SCENARIOS.get(6), SCENARIOS.get(11))) {
                 routing.show(scenario);
                 assertEquals(OWN_ID, state.cardUnit(), scenario + ": the acting unit is the selected one");
-                boolean dock = shown(routing.find("command-dock"));
+                // The dock's head (the unit's title) comes with its commands; the chat-only dock has none.
+                boolean dock = shown(routing.find("dock-title"));
                 routing.press(routing.find("unit-card-close"));
                 routing.view.render();
                 assertEquals(List.of(Entity.NONE, Entity.NONE), List.of(state.inspected, state.cardUnit()),
                       scenario + ": the ✕ clears the selection");
                 assertFalse(shown(routing.find("unit-card")), scenario + ": no card");
-                assertFalse(shown(routing.find("command-dock")), scenario + ": no dock");
+                assertFalse(shown(routing.find("dock-title")), scenario + ": the dock keeps only the chat");
                 assertFalse(routing.<UiButton>find("forces-unit-" + OWN_ID).isChecked(), scenario + ": no row");
                 clearInvocations(routing.source, routing.moves, routing.fire);
 
@@ -808,7 +816,7 @@ class GpuHudRoutingSmokeTest {
                 routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
                 routing.view.render();
                 assertEquals(FOE_ID, state.inspected, scenario + ": an enemy is inspected");
-                assertFalse(shown(routing.find("command-dock")), scenario + ": and the selection stays cleared");
+                assertFalse(shown(routing.find("dock-title")), scenario + ": and the selection stays cleared");
                 assertEquals(Handler.CAMERA, routing.press(key(keys, KeyCommandBind.TURN_LEFT)),
                       scenario + ": Shift+A pans even with no unit selected");
                 for (KeyCommandBind bind : List.of(KeyCommandBind.DONE,
@@ -832,7 +840,7 @@ class GpuHudRoutingSmokeTest {
                     verify(routing.source).selectUnit(OWN_ID);
                 }
                 assertEquals(OWN_ID, state.cardUnit(), scenario + ": a click selects the unit again");
-                assertEquals(dock, shown(routing.find("command-dock")), scenario + ": with its dock");
+                assertEquals(dock, shown(routing.find("dock-title")), scenario + ": with its dock");
             }
         });
     }
@@ -969,7 +977,8 @@ class GpuHudRoutingSmokeTest {
 
     /**
      * The one highlighted row of the shown forces and contacts lists is the unit's: its forces row, or for an enemy its
-     * contacts row and its forces row while the forces list shows its contacts; the card shows the unit.
+     * contacts row and its forces row while the forces list shows its contacts; the card shows the unit, an enemy on
+     * the card for other units.
      */
     private static void assertHighlighted(Routing routing, int unitId, String when) {
         Set<String> expected = new HashSet<>();
@@ -992,7 +1001,7 @@ class GpuHudRoutingSmokeTest {
             }
         }
         assertEquals(expected, highlighted, when + ": the highlighted rows");
-        Label name = routing.find("unit-card-name");
+        Label name = routing.find(enemy ? "other-unit-card-name" : "unit-card-name");
         assertEquals(UiTheme.upper("Unit " + unitId), name.getText().toString(), when + ": the card");
     }
 
@@ -1195,9 +1204,8 @@ class GpuHudRoutingSmokeTest {
         GamePhase phase = scenario.phase();
         boolean firing = scenario.myTurn() && phase.isFiring();
         return switch (bind) {
-            // The last Esc opens the Menu, except in MegaMek's own movement turn; F10 always toggles it.
-            case CANCEL -> !(scenario.myTurn() && phase.isMovement() && !scenario.planner());
-            case GAME_MENU, SHOW_NAMEPLATES, ROUND_REPORT, KEY_BINDS, BOT_COMMANDS, LOS_SETTING,
+            // Esc clears the selection, or opens the Menu; F10 always toggles it.
+            case CANCEL, GAME_MENU, SHOW_NAMEPLATES, ROUND_REPORT, KEY_BINDS, BOT_COMMANDS, LOS_SETTING,
                  UNIT_OVERVIEW, FORCE_DISPLAY, UNIT_DISPLAY, UD_GENERAL, UD_PILOT, UD_ARMOR, UD_WEAPONS, UD_SYSTEMS,
                  UD_EXTRAS, FORCES_GRID, TOGGLE_CHAT, TOGGLE_CHAT_CMD, DONE -> true;
             case MOVE_MODE_WALK, MOVE_MODE_RUN, MOVE_MODE_JUMP, TURN_LEFT, TURN_RIGHT -> scenario.planning();

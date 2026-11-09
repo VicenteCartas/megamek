@@ -151,8 +151,9 @@ class GpuHelpMenuPlayersSmokeTest {
                       "---", menu("FileMenu") + " ›", menu("GameMenu") + " ›", menu("BoardMenu") + " ›",
                       menu("ViewMenu") + " ›", menu("HelpMenu") + " ›",
                       Messages.getString("GameCommands.title") + " ›", "Maps ›", "---",
-                      Messages.getString("GpuBoard.hud.menu.quit")), lines(root),
-                      "the Players row, then one group per menu of the menu bar, the commands, the maps and Quit");
+                      Messages.getString("GpuBoard.hud.menu.lobby"), Messages.getString("GpuBoard.hud.menu.quit")),
+                      lines(root), "the Players row, then one group per menu of the menu bar, the commands, the maps, "
+                            + "Return to Lobby (MegaMek's Reset Game, offered without a Game Master) and Quit");
                 hud.draw();
                 hud.capture("menu-panel").dispose();
 

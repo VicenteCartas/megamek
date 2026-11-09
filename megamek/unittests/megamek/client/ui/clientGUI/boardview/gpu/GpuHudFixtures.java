@@ -164,10 +164,15 @@ final class GpuHudFixtures {
               GpuReportLog.Snapshot.EMPTY, status, panels);
     }
 
+    /** The first unit's plan with {@code route}; outside the planner MegaMek's CANCEL then has the route to drop. */
     static GpuMovePlan.Snapshot move(boolean planner, List<GpuMovePlan.Step> route) {
+        return move(planner, route, !planner && !route.isEmpty());
+    }
+
+    static GpuMovePlan.Snapshot move(boolean planner, List<GpuMovePlan.Step> route, boolean cancellable) {
         return new GpuMovePlan.Snapshot(true, planner, false, GpuHudFixtures.FIRST, GpuMovePlan.Mode.AUTO, false, "", route,
               List.of(), List.of(), route.isEmpty() ? null : GpuHudFixtures.HEX, 0, route.size(), 4, EntityMovementType.MOVE_WALK, "",
-              true, 0, 0, true, List.of(), !route.isEmpty(), !route.isEmpty(), true, Map.of(), Set.of(), 0);
+              true, 0, 0, true, List.of(), !route.isEmpty(), !route.isEmpty(), true, Map.of(), Set.of(), 0, cancellable);
     }
 
     /** The panel bundle of the given snapshots, with the others empty. */

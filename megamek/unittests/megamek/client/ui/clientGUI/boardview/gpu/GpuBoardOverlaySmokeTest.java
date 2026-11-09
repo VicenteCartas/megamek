@@ -970,7 +970,7 @@ class GpuBoardOverlaySmokeTest {
         return new GpuMovePlan.Snapshot(true, planner, false, unit, GpuMovePlan.Mode.AUTO, false, "", route, hover,
               pins, last == null ? null : last.coords(), last == null ? -1 : last.facing(), route.size(), 5,
               EntityMovementType.MOVE_WALK, "", true, 1, 0, true, List.of(), true, true, true, envelope, Set.of(),
-              0);
+              0, !planner && !route.isEmpty());
     }
 
     static GpuMovePlan.Snapshot withRoute(GpuMovePlan.Snapshot plan, List<GpuMovePlan.Step> route,

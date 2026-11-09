@@ -357,7 +357,10 @@ final class GpuMapHud implements GpuBoardHud {
         }
     }
 
-    /** Esc closes the open menu or tuning panel; the open menu takes its list keys. */
+    /**
+     * A modal, a pending file question, the open menu, a focused text field and the hex menu take the keys first (Esc
+     * closes the modal, the menu or the hex menu, or leaves the field); then Esc takes {@link #escape}'s next step.
+     */
     @Override
     public boolean keyDown(int key, int awt, int modifiers) {
         UiModal active = UiModal.active(stage);
@@ -375,17 +378,23 @@ final class GpuMapHud implements GpuBoardHud {
         }
         // A tree that holds the keyboard focus (Layers, after a click on a row) takes its navigation keys.
         if (stage.getKeyboardFocus() instanceof megamek.client.ui.gdx.UiTree && stage.keyDown(key)) { return true; }
-        if (key == Input.Keys.ESCAPE && editor != null && editor.escape()) { return true; }
+        if (key == Input.Keys.ESCAPE) { escape(); return true; }
         // Bare tool keys win inside the editor only; B waits for a picker click without ending a stroke.
         if (editor != null && modifiers == 0 && (key == Input.Keys.B || editor.toolKey(key))) { return true; }
-        if (state.dialog == Dialog.NONE) {
-            return key == Input.Keys.ESCAPE && (losPanel.cancel() || editor != null && editor.escapeAssets());
-        }
-        if (key == Input.Keys.ESCAPE) {
-            state.dialog = Dialog.NONE;
-            return true;
-        }
-        return stage.keyDown(key);
+        return state.dialog != Dialog.NONE && stage.keyDown(key);
+    }
+
+    /**
+     * Esc, one step per press: the editor's open dialog or list closes, then the tuning panel, then a pending ruler
+     * is dropped, the editor's selection clears and the Assets panel goes back a page; with nothing left, the Menu
+     * opens, as a game's Esc does.
+     */
+    private void escape() {
+        if (editor != null && editor.escape()) { return; }
+        if (state.dialog != Dialog.NONE) { state.dialog = Dialog.NONE; return; }
+        if (losPanel.cancel()) { return; }
+        if (editor != null && (editor.clearSelection() || editor.escapeAssets())) { return; }
+        state.dialog = Dialog.MENU;
     }
 
     @Override

@@ -185,15 +185,25 @@ class GpuHudInputTest {
         update(moving, GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
         assertTrue(escape());
         assertEquals(Entity.NONE, hud.state.inspected);
+        assertFalse(hud.state.turnLocked(moving));
+        assertTrue(escape(), "then the selection clears, as the card's close button clears it");
+        assertTrue(hud.state.turnLocked(moving));
+        assertEquals(Entity.NONE, hud.state.ownCardUnit());
         assertTrue(escape(), "with nothing left to close, Esc opens the Menu instead of reaching the phase display");
         assertEquals(GpuHudState.Dialog.MENU, hud.state.dialog);
         assertTrue(escape());
         assertEquals(GpuHudState.Dialog.NONE, hud.state.dialog, "Esc closes the Menu again");
+        assertTrue(escape());
+        assertEquals(GpuHudState.Dialog.MENU, hud.state.dialog, "and opens it again: Esc alternates");
+        hud.state.dialog = GpuHudState.Dialog.NONE;
 
-        // OFFBOARD runs the targeting display, whose CANCEL clears the declared attacks as well.
+        // OFFBOARD runs the targeting display, whose CANCEL clears the declared attacks as well. A new phase restores
+        // the selection, so its first Esc clears it again.
         for (GamePhase phase : List.of(GamePhase.FIRING, GamePhase.TARGETING, GamePhase.OFFBOARD,
               GamePhase.PHYSICAL)) {
             update(GpuHudFixtures.status(3, phase, true, GpuHudFixtures.FIRST, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)), GpuHudData.EMPTY, null);
+            assertTrue(escape());
+            assertEquals(GpuHudState.Dialog.NONE, hud.state.dialog, phase + ": the selection goes first");
             assertTrue(escape(), "CANCEL would clear declared attacks, so " + phase + " never forwards it");
             assertEquals(GpuHudState.Dialog.MENU, hud.state.dialog, phase + ": the last Esc opens the Menu");
             hud.state.dialog = GpuHudState.Dialog.NONE;
@@ -303,12 +313,43 @@ class GpuHudInputTest {
               new Key(Input.Keys.ESCAPE, KeyEvent.VK_ESCAPE, 0))) {
             assertFalse(press(key.gdx(), key.awt(), key.modifiers()), "key " + key + " was consumed");
         }
-        // Without a path (a hex pick, or nothing yet) Esc still reaches MegaMek rather than opening the Menu.
-        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)),
-              GpuHudFixtures.panels(GpuHudFixtures.move(false, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        // A hex pick or a gear without a path is MegaMek's to drop as well.
+        GpuBattleStatus.Snapshot moving = GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1,
+              GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true));
+        update(moving, GpuHudFixtures.panels(GpuHudFixtures.move(false, List.of(), true), GpuPhysicalOptions.Snapshot.EMPTY), null);
         assertFalse(escape(), "Esc was consumed");
         assertEquals(GpuHudState.Dialog.NONE, hud.state.dialog);
+        // With nothing of MegaMek's to drop, Esc goes on: the selection clears, then the Menu opens.
+        update(moving, GpuHudFixtures.panels(GpuHudFixtures.move(false, List.of(), false), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        assertTrue(escape());
+        assertTrue(hud.state.turnLocked(moving));
+        assertTrue(escape());
+        assertEquals(GpuHudState.Dialog.MENU, hud.state.dialog);
         verifyNoInteractions(moves);
+    }
+
+    @Test
+    void escapeReleasesAChosenPhysicalAttackBeforeTheSelection() {
+        GpuPhysicalOptions.Option kick = new GpuPhysicalOptions.Option("kickLeft", "Kick L", "L", true, "", 4, 92, 20,
+              "Kick table", List.of(), false);
+        GpuBattleStatus.Snapshot turn = GpuHudFixtures.status(3, GamePhase.PHYSICAL, true, GpuHudFixtures.FIRST, 1,
+              GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true), GpuHudFixtures.unit(FOE, ENEMY, false, false));
+        GpuHudData panels = GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY, new GpuPhysicalOptions.Snapshot(true,
+              GpuHudFixtures.FIRST, FOE, List.of(FOE), List.of(kick)));
+        update(turn, panels, null);
+        UiButton option = hud.stage.getRoot().findActor("dock-option-kickLeft");
+        option.fire(new ChangeListener.ChangeEvent());
+        update(turn, panels, null);
+        assertTrue(option.isChecked());
+
+        assertTrue(escape());
+        update(turn, panels, null);
+        assertFalse(option.isChecked(), "the kick is released, undeclared");
+        assertFalse(hud.state.turnLocked(turn), "the selection stays for the next Esc");
+        verify(physical, never()).declare(any());
+        assertTrue(escape());
+        assertTrue(hud.state.turnLocked(turn));
+        assertEquals(GpuHudState.Dialog.NONE, hud.state.dialog);
     }
 
     @Test

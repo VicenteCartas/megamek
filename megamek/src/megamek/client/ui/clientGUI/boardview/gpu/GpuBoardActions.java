@@ -59,6 +59,8 @@ final class GpuBoardActions {
     static final String DONE_ID = "phase.done";
     static final String SKIP_ID = "phase.skip";
     static final String CLEAR_ID = "clear";
+    /** The id of the game commands group (the Commands button's menu) among the global commands. */
+    static final String GAME_COMMANDS_ID = "game-commands";
 
     /**
      * The phase panel's status and the ids of its completion commands in the phase commands, "" when absent.
@@ -288,7 +290,7 @@ final class GpuBoardActions {
             Supplier<Container> commands = () -> view.game.getPhase().isOnMap() || view.game.getPhase().isReport()
                   ? new GameCommandsMenu(gui).createPopup() : new JPopupMenu();
             List<BoardScene.Command> children = menuCommands(commands.get(), commands, null);
-            result.add(new BoardScene.Command("game-commands", Messages.getString("GameCommands.title"),
+            result.add(new BoardScene.Command(GAME_COMMANDS_ID, Messages.getString("GameCommands.title"),
                   Messages.getString("GameCommands.tooltip"), !children.isEmpty(), false, children, () -> { }));
         }
         return result;

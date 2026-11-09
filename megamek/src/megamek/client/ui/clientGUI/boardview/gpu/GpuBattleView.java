@@ -3412,9 +3412,12 @@ class GpuBattleView extends ApplicationAdapter {
             if (pressedKeys.containsKey(key) || cameraKeys.containsKey(key)) {
                 return true;
             }
-            // Esc drops a route being drawn by hand before the HUD's Esc chain sees it.
-            if (key == Input.Keys.ESCAPE && drawingRoute()) {
-                cancelRoute();
+            // Esc takes the editor's left-button gesture before the HUD's Esc chain: a route drawn by hand is dropped
+            // unbuilt, and a box, click, pick or measurement is dropped before its release acts. A stroke, move or
+            // turn changes the board as it goes, so Esc leaves it to its release.
+            if (key == Input.Keys.ESCAPE && boardGesture && gestureButton == Input.Buttons.LEFT && source.isEditor()) {
+                if (drawingRoute()) { cancelRoute(); }
+                else if (marquee || measurementGesture || brushPickerGesture) { reset(); }
                 return true;
             }
             int awt = awtKey(key);

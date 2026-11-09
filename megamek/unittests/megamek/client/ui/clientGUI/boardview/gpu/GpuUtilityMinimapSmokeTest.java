@@ -701,7 +701,7 @@ class GpuUtilityMinimapSmokeTest {
         GpuMovePlan.Snapshot empty = GpuMovePlan.Snapshot.EMPTY;
         return new GpuMovePlan.Snapshot(true, true, false, GpuHudFixtures.ATLAS, GpuMovePlan.Mode.AUTO, false, "",
               ROUTE, List.of(), List.of(), ROUTE.getLast().coords(), 0, 3, 3, EntityMovementType.MOVE_WALK, "",
-              true, 1, 1, true, List.of(), true, true, true, empty.envelope(), Set.of(), 0);
+              true, 1, 1, true, List.of(), true, true, true, empty.envelope(), Set.of(), 0, false);
     }
 
     /** A volley of {@code count} weapon attacks of this round, as the report log keeps them for review. */

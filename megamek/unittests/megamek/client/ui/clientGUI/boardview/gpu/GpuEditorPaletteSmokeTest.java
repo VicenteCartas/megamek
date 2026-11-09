@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -216,6 +217,15 @@ class GpuEditorPaletteSmokeTest {
               (view, source, root) -> {
                   assertNull(root.findActor("editor-back"), "Esc: from the category back to the start page");
                   escape();
+                  return true;
+              },
+              (view, source, root) -> {
+                  assertTrue(GpuBoardTestUi.shown(root.findActor("menu-panel")), "With nothing left, Esc opens the Menu");
+                  escape();
+                  return true;
+              },
+              (view, source, root) -> {
+                  assertFalse(GpuBoardTestUi.shown(root.findActor("menu-panel")), "and the next Esc closes it");
                   GpuBoardTestUi.category("theme");
                   return true;
               },

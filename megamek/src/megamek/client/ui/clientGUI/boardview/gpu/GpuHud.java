@@ -534,7 +534,17 @@ final class GpuHud implements GpuBoardHud {
 
     @Override
     public boolean isModal() {
-        return UiModal.active(stage) != null || centeredDialogOpen() || inputs != null && inputs.dialog() != null;
+        return otherModal() != null || centeredDialogOpen() || inputs != null && inputs.dialog() != null;
+    }
+
+    /**
+     * The stage's open modal unless it is the centred dialogs' or the pending dialog's layer: the HUD state opens and
+     * closes those two, and their layers only follow it at the next update, so a closed dialog holds no key a frame
+     * longer.
+     */
+    private UiModal otherModal() {
+        UiModal active = UiModal.active(stage);
+        return active == centeredDialogs || active == modal.actor() ? null : active;
     }
 
     /**
@@ -546,8 +556,8 @@ final class GpuHud implements GpuBoardHud {
     @Override
     public boolean keyDown(int key, int awt, int modifiers) {
         swallowTyped = false;
-        UiModal active = UiModal.active(stage);
-        if (active != null && active != centeredDialogs && active != modal.actor()) {
+        UiModal active = otherModal();
+        if (active != null) {
             active.focus(); stage.keyDown(key); consumedKeys.add(key); return true;
         }
         boolean consumed = inputs != null && dispatch(key, binds(awt, modifiers));
@@ -660,11 +670,12 @@ final class GpuHud implements GpuBoardHud {
     }
 
     /**
-     * The Esc chain (C.4), one step per press. With nothing left to close it skips a running playback, as the dock's
-     * Skip to results does. In the local movement turn MegaMek's own movement (aerospace and the other gears the
-     * planner leaves to it) forwards CANCEL to the phase display, which clears its path or hex pick; F10 opens the Menu
-     * there. With nothing else left, Esc opens the Menu, as a game's Esc does; it never forwards CANCEL in FIRING,
-     * TARGETING, OFFBOARD or PHYSICAL, where it would clear the declared attacks.
+     * The Esc chain (C.4), one step per press: what is open closes, then a pending action is dropped (a pick, the
+     * armed weapon, the route, the chosen physical attack; MegaMek's own movement, aerospace and the other gears the
+     * planner leaves to it, gets CANCEL while its display has a path, gear or hex pick to drop), then the inspected
+     * unit goes, a running playback skips to its results as the dock's Skip does, and the selection clears as the
+     * card's close button clears it. With nothing left, the Menu opens, as a game's Esc does. CANCEL never reaches
+     * FIRING, TARGETING, OFFBOARD or PHYSICAL, where it would clear the declared attacks.
      */
     private boolean escape() {
         // A row dragged in a list (attacks or weapons) goes home first.
@@ -700,12 +711,16 @@ final class GpuHud implements GpuBoardHud {
             return true;
         } else if (planning(inputs) && !inputs.frame().panels().move().route().isEmpty()) {
             source.moves().clearRoute();
+        } else if (dock.releaseChosen()) {
+            return true;
+        } else if (swingMovement(inputs)) {
+            return false;
         } else if (state.inspected != Entity.NONE) {
             state.inspected = Entity.NONE;
         } else if (!phase.isEndReport() && state.history.running()) {
             state.history.skip();
-        } else if (swingMovement(inputs)) {
-            return false;
+        } else if (state.ownCardUnit() != Entity.NONE) {
+            state.clearSelection();
         } else {
             state.dialog = GpuHudState.Dialog.MENU;
         }
@@ -713,13 +728,13 @@ final class GpuHud implements GpuBoardHud {
     }
 
     /**
-     * The local movement turn outside the planner (G20): MegaMek's own movement display holds its path and hex picks,
-     * so its CANCEL keeps Esc.
+     * The local movement turn outside the planner (G20) while MegaMek's own movement display has a path, gear or hex
+     * pick to drop: its CANCEL takes Esc.
      */
     private static boolean swingMovement(Inputs inputs) {
         GpuMovePlan.Snapshot move = inputs.frame().panels().move();
         return inputs.frame().status().myTurn() && inputs.frame().status().phase().isMovement() && move.active()
-              && !move.planner();
+              && !move.planner() && move.cancellable();
     }
 
     /**

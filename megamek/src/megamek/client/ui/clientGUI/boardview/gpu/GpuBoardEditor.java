@@ -3056,9 +3056,16 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         return false;
     }
 
+    /** Esc's selection step: clears the selection, as a click beside the board does; false while nothing is selected. */
+    boolean clearSelection() {
+        if (snapshot == null || snapshot.selected() == null && snapshot.selection().isEmpty()) { return false; }
+        send(Action.CLEAR_SELECTION);
+        return true;
+    }
+
     /**
-     * Esc's last step, after the line-of-sight ruler's: the Assets panel's search clears, a gallery goes back to the page
-     * that opened it, a subcategory to its category, a category to the start page.
+     * Esc's step after the selection's: the Assets panel's search clears, a gallery goes back to the page that opened
+     * it, a subcategory to its category, a category to the start page.
      */
     boolean escapeAssets() {
         if (!query.isEmpty()) { query = ""; searchField.setText(""); showHead(); showGrid(false); return true; }

@@ -98,6 +98,36 @@ class GpuEditorToolsAndGroupsSmokeTest {
         });
     }
 
+    /** Esc takes one step a press: the selection clears first; with nothing left it opens the Menu, then closes it. */
+    @Test
+    void escapeClearsTheSelectionThenTogglesTheMenu() throws Exception {
+        var setup = new FutureTask<GpuMapSource>(() -> {
+            var editor = new BoardEditorSession();
+            editor.game().setBoard(Board.createEmptyBoard(9, 9));
+            return new GpuMapSource(editor.game(), null, editor);
+        });
+        run(setup, 1280, 800, (view, source) -> {
+            var root = GpuBoardTestUi.stage().getRoot();
+            // An editor opened before in this JVM left its Assets page, which Esc would leave first.
+            for (int page = 0; page < 4 && root.findActor("editor-back") != null; page++) {
+                GpuBoardTestUi.click("editor-back"); settle(view, source);
+            }
+            source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.SELECT_AT, "4,4", ""),
+                  source.takeFrame().boardGeneration());
+            settle(view, source);
+            assertEquals(new Coords(4, 4), source.editorState().selected());
+            Actor menu = root.findActor("menu-panel");
+            press(Input.Keys.ESCAPE); settle(view, source);
+            assertNull(source.editorState().selected(), "The first Esc clears the selection");
+            assertTrue(source.editorState().selection().isEmpty());
+            assertFalse(GpuBoardTestUi.shown(menu));
+            for (boolean open : List.of(true, false, true)) {
+                press(Input.Keys.ESCAPE); settle(view, source);
+                assertEquals(open, GpuBoardTestUi.shown(menu), "With nothing left, Esc toggles the Menu");
+            }
+        });
+    }
+
     @Test
     void zStillTogglesTheMapPreviewOverview() throws Exception {
         var setup = new FutureTask<GpuMapSource>(() -> {

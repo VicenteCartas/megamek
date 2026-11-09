@@ -11,6 +11,7 @@ import java.util.Set;
 
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuHudState.Dialog;
 import megamek.client.ui.util.KeyCommandBind;
@@ -18,8 +19,8 @@ import megamek.client.ui.util.KeyCommandBind;
 /**
  * Menu panel (C.1 G14, C.2, user corrections 3 and 6): the commands of the removed menu bar as the client captures
  * them (File, Game, Board, View, Help, Commands, Maps) in a centred dialog. Its first row opens the players panel and
- * its last row quits to the main menu; groups expand in place; every item shows its shortcut and check mark and runs
- * its own action, except the C.2
+ * its last rows return to the lobby (where the player may reset the game) and quit to the main menu; groups expand in
+ * place; every item shows its shortcut and check mark and runs its own action, except the C.2
  * redirects, which open the native surfaces instead of Swing. Choosing an item closes the panel, as a menu closes.
  */
 final class GpuMenuPanel implements GpuHud.Component {
@@ -71,12 +72,30 @@ final class GpuMenuPanel implements GpuHud.Component {
             rows.add(GpuCommandTree.SEPARATOR);
             tree.rows(menuBar, "", 0, rows);
         }
-        // The window has no close button in fullscreen, so the panel always offers the way out of the game.
-        BoardScene.Command quit = new BoardScene.Command("quit", text("GpuBoard.hud.menu.quit"), "", true, false,
-              false, List.of(), source::quitGame, "", null);
+        // The ways out of the game: back to the lobby where the player may reset it, and, as the window has no close
+        // button in fullscreen, always the main menu.
+        List<BoardScene.Command> exits = new ArrayList<>();
+        BoardScene.Command reset = reset(menuBar);
+        if (reset != null) {
+            exits.add(new BoardScene.Command("lobby", text("GpuBoard.hud.menu.lobby"), reset.detail(), reset.enabled(),
+                  false, false, List.of(), reset.action(), "", null));
+        }
+        exits.add(new BoardScene.Command("quit", text("GpuBoard.hud.menu.quit"), "", true, false, false, List.of(),
+              source::quitGame, "", null));
         rows.add(GpuCommandTree.SEPARATOR);
-        tree.rows(List.of(quit), "", 0, rows);
+        tree.rows(exits, "", 0, rows);
         tree.show(rows, null, this::run);
+    }
+
+    /**
+     * MegaMek's Reset Game among the game commands, which the Commands button offers only where the player may reset:
+     * after its confirmation it ends the game for everyone and returns the server to the lobby. Null without it.
+     */
+    private static BoardScene.Command reset(List<BoardScene.Command> menuBar) {
+        String label = Messages.getString("GameCommands.ResetGame.title");
+        return menuBar.stream().filter(command -> command.id().equals(GpuBoardActions.GAME_COMMANDS_ID))
+              .flatMap(command -> command.children().stream()).filter(command -> command.label().equals(label))
+              .findFirst().orElse(null);
     }
 
     /**
