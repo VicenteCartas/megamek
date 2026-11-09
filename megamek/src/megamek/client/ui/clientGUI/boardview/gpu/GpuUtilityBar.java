@@ -207,14 +207,15 @@ final class GpuUtilityBar implements GpuHud.Component {
         camera.setTactical(enabled, inputs.frame().scene());
     }
 
-    /** The Menu utility's tooltip with the keys that open the Menu: the CANCEL bind (Esc) and the GAME_MENU bind. */
+    /**
+     * The Menu utility's tooltip with the keys that open the Menu: the CANCEL bind (Esc) and the GAME_MENU bind. An
+     * unbound key (code 0) is left out.
+     */
     static String menuTip(GpuBoardSource.UiPreferences preferences) {
         StringJoiner keys = new StringJoiner(" / ");
-        for (KeyCommandBind bind : List.of(KeyCommandBind.CANCEL, KeyCommandBind.GAME_MENU)) {
-            String key = GpuHintLine.key(preferences, bind);
-            if (!key.isEmpty()) {
-                keys.add(key);
-            }
+        for (KeyCommandBind command : List.of(KeyCommandBind.CANCEL, KeyCommandBind.GAME_MENU)) {
+            preferences.binds().stream().filter(bind -> bind.command() == command && bind.keyCode() != 0)
+                  .map(GpuBoardSource.Bind::text).filter(text -> !text.isEmpty()).findFirst().ifPresent(keys::add);
         }
         return keys.length() == 0 ? Messages.getString("GpuBoard.hud.menu.title")
               : Messages.getString("GpuBoard.hud.menu.tip", keys.toString());
