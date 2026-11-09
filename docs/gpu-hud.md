@@ -298,22 +298,47 @@ whether the nameplate key shows every nameplate, the log's open state and the pl
   movement-completed notification to the client. While a firing, physical or end report still plays, the dock shows its
   transport under the latest phase, although the presented phase holds back with the units.
 
-### Scheduled nuclear effects
+### Strikes and explosions
 
-Scheduled `/nuke` strikes use `NUCLEAR_DETONATION` BEGIN/END packets around the server's existing damage resolution.
-`NuclearDetonation` carries the confirmed position, original ground level and four resolved statistics (damage,
-degradation, secondary radius and crater depth), supporting both stock and custom strikes without an invented attacker.
-Command coordinates are converted from one-based input to zero-based once; scheduling, blast resolution and incoming/hit
-markers all use that zero-based position. Weapon impacts remain on their existing resolved-attack path: captured ammo
-selects Davy Crockett type 1, Alamo type 2, Santa Ana type 3 or Peacemaker type 4, instead of treating every nuke as Davy Crockett.
+Blasts without an attacker use `NUCLEAR_DETONATION` BEGIN/END packets around the server's existing damage resolution
+(`TWGameManager#detonation`, animation only). `NuclearDetonation` carries the confirmed position, original ground level,
+four resolved statistics (damage, degradation, secondary radius, crater depth), its `Kind` and, on END, every structure
+hex the blast took to CF 0:
 
-The client applies authoritative updates immediately. `GpuBoardSource` retains the preceding presentation only until END,
-then queues the detonation, one final terrain checkpoint and its visible casualty animations. `UnitPlayback` releases that
-checkpoint at flash contact and uses the existing blast, scorch and camera path; unchanged terrain still completes normally.
-If an update conceals a unit, visibility takes precedence: catch up first, discard consequences that could restore its
-identity (including carrier attachments), then play the public flash. Terrain can therefore already be converted in that
-exceptional case. Board changes clear retained blast effects. Scheduled detonations are live timeline events; this does not
-add a scheduled-strike replay card to the report log.
+- `NUCLEAR`: a scheduled `/nuke` strike, stock or custom. Command coordinates are converted from one-based input to
+  zero-based once.
+- `ORBITAL`: a Game Master's orbital bombardment.
+- `EXPLOSION`: a conventional explosion (a fuel tank, a unit's ammunition, a fusion engine, a booby trap), drawn as a
+  blast falling off evenly over the rules' damage table, whose reach it keeps exactly.
+
+The server's animation capture brackets them: what comes down while one is open is the innermost's. An explosion inside
+a strike, inside a nuclear round's attack or at the centre of an open explosion (a multi-hex tank's next hex) is folded
+into it and never sent; an explosion that brings nothing down is not sent. A tank set off elsewhere is its own explosion,
+nested inside the one that set it off. Weapon nukes stay on the resolved-attack path (captured ammo selects Davy Crockett
+type 1, Alamo 2, Santa Ana 3 or Peacemaker 4); what their attack brought down falls with their front as the round goes
+off.
+
+The client applies authoritative updates immediately. `GpuBoardSource` retains the preceding presentation until END, then
+queues the detonation, one final terrain checkpoint and its visible casualty animations; a nested explosion queues inside
+the enclosing one and plays after it. `UnitPlayback` releases the checkpoint at flash contact. A strike holds its front;
+an explosion plays as the hit that set it off ends and holds its front and its falls, or, in a chain, only until its
+front reaches the next tank, which goes off there; the camera eases to an explosion without holding its clock. An
+explosion draws a fireball, smoke and its shock ring, moves plants without scorching, pushes units only within its
+damage's reach, and bursts the fuel tank that went off: every piece at once, thrown up and out. If an update conceals a unit, visibility takes
+precedence: catch up first, discard consequences that could restore its identity (including carrier attachments), then
+play the public flash. Board changes clear retained blast effects. Detonations are live timeline events, with no replay
+card in the report log.
+
+### Trees an attack takes down
+
+The server names on an attack the hexes whose woods or jungle its damage thinned or cleared
+(`ResolvedAttack#cleared`, noted by `TWGameManager#tryClearHex`; what an explosion it sets off clears is that explosion's,
+felled by its front). The trees those hexes lose in the attack's checkpoint are the ones it took down: `GpuBoardSource`
+names them on that checkpoint's `SceneUpdate` with the attack's hit. As the playback shows that checkpoint at the hit, `GpuTerrain#breakTrees` breaks them into
+fragments that burst away from the attacker and out, scatter and sink once the terrain shows them gone. A tree's model
+splits on the fragment cutter thread as the checkpoint arrives (`KitFragments#splitLater`): leaf cards and twigs stay
+whole, a trunk breaks between its triangles; a model not split by the hit falls in whole parts. Instant and a review
+show only the outcome.
 
 ## 2. Input routing
 
@@ -431,14 +456,19 @@ CANCEL (Esc by default) takes one step per press:
 6. the forces overview: closed;
 7. chat: closed;
 8. a bot order's hex pick: cancelled, no order sent;
-9. the unit sheet (its popover, then the expanded row, then the sheet);
+9. the line of sight panel (its popover, then the panel); the unit sheet (its popover, then the expanded row, then the
+   sheet);
 10. the weapons panel: the armed weapon disarmed, else the weapon deselected (the solution card closes with it);
 11. the local planner turn's route: cleared;
-12. the inspected unit: no longer inspected;
-13. the local movement turn without the planner (aerospace, vector): the key goes to the phase display, which clears
-    MegaMek's own path or hex pick (F10 opens the Menu there);
-14. otherwise: the Menu opens. The key never reaches the phase display here, so MegaMek's CANCEL cannot clear declared
-    attacks. The `GAME_MENU` bind (F10) toggles the Menu directly, over any other centred dialog.
+12. the chosen physical attack: released, undeclared;
+13. the local movement turn without the planner (aerospace, vector, the other gears) while MegaMek's display has a
+    path, a gear other than walking or a hex pick: the key goes to the phase display, which drops it;
+14. the inspected unit: no longer inspected;
+15. a running playback: skipped to its results, as the dock's Skip does;
+16. the selection: cleared, as the unit card's close button clears it;
+17. otherwise: the Menu opens, and the next Esc closes it. The key never reaches the phase display in FIRING,
+    TARGETING, OFFBOARD or PHYSICAL, where MegaMek's CANCEL would clear the declared attacks (Clear does that). The
+    `GAME_MENU` bind (F10) toggles the Menu directly, over any other centred dialog.
 
 ## 3. Components
 
@@ -482,7 +512,7 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 | `GpuToastStack` | centre, above the dock | MegaMek's toasts: at most 5, levels INFO, SUCCESS, WARNING, ERROR, GAMEMASTER | presses pass through |
 | `GpuForceOverview` | over the board; the panels it covers are hidden (the prototype blurs them) | a card for every presented unit, grouped, filtered and searchable | locate, selection rule, unit menu |
 | `GpuHelpDialog` | centred | Compact "Controls": category sidebar, action rows and current key badges; mouse gestures have their own category | none |
-| `GpuMenuPanel` | centred | "Players", then the menu bar's groups as `GpuBoardActions` captures them (File, Game, Board, View, Help, Commands, Maps), then "Quit to Main Menu" (the client's exit: the save prompt, then the startup screen or MekHQ) | each item's own action, or a redirect (below) |
+| `GpuMenuPanel` | centred | "Players", then the menu bar's groups as `GpuBoardActions` captures them (File, Game, Board, View, Help, Commands, Maps), then "Return to Lobby" (the Commands group's Reset Game, offered where the player may reset: its confirmation, then the game ends for everyone and the server returns to the lobby) and "Quit to Main Menu" (the client's exit: the save prompt, then the startup screen or MekHQ) | each item's own action, or a redirect (below) |
 | `GpuPlayersPanel` | centred | the players as the Swing player list shows them; each bot's commands under it | bot commands |
 | `GpuContextMenu` | popover | unit menus and the hex menu (its header: the hex, MegaMek's terrain line and level, then the hex tooltip's other lines of the hex: a building, bridge or fuel tank with its height and CF, minefields, objects on the ground, clearing and bridge-building work), each starting with a Select or Inspect item per unit of its hex and ending with MegaMek's map menu of its hex in sections (a group's commands between separators, no menu of menus), weapon-row and queued-attack menus, the dock's More, select lists; a group opens its submenu beside its item as a desktop menu does: the menus before it stay open, another group replaces the chain below its menu, Esc closes the deepest and a press outside closes all | existing commands only |
 | `GpuHexTip` | popover, beside the pointer | after the pointer rests on a hex of the board for `GpuHexTip.DELAY` (0.75 s), the hex and its menu header's lines in small text on a faint plate, the first line broken only between its terms into the fewest, most even lines; gone when the pointer leaves the hex or the board, at a press, and while a menu or dialog is open | none; it never takes input |

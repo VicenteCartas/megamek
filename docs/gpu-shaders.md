@@ -95,13 +95,50 @@ without their comments (`GpuGlsl.withoutComments` keeps the line breaks), so a l
 launch loads it instead of compiling and a comment-only edit changes nothing; Intel's own
 cache stores nothing once it is full. A damaged entry, or one the driver rejects, is
 deleted and compiles again; a driver without binary formats compiles at every launch.
-Opening a board window, and every 256 MB written, deletes entries unused for 30 days, then
-the least recently used beyond 1 GB. `-Dmegamek.gpu.programCacheDir=` keeps the entries
+Opening a board window, and every 512 MB written, deletes entries unused for 30 days, then
+the least recently used beyond 2 GB. `-Dmegamek.gpu.programCacheDir=` keeps the entries
 elsewhere; the Gradle `test`, `gpuBoardSmoke`, `gpuBoardBenchmark` and `gpuBoardLargeMapTest`
 tasks use `build/gpu-program-cache`, so test runs never evict the player's entries.
 `-Dmegamek.gpu.programCache=false` compiles from source, for compiler timings. On Iris Xe the calibration board's 30 terrain programs compile in 168 s and
 load from the cache in 0.3 s; a warm load of the board takes 6–10 s, and its 44
 programs take 5.5 MB (`GpuProgramCacheSmokeTest`).
+
+While the window shows a menu (start screen, lobby), `GpuShaderWarmup` runs a process of its
+own that builds boards' terrain as a loading stage does and links their generic and family
+programs, blends included, into the program cache; a game, the lobby's map preview or the
+editor then loads them as binaries. It prepares the boards likely next first (the last one
+shown, the lobby's map, a scenario's; the newest four are kept in `warmup-boards/` beside the
+cache), then one sample board per theme with every blueprint component, preset and look, for
+four lighting configurations (a game's, the editor's, biomes or crystals alone,
+`GpuTerrain.setLightingStages`), all with the saved Display settings, until the sample boards fill half the
+cache (1 GB): the boards played keep the rest. It ends at once when a
+board view is asked for or a board draws inside a menu (the lobby's preview), and goes on at
+the next menu, or 2 s after the preview last drew: that board's own links and frames come
+first. A file beside the cache lists the steps done for a fingerprint of driver, shading
+language, settings, `megamek.gpu.*` properties, shader files, code and blueprint; with nothing
+changed no process starts. It keeps only programs linked off its render thread, where nothing
+draws, as the game's terrain links are without the parallel compiler; programs a board finds
+only by drawing (units, shadows, effects) still link in its loading stage. The window shows the
+editor's spinner, translucent in its bottom-right corner, while the warm-up, the link helper or
+a deferred link runs (the editor shows its own). `-Dmegamek.gpu.shaderWarmup=false` turns it
+off (the Gradle GPU test tasks do); `-Dmegamek.gpu.shaderWarmupSteps=` chooses sample boards.
+Its process runs below normal priority (Windows' class; on Linux and macOS it starts under
+`nice -n 10`); its two threads in the game's process keep the game's priority, since the window's
+thread waits on their lock. It builds chunks on two threads and, where the driver compiles in
+parallel (NVIDIA), compiles on two of the driver's threads. It held at most 4.2 GB on Iris Xe (2.9 GB
+at the median; up to 1.3 GB of it the system memory its textures took) and 2.9 GB on an RTX 4070
+(1.8 GB), mostly the driver's, its Java heap 0.6 GB; with the driver's own thread count it held
+4.9 GB on the RTX 4070. It starts only while the system has 4.3 GB available beyond the 1 GB it
+leaves free, and ends within a second once less than that 1 GB is
+(`-Dmegamek.gpu.shaderWarmupFreeMiB=`, negative for no check), trying again 10 s later; where
+the available memory can't be read (macOS, where Java counts only free pages) it doesn't start.
+The progress file expires after 30 days unwritten, as unused cache entries do, so what pruning
+took is prepared again.
+With the drivers' own shader caches empty, the grass board in a game's lighting stores 88
+programs in 70 s on an RTX 4070 and 349 s on Iris Xe (14-23 s on the RTX 4070 with NVIDIA's cache
+warm), after which Grassland 3 links none of its 23 terrain programs, and on Iris its first shown
+frames take at most 33 ms; Grassland 3 asked for by itself takes 24 s on the RTX 4070 and leaves
+its game none of 23 generic and 4 family programs to link (`GpuShaderWarmupSmokeTest`).
 
 No program compiles once the loading stage has gone. No program exists for combat scars: a
 scar patch on a wall or an object draws with its receiver's sculpt or model program, which

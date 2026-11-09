@@ -105,8 +105,9 @@ the pit where no bearing takes it clear (`BoardGroundCut.hide`). A hull-down
 tank and a mechanized platoon's transports, side by side at the pit's vehicle stands, settle onto its floor by their
 hull's middle; so does whatever else stands in the hex's middle and cannot use the strongpoint, as a Mek or a Large
 Vehicle, and meeple tokens stand in the pit as models do. A platoon dug in in a fortified hex takes to its strongpoint
-and digs no holes. Pavement cannot be dug (TO:AUE p.153), so a paved fortified hex is
-built up instead (`scenery/military/sandbags`, `BoardFeatures.onGround`): sandbag walls 1.83 m high round the hex,
+and digs no holes. Pavement and roads of any kind cannot be dug (TO:AUE p.153), so a fortified hex there is built up
+instead, as is one whose author chose sandbags (`HexAppearance.Fortification`, `scenery/military/sandbags`,
+`BoardFeatures.onGround`): sandbag walls 1.83 m high round the hex,
 open at the same corner and hide, with a firing notch (a top bag left out) at each of five fire positions and a
 revetment round the centre for vehicles. It digs nothing; the same stands put its troops behind the notches, a
 hull-down tank and the transports in the revetment and a waiting tank toward the hide, all on the pavement. Near, a

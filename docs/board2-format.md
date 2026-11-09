@@ -180,6 +180,10 @@ stores a side on both hexes, and either one parts it. A legacy file's hand-set e
 | `space` | `level`, `screen` |
 | `scorch` | `appearance` only |
 
+A fortified hex's `scenario` appearance may store `"fortification": "sandbags"`: its strongpoint is a sandbag emplacement
+instead of dug into the ground. `dug`, the default, is omitted. Pavement and roads always take sandbags, whatever is stored.
+The value is written only while the hex is fortified; rules and the 2D views ignore it.
+
 Industrial elevators store `"industrial":{"bottom":-2,"top":4,"capacity":100}`. Bottom and top are relative to
 the hex elevation; capacity is tons, in steps of 10. Solaris elevators store
 `"solaris":{"alternateElevation":7,"rolls":[1,3]}`: the alternate elevation is absolute, and the list names d6
