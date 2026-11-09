@@ -132,6 +132,8 @@ final class ModelTextures {
                 switch (glb.emissions.getOrDefault(material.id, RigidGlb.Emission.ALWAYS)) {
                     case OFF -> material.set(new GpuModelLight(0, 0, 1));
                     case NIGHT -> material.set(new GpuModelLight(1, 0, 1, true));
+                    // About 40 flashes a minute, the lens dark between them.
+                    case BLINK -> material.set(new GpuModelLight(1, 1.5f, .3f));
                     case ALWAYS -> { }
                 }
             });

@@ -575,6 +575,66 @@ final class KitOutline {
     }
 
     /**
+     * Points {@code inset} inside each convex corner of {@code walls}, where the outline turns outwards (an inside corner
+     * holds none): on a {@link End#CORNER} turn's bisector, as far from both walls; at a rounded corner ({@link #rounded}),
+     * its arc's facets no longer than {@code facet}, that far in from the middle of the arc.
+     */
+    static List<double[]> convexCorners(List<Wall> walls, double facet, double inset) {
+        List<double[]> result = new ArrayList<>();
+        for (Wall wall : walls) {
+            Wall next = following(wall, walls);
+            if (next == null) { continue; }
+            double[] at, out;
+            if (wall.end() == End.CORNER && cross(direction(wall), direction(next)) > 1e-6) {
+                double[] n = normal(wall.p(), wall.q()), m = normal(next.p(), next.q());
+                out = unit(new double[] { n[0] + m[0], n[1] + m[1] });
+                at = wall.q();
+                double along = inset / (out[0] * n[0] + out[1] * n[1]);
+                result.add(new double[] { at[0] - out[0] * along, at[1] - out[1] * along });
+                continue;
+            }
+            if (wall.end() != End.ROUND || facet(wall, facet)) { continue; }
+            // The wall leading into an arc: its facets follow.
+            List<Wall> arc = new ArrayList<>();
+            for (Wall facetWall = next; facetWall != null && facet(facetWall, facet) && arc.size() < walls.size();
+                  facetWall = following(facetWall, walls)) {
+                arc.add(facetWall);
+            }
+            if (arc.isEmpty()) { continue; }
+            Wall middle = arc.get(arc.size() / 2);
+            out = normal(middle.p(), middle.q());
+            at = lerp(middle.p(), middle.q(), .5);
+            if (arc.size() % 2 == 0) {
+                Wall before = arc.get(arc.size() / 2 - 1);
+                double[] n = normal(before.p(), before.q());
+                out = unit(new double[] { n[0] + out[0], n[1] + out[1] });
+                at = middle.p();
+            }
+            result.add(new double[] { at[0] - out[0] * inset, at[1] - out[1] * inset });
+        }
+        return result;
+    }
+
+    /**
+     * {@code inset} inside the corner where an Angled outline turns outwards at side {@code side}'s nose, as it does
+     * where that side and both beside it are unlinked: two corner pieces' walls meet there, so neither holds the turn.
+     */
+    static double[] elbow(int side, double inset) {
+        // The noses' hexagon turns 60 degrees there; its bisector is the side's axis.
+        return scaled(MIDPOINTS[side], (NOSE - inset / Math.sin(Math.PI / 3)) / H);
+    }
+
+    /** Whether a wall is a facet of a rounded corner's arc: both ends round, no longer than {@code facet}. */
+    private static boolean facet(Wall wall, double facet) {
+        return wall.start() == End.ROUND && wall.end() == End.ROUND && wall.length() <= facet + 1e-6;
+    }
+
+    /** The wall of {@code walls} that starts where {@code wall} ends, or null. */
+    private static Wall following(Wall wall, List<Wall> walls) {
+        return walls.stream().filter(other -> other != wall && close(other.p(), wall.q())).findFirst().orElse(null);
+    }
+
+    /**
      * A piece's walls with every convex corner within it rounded to {@code radius}: both walls stop short and an arc of
      * {@code segments} walls (ROUND ends) turns between them; the floor polygon holding the corner is cut to the arc.
      */

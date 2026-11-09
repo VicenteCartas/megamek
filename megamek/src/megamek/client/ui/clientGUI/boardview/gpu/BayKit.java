@@ -46,9 +46,10 @@ final class BayKit {
     /**
      * A flat surface over the piece: a board material, {@code repeat} units a repeat on the board's axes, at a height per
      * level of detail (the last for any further), kept {@code inset} off the walls; with {@code underlay} (a glass roof),
-     * a planted bed just under it, so the glass shows a greenhouse rather than the ground down a seam.
+     * a planted bed just under it, so the glass shows a greenhouse rather than the ground down a seam; with {@code aol}
+     * (a roof), aviation obstruction lights on its convex corners ({@link GeneratedKit#lights}).
      */
-    record Slab(String material, double repeat, double inset, double[] heights, boolean underlay) {
+    record Slab(String material, double repeat, double inset, double[] heights, boolean underlay, boolean aol) {
         double height(int lod) { return heights[Math.min(lod, heights.length - 1)]; }
     }
 
@@ -150,18 +151,20 @@ final class BayKit {
         double halfLength = spec.lone() == null ? H : spec.lone().stream().mapToDouble(p -> Math.abs(p[1])).max().orElse(H);
         return GeneratedKit.lods(name, square, modelled, List.copyOf(modules.keySet()), pieces, boardUVs,
               (role, piece, lod) -> twins(spec, modelled, modules.get(role), piece, lod, square, footprintScale, fitting,
-                    layouts.get(role), halfLength));
+                    layouts.get(role), halfLength), spec.roof().aol() ? spec.roof()::height : null);
     }
 
     /**
      * A role's module for a piece; also closed beside each set of its links' shorter neighbours (the twins that stand in
      * for it there): a seamed roof's, an Angled storey's, whose own walls then meet in corners like the kit's others, and
-     * its roof's where those corners round. Their caps stay empty, since those twins carry their edges.
+     * its roof's where those corners round or carry aviation lights. Their caps stay empty, since those twins carry their
+     * edges.
      */
     private static Map<String, GeneratedMesh> twins(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece,
           int lod, boolean square, float footprintScale, HabitatKit.Fitting fitting, HabitatKit.Layout layout, double halfLength) {
         boolean seamed = role.startsWith("roof") && spec.modules().get(role).stream().anyMatch(run -> run.seam() != null);
-        boolean closing = seamed || !square && (!role.startsWith("roof") || spec.cornerRadius() > 0);
+        boolean closing = seamed || role.startsWith("roof") && spec.roof().aol()
+              || !square && (!role.startsWith("roof") || spec.cornerRadius() > 0);
         if (closing && piece.tags().endsWith("-cap")) { return Map.of("", new GeneratedMesh()); }
         Map<String, GeneratedMesh> result = new LinkedHashMap<>();
         result.put("", module(spec, modelled, role, piece, 0, lod, square, footprintScale, fitting, layout, halfLength));
@@ -281,6 +284,10 @@ final class BayKit {
         }
         if (top && layout != null) {
             HabitatKit.fittings(result, modelled, lod, fitting, layout, piece, spec.roof().height(lod), halfLength, footprintScale);
+        }
+        if (top && slab.aol()) {
+            GeneratedKit.lights(result, piece, spec.cornerRadius() * Math.PI / Math.max(1, spec.cornerSegments()),
+                  slab.height(lod), lod);
         }
         return piece.direction() != null
               ? result.clipped(KitOutline.sector(piece.direction(), KitOutline.SEAM_OVERLAP)) : result;

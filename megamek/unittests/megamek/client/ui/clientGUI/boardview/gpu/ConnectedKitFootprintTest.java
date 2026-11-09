@@ -4,7 +4,10 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
@@ -13,6 +16,7 @@ import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.TilesetScenery;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -153,6 +157,42 @@ class ConnectedKitFootprintTest {
                 }
             }
         }
+    }
+
+    @Test
+    void aviationLightsStandOnTheRoofsOuterCornersOnly() {
+        // Two levels high, by its links: alone (an Angled hexagon, a Square square), a run's end, along a run, a 60- and a
+        // 120-degree bend (their outer elbows), a junction (inside corners only), above a shorter neighbour.
+        int[][] links = { { 0, 0, 0, 0, 0, 0 }, { 2, 0, 0, 0, 0, 0 }, { 2, 0, 0, 2, 0, 0 }, { 2, 2, 0, 0, 0, 0 },
+              { 2, 0, 2, 0, 0, 0 }, { 2, 0, 2, 0, 2, 0 }, { 2, 1, 0, 0, 0, 0 } };
+        for (String asset : ASSETS) {
+            for (var footprint : HexAppearance.Footprint.values()) {
+                var kit = GpuBuilding.kit(TilesetScenery.footprint(asset, footprint));
+                String shaped = kit.lods().getFirst().id;
+                // Utopia's roofs carry none.
+                int[] expected = asset.contains("utopia") ? new int[links.length]
+                      : new int[] { shaped.contains("-square") ? 4 : 6, 2, 0, 2, 1, 0, 3 };
+                for (int k = 0; k < links.length; k++) {
+                    assertEquals(expected[k], lights(kit, links[k]), shaped + " " + Arrays.toString(links[k]));
+                }
+            }
+        }
+    }
+
+    /** The aviation lights on a two-level hex's roof: its lamps' triangles, 12 a lamp. */
+    private static int lights(ConnectedKit.Kit kit, int[] reach) {
+        var data = kit.lods().getFirst();
+        Map<String, Integer> triangles = new HashMap<>();
+        for (var mesh : data.meshes) {
+            for (var part : mesh.parts) { triangles.put(part.id, part.indices.length / 3); }
+        }
+        int lamps = 0;
+        for (var placed : ConnectedKit.placements(kit, 0, GpuBuilding.select(kit.roles(), 2, 0), reach, 0, false, null)) {
+            for (var part : ConnectedKit.node(data, placed.node()).parts) {
+                if (part.materialId.endsWith("#blink")) { lamps += triangles.get(part.meshPartId); }
+            }
+        }
+        return lamps / 12;
     }
 
     private static List<Vector3> triangles(ConnectedKit.Kit kit, int lod, int height, int[] reach, boolean stepped) {

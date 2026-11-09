@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.IntToDoubleFunction;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
@@ -99,7 +100,45 @@ final class GeneratedKit {
         return result;
     }
 
-    static void reload() { KITS.clear(); }
+    static void reload() {
+        KITS.clear();
+        aviationLight = null;
+    }
+
+    /** The aviation obstruction light ({@link #lights}), read once until assets reload. */
+    private static volatile List<ModelData> aviationLight;
+
+    private static List<ModelData> aviationLight() {
+        var light = aviationLight;
+        if (light == null) {
+            var models = new File(Configuration.dataDir(), "models");
+            var file = new FileHandle(new File(models, "buildings/fittings/aviation-light.glb"));
+            light = RigidGlb.loadLods(file, models.toPath());
+            aviationLight = light;
+        }
+        return light;
+    }
+
+    /** How far in from its walls an aviation light stands on a roof's corner. */
+    private static final double LIGHT_INSET = 2.5;
+
+    /**
+     * A roof piece's aviation obstruction lights ({@code aol} in its kit's spec): one on each convex corner of its walls
+     * ({@link KitOutline#convexCorners}, arcs of facets no longer than {@code facet}) within its sector, so the piece's
+     * cut never halves one; its stick from {@code deck}, the roof's height, down into the roof.
+     */
+    static void lights(GeneratedMesh geometry, KitOutline.Piece piece, double facet, double deck, int lod) {
+        for (double[] corner : KitOutline.convexCorners(piece.walls(), facet, LIGHT_INSET)) {
+            if (piece.direction() == null || KitOutline.inSector(piece.direction(), corner)) {
+                light(geometry, corner, deck, lod);
+            }
+        }
+    }
+
+    private static void light(GeneratedMesh geometry, double[] at, double deck, int lod) {
+        var frame = new Matrix4().setToTranslation((float) at[0], (float) at[1], (float) deck);
+        piece(geometry, aviationLight(), lod, "aol", frame, 0);
+    }
 
     /**
      * The kit's levels of detail (its pieces GLB's): every role's module for every footprint piece, named as a kit GLB's
@@ -107,6 +146,16 @@ final class GeneratedKit {
      */
     static List<RigidGlb.Data> lods(String name, boolean square, List<ModelData> modelled, List<String> roles,
           List<KitOutline.Piece> pieces, Map<String, Float> boardUVs, Module module) {
+        return lods(name, square, modelled, roles, pieces, boardUVs, module, null);
+    }
+
+    /**
+     * {@code deck}: the roof's height at each level of detail where the kit stands aviation lights (null: none). An
+     * Angled kit's also stand as nodes {@code aol-<side>}, one on each side's nose ({@link KitOutline#elbow}), which the
+     * runtime places on a roof's outer elbows ({@link ConnectedKit#placements}).
+     */
+    static List<RigidGlb.Data> lods(String name, boolean square, List<ModelData> modelled, List<String> roles,
+          List<KitOutline.Piece> pieces, Map<String, Float> boardUVs, Module module, IntToDoubleFunction deck) {
         String kit = name + (square ? "-square" : "");
         List<RigidGlb.Data> result = new ArrayList<>();
         for (int lod = 0; lod < GpuBuilding.lods(modelled).size(); lod++) {
@@ -126,21 +175,30 @@ final class GeneratedKit {
                     }
                 }
             }
+            for (int side = 0; deck != null && !square && side < 6; side++) {
+                var light = new GeneratedMesh();
+                light(light, KitOutline.elbow(side, LIGHT_INSET), deck.applyAsDouble(lod), lod);
+                nodes.put(kit + "-lod" + lod + "-aol-" + side, light);
+            }
             var generated = GeneratedMesh.kit(kit + "-lod" + lod, nodes, boardUVs);
-            var source = (RigidGlb.Data) modelled.get(lod);
             // Each piece material keeps its finish and alpha mode, as an authored GLB's do: the kit draws it under the
-            // same id (GeneratedMesh#piece), a cutout alpha tested rather than blended as its board material's .tres says.
-            source.surfaces.forEach((id, surface) -> {
-                if (surface.board() == null || !generated.surfaces.containsKey(id)) { return; }
-                if (source.buildingPaint.contains(id)) { generated.buildingPaint.add(id); }
-                if (source.emissions.containsKey(id)) { generated.emissions.put(id, source.emissions.get(id)); }
-                if (source.ownGlows.containsKey(id)) { RigidGlb.ownGlow(generated, id, source.ownGlows.get(id)); }
-                if (source.alphaTests.containsKey(id)) {
-                    generated.alphaTests.put(id, source.alphaTests.get(id));
-                    generated.blends.remove(id);
-                }
-                if (source.fades.contains(id)) { generated.fades.add(id); }
-            });
+            // same id (GeneratedMesh#piece), a cutout alpha tested rather than blended as its board material's .tres says;
+            // the aviation light's too, where the kit stands them (lights).
+            List<RigidGlb.Data> sources = new ArrayList<>(List.of((RigidGlb.Data) modelled.get(lod)));
+            if (deck != null) { sources.add((RigidGlb.Data) aviationLight().getFirst()); }
+            for (var source : sources) {
+                source.surfaces.forEach((id, surface) -> {
+                    if (surface.board() == null || !generated.surfaces.containsKey(id)) { return; }
+                    if (source.buildingPaint.contains(id)) { generated.buildingPaint.add(id); }
+                    if (source.emissions.containsKey(id)) { generated.emissions.put(id, source.emissions.get(id)); }
+                    if (source.ownGlows.containsKey(id)) { RigidGlb.ownGlow(generated, id, source.ownGlows.get(id)); }
+                    if (source.alphaTests.containsKey(id)) {
+                        generated.alphaTests.put(id, source.alphaTests.get(id));
+                        generated.blends.remove(id);
+                    }
+                    if (source.fades.contains(id)) { generated.fades.add(id); }
+                });
+            }
             result.add(generated);
         }
         return result;

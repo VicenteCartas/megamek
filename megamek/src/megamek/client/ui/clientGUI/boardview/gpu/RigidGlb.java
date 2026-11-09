@@ -136,16 +136,20 @@ final class RigidGlb {
      */
     record Relief(String map, float depthU, float depthV, int minimumLayers, int maximumLayers) { }
 
-    /** When a material's emission shows: {@code mmEmission} in its extras, else in its .tres's metadata, else always. */
+    /**
+     * When a material's emission shows: {@code mmEmission} in its extras, else in its .tres's metadata, else always;
+     * {@code blink}: on and off, as an aviation obstruction light.
+     */
     enum Emission {
-        ALWAYS, NIGHT, OFF;
+        ALWAYS, NIGHT, OFF, BLINK;
 
         static Emission of(Object mode) {
             return switch (String.valueOf(mode)) {
                 case "always" -> ALWAYS;
                 case "night" -> NIGHT;
                 case "off" -> OFF;
-                default -> throw new IllegalArgumentException("mmEmission must be always, night or off, not " + mode);
+                case "blink" -> BLINK;
+                default -> throw new IllegalArgumentException("mmEmission must be always, night, off or blink, not " + mode);
             };
         }
     }

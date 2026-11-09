@@ -42,11 +42,12 @@ final class HabitatKit {
      * battered skirt; the pieces at the walls' corners and joints: piers up every storey, their tops on the roof, footings
      * on the ground ({@code null}: none); the Angled lone hex's half length and a single link's band end; the storeys
      * above the ground ({@code windows} lit or dim, shifted along by a fraction of a repeat); the roofs' fittings per
-     * footprint (hatch and vent pieces, laid out at x, y).
+     * footprint (hatch and vent pieces, laid out at x, y); with {@code aol}, aviation obstruction lights on the roofs'
+     * convex corners ({@link GeneratedKit#lights}).
      */
     record Spec(String name, String style, Map<String, String> materials, String pieces, double cornerRadius, int cornerSegments, Parapet parapet,
                 Eave eave, Skirt skirt, Uprights piers, Uprights tops, Uprights footings, Lone lone, List<Storey> storeys,
-                Fittings fittings) { }
+                Fittings fittings, boolean aol) { }
 
     record Parapet(double height, double width) { }
 
@@ -146,7 +147,7 @@ final class HabitatKit {
                 result.put(twin.getKey(), mesh);
             }
             return result;
-        });
+        }, spec.aol() ? lod -> 2 * LEVEL + (spec.parapet() != null ? 0 : eave(spec)) : null);
         for (var level : levels) {
             level.buildingPaint.add(spec.materials().get("wall"));
         }
@@ -405,6 +406,10 @@ final class HabitatKit {
             }
         }
         fittings(geometry, modelled, lod, fitting, layout, piece, deck, spec.lone().halfLength(), footprintScale);
+        if (spec.aol()) {
+            double facet = spec.cornerRadius() * Math.PI / Math.max(1, spec.cornerSegments());
+            GeneratedKit.lights(geometry, piece, facet, deck, lod);
+        }
         return new Laid(geometry, piers);
     }
 
