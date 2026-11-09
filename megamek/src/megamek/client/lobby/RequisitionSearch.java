@@ -14,7 +14,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import jakarta.annotation.Nullable;
-import megamek.client.ui.gdx.TableSort;
+import megamek.client.ui.TableSort;
 import megamek.common.loaders.MekSummary;
 import megamek.common.loaders.MekSummaryCache;
 import megamek.logging.MMLogger;
@@ -28,15 +28,24 @@ import megamek.logging.MMLogger;
 public final class RequisitionSearch {
     private static final MMLogger LOGGER = MMLogger.create(RequisitionSearch.class);
 
-    /** What to look for: the game's rules, a category, the Commander's filters and the search text, and the order. */
+    /**
+     * What to look for: the game's rules, a category, the Commander's filters and the search text, and the order, whose
+     * value is the Point Value with {@code pv}, else the Battle Value.
+     */
     public record Query(RequisitionCatalog.Rules rules, RequisitionCatalog.Category category,
-          RequisitionCatalog.Filters filters, String search, TableSort<RequisitionSort> sort) {
+          RequisitionCatalog.Filters filters, String search, TableSort<RequisitionSort> sort, boolean pv) {
         public Query {
             Objects.requireNonNull(rules);
             Objects.requireNonNull(category);
             Objects.requireNonNull(filters);
             search = (search == null) ? "" : search;
             sort = (sort == null) ? RequisitionSort.BY_NAME : sort;
+        }
+
+        /** A query whose order's value is the Battle Value. */
+        public Query(RequisitionCatalog.Rules rules, RequisitionCatalog.Category category,
+              RequisitionCatalog.Filters filters, String search, TableSort<RequisitionSort> sort) {
+            this(rules, category, filters, search, sort, false);
         }
 
         /** A query whose results come in name order. */
@@ -149,7 +158,7 @@ public final class RequisitionSearch {
             sources = RequisitionCatalog.sources(index, query.rules());
             types = RequisitionCatalog.types(index, query.rules());
         }
-        List<RequisitionRow> ordered = RequisitionSort.sorted(shown, query.sort());
+        List<RequisitionRow> ordered = RequisitionSort.sorted(shown, query.sort(), query.pv());
         long millis = (System.nanoTime() - start) / 1_000_000;
         return new Result(query, ordered, index.size(), sources, millis, loadMillis, types);
     }

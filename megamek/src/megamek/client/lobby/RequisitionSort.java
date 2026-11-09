@@ -4,20 +4,18 @@ package megamek.client.lobby;
 import java.util.Comparator;
 import java.util.List;
 
-import megamek.client.ui.gdx.TableSort;
-import megamek.common.TechConstants;
+import megamek.client.ui.TableSort;
 import megamek.common.loaders.MekSummary;
 
 /**
- * What the Requisition view's results sort by: the name, which they start in, the Battle or Point Value, the tonnage,
- * the year of introduction, the movement (walk, then run, then jump), the armor, the role, the rules level or the type.
- * Numbers start high first and text from A to Z ({@link TableSort#click}); a unit without armor or a role sorts after
- * those with one, whichever the direction, and units that sort alike stay in name order.
+ * What the Requisition view's results sort by: the name, which they start in, the value they show (Battle or Point),
+ * the tonnage, the year of introduction, the movement (walk, then run, then jump), the armor, the role, the rules level
+ * or the type. Numbers start high first and text from A to Z ({@link TableSort#click}); a unit without armor, a role or
+ * a rules level sorts after those with one, whichever the direction, and units that sort alike stay in name order.
  */
 public enum RequisitionSort implements TableSort.Key {
     NAME("Lobby.requisition.sort.name", false),
-    BV("Lobby.requisition.bv", true),
-    PV("Lobby.requisition.pv", true),
+    VALUE("Lobby.requisition.bv", true),
     TONS("Lobby.requisition.sort.tons", true),
     YEAR("Lobby.requisition.sort.year", true),
     MOVE("Lobby.requisition.column.move", true),
@@ -29,12 +27,11 @@ public enum RequisitionSort implements TableSort.Key {
     /** The results' order until the Commander picks another: by name, A to Z. */
     public static final TableSort<RequisitionSort> BY_NAME = TableSort.of(NAME);
 
-    /** The catalogue's order: by name without case or leading marks, then by the name as written. */
-    public static final Comparator<RequisitionRow> NAME_ORDER = Comparator
-          .comparing((RequisitionRow row) -> RequisitionCatalog.sortKey(row.name()))
-          .thenComparing(RequisitionRow::name);
-
-    private static final Comparator<RequisitionRow> AS_WRITTEN = Comparator.comparing(RequisitionRow::name);
+    /**
+     * No tiebreak: the rows come in name order and the sort is stable, so rows that sort alike keep that order without
+     * comparing their names again.
+     */
+    private static final Comparator<RequisitionRow> KEEP_ORDER = (first, second) -> 0;
     /** Walk, run and jump points packed into one number that sorts as the three in turn. */
     private static final long MOVE_PLACE = 10_000;
 
@@ -46,9 +43,14 @@ public enum RequisitionSort implements TableSort.Key {
         this.numeric = numeric;
     }
 
-    /** The message key of the key's name. */
+    /** The message key of the key's name; the value's is the Battle Value's. */
     public String messageKey() {
         return messageKey;
+    }
+
+    /** The message key of the key's name, the value named as the one shown: the Point Value with {@code pv}. */
+    public String messageKey(boolean pv) {
+        return ((this == VALUE) && pv) ? "Lobby.requisition.pv" : messageKey;
     }
 
     @Override
@@ -66,41 +68,34 @@ public enum RequisitionSort implements TableSort.Key {
         };
     }
 
-    /** The key of the value the results show: the Point Value with {@code pv}, else the Battle Value. */
-    public static RequisitionSort value(boolean pv) {
-        return pv ? PV : BV;
-    }
-
-    /** Whether this is the key of a value, Battle or Point. */
-    public boolean isValue() {
-        return (this == BV) || (this == PV);
-    }
-
-    /** The order of rows in {@code sort}. */
-    public static Comparator<RequisitionRow> order(TableSort<RequisitionSort> sort) {
-        TableSort.Direction direction = sort.direction();
-        return switch (sort.key()) {
-            case NAME -> TableSort.comparator(row -> RequisitionCatalog.sortKey(row.name()), direction, AS_WRITTEN);
-            case BV -> TableSort.comparator(RequisitionRow::bv, direction, NAME_ORDER);
-            case PV -> TableSort.comparator(RequisitionRow::pv, direction, NAME_ORDER);
-            case TONS -> TableSort.comparator(RequisitionRow::tons, direction, NAME_ORDER);
-            case YEAR -> TableSort.comparator(row -> row.unit().getYear(), direction, NAME_ORDER);
-            case MOVE -> TableSort.comparator(RequisitionSort::move, direction, NAME_ORDER);
-            case ARMOR -> TableSort.comparator(RequisitionSort::armor, direction, NAME_ORDER);
-            case ROLE -> TableSort.comparator(row -> blankAsNone(row.role()), String.CASE_INSENSITIVE_ORDER,
-                  direction, NAME_ORDER);
-            case LEVEL -> TableSort.comparator(RequisitionSort::level, direction, NAME_ORDER);
-            case TYPE -> TableSort.comparator(row -> RequisitionRow.typeName(row.unit()),
-                  String.CASE_INSENSITIVE_ORDER, direction, NAME_ORDER);
-        };
-    }
-
-    /** {@code rows} in {@code sort}'s order; rows in name order come back as they are when that is the order. */
-    public static List<RequisitionRow> sorted(List<RequisitionRow> rows, TableSort<RequisitionSort> sort) {
+    /**
+     * {@code rows}, which come in the catalogue's name order, in {@code sort}'s order, the value being the Point Value
+     * with {@code pv}, else the Battle Value; rows in name order come back as they are when that is the order.
+     */
+    public static List<RequisitionRow> sorted(List<RequisitionRow> rows, TableSort<RequisitionSort> sort, boolean pv) {
         if (sort.equals(BY_NAME)) {
             return rows;
         }
-        return rows.stream().sorted(order(sort)).toList();
+        return rows.stream().sorted(order(sort, pv)).toList();
+    }
+
+    /** The order of rows in name order in {@code sort}; it leaves ties to the stable sort. */
+    private static Comparator<RequisitionRow> order(TableSort<RequisitionSort> sort, boolean pv) {
+        TableSort.Direction direction = sort.direction();
+        return switch (sort.key()) {
+            case NAME -> TableSort.comparator(RequisitionRow::sortName, direction, KEEP_ORDER);
+            case VALUE -> pv ? TableSort.comparator(RequisitionRow::pv, direction, KEEP_ORDER)
+                  : TableSort.comparator(RequisitionRow::bv, direction, KEEP_ORDER);
+            case TONS -> TableSort.comparator(RequisitionRow::tons, direction, KEEP_ORDER);
+            case YEAR -> TableSort.comparator(row -> row.unit().getYear(), direction, KEEP_ORDER);
+            case MOVE -> TableSort.comparator(RequisitionSort::move, direction, KEEP_ORDER);
+            case ARMOR -> TableSort.comparator(RequisitionSort::armor, direction, KEEP_ORDER);
+            case ROLE -> TableSort.comparator(row -> blankAsNone(row.role()), String.CASE_INSENSITIVE_ORDER,
+                  direction, KEEP_ORDER);
+            case LEVEL -> TableSort.comparator(RequisitionSort::level, direction, KEEP_ORDER);
+            case TYPE -> TableSort.comparator(RequisitionRow::type, String.CASE_INSENSITIVE_ORDER, direction,
+                  KEEP_ORDER);
+        };
     }
 
     private static long move(RequisitionRow row) {
@@ -114,21 +109,8 @@ public enum RequisitionSort implements TableSort.Key {
         return (armor > 0) ? armor : null;
     }
 
-    /**
-     * The rules level's rank, Introductory first and Unofficial last; a level the simple names do not hold comes after
-     * them, and none goes last.
-     */
     private static Integer level(RequisitionRow row) {
-        String level = row.level();
-        if (level.isBlank()) {
-            return null;
-        }
-        for (int i = 0; i < TechConstants.T_SIMPLE_NAMES.length; i++) {
-            if (TechConstants.T_SIMPLE_NAMES[i].equalsIgnoreCase(level.strip())) {
-                return i;
-            }
-        }
-        return TechConstants.T_SIMPLE_NAMES.length;
+        return (row.levelRank() == RequisitionRow.NO_LEVEL) ? null : row.levelRank();
     }
 
     private static String blankAsNone(String text) {

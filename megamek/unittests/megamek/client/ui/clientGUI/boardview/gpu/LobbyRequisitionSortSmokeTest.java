@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -21,8 +22,10 @@ import megamek.client.lobby.RequisitionRow;
 import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.lobby.RequisitionSort;
-import megamek.client.ui.gdx.TableSort;
-import megamek.client.ui.gdx.TableSort.Direction;
+import megamek.client.ui.Messages;
+import megamek.client.ui.TableSort;
+import megamek.client.ui.TableSort.Direction;
+import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiSortHeader;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.loaders.MekSummary;
@@ -97,21 +100,30 @@ class LobbyRequisitionSortSmokeTest {
             requisition.opened(LobbyForces.EMPTY);
             run(ui, .1f);
 
-            UiSortHeader value = requisition.sortHeader(RequisitionSort.BV);
+            UiSortHeader value = requisition.sortHeader(RequisitionSort.VALUE);
             assertNotNull(value);
             click(ui, value);
             run(ui, .1f);
-            assertEquals(new TableSort<>(RequisitionSort.BV, Direction.DESCENDING), requisition.sort());
+            TableSort<RequisitionSort> byValue = new TableSort<>(RequisitionSort.VALUE, Direction.DESCENDING);
+            assertEquals(byValue, requisition.sort());
             assertEquals(Direction.DESCENDING, value.direction());
+            assertEquals(List.of("Atlas", "Archer", "Locust"), names(requisition), "by Battle Value");
+            UiSelect select = requisition.sortControl().select();
+            int index = requisition.sortControl().keys().indexOf(RequisitionSort.VALUE);
+            assertEquals(Messages.getString("Lobby.requisition.bv"), select.getSelected());
 
             click(ui, requisition.valueToggle().option(1));
             run(ui, .1f);
-            assertEquals(new TableSort<>(RequisitionSort.PV, Direction.DESCENDING), requisition.sort());
-            assertTrue(requisition.sortControl().keys().contains(RequisitionSort.PV));
+            assertEquals(byValue, requisition.sort(), "the order keeps its key and direction");
+            assertTrue(actions.last.pv(), "the search is asked to sort by the Point Value");
+            assertEquals(List.of("Archer", "Atlas", "Locust"), names(requisition), "by Point Value");
+            assertSame(select, requisition.sortControl().select(), "the control keeps its select");
+            assertEquals(Messages.getString("Lobby.requisition.pv"), select.getSelected());
+            assertEquals(Messages.getString("Lobby.requisition.pv"), select.popup().label(index).getText().toString());
+            assertEquals(Messages.getString("Lobby.requisition.pv"), value.text());
             assertEquals(requisition.sort(), requisition.sortControl().sort());
-            assertEquals(value, requisition.sortHeader(RequisitionSort.PV));
+            assertEquals(value, requisition.sortHeader(RequisitionSort.VALUE));
             assertEquals(Direction.DESCENDING, value.direction());
-            assertEquals(List.of("Atlas", "Archer", "Locust"), names(requisition));
         });
     }
 
@@ -174,7 +186,7 @@ class LobbyRequisitionSortSmokeTest {
 
     /** Answers with three units in the query's order, and keeps the last query. */
     private static final class SortActions implements LobbyRequisitionPanel.Actions {
-        private final List<MekSummary> units = List.of(unit("Archer", 70, 1817, 38, 208),
+        private final List<MekSummary> units = List.of(unit("Archer", 70, 1817, 60, 208),
               unit("Atlas", 100, 1897, 52, 304), unit("Locust", 20, 432, 18, 64));
         private RequisitionSearch.Query last;
 
@@ -185,7 +197,7 @@ class LobbyRequisitionSortSmokeTest {
             for (MekSummary unit : units) {
                 rows.add(RequisitionRow.of(unit));
             }
-            List<RequisitionRow> sorted = RequisitionSort.sorted(rows, query.sort());
+            List<RequisitionRow> sorted = RequisitionSort.sorted(rows, query.sort(), query.pv());
             done.accept(new RequisitionSearch.Result(query, sorted, sorted.size(), List.of(), 0, 0));
         }
 
