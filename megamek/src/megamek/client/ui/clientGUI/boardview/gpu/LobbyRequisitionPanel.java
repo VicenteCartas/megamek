@@ -214,7 +214,8 @@ final class LobbyRequisitionPanel {
     private final Container<Actor> centre = new Container<>();
     private @Nullable LobbyAdvancedSearchView advanced;
     private boolean advancedOpen;
-    private @Nullable UiButton advancedButton;
+    private final UiButton advancedButton;
+    private final UiButton resetButton;
     private final Table ownerGroup = new Table();
     private UiSelect owner;
     private final Image ownerSwatch = new Image((Drawable) null, Scaling.fill);
@@ -241,8 +242,12 @@ final class LobbyRequisitionPanel {
     /** The types holding a unit the rules allow; every type until the first result says otherwise. */
     private Set<ExactType> populated = EnumSet.allOf(ExactType.class);
     private boolean drawerOpen;
-    /** The drawer's slide: the height it set out from, its seconds so far (negative: none) and whether it shuts. */
+    /**
+     * The drawer's slide: the height it set out from, the height a shutting one ends at (the tags' row, or none), its
+     * seconds so far (negative: none) and whether it shuts.
+     */
     private float slideFrom;
+    private float slideTo;
     private float slideAt = -1;
     private boolean slideCloses;
     private boolean dossierOpen;
@@ -309,25 +314,42 @@ final class LobbyRequisitionPanel {
                 return false;
             }
         });
-        Table weights = new Table();
+        resetButton = kit.button("button-quiet" + UiTheme.COMPACT, "undo",
+              Messages.getString("Lobby.requisition.reset"), null);
+        resetButton.setName("lobby-requisition-reset");
+        resetButton.setDisabled(true);
+        kit.tip(resetButton, true).getActor().setText(Messages.getString("Lobby.requisition.resetTip"));
+        UiKit.onChange(resetButton, () -> setFilters(filters.withoutDrawer()));
+        Table searchRow = new Table();
+        searchRow.add(searchBox).growX().minWidth(0);
+        searchRow.add(resetButton).padLeft(space("sm"));
+        body.add(searchRow).growX().minWidth(0).pad(0, space("md"), 0, space("md")).row();
+
+        // The filter strip: the weight chips, Filters and Advanced, sharing the row's width evenly
+        Table strip = new Table();
+        strip.defaults().growX().uniformX();
         for (Weight weight : Weight.values()) {
             UiFilterChip chip = kit.filterChip(Messages.getString(weight.messageKey()));
             UiKit.onChange(chip, this::weightsChanged);
             weightChips.add(chip);
-            weights.add(chip).padLeft(space("xs"));
+            strip.add(chip).padRight(space("xs"));
         }
         UiFilterChip.sameWidth(weightChips);
-        filtersButton = kit.button("button-toggle" + UiTheme.COMPACT, "tune",
+        filtersButton = kit.button("button-toggle" + UiTheme.COMPACT, "filter",
               Messages.getString("Lobby.requisition.filters"), null);
         filtersButton.setProgrammaticChangeEvents(false);
         kit.tip(filtersButton, true).getActor().setText(Messages.getString("Lobby.requisition.filtersTip"));
         // A UiButton never toggles itself (isChecked() is the shown state), so the click flips the drawer's own state
         UiKit.onChange(filtersButton, () -> drawer(!drawerOpen));
-        Table toolbar = new Table();
-        toolbar.add(searchBox).growX().minWidth(0);
-        toolbar.add(weights).padLeft(space("sm"));
-        toolbar.add(filtersButton).padLeft(space("sm"));
-        body.add(toolbar).growX().minWidth(0).pad(0, space("md"), 0, space("md")).row();
+        advancedButton = kit.button("button-toggle" + UiTheme.COMPACT, "tune",
+              Messages.getString("Lobby.requisition.advanced.open"), null);
+        advancedButton.setName("lobby-requisition-advanced-open");
+        advancedButton.setProgrammaticChangeEvents(false);
+        kit.tip(advancedButton, true).getActor().setText(Messages.getString("Lobby.requisition.advanced.openTip"));
+        UiKit.onChange(advancedButton, () -> openAdvanced(!advancedOpen));
+        strip.add(filtersButton).padLeft(space("md")).padRight(space("xs"));
+        strip.add(advancedButton);
+        body.add(strip).growX().minWidth(0).pad(space("sm"), space("md"), 0, space("md")).row();
         body.add(drawerHolder).growX().minWidth(0).pad(space("sm"), space("md"), 0, space("md")).row();
         // The drawer keeps its own height and the holder clips it, so it slides rather than squashes
         drawerHolder.fillX().top().minHeight(Value.prefHeight);
@@ -815,10 +837,21 @@ final class LobbyRequisitionPanel {
         drawerOpen = open;
         if (changed && motion) {
             slideFrom = from;
+            slideTo = open ? 0 : tagsHeight();
             slideAt = 0;
             slideCloses = !open;
         }
         refreshFilters();
+    }
+
+    /** The height of the tags' row that takes the shut drawer's place; 0 when no filter is at work. */
+    private float tagsHeight() {
+        if (filters.drawerCount() == 0) {
+            return 0;
+        }
+        Actor tags = tags();
+        tags.setWidth(drawerHolder.getWidth());
+        return (tags instanceof Layout layout) ? layout.getPrefHeight() : tags.getHeight();
     }
 
     /**
@@ -834,7 +867,8 @@ final class LobbyRequisitionPanel {
 
     /** The holder's height for the drawer's own {@code natural} one, while it slides open or shut. */
     private float slid(float natural) {
-        return slideAt < 0 ? natural : slideHeight(slideFrom, slideCloses ? 0 : natural, slideAt, SLIDE_SECONDS);
+        return slideAt < 0 ? natural : slideHeight(slideFrom, slideCloses ? slideTo : natural, slideAt,
+              SLIDE_SECONDS);
     }
 
     private void slide(float delta) {
@@ -862,12 +896,17 @@ final class LobbyRequisitionPanel {
             chip.getColor().a = weighs ? 1 : .4f;
         }
         int at = filters.drawerCount();
+        int criteria = filters.advanced().count();
         if (advancedOpen && advanced != null) {
             advanced.sync(filters.advanced());
         }
         String label = Messages.getString("Lobby.requisition.filters");
-        filtersButton.setText(kit.cased("button", (at > 0) ? label + " · " + at : label));
+        filtersButton.setText(kit.cased("button", (at > criteria) ? label + " · " + (at - criteria) : label));
         filtersButton.setChecked(drawerOpen);
+        String open = Messages.getString("Lobby.requisition.advanced.open");
+        advancedButton.setText(kit.cased("button", (criteria > 0) ? open + " · " + criteria : open));
+        advancedButton.setChecked(advancedOpen);
+        resetButton.setDisabled(at == 0);
         if (drawerOpen) {
             fillDrawer();
         } else if (slideCloses) {
@@ -971,22 +1010,6 @@ final class LobbyRequisitionPanel {
         selects.add(labelled("Lobby.requisition.drawer.era", eraSelect)).padLeft(space("lg"));
         selects.add(labelled("Lobby.requisition.drawer.source", sourceSelect)).padLeft(space("lg"));
         drawer.add(selects).growX().minWidth(0).colspan(2).padTop(space("sm")).row();
-
-        UiButton reset = kit.button("button-quiet" + UiTheme.COMPACT, "undo",
-              Messages.getString("Lobby.requisition.reset"), null);
-        reset.setDisabled(filters.drawerCount() == 0);
-        UiKit.onChange(reset, () -> setFilters(filters.withoutDrawer()));
-        int criteria = filters.advanced().count();
-        String open = Messages.getString("Lobby.requisition.advanced.open");
-        advancedButton = kit.button("button-quiet" + UiTheme.COMPACT, "tune",
-              criteria > 0 ? open + " \u00b7 " + criteria : open, null);
-        advancedButton.setName("lobby-requisition-advanced-open");
-        kit.tip(advancedButton, true).getActor().setText(Messages.getString("Lobby.requisition.advanced.openTip"));
-        UiKit.onChange(advancedButton, () -> openAdvanced(true));
-        Table buttons = new Table();
-        buttons.add(advancedButton);
-        buttons.add(reset).padLeft(space("sm"));
-        drawer.add(buttons).colspan(2).left().padTop(space("sm"));
         UiFilterChip.sameWidth(chips);
         drawerHolder.setActor(drawer);
     }
@@ -1039,7 +1062,7 @@ final class LobbyRequisitionPanel {
         return next;
     }
 
-    /** The drawer's filters at work as tags, each removed by a click, and Clear filters. */
+    /** The drawer's filters at work as tags, each removed by a click. */
     private Actor tags() {
         HorizontalGroup row = chipGroup();
         row.setName("lobby-requisition-tags");
@@ -1076,10 +1099,6 @@ final class LobbyRequisitionPanel {
         for (RequisitionAdvancedSearch.Field field : criteria.values().keySet()) {
             row.addActor(tag(criteria.describe(field), filters.withAdvanced(criteria.without(field))));
         }
-        UiButton clear = kit.button("button-quiet" + UiTheme.COMPACT, null,
-              Messages.getString("Lobby.requisition.clear"), null);
-        UiKit.onChange(clear, () -> setFilters(filters.withoutDrawer()));
-        row.addActor(clear);
         return row;
     }
 
@@ -1089,6 +1108,7 @@ final class LobbyRequisitionPanel {
             return;
         }
         advancedOpen = open;
+        advancedButton.setChecked(open);
         if (open) {
             if (advanced == null) {
                 advanced = new LobbyAdvancedSearchView(kit, new LobbyAdvancedSearchView.Host() {
@@ -1134,9 +1154,14 @@ final class LobbyRequisitionPanel {
         return advancedOpen;
     }
 
-    /** The drawer's Advanced search button, while the drawer is open. */
-    @Nullable UiButton drawerAdvancedButton() {
-        return drawerOpen ? advancedButton : null;
+    /** The filter strip's Advanced button, which opens and shuts the advanced search. */
+    UiButton advancedToggle() {
+        return advancedButton;
+    }
+
+    /** The search row's Reset filters button. */
+    UiButton resetButton() {
+        return resetButton;
     }
 
     /** The advanced criteria at work, for the probe's log. */

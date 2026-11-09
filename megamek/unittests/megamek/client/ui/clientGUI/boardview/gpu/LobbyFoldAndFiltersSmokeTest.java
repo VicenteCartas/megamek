@@ -110,7 +110,7 @@ class LobbyFoldAndFiltersSmokeTest {
     }
 
     @Test
-    void theWeightsAndTechBasesAreKeptAndClearFiltersClearsThem() {
+    void theWeightsAndTechBasesAreKeptAndResetFiltersClearsThem() {
         UiTestStage.run(ui -> {
             RequisitionActions actions = new RequisitionActions("");
             LobbyRequisitionPanel requisition = new LobbyRequisitionPanel(ui.kit, actions, key -> null, false);
@@ -128,11 +128,12 @@ class LobbyFoldAndFiltersSmokeTest {
             ui.draw();
             assertTrue(chip(nextBody, Messages.getString("Lobby.requisition.weight.heavy")).isChecked(),
                   "the kept weight is lit when the Requisition opens");
-            Actor clear = find(nextBody, actor -> actor instanceof UiButton button && button.getText() != null
-                  && button.getText().toString().equalsIgnoreCase(Messages.getString("Lobby.requisition.clear")));
-            assertNotNull(clear, "the kept tech base shows as a tag with Clear filters");
-            click(ui, clear);
-            assertEquals("C:ALL;W:HEAVY;B:;L:", next.kept, "Clear filters clears the kept tech base, keeping the weight");
+            assertNotNull(nextBody.findActor("lobby-requisition-tags"), "the kept tech base shows as a tag");
+            UiButton reset = again.resetButton();
+            assertFalse(reset.isDisabled(), "Reset filters is on while the kept tech base is at work");
+            click(ui, reset);
+            assertEquals("C:ALL;W:HEAVY;B:;L:", next.kept, "Reset filters clears the kept tech base, keeping the weight");
+            assertTrue(reset.isDisabled(), "and is off once nothing is left to reset");
             nextBody.remove();
         });
     }
