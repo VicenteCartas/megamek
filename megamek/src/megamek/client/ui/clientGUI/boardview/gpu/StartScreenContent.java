@@ -22,8 +22,8 @@ public abstract class StartScreenContent {
         BATTLE,
         /**
          * A command post: the art arrives as a departures board, its tiles flipping over in perspective, over a square
-         * plotting grid; then light shafts stream from the art's warm light, its screens flicker with data and dust
-         * drifts.
+         * plotting grid; then soft light shafts stream from the art's warm light, a faint scan line and the odd blip
+         * pass over its screens, and dust drifts.
          */
         COMMAND
     }

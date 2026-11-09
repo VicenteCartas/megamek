@@ -18,8 +18,8 @@ import com.badlogic.gdx.utils.Disposable;
 /**
  * A command post's start screen effects ({@link StartScreenContent.Ambience#COMMAND}). The art arrives as a departures
  * board: its tiles flip over in perspective, cascading from the top left, and land with a little overshoot. Once
- * settled, light shafts stream from the art's warm, bright openings through drifting haze, and the art's teal screens
- * come alive with blinking readouts and a rolling raster. Both find their places in the art itself, so any art works.
+ * settled, soft light shafts stream from the brightest warm opening in the art through drifting haze, and the art's teal
+ * screens show a faint rolling scan line and the odd blip. Both find their places in the art itself, so any art works.
  *
  * <p>GPU thread only. When a shader does not compile, {@link #ready} is false and the screen shows the art plainly.</p>
  */
@@ -60,8 +60,9 @@ final class StartCommandEffects implements Disposable {
           """;
 
     /**
-     * Light scattered from the mask's warm light (red) towards each pixel along the line from the light's origin, broken
-     * into beams and stirred by haze, and dimmed where the screen shades the art (blue).
+     * Light scattered from the mask's warm light (red) towards each pixel along the line from the light's origin,
+     * stirred by haze and dimmed where the screen shades the art (blue). The opening itself gets none: it is lit
+     * already, and adding to it would blow it out into a star.
      */
     private static final String RAYS_FRAGMENT = """
           uniform sampler2D u_texture;
@@ -83,14 +84,16 @@ final class StartCommandEffects implements Disposable {
                   decay *= 0.965;
               }
               light /= float(%1$d);
-              vec2 d = uv - u_origin;
-              float beams = 0.35 + 0.65 * noise(vec2(atan(d.y, d.x) * 14.0, u_time * 0.12));
-              float shade = texture2D(u_texture, uv).b;
-              gl_FragColor = vec4(1.0, 0.86, 0.62, clamp(light * beams * shade * u_strength, 0.0, 0.55));
+              vec4 here = texture2D(u_texture, uv);
+              float outside = 1.0 - smoothstep(0.05, 0.6, here.r);
+              gl_FragColor = vec4(1.0, 0.86, 0.62, clamp(light * outside * here.b * u_strength, 0.0, 0.3));
           }
           """.formatted(RAY_SAMPLES);
 
-    /** The art's screens (green) glowing with blinking blocks of data and a rolling raster. */
+    /**
+     * The art's screens (green) left as painted but for a faint line rolling down them, as a display refreshes, and now
+     * and then a blip that pings and fades, as on a plot.
+     */
     private static final String MONITORS_FRAGMENT = """
           uniform sampler2D u_texture;
           uniform float u_time;
@@ -103,14 +106,21 @@ final class StartCommandEffects implements Disposable {
               if (mask.g < 0.02) {
                   discard;
               }
-              vec2 cell = floor(v_texCoords * u_cells);
-              float rate = 1.5 + 5.0 * hash(cell * 0.37);
-              float data = step(0.7, hash(cell + floor(u_time * rate)));
-              float raster = 0.5 + 0.5 * sin(v_texCoords.y * u_cells.y * 2.0 - u_time * 4.0);
-              float sweep = smoothstep(0.92, 1.0, fract(v_texCoords.y * 1.5 - u_time * 0.35));
-              float flicker = 0.9 + 0.1 * sin(u_time * 31.0) * sin(u_time * 7.3);
-              float glow = mask.g * (0.2 * raster + 0.55 * data + 0.5 * sweep) * flicker;
-              gl_FragColor = vec4(0.5, 1.0, 0.93, clamp(glow * u_strength, 0.0, 0.9));
+              float roll = fract(v_texCoords.y * 8.0 - u_time * 0.12);
+              float scan = (1.0 - smoothstep(0.0, 0.012, abs(roll - 0.5))) * 0.14
+                    + smoothstep(0.3, 0.5, roll) * step(roll, 0.5) * 0.03;
+              vec2 cellUv = v_texCoords * u_cells;
+              vec2 cell = floor(cellUv);
+              float seed = hash(cell);
+              float blip = 0.0;
+              if (seed > 0.82) {
+                  vec2 spot = vec2(hash(cell + 17.0), hash(cell + 31.0)) * 0.6 + 0.2;
+                  float phase = fract(u_time / (2.5 + 3.0 * seed) + seed * 7.0);
+                  float fade = 1.0 - smoothstep(0.0, 0.45, phase);
+                  float d = length(cellUv - cell - spot);
+                  blip = fade * (1.0 - smoothstep(0.08, 0.2, d)) * 0.8;
+              }
+              gl_FragColor = vec4(0.6, 1.0, 0.94, clamp(mask.g * (scan + blip) * u_strength, 0.0, 0.7));
           }
           """;
 
@@ -214,33 +224,117 @@ final class StartCommandEffects implements Disposable {
     void findLights(BufferedImage art, BufferedImage shading) {
         int width = art.getWidth();
         int height = art.getHeight();
-        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-        double weight = 0;
-        double sumU = 0;
-        double sumV = 0;
+        float[] light = new float[width * height];
+        float[] screen = new float[width * height];
+        float[] shade = new float[width * height];
+        float[] seen = new float[width * height];
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
+                int i = y * width + x;
                 int rgb = art.getRGB(x, y);
-                float light = warmLight(rgb);
-                float screen = screenGlow(rgb);
-                float shade = luminance(shading.getRGB(x, y));
-                image.setRGB(x, y, 0xFF000000 | (byteOf(light) << 16) | (byteOf(screen) << 8) | byteOf(shade));
-                double w = light * light * shade;
-                weight += w;
-                sumU += w * (x + 0.5) / width;
-                sumV += w * (y + 0.5) / height;
+                light[i] = warmLight(rgb);
+                screen[i] = screenGlow(rgb);
+                shade[i] = luminance(shading.getRGB(x, y));
+                seen[i] = light[i] * shade[i];
             }
         }
-        // Too little light leaves the shafts out rather than streaming them from a speck
-        hasLight = weight > width * height * 0.002;
+        Opening opening = opening(seen, width, height);
+        hasLight = opening != null;
         if (hasLight) {
-            lightU = (float) (sumU / weight);
-            lightV = (float) (sumV / weight);
+            lightU = (float) opening.u();
+            lightV = (float) opening.v();
+        }
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int i = y * width + x;
+                // Only the opening the shafts stream from lights them; others would cast shafts from the wrong place
+                float lit = hasLight && opening.inside()[i] ? light[i] : 0;
+                image.setRGB(x, y, 0xFF000000 | (byteOf(lit) << 16) | (byteOf(screen[i]) << 8) | byteOf(shade[i]));
+            }
         }
         if (mask != null) {
             mask.dispose();
         }
         mask = GpuStartScreen.texture(image, false);
+    }
+
+    /** The brightest opening the light comes through: which pixels it covers and its centre (fractions, from the top). */
+    record Opening(boolean[] inside, double u, double v) { }
+
+    /**
+     * The opening the most {@code light} (0 to 1 a pixel, rows from the top) shows through: the bright region around the
+     * peak of the light blurred, so that the opening counts rather than a speck, with its light's centre. Null when there
+     * is too little light to stream shafts from.
+     */
+    static Opening opening(float[] light, int width, int height) {
+        double total = 0;
+        for (float value : light) {
+            total += value;
+        }
+        if (total < width * height * 0.003) {
+            return null;
+        }
+        int radius = Math.max(1, Math.round(width * 0.03f));
+        float[] blurred = light.clone();
+        for (int pass = 0; pass < 3; pass++) {
+            blurred = boxBlur(blurred, width, height, radius, true);
+            blurred = boxBlur(blurred, width, height, radius, false);
+        }
+        int peak = 0;
+        for (int i = 1; i < blurred.length; i++) {
+            if (blurred[i] > blurred[peak]) {
+                peak = i;
+            }
+        }
+        float threshold = blurred[peak] * 0.3f;
+        boolean[] inside = new boolean[light.length];
+        int[] queue = new int[light.length];
+        int head = 0;
+        int tail = 0;
+        inside[peak] = true;
+        queue[tail++] = peak;
+        double weight = 0;
+        double sumU = 0;
+        double sumV = 0;
+        while (head < tail) {
+            int i = queue[head++];
+            int x = i % width;
+            int y = i / width;
+            weight += light[i];
+            sumU += light[i] * (x + 0.5) / width;
+            sumV += light[i] * (y + 0.5) / height;
+            int[] neighbours = { x > 0 ? i - 1 : -1, x < width - 1 ? i + 1 : -1, y > 0 ? i - width : -1,
+                                 y < height - 1 ? i + width : -1 };
+            for (int next : neighbours) {
+                if (next >= 0 && !inside[next] && blurred[next] >= threshold) {
+                    inside[next] = true;
+                    queue[tail++] = next;
+                }
+            }
+        }
+        return weight <= 0 ? null : new Opening(inside, sumU / weight, sumV / weight);
+    }
+
+    /** One pass of a box blur {@code radius} pixels each way, along rows or columns, clamped at the edges. */
+    private static float[] boxBlur(float[] in, int width, int height, int radius, boolean rows) {
+        float[] out = new float[in.length];
+        int lines = rows ? height : width;
+        int length = rows ? width : height;
+        int stride = rows ? 1 : width;
+        for (int line = 0; line < lines; line++) {
+            int first = rows ? line * width : line;
+            float sum = 0;
+            for (int k = -radius; k <= radius; k++) {
+                sum += in[first + Math.max(0, Math.min(length - 1, k)) * stride];
+            }
+            for (int k = 0; k < length; k++) {
+                out[first + k * stride] = sum / (2 * radius + 1);
+                sum += in[first + Math.min(length - 1, k + radius + 1) * stride];
+                sum -= in[first + Math.max(0, k - radius) * stride];
+            }
+        }
+        return out;
     }
 
     /** The size the masks are drawn at for a window {@code width} by {@code height} pixels. */
@@ -358,15 +452,15 @@ final class StartCommandEffects implements Disposable {
             batch.begin();
             rays.setUniformf("u_origin", lightU, lightV);
             rays.setUniformf("u_time", time);
-            rays.setUniformf("u_strength", 2.6f * strength);
+            rays.setUniformf("u_strength", 1.6f * strength);
             batch.draw(mask, 0, 0, bw, bh);
             batch.end();
         }
         batch.setShader(monitors);
         batch.begin();
         monitors.setUniformf("u_time", time);
-        monitors.setUniformf("u_strength", 1.6f * strength);
-        monitors.setUniformf("u_cells", bw / (7 * scale), bh / (3.5f * scale));
+        monitors.setUniformf("u_strength", strength);
+        monitors.setUniformf("u_cells", bw / (12 * scale), bh / (12 * scale));
         batch.draw(mask, 0, 0, bw, bh);
         batch.end();
         batch.setShader(null);
