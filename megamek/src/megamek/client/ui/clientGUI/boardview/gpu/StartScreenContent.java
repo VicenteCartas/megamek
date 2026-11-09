@@ -73,6 +73,20 @@ public abstract class StartScreenContent {
         return Ambience.BATTLE;
     }
 
+    /** A star system on a {@link StarChart}: where it is, in light years from Terra (coreward up), and its owner's colour. */
+    public record Star(double x, double y, java.awt.Color color) { }
+
+    /** The stars a command post's star map shows, and the one the view dives to, in light years from Terra. */
+    public record StarChart(List<Star> stars, double focusX, double focusY) { }
+
+    /**
+     * The real star map a command post's intro draws and dives through, or null for an invented one. Called once, on a
+     * thread of its own, so it may read files; the intro invents a map when this is not back in time.
+     */
+    public @Nullable StarChart starChart() {
+        return null;
+    }
+
     /** Whether the screen has MegaMek's own pages, such as Host and Connect, rather than {@link #menu}. */
     boolean gamePages() {
         return false;

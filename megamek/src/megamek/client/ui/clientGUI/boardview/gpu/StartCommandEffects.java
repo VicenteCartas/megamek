@@ -6,8 +6,10 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
@@ -127,13 +129,13 @@ final class StartCommandEffects implements Disposable {
               vec2 cell = floor(cellUv);
               float seed = hash(cell);
               float blip = 0.0;
-              if (seed > 0.84) {
-                  vec2 spot = vec2(hash(cell + 17.0), hash(cell + 31.0)) * 0.3 + 0.35;
+              if (seed > 0.86) {
+                  vec2 spot = vec2(hash(cell + 17.0), hash(cell + 31.0)) * 0.16 + 0.42;
                   float phase = fract(u_time / (3.0 + 3.0 * seed) + seed * 7.0);
                   float d = hexDistance(cellUv - cell - spot);
-                  float contact = (1.0 - smoothstep(0.0, 0.5, phase)) * (1.0 - smoothstep(0.07, 0.1, d));
-                  float reach = 0.06 + 0.24 * smoothstep(0.0, 0.7, phase);
-                  float ripple = (1.0 - smoothstep(0.0, 0.025, abs(d - reach))) * (1.0 - smoothstep(0.1, 0.7, phase));
+                  float contact = (1.0 - smoothstep(0.0, 0.5, phase)) * (1.0 - smoothstep(0.1, 0.145, d));
+                  float reach = 0.09 + 0.24 * smoothstep(0.0, 0.7, phase);
+                  float ripple = (1.0 - smoothstep(0.0, 0.035, abs(d - reach))) * (1.0 - smoothstep(0.1, 0.7, phase));
                   blip = contact * 0.9 + ripple * 0.5;
               }
               gl_FragColor = vec4(0.6, 1.0, 0.94, clamp(mask.g * (scan + blip) * u_strength, 0.0, 0.7));
@@ -219,60 +221,45 @@ final class StartCommandEffects implements Disposable {
           }
           """;
 
-    /** The art arrives out of the star map: it dissolves in from the centre with a glowing rim, easing out of a zoom. */
-    private static final String ARRIVAL_FRAGMENT = """
-          uniform sampler2D u_texture;
-          uniform float u_progress;
-          uniform float u_aspect;
-          uniform vec3 u_tint;
-          varying vec2 v_texCoords;
-          """ + NOISE + """
-          void main() {
-              float p = u_progress;
-              vec2 c = v_texCoords - 0.5;
-              vec2 q = v_texCoords * vec2(u_aspect, 1.0);
-              float grain = noise(q * 5.0) * 0.65 + noise(q * 23.0) * 0.35;
-              float key = grain * 0.5 + length(c * vec2(u_aspect, 1.0)) * 0.6;
-              float gap = p * 1.25 - 0.1 - key;
-              if (gap < 0.0) {
-                  discard;
-              }
-              float zoom = 1.0 + 0.25 * (1.0 - p) * (1.0 - p);
-              vec3 art = texture2D(u_texture, 0.5 + c / zoom).rgb;
-              float rim = (1.0 - smoothstep(0.0, 0.03, gap)) * (1.0 - smoothstep(0.85, 1.0, p));
-              gl_FragColor = vec4(art + u_tint * rim * 0.9, smoothstep(0.0, 0.01, gap));
-          }
-          """;
-
     private static final String STARS_VERTEX = """
           attribute vec3 a_position;
           attribute vec2 a_texCoord0;
           attribute float a_when;
           attribute float a_kind;
-          uniform mat4 u_projTrans;
-          uniform vec3 u_eye;
+          attribute vec3 a_tone;
+          attribute float a_size;
+          uniform mat4 u_view;
+          uniform mat4 u_proj;
+          uniform vec2 u_far;
           varying vec2 v_uv;
           varying float v_when;
           varying float v_kind;
+          varying vec3 v_tone;
           varying float v_near;
           void main() {
               v_uv = a_texCoord0;
               v_when = a_when;
               v_kind = a_kind;
-              float d = distance(a_position, u_eye);
-              v_near = smoothstep(0.08, 0.5, d) * (1.0 - smoothstep(5.0, 9.0, d));
-              gl_Position = u_projTrans * vec4(a_position, 1.0);
+              v_tone = a_tone;
+              vec4 view = u_view * vec4(a_position, 1.0);
+              float d = length(view.xyz);
+              v_near = smoothstep(0.08, 0.5, d) * (1.0 - smoothstep(u_far.x, u_far.y, d));
+              view.xy += (a_texCoord0 * 2.0 - 1.0) * a_size;
+              gl_Position = u_proj * view;
           }
           """;
 
-    /** Star systems light up and jump routes draw out from them, with a bright head where each is growing. */
+    /**
+     * Star systems light up and jump routes draw out from them, with a bright head where each is growing; a faint haze
+     * of each system's colour tints the space its owner holds.
+     */
     private static final String STARS_FRAGMENT = """
           uniform float u_build;
           uniform float u_fade;
-          uniform vec3 u_tint;
           varying vec2 v_uv;
           varying float v_when;
           varying float v_kind;
+          varying vec3 v_tone;
           varying float v_near;
           void main() {
               float since = u_build - v_when;
@@ -280,16 +267,19 @@ final class StartCommandEffects implements Disposable {
                   discard;
               }
               float fresh = 1.0 - smoothstep(0.0, 0.06, since);
+              vec2 d = v_uv * 2.0 - 1.0;
+              float r2 = dot(d, d);
               float a;
-              if (v_kind > 0.5) {
-                  vec2 d = v_uv * 2.0 - 1.0;
-                  float r2 = dot(d, d);
+              if (v_kind > 1.5) {
+                  a = exp(-r2 * 4.0) * 0.07 * smoothstep(0.0, 0.15, since);
+                  fresh = 0.0;
+              } else if (v_kind > 0.5) {
                   a = (exp(-r2 * 9.0) + 0.35 * exp(-r2 * 2.5)) * (0.8 + 1.5 * fresh);
               } else {
                   float across = 1.0 - abs(v_uv.y * 2.0 - 1.0);
                   a = across * across * 0.35 * (1.0 + 3.0 * fresh);
               }
-              gl_FragColor = vec4(u_tint + fresh * 0.4, clamp(a * v_near * u_fade, 0.0, 1.0));
+              gl_FragColor = vec4(v_tone + fresh * 0.4, clamp(a * v_near * u_fade, 0.0, 1.0));
           }
           """;
 
@@ -309,13 +299,27 @@ final class StartCommandEffects implements Disposable {
     private static final double MAP_START = 0.3;
     private static final double MAP_BUILD = 2.2;
     private static final int MAP_STARS = 150;
-    /** Position (3), across or around (2), when it lights (1) and whether a star or a route (1). */
-    private static final int STAR_FLOATS = 7;
+    /**
+     * Position (3), across or around (2), when it lights (1), whether a route, a star or a haze (1), its colour (3) and
+     * how far a star's glow reaches either way from its centre (1).
+     */
+    private static final int STAR_FLOATS = 11;
+    /** Light years from Terra the charted map reaches, how many to a unit of the map, and how far a jump goes. */
+    private static final double CHART_REACH = 1300;
+    private static final double CHART_SCALE = 220;
+    private static final double JUMP = 30;
+    /** How far a charted system's haze spreads, in light years. */
+    private static final double HAZE = 40;
     /** The fraction of the reveal one split flap takes to fall. */
     static final double FLAP_SPAN = 0.3;
 
-    /** Star systems at {@code points} (x, y, z each), when each lights from 0 to 1, and routes as pairs of indices. */
-    record StarMap(float[] points, float[] born, int[] routes) { }
+    /**
+     * Star systems at {@code points} (x, y, z each), when each lights from 0 to 1, routes as pairs of indices, each
+     * system's colour (r, g, b each, or null for the tint) and the one the view dives into; a {@code planar} map lies
+     * flat as a chart does.
+     */
+    record StarMap(float[] points, float[] born, int[] routes, float[] colours, int focus,
+          boolean planar) { }
 
     private final float[] edge;
     private final float[] back;
@@ -325,9 +329,10 @@ final class StartCommandEffects implements Disposable {
     private ShaderProgram monitors;
     private ShaderProgram flip;
     private ShaderProgram hologram;
-    private ShaderProgram arrival;
     private ShaderProgram stars;
     private Mesh starMesh;
+    private StarMap shownMap;
+    private StartScreenContent.StarChart chartTried;
     private Mesh mesh;
     private float[] vertices = new float[0];
     private Texture mask;
@@ -347,7 +352,6 @@ final class StartCommandEffects implements Disposable {
         monitors = compile(BATCH_VERTEX, MONITORS_FRAGMENT);
         flip = compile(FLIP_VERTEX, FLIP_FRAGMENT);
         hologram = compile(BATCH_VERTEX, HOLOGRAM_FRAGMENT);
-        arrival = compile(BATCH_VERTEX, ARRIVAL_FRAGMENT);
         stars = compile(STARS_VERTEX, STARS_FRAGMENT);
     }
 
@@ -363,7 +367,7 @@ final class StartCommandEffects implements Disposable {
 
     /** Whether the effects can draw; when not, the screen shows the art plainly. */
     boolean ready() {
-        return rays != null && monitors != null && flip != null && hologram != null && arrival != null
+        return rays != null && monitors != null && flip != null && hologram != null
               && stars != null;
     }
 
@@ -781,37 +785,77 @@ final class StartCommandEffects implements Disposable {
         batch.setShader(null);
     }
 
-    /** Draws the art arriving out of the star map, {@code progress} of the way through the reveal. */
-    void drawArrival(SpriteBatch batch, Texture backdrop, double progress) {
-        double p = Math.max(0, Math.min(1, (progress - 0.3) / 0.7));
-        if (p <= 0) {
-            return;
-        }
-        batch.setShader(arrival);
-        batch.begin();
-        arrival.setUniformf("u_progress", (float) p);
-        arrival.setUniformf("u_aspect", (float) bw / Math.max(1, bh));
-        arrival.setUniformf("u_tint", edge[0], edge[1], edge[2]);
-        batch.setColor(1, 1, 1, 1);
-        batch.draw(backdrop, 0, 0, bw, bh);
-        batch.end();
-        batch.setShader(null);
-    }
-
     /**
-     * Draws the star map {@code t} seconds into the intro: it draws itself out from a hub behind the greeting, then the
-     * view dives through it during the reveal as it fades.
+     * Draws the star map {@code t} seconds into the intro: it draws itself out behind the greeting, then the view dives
+     * into it during the reveal as it fades. The map is {@code chart} once it has come, if it has any systems near
+     * Terra, and a made-up network of jump routes until then.
      */
-    void drawStarMap(double t) {
+    void drawStarMap(double t, StartScreenContent.StarChart chart) {
         float build = (float) Math.max(0, Math.min(1, (t - MAP_START) / MAP_BUILD));
         if (build <= 0) {
             return;
         }
+        if (chart != null && chart != chartTried && (starMesh == null || build < 0.05f)) {
+            chartTried = chart;
+            StarMap charted = chartMap(chart);
+            if (charted != null) {
+                show(charted);
+            }
+        }
         if (starMesh == null) {
-            starMesh = starMesh(starMap(3025L, MAP_STARS));
+            show(starMap(3025L, MAP_STARS));
         }
         double dive = Math.max(0, Math.min(1, (t - StartTimeline.REVEAL_START) / StartTimeline.REVEAL_DURATION));
         double rush = dive * dive;
+        if (shownMap.planar()) {
+            aimAtChart(build, dive, rush);
+        } else {
+            aimIntoNetwork(t, dive, rush);
+        }
+        float fade = 1 - smoothstep(0.55f, 1f, (float) dive);
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE);
+        Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
+        Gdx.gl.glDisable(GL20.GL_CULL_FACE);
+        stars.bind();
+        stars.setUniformMatrix("u_view", mapCamera.view);
+        stars.setUniformMatrix("u_proj", mapCamera.projection);
+        stars.setUniformf("u_far", shownMap.planar() ? 6f : 5f, shownMap.planar() ? 11f : 9f);
+        stars.setUniformf("u_build", build);
+        stars.setUniformf("u_fade", fade);
+        starMesh.render(stars, GL20.GL_TRIANGLES);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+    }
+
+    private void show(StarMap map) {
+        if (starMesh != null) {
+            starMesh.dispose();
+        }
+        shownMap = map;
+        starMesh = starMesh(map, edge);
+    }
+
+    /** Looks down on the chart at a slant, gliding from Terra towards the focus, then dives straight into it. */
+    private void aimAtChart(float build, double dive, double rush) {
+        float[] p = shownMap.points();
+        int focus = shownMap.focus();
+        float glide = (float) StartTimeline.ease(build);
+        float targetX = p[focus * 3] * (0.3f + 0.7f * glide);
+        float targetY = p[focus * 3 + 1] * (0.3f + 0.7f * glide);
+        double angle = -0.3 + 0.3 * glide;
+        double distance = (5.2 - 2.0 * glide) * (1 - 0.96 * rush);
+        double tilt = (0.45 + 0.2 * glide) * (1 - dive);
+        float across = (float) (distance * Math.sin(tilt));
+        mapCamera.position.set(targetX + (float) Math.sin(angle) * across, targetY - (float) Math.cos(angle) * across,
+              (float) (distance * Math.cos(tilt)));
+        mapCamera.direction.set(targetX, targetY, 0).sub(mapCamera.position).nor();
+        double roll = angle + 0.35 * rush;
+        mapCamera.up.set((float) -Math.sin(roll), (float) Math.cos(roll), 0);
+        mapCamera.update();
+    }
+
+    /** Drifts before the network, then rushes through it with a roll. */
+    private void aimIntoNetwork(double t, double dive, double rush) {
         float drift = (float) (1 - dive);
         float x = (float) (0.25 * Math.sin(t * 0.35)) * drift;
         float y = (float) (0.12 * Math.sin(t * 0.27)) * drift;
@@ -820,41 +864,56 @@ final class StartCommandEffects implements Disposable {
         mapCamera.direction.set(-x * 0.3f, -y * 0.3f, -1).nor();
         mapCamera.up.set((float) Math.sin(roll), (float) Math.cos(roll), 0);
         mapCamera.update();
-        float fade = 1 - smoothstep(0.55f, 1f, (float) dive);
-        Gdx.gl.glEnable(GL20.GL_BLEND);
-        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE);
-        Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
-        Gdx.gl.glDisable(GL20.GL_CULL_FACE);
-        stars.bind();
-        stars.setUniformMatrix("u_projTrans", mapCamera.combined);
-        stars.setUniformf("u_eye", mapCamera.position);
-        stars.setUniformf("u_build", build);
-        stars.setUniformf("u_fade", fade);
-        stars.setUniformf("u_tint", edge[0], edge[1], edge[2]);
-        starMesh.render(stars, GL20.GL_TRIANGLES);
-        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
     }
 
-    /** The star map as quads: a glow for each star and a thin strip for each route, lit when they are. */
-    private static Mesh starMesh(StarMap map) {
+    /**
+     * The star map as quads: a glow facing the view for each star, a thin strip for each route and, on a chart, a haze
+     * of each held system's colour, lit when they are. {@code tint} colours what the map does not.
+     */
+    private static Mesh starMesh(StarMap map, float[] tint) {
         float[] p = map.points();
         float[] born = map.born();
         int[] routes = map.routes();
-        float[] data = new float[(born.length + routes.length / 2) * 6 * STAR_FLOATS];
+        float[] data = new float[(born.length * 2 + routes.length / 2) * 6 * STAR_FLOATS];
         int n = 0;
+        if (map.planar()) {
+            float h = (float) (HAZE / CHART_SCALE);
+            for (int i = 0; i < born.length; i++) {
+                float[] tone = tone(map, i, tint);
+                if (held(tone)) {
+                    float x = p[i * 3];
+                    float y = p[i * 3 + 1];
+                    float[][] corners = { { x - h, y - h, 0, 0, 0, born[i] }, { x + h, y - h, 0, 1, 0, born[i] },
+                                          { x + h, y + h, 0, 1, 1, born[i] }, { x - h, y + h, 0, 0, 1, born[i] } };
+                    n = starQuad(data, n, corners, 2, tone, 0);
+                }
+            }
+        }
         for (int i = 0; i < born.length; i++) {
-            float s = i == 0 ? 0.07f : 0.03f + 0.002f * (i * 37 % 10);
+            float s;
+            if (map.planar()) {
+                s = i == map.focus() ? 0.035f : 0.012f;
+            } else {
+                s = i == 0 ? 0.07f : 0.03f + 0.002f * (i * 37 % 10);
+            }
             float x = p[i * 3];
             float y = p[i * 3 + 1];
             float z = p[i * 3 + 2];
-            float[][] corners = { { x - s, y - s, z, 0, 0, born[i] }, { x + s, y - s, z, 1, 0, born[i] },
-                                  { x + s, y + s, z, 1, 1, born[i] }, { x - s, y + s, z, 0, 1, born[i] } };
-            n = starQuad(data, n, corners, 1);
+            float[][] corners = { { x, y, z, 0, 0, born[i] }, { x, y, z, 1, 0, born[i] },
+                                  { x, y, z, 1, 1, born[i] }, { x, y, z, 0, 1, born[i] } };
+            n = starQuad(data, n, corners, 1, tone(map, i, tint), s);
         }
         float width = 0.0035f;
+        float[] border = { 0.3f, 0.3f, 0.3f };
         for (int k = 0; k < routes.length; k += 2) {
             int a = routes[k];
             int b = routes[k + 1];
+            float[] tone = tone(map, a, tint);
+            if (map.planar()) {
+                float[] other = tone(map, b, tint);
+                tone = Arrays.equals(tone, other) ? new float[] { tone[0] * 0.6f, tone[1] * 0.6f, tone[2] * 0.6f }
+                      : border;
+            }
             float dx = p[b * 3] - p[a * 3];
             float dy = p[b * 3 + 1] - p[a * 3 + 1];
             float length = (float) Math.hypot(dx, dy);
@@ -865,24 +924,114 @@ final class StartCommandEffects implements Disposable {
                   { p[b * 3] - px, p[b * 3 + 1] - py, p[b * 3 + 2], 1, 0, born[b] },
                   { p[b * 3] + px, p[b * 3 + 1] + py, p[b * 3 + 2], 1, 1, born[b] },
                   { p[a * 3] + px, p[a * 3 + 1] + py, p[a * 3 + 2], 0, 1, born[a] } };
-            n = starQuad(data, n, corners, 0);
+            n = starQuad(data, n, corners, 0, tone, 0);
         }
         Mesh starMesh = new Mesh(true, n / STAR_FLOATS, 0, VertexAttribute.Position(), VertexAttribute.TexCoords(0),
               new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_when"),
-              new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_kind"));
+              new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_kind"),
+              new VertexAttribute(VertexAttributes.Usage.Generic, 3, "a_tone"),
+              new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_size"));
         starMesh.setVertices(data, 0, n);
         return starMesh;
     }
 
-    private static int starQuad(float[] data, int n, float[][] corners, float kind) {
+    private static float[] tone(StarMap map, int i, float[] tint) {
+        float[] colours = map.colours();
+        return colours == null ? tint : Arrays.copyOfRange(colours, i * 3, i * 3 + 3);
+    }
+
+    /** Whether a system's colour is a power's, not the grey of one that no one holds. */
+    static boolean held(float[] tone) {
+        float max = Math.max(tone[0], Math.max(tone[1], tone[2]));
+        float min = Math.min(tone[0], Math.min(tone[1], tone[2]));
+        return max - min > 0.2f || max > 0.9f;
+    }
+
+    private static int starQuad(float[] data, int n, float[][] corners, float kind, float[] tone, float size) {
         for (int corner : new int[] { 0, 1, 2, 0, 2, 3 }) {
             System.arraycopy(corners[corner], 0, data, n, 6);
             data[n + 6] = kind;
+            System.arraycopy(tone, 0, data, n + 7, 3);
+            data[n + 10] = size;
             n += STAR_FLOATS;
         }
         return n;
     }
 
+    /**
+     * The systems of {@code chart} within reach of Terra as a flat map, each in its owner's colour and joined by routes
+     * to its nearest neighbours a jump away, lighting outwards from Terra as humanity spread; null when none are near.
+     */
+    static StarMap chartMap(StartScreenContent.StarChart chart) {
+        List<StartScreenContent.Star> kept = new ArrayList<>();
+        for (StartScreenContent.Star star : chart.stars()) {
+            if (Math.hypot(star.x(), star.y()) <= CHART_REACH) {
+                kept.add(star);
+            }
+        }
+        int count = kept.size();
+        if (count < 2) {
+            return null;
+        }
+        Random random = new Random(3025L);
+        float[] points = new float[count * 3];
+        float[] colours = new float[count * 3];
+        float[] born = new float[count];
+        Map<Long, List<Integer>> grid = new HashMap<>();
+        int focus = 0;
+        double closest = Double.MAX_VALUE;
+        for (int i = 0; i < count; i++) {
+            StartScreenContent.Star star = kept.get(i);
+            points[i * 3] = (float) (star.x() / CHART_SCALE);
+            points[i * 3 + 1] = (float) (star.y() / CHART_SCALE);
+            float[] rgb = star.color().getRGBColorComponents(null);
+            System.arraycopy(rgb, 0, colours, i * 3, 3);
+            born[i] = (float) Math.min(1, Math.hypot(star.x(), star.y()) / CHART_REACH * 0.85
+                  + random.nextFloat() * 0.1);
+            double fromFocus = Math.hypot(star.x() - chart.focusX(), star.y() - chart.focusY());
+            if (fromFocus < closest) {
+                closest = fromFocus;
+                focus = i;
+            }
+            grid.computeIfAbsent(gridKey(star.x(), star.y(), 0, 0), key -> new ArrayList<>()).add(i);
+        }
+        Set<Long> pairs = new LinkedHashSet<>();
+        for (int i = 0; i < count; i++) {
+            StartScreenContent.Star star = kept.get(i);
+            List<Integer> near = new ArrayList<>();
+            for (int gx = -1; gx <= 1; gx++) {
+                for (int gy = -1; gy <= 1; gy++) {
+                    for (int j : grid.getOrDefault(gridKey(star.x(), star.y(), gx, gy), List.of())) {
+                        if (j != i && jump(kept, i, j) <= JUMP) {
+                            near.add(j);
+                        }
+                    }
+                }
+            }
+            int from = i;
+            near.sort(Comparator.comparingDouble(j -> jump(kept, from, j)));
+            for (int k = 0; k < Math.min(3, near.size()); k++) {
+                pairs.add(pair(i, near.get(k), count));
+            }
+        }
+        int[] routes = new int[pairs.size() * 2];
+        int k = 0;
+        for (long key : pairs) {
+            routes[k++] = (int) (key / count);
+            routes[k++] = (int) (key % count);
+        }
+        return new StarMap(points, born, routes, colours, focus, true);
+    }
+
+    private static long gridKey(double x, double y, int dx, int dy) {
+        long gx = (long) Math.floor(x / JUMP) + dx;
+        long gy = (long) Math.floor(y / JUMP) + dy;
+        return (gx << 32) ^ (gy & 0xFFFFFFFFL);
+    }
+
+    private static double jump(List<StartScreenContent.Star> stars, int a, int b) {
+        return Math.hypot(stars.get(a).x() - stars.get(b).x(), stars.get(a).y() - stars.get(b).y());
+    }
     /**
      * A star map of {@code count} systems from {@code seed}: the first a hub in the middle, each joined by jump routes
      * to its nearest neighbours and all joined to the hub, lighting outwards from it a jump at a time.
@@ -943,7 +1092,7 @@ final class StartCommandEffects implements Disposable {
             routes[k++] = (int) (key / count);
             routes[k++] = (int) (key % count);
         }
-        return new StarMap(points, born, routes);
+        return new StarMap(points, born, routes, null, 0, false);
     }
 
     private static long pair(int a, int b, int count) {
@@ -1007,7 +1156,7 @@ final class StartCommandEffects implements Disposable {
         batch.begin();
         monitors.setUniformf("u_time", time);
         monitors.setUniformf("u_strength", strength);
-        monitors.setUniformf("u_cells", bw / (24 * scale), bh / (24 * scale));
+        monitors.setUniformf("u_cells", bw / (16 * scale), bh / (16 * scale));
         batch.draw(mask, 0, 0, bw, bh);
         batch.end();
         batch.setShader(null);
@@ -1029,7 +1178,7 @@ final class StartCommandEffects implements Disposable {
 
     @Override
     public void dispose() {
-        for (Disposable disposable : new Disposable[] { rays, monitors, flip, hologram, arrival, stars, starMesh, mesh,
+        for (Disposable disposable : new Disposable[] { rays, monitors, flip, hologram, stars, starMesh, mesh,
                                                         mask }) {
             if (disposable != null) {
                 disposable.dispose();
@@ -1039,9 +1188,10 @@ final class StartCommandEffects implements Disposable {
         monitors = null;
         flip = null;
         hologram = null;
-        arrival = null;
         stars = null;
         starMesh = null;
+        shownMap = null;
+        chartTried = null;
         mesh = null;
         mask = null;
     }

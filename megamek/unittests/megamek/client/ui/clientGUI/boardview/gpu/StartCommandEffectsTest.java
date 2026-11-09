@@ -1,11 +1,15 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.awt.Color;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
@@ -125,6 +129,40 @@ class StartCommandEffectsTest {
             }
             assertTrue(reached, "system " + i + " is reached by a route from one lit before it");
         }
+    }
+
+    @Test
+    void aChartKeepsSystemsNearTerraJoinsThoseAJumpApartAndDivesIntoItsFocus() {
+        Color fs = new Color(255, 221, 0);
+        StartScreenContent.StarChart chart = new StartScreenContent.StarChart(List.of(
+              new StartScreenContent.Star(0, 0, Color.WHITE),
+              new StartScreenContent.Star(20, 0, fs),
+              new StartScreenContent.Star(800, 0, fs),
+              new StartScreenContent.Star(3000, 0, fs)), 798, 1);
+
+        StartCommandEffects.StarMap map = StartCommandEffects.chartMap(chart);
+
+        assertNotNull(map);
+        assertTrue(map.planar());
+        assertEquals(9, map.points().length, "the far system is left out");
+        assertEquals(2, map.focus());
+        assertArrayEquals(new int[] { 0, 1 }, map.routes(), "only the near pair is a jump apart");
+        assertEquals(1f, map.colours()[3], 0.001f);
+        assertEquals(221 / 255f, map.colours()[4], 0.001f);
+        assertTrue(map.born()[0] < map.born()[2], "Terra lights before the far reaches");
+    }
+
+    @Test
+    void aChartWithNothingNearTerraIsNoMap() {
+        assertNull(StartCommandEffects.chartMap(new StartScreenContent.StarChart(
+              List.of(new StartScreenContent.Star(5000, 0, Color.WHITE)), 0, 0)));
+    }
+
+    @Test
+    void powersHazeButTheUnheldGreyDoesNot() {
+        assertTrue(StartCommandEffects.held(new float[] { 1f, 0.87f, 0f }));
+        assertTrue(StartCommandEffects.held(new float[] { 1f, 0.98f, 0.94f }));
+        assertFalse(StartCommandEffects.held(new float[] { 0.43f, 0.43f, 0.43f }));
     }
 
     private static void fill(float[] light, int width, int x0, int x1, int y0, int y1) {

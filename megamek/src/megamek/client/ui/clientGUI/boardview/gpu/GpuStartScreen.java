@@ -125,6 +125,8 @@ final class GpuStartScreen extends ApplicationAdapter {
     private StartCommandEffects effects;
     /** How a command post's art arrives; keys 1 to 4 pick one and play the intro again. */
     private StartCommandEffects.Intro intro = StartCommandEffects.Intro.FLIPBOARD;
+    /** The content's star chart for the star map intro, once it has come. */
+    private volatile StartScreenContent.StarChart starChart;
     private final GUIPreferences preferences;
     private final DesignTokens tokens = DesignTokens.shipped();
     private final java.awt.Color base = awtColor("surface.base");
@@ -276,6 +278,8 @@ final class GpuStartScreen extends ApplicationAdapter {
             if (!effects.ready()) {
                 effects.dispose();
                 effects = null;
+            } else {
+                chartStars();
             }
         }
         bottomRow = bottomRow();
@@ -1355,13 +1359,26 @@ final class GpuStartScreen extends ApplicationAdapter {
         }
     }
 
+    /** Asks the content for its star chart on a thread of its own, as reading it may take a moment. */
+    private void chartStars() {
+        Thread reader = new Thread(() -> {
+            try {
+                starChart = content.starChart();
+            } catch (RuntimeException e) {
+                LOGGER.warn(e, "The start screen could not chart the stars");
+            }
+        }, "Start screen star chart");
+        reader.setDaemon(true);
+        reader.start();
+    }
+
     private void drawScene(double t) {
         Gdx.gl.glEnable(GL20.GL_BLEND);
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
         batch.setProjectionMatrix(pixels);
         shapes.setProjectionMatrix(pixels);
         if (effects != null && intro == StartCommandEffects.Intro.STARMAP && t < StartTimeline.REVEAL_END) {
-            effects.drawStarMap(t);
+            effects.drawStarMap(t, starChart);
         }
         drawGreeting(t);
         drawReveal(t);
@@ -1391,7 +1408,7 @@ final class GpuStartScreen extends ApplicationAdapter {
                 switch (intro) {
                     case FLIPBOARD -> effects.drawBoard(backdrop, tiles, scale, tileR, progress);
                     case HOLOGRAM -> effects.drawHologram(batch, backdrop, progress, (float) t);
-                    case STARMAP -> effects.drawArrival(batch, backdrop, progress);
+                    case STARMAP -> effects.drawHologram(batch, backdrop, (progress - 0.35) / 0.65, (float) t);
                     case SPLITFLAP -> effects.drawSplitFlap(backdrop, progress);
                 }
             }
