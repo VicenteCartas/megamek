@@ -25,6 +25,8 @@ import com.badlogic.gdx.graphics.g3d.RenderableProvider;
 import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
+import com.badlogic.gdx.graphics.g3d.Attributes;
+import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.g3d.utils.DepthShaderProvider;
 import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
@@ -244,7 +246,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             while (at > 0 && sizes.get(at - 1) < diameter) { at--; }
             sizes.insert(at, diameter);
             FloatArray tree = new FloatArray(STRIDE);
-            append(tree, transform);
+            append(tree, transform, 0);
             FloatArray placed = trees.computeIfAbsent(species, key -> new FloatArray());
             placed.insertRange(at * STRIDE, STRIDE);
             System.arraycopy(tree.items, 0, placed.items, at * STRIDE, STRIDE);
@@ -520,12 +522,22 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         private final List<Renderable> samples = new ArrayList<>();
         private final List<Batch[]> batches = new ArrayList<>();
         private final List<FloatArray> data = new ArrayList<>();
+        /** Whether each batch's parts are falling pieces, which turn about their sample's box. */
+        private final List<Boolean> pieces = new ArrayList<>();
     }
 
-    Placements placements(Array<Renderable> parts) {
+    Placements placements(Array<Renderable> parts) { return placements(parts, null); }
+
+    /**
+     * Falling pieces ({@link GpuDestruction}) with their hexes' slots + 1 ({@code owners}), which their instances carry
+     * (a_instance1.w); a piece's mesh part's box is its node's, about which it turns.
+     */
+    Placements placements(Array<Renderable> parts, IntArray owners) {
         Placements result = new Placements();
         Map<Batch[], FloatArray> data = new IdentityHashMap<>();
-        for (Renderable source : parts) {
+        for (int i = 0; i < parts.size; i++) {
+            Renderable source = parts.get(i);
+            int owner = owners == null ? 0 : owners.get(i);
             Batch[] passes = batches(source);
             FloatArray instances = data.get(passes);
             if (instances == null) {
@@ -533,8 +545,9 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                 result.samples.add(source);
                 result.batches.add(passes);
                 result.data.add(instances);
+                result.pieces.add(owner > 0);
             }
-            append(instances, source.worldTransform);
+            append(instances, source.worldTransform, owner);
             if (RigidGlb.colourSlotted(source.meshPart.mesh.getVertexAttributes())) {
                 instances.addAll(RigidGlb.slotColours(source.userData));
             }
@@ -547,6 +560,11 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         for (int i = 0; i < placed.batches.size(); i++) {
             Batch batch = batch(placed.batches.get(i), placed.samples.get(i));
             if (batch.data.isEmpty()) { gathered.add(batch); }
+            if (placed.pieces.get(i) && batch.mesh.piece == null) {
+                var part = placed.samples.get(i).meshPart;
+                batch.mesh.piece = new float[] { part.center.x, part.center.y, part.center.z,
+                      part.halfExtents.x, part.halfExtents.y, part.halfExtents.z };
+            }
             batch.data.addAll(placed.data.get(i));
         }
     }
@@ -569,7 +587,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     void add(Renderable source) {
         Batch batch = batch(batches(source), source);
         if (batch.data.isEmpty()) { gathered.add(batch); }
-        append(batch.data, source.worldTransform);
+        append(batch.data, source.worldTransform, 0);
         // Every colouring of a recolourable model shares this batch: each placement adds its colours.
         if (batch.stride > STRIDE) { batch.data.addAll(RigidGlb.slotColours(source.userData)); }
     }
@@ -613,14 +631,36 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
 
     /**
      * The x column gives the turn and the horizontal scale; a mirror image's y column is the turned y axis reversed,
-     * which the scale's sign carries.
+     * which the scale's sign carries. A falling piece's last float names its hex's slot + 1 ({@code owner}).
      */
-    private static void append(FloatArray data, Matrix4 transform) {
+    private static void append(FloatArray data, Matrix4 transform, int owner) {
         float[] m = transform.val;
         float horizontal = (float) Math.hypot(m[Matrix4.M00], m[Matrix4.M10]);
         // Two four-float adds: the varargs addAll would allocate an array per instance, every pass.
         data.add(m[Matrix4.M03], m[Matrix4.M13], m[Matrix4.M23], mirrored(transform) ? -horizontal : horizontal);
-        data.add(m[Matrix4.M00] / horizontal, m[Matrix4.M10] / horizontal, m[Matrix4.M22], 0);
+        data.add(m[Matrix4.M00] / horizontal, m[Matrix4.M10] / horizontal, m[Matrix4.M22], owner);
+    }
+
+    /** A debris batch's piece for the draw (tree-instances.glsl: u_piece, u_pieceHalf); 0 for every other batch. */
+    static void registerPiece(BaseShader shader) {
+        shader.register("u_piece", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                float[] piece = piece(renderable);
+                if (piece == null) { target.set(id, 0f, 0f, 0f, 0f); } else { target.set(id, piece[0], piece[1], piece[2], 1f); }
+            }
+        });
+        shader.register("u_pieceHalf", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                float[] piece = piece(renderable);
+                if (piece != null) { target.set(id, piece[3], piece[4], piece[5]); }
+            }
+        });
+    }
+
+    private static float[] piece(Renderable renderable) {
+        return renderable.meshPart.mesh instanceof GpuInstancedMesh instanced ? instanced.piece : null;
     }
 
     /** Evict buffers for retired building interiors/modules at the scene commit boundary. */
@@ -690,9 +730,9 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
 
     /** The scene vertex shader, placing each vertex by its tree's instance data instead of the world transform. */
     static String vertex(String source) {
-        source = insert(source, MAIN, GpuShaderSource.read("tree-instances.glsl") + "\n" + MAIN);
+        source = insert(source, MAIN, GpuDestruction.defines() + GpuShaderSource.read("tree-instances.glsl") + "\n" + MAIN);
         source = insert(source, "vec4 pos = u_worldTrans * vec4(a_position, 1.0);",
-              "#ifdef impostorFlag\nvec4 pos = vec4(impostorPosition(a_position), 1.0);\n#else\n"
+              "fallBegin();\n#ifdef impostorFlag\nvec4 pos = vec4(impostorPosition(a_position), 1.0);\n#else\n"
                     + "vec4 pos = vec4(instancePosition(a_position), 1.0);\n#endif\n"
                     + "#ifdef treeDissolveFlag\nv_treeDissolve = a_instance1.w;\n#endif\n");
         // A recolourable model's placement passes its colours in the instance data instead of the uniform.
@@ -700,6 +740,11 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         // An impostor's quad stands where it shows, at the depth of its plant's front (tree-instances.glsl).
         source = insert(source, "gl_Position = u_projViewTrans * pos;",
               "gl_Position = u_projViewTrans * pos;\n#ifdef impostorFlag\ngl_Position.z = impostorFrontZ(a_position, gl_Position);\n#endif\n");
+        // A material mapped along the board keeps its place on a falling piece (tree-instances.glsl, fallRest).
+        String boardUV = "v_modelUV = vec2(pos.x, -pos.y) / u_modelBoardUV;";
+        if (source.contains(boardUV)) {
+            source = insert(source, boardUV, "v_modelUV = vec2(fallRest(pos.xyz).x, -fallRest(pos.xyz).y) / u_modelBoardUV;");
+        }
         // An impostor's quad faces the camera; its texels carry their own normals (impostor-sample.glsl).
         return insert(source, "vec3 normal = normalize(u_normalMatrix * a_normal);",
               "\n#ifdef impostorFlag\nvec3 normal = impostorToward();\n#else\nvec3 normal = instanceNormal(a_normal);\n#endif\n");
@@ -711,6 +756,11 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
      * are depth.vert and depth.frag unless the configuration names them.
      */
     static DepthShaderProvider depthProvider(DepthShader.Config plain) {
+        return depthProvider(plain, shader -> { });
+    }
+
+    /** {@code tables}: registers the falls' texture and clock (GpuLavaLighting#register) where pieces fall. */
+    static DepthShaderProvider depthProvider(DepthShader.Config plain, Consumer<DepthShader> tables) {
         String plainVertex = plain.vertexShader != null ? plain.vertexShader : GpuShaderSource.read("depth.vert");
         String plainFragment = plain.fragmentShader != null ? plain.fragmentShader : GpuShaderSource.read("depth.frag");
         DepthShader.Config trees = new DepthShader.Config(depthVertex(plainVertex), plainFragment);
@@ -743,15 +793,18 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                 };
                 GpuBuildingCutaway.register(result);
                 GpuShadowLight.register(result);
+                registerPiece(result);
+                tables.accept(result);
                 return result;
             }
         };
     }
 
     private static String depthVertex(String source) {
-        source = insert(source, MAIN, "uniform mat4 u_projViewTrans;\n" + GpuShaderSource.read("tree-instances.glsl") + "\n" + MAIN);
+        source = insert(source, MAIN, "uniform mat4 u_projViewTrans;\n" + GpuDestruction.defines()
+              + GpuShaderSource.read("tree-instances.glsl") + "\n" + MAIN);
         return insert(source, "vec4 pos = u_projViewWorldTrans * vec4(a_position, 1.0);",
-              "\n#ifdef impostorFlag\nvec4 pos = u_projViewTrans * vec4(impostorPosition(a_position), 1.0);\n#else\n"
+              "\nfallBegin();\n#ifdef impostorFlag\nvec4 pos = u_projViewTrans * vec4(impostorPosition(a_position), 1.0);\n#else\n"
                     + "vec4 pos = u_projViewTrans * vec4(instancePosition(a_position), 1.0);\n#endif\n");
     }
 

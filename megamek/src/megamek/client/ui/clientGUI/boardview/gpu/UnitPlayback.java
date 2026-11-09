@@ -39,7 +39,7 @@ final class UnitPlayback {
     private final List<UnitAttack> attacks = new ArrayList<>();
     /** Completed/instant shots wait only until the next render consumes their persistent cosmetic impacts. */
     private final Map<UUID, UnitAttack> completedAttacks = new LinkedHashMap<>();
-    private final Map<UUID, megamek.common.NuclearDetonation> detonations = new LinkedHashMap<>();
+    private final Map<UUID, BoardScene.Detonation> detonations = new LinkedHashMap<>();
     private boolean detonationStarted;
     private final UnitVolley volley = new UnitVolley();
     private record Reaction(BoardScene.Movement movement, double start) { }
@@ -339,7 +339,7 @@ final class UnitPlayback {
     }
 
     /** Contact edges consumed once by effects, including strikes skipped with Instant playback. */
-    List<megamek.common.NuclearDetonation> takeDetonations() {
+    List<BoardScene.Detonation> takeDetonations() {
         var result = List.copyOf(detonations.values());
         detonations.clear();
         return result;
@@ -352,7 +352,7 @@ final class UnitPlayback {
     private void startDetonation(BoardScene.Detonation event) {
         if (detonationStarted) { return; }
         detonationStarted = true;
-        detonations.putIfAbsent(event.result().id(), event.result());
+        detonations.putIfAbsent(event.result().id(), event);
         if (detonations.size() > MAX_PENDING_EVENTS) { detonations.remove(detonations.keySet().iterator().next()); }
     }
 

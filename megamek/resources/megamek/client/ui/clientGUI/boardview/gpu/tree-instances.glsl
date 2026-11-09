@@ -29,12 +29,125 @@ vec3 instanceScale() {
     return vec3(abs(a_instance0.w), a_instance0.w, a_instance1.z);
 }
 
-vec3 instancePosition(vec3 p) {
+// A structure's pieces falling where the board drew them (GpuDestruction): rigid bodies thrown in closed form, the
+// collapse MeepleDebris simulated on the CPU. A debris batch (u_piece.w 1) draws one piece of a kit at every falling hex;
+// each instance names its hex's slot (a_instance1.w, from 1), whose texels in the local lights' texture hold its fall
+// (GpuDestruction#write). Every pass, colour, depth and shadow, poses alike from the same inputs.
+// LAVA_LIGHTS
+uniform vec4 u_destruct;       // the falls' clock in playback seconds, gravity, a level's height, a hex's reach
+uniform ivec2 u_destructSlots; // the first slot's texel, and 1 while anything falls
+uniform vec4 u_piece;          // the batch's piece: its node's box centre in the model's frame; w 1 for debris
+uniform vec3 u_pieceHalf;      // that box's half size
+
+// The fall's rigid motion, p' = fallShift + fallTurn (p - fallPivot), set once a vertex by fallBegin.
+bool falling = false;
+mat3 fallTurn = mat3(1.0);
+vec3 fallPivot = vec3(0.0);
+vec3 fallShift = vec3(0.0);
+
+vec3 instancePlace(vec3 p) {
     return instanceTurn(p * instanceScale()) + a_instance0.xyz;
 }
 
+vec3 instancePosition(vec3 p) {
+    return falling ? fallShift + fallTurn * (instancePlace(p) - fallPivot) : instancePlace(p);
+}
+
 vec3 instanceNormal(vec3 n) {
-    return normalize(instanceTurn(n / instanceScale()));
+    vec3 placed = instanceTurn(n / instanceScale());
+    return normalize(falling ? fallTurn * placed : placed);
+}
+
+// Where a posed point stood: materials mapped along the board (v_modelUV) keep their place on a falling piece.
+vec3 fallRest(vec3 p) {
+    return falling ? fallPivot + transpose(fallTurn) * (p - fallShift) : p;
+}
+
+uint fallMix(uint h) {
+    h ^= h >> 16u;
+    h *= 0x7feb352du;
+    h ^= h >> 15u;
+    h *= 0x846ca68bu;
+    return h ^ (h >> 16u);
+}
+
+float fallNoise(uint seed, uint salt) {
+    return float(fallMix(seed + salt * 0x9e3779b9u) & 0xffffffu) / 16777216.0;
+}
+
+mat3 fallRotation(vec3 axis, float angle) {
+    float c = cos(angle), s = sin(angle), k = 1.0 - c;
+    return mat3(c + axis.x * axis.x * k, axis.y * axis.x * k + axis.z * s, axis.z * axis.x * k - axis.y * s,
+          axis.x * axis.y * k - axis.z * s, c + axis.y * axis.y * k, axis.z * axis.y * k + axis.x * s,
+          axis.x * axis.z * k + axis.y * s, axis.y * axis.z * k - axis.x * s, c + axis.z * axis.z * k);
+}
+
+// Poses this vertex's piece: each storey gives way FALL_STOREY_RELEASE after the one below it; the crushed foot bursts
+// out, the storeys above spill outward onto its wreck and tumble the more the higher they stood, a strong hit pushes
+// them away from it, a unit's weight drives them down. A piece flies, lands on the pile at its lowest corner, skids and
+// stops turning, and from its slot's sink time sinks into the rubble the hex shows.
+void fallBegin() {
+    if (u_destructSlots.y == 0 || u_piece.w < 0.5 || a_instance1.w < 0.5) { return; }
+    int texel = u_destructSlots.x + (int(a_instance1.w + 0.5) - 1) * FALL_TEXELS;
+    vec4 fall = texelFetch(u_lavaLights, lavaTexel(texel), 0);     // start, flags, push away from the hit
+    float clock = u_destruct.x;
+    if (clock < fall.x) { return; }
+    vec4 site = texelFetch(u_lavaLights, lavaTexel(texel + 1), 0); // the hex's middle, its floor and its top
+    float sinks = texelFetch(u_lavaLights, lavaTexel(texel + 2), 0).x;
+    vec3 centre = instancePlace(u_piece.xyz);
+    // Raw inputs only, so that every pass's program draws the same numbers.
+    uint seed = fallMix(floatBitsToUint(a_instance0.x) ^ fallMix(floatBitsToUint(a_instance0.y)
+          ^ fallMix(floatBitsToUint(a_instance0.z) ^ fallMix(floatBitsToUint(a_instance1.x)
+          ^ fallMix(floatBitsToUint(u_piece.x) ^ fallMix(floatBitsToUint(u_piece.y) ^ floatBitsToUint(u_piece.z)))))));
+    float level = u_destruct.z, reach = u_destruct.w, height = max(site.w - site.z, level);
+    float share = clamp((centre.z - site.z) / height, 0.0, 1.0), foot = (1.0 - share) * (1.0 - share);
+    vec2 outward = centre.xy - site.xy;
+    float offset = length(outward);
+    float bearing = 6.2831853 * fallNoise(seed, 0u);
+    vec2 away = offset > 1e-3 ? outward / offset : vec2(cos(bearing), sin(bearing));
+    float strength = length(fall.zw);
+    vec2 pushed = strength > 1e-4 ? fall.zw / strength : vec2(0.0);
+    bool loaded = (int(fall.y + 0.5) & FALL_LOADED) != 0;
+    float release = FALL_STOREY_RELEASE * max(0.0, centre.z - site.z) / level * (0.8 + 0.4 * fallNoise(seed, 7u))
+          * (1.0 - 0.5 * min(strength, 1.0)) * (loaded ? 0.3 : 1.0);
+    float t = clock - fall.x - release;
+    if (t <= 0.0) { return; }
+    vec3 velocity = vec3(away * (FALL_CRUSH * foot + FALL_SPILL * share) * (0.6 + 0.8 * fallNoise(seed, 1u)),
+          FALL_CRUSH * 0.3 * foot * fallNoise(seed, 9u));
+    // The side facing the hit and the top take most of it: the structure leans away and falls over.
+    float facing = clamp(0.5 - dot(outward, pushed) / reach, 0.0, 1.0);
+    velocity.xy += pushed * FALL_PUSH * strength * (0.5 + 0.3 * facing + 0.4 * share);
+    if (loaded) { velocity.z = min(velocity.z, -FALL_LOAD_DROP); }
+    vec3 tumble = vec3(fallNoise(seed, 2u), fallNoise(seed, 3u), fallNoise(seed, 4u)) - 0.5;
+    vec3 spin = (dot(tumble, tumble) > 1e-6 ? normalize(tumble) : vec3(0.0, 0.0, 1.0))
+          * FALL_TUMBLE * share * (0.3 + 0.7 * fallNoise(seed, 5u))
+          + vec3(-away.y, away.x, 0.0) * FALL_TOPPLE_OUT * (0.5 + foot) * (0.5 + fallNoise(seed, 8u))
+          + vec3(-pushed.y, pushed.x, 0.0) * FALL_TOPPLE * strength * (0.5 + share);
+    // It comes to rest on the floor, or on the wreck of the storeys below it, higher in the middle.
+    float ground = site.z + 0.25 * height * share * max(0.0, 1.0 - offset * offset / (reach * reach));
+    vec3 extent = abs(u_pieceHalf * instanceScale());
+    float gravity = u_destruct.y;
+    float drop = max(0.0, centre.z - extent.z - ground);
+    // Without gravity (a zero-g board) a piece drifts on: it lands only when it moves down.
+    float landing = gravity > 1e-4 ? (velocity.z + sqrt(velocity.z * velocity.z + 2.0 * gravity * drop)) / gravity
+          : velocity.z < -1e-4 ? drop / -velocity.z : 1e9;
+    float flight = min(t, landing), slide = max(0.0, t - landing);
+    vec3 position = centre + velocity * flight;
+    position.z -= 0.5 * gravity * flight * flight;
+    position.xy += velocity.xy * (1.0 - exp(-FALL_GROUND_DRAG * slide)) / FALL_GROUND_DRAG;
+    float rate = length(spin);
+    float angle = rate * (flight + (1.0 - exp(-FALL_GROUND_SPIN_DRAG * slide)) / FALL_GROUND_SPIN_DRAG);
+    fallTurn = rate > 1e-4 ? fallRotation(spin / rate, angle) : mat3(1.0);
+    // The turned box's reach below its middle: the piece rests on its lowest corner.
+    vec3 up = vec3(fallTurn[0].z, fallTurn[1].z, fallTurn[2].z);
+    float below = abs(dot(up.xy, a_instance1.xy)) * extent.x + abs(dot(up.xy, vec2(-a_instance1.y, a_instance1.x))) * extent.y
+          + abs(up.z) * extent.z;
+    position.z = max(position.z, ground + below);
+    float sinking = clamp((clock - sinks) / FALL_SINK, 0.0, 1.0);
+    position.z -= 2.0 * length(extent) * sinking * sinking * (3.0 - 2.0 * sinking);
+    falling = true;
+    fallPivot = centre;
+    fallShift = position;
 }
 #ifdef impostorFlag
 

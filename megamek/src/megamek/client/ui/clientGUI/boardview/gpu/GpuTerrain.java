@@ -11,6 +11,8 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
+import java.util.function.Predicate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +73,7 @@ import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.OrientedBoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
@@ -411,6 +414,8 @@ final class GpuTerrain implements Disposable {
                 private final int waterStormUniform = register("u_waterStorm");
                 private final int vegetationPhaseUniform = register("u_vegetationPhase");
                 private final int treeClockUniform = register("u_treeClock");
+                private final int shocksUniform = register("u_shocks");
+                private final int shockCountUniform = register("u_shockCount");
                 private final int mirroredUniform = register("u_mirrored");
                 private final int metreUniform = register("u_worldMetre");
                 private final int coverPixelsUniform = register("u_coverPixels");
@@ -548,6 +553,9 @@ final class GpuTerrain implements Disposable {
                     set(waterStormUniform, ocean.gain());
                     set(vegetationPhaseUniform, vegetationPhase);
                     set(treeClockUniform, clock);
+                    // The live blasts' fronts: plants bend and sway, scorch spreads, as each passes (terrain-shocks.glsl).
+                    set(shockCountUniform, shockCount);
+                    if (shockCount > 0 && has(shocksUniform)) { program.setUniform4fv(loc(shocksUniform), shocks, 0, shockCount * 4); }
                     set(metreUniform, BoardRelief.detailMetres(1));
                     set(coverHexWidthUniform, BoardGeometry.width());
                     set(coverShareUniform, BoardQuality.current.meadowShare, BoardQuality.current.cropShare);
@@ -769,6 +777,7 @@ final class GpuTerrain implements Disposable {
                 if (lighting != null) { lighting.texture(); }
             }
             GpuLavaLighting.register(result, lavaLighting);
+            GpuTreeInstances.registerPiece(result);
             GpuAmbientOcclusion.register(result);
             if (tessellated) {
                 GpuTessellation.tessellated(result.program);
@@ -950,7 +959,7 @@ final class GpuTerrain implements Disposable {
     private final ModelBatch depthBatch = new ModelBatch(GpuShaderManager.provider("Shadows", () ->
           GpuTreeInstances.depthProvider(new DepthShader.Config(null, GpuShaderSource.replaceOnce(
                 GpuShaderSource.read("shadow-depth.frag"), "// SHADOW_MAP_PASS", "#define SHADOW_PASS\n//",
-                "shadow depth")))),
+                "shadow depth")), this::registerTables)),
           new GpuOpaqueSorter());
     private final Map<ModelInstance, Integer> flagRevisions = new java.util.IdentityHashMap<>();
     /** Bumped when installed chunks change, the ground under the flags' grids (GpuFlag.ground). */
@@ -972,13 +981,23 @@ final class GpuTerrain implements Disposable {
         }
 
         @Override
-        public BoundingBox bounds(ModelInstance unit) { return unitBounds(unit); }
+        public BoundingBox bounds(ModelInstance unit) {
+            if (unit != fallCaster) { return unitBounds(unit); }
+            float reach = BoardGeometry.width();
+            BoundingBox bounds = destruction.bounds(new BoundingBox());
+            return bounds.set(bounds.min.sub(reach, reach, reach), bounds.max.add(reach, reach, 0));
+        }
 
         @Override
-        public int revision(ModelInstance unit) { return flagRevisions.getOrDefault(unit, 0); }
+        public int revision(ModelInstance unit) {
+            return unit == fallCaster ? Float.floatToIntBits(destruction.clock()) : flagRevisions.getOrDefault(unit, 0);
+        }
     });
 
     void shadersChanged() { refreshShadows(); }
+
+    /** The local lights' texture and the falls in it, for a shadow program: falling pieces cast where they are. */
+    private void registerTables(DepthShader shader) { GpuLavaLighting.register(shader, lavaLighting); }
 
     /** What selects a sculpt material's generic program besides its families; the family marker is left out. */
     private static Object familyVariant(Material material) {
@@ -1112,6 +1131,11 @@ final class GpuTerrain implements Disposable {
     private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
     private final GpuCrystalTransmission crystalTransmission = new GpuCrystalTransmission();
     private final GpuLavaLighting lavaLighting;
+    /** Kit structures falling where they stood, drawn instanced in every pass (GpuDestruction). */
+    private final GpuDestruction destruction;
+    /** The live nuclear blasts' shock fronts (terrain-shocks.glsl), four floats each, and how many there are. */
+    private final float[] shocks = new float[GpuArtilleryBlast.MAX_SHOCKS * 4];
+    private int shockCount;
     private final List<Chunk> chunks = new ArrayList<>();
     // At most four in-flight chunks (two for the camera) and eight replaced chunks. Half the cores, at most eight,
     // build terrain: each chunk spreads its hexes across the pool, while the other half keeps rendering, input and
@@ -1487,6 +1511,7 @@ final class GpuTerrain implements Disposable {
             materialCache.prepare();
         }
         lavaLighting = new GpuLavaLighting(assets);
+        destruction = new GpuDestruction(lavaLighting);
         environmentLighting.lavaLighting = lavaLighting;
         biomes = new GpuBiomeSurface(lavaLighting);
         trees = new GpuTreeInstances((name, level) -> foliage(assets.lodModel(name, level)));
@@ -2141,8 +2166,11 @@ final class GpuTerrain implements Disposable {
             out.addAll(source);
         }
 
-        /** Caches the props for drawing and shadows. */
-        void cacheProps() {
+        /** The falls' revision its prop snapshot left out the falling structures at (GpuTerrain#refall). */
+        int fallsRevision = -1;
+
+        /** Caches the props for drawing and shadows; the kit structures at {@code falling} hexes fall as pieces instead. */
+        void cacheProps(Predicate<Coords> falling) {
             cacheDecorations();
             if (cutaways.isEmpty() && struts.isEmpty()) { return; }
             if (shadowPropRenderables.isEmpty()) {
@@ -2154,7 +2182,7 @@ final class GpuTerrain implements Disposable {
             // These snapshots contain transforms and mesh ranges only; module geometry is never merged per building.
             List<ModelInstance> shared = new ArrayList<>();
             for (Prop prop : cutaways) {
-                if (prop.building != null) { shared.add(prop.instance); }
+                if (prop.building != null && !falling.test(prop.coords())) { shared.add(prop.instance); }
             }
             sharedShadows.clear();
             sharedShadows.addAll(GpuTerrainDepth.snapshot(shared));
@@ -2162,16 +2190,21 @@ final class GpuTerrain implements Disposable {
             for (Renderable part : sharedShadows) { part.material.remove(GpuBuildingCutaway.TYPE); }
             for (Prop prop : faded) {
                 shared.remove(prop.instance);
-                if (prop.building != null && prop.hoverOpaque != null) { shared.add(prop.hoverOpaque); }
+                if (prop.building != null && prop.hoverOpaque != null && !falling.test(prop.coords())) {
+                    shared.add(prop.hoverOpaque);
+                }
             }
             for (InteriorStruts strut : struts) {
-                if (sharedInteriors.contains(strut.instance.model) && interiorVisible(strut.coords)) {
+                if (sharedInteriors.contains(strut.instance.model) && interiorVisible(strut.coords)
+                      && !falling.test(strut.coords)) {
                     shared.add(strut.instance);
                 }
             }
             for (Prop prop : cutaways) {
                 if (!Float.isNaN(prop.floorZ) && sharedInteriors.contains(prop.instance.model)
-                      && interiorFloorVisible(prop) && !faded.contains(prop)) { shared.add(prop.instance); }
+                      && interiorFloorVisible(prop) && !faded.contains(prop) && !falling.test(prop.coords())) {
+                    shared.add(prop.instance);
+                }
             }
             sharedProps.clear();
             sharedPlacements = null;
@@ -2582,6 +2615,9 @@ final class GpuTerrain implements Disposable {
         return material.getMask() == (TextureAttribute.Diffuse | IntAttribute.CullFace | Sculpt.TYPE
               | Ground.TYPE | SculptTiles.TYPE | SculptLayers.TYPE);
     }
+
+    /** Ages Ground Zero's glow by these blast seconds (GpuArtilleryBlast#advance). */
+    void advanceScorch(float seconds) { groundDamage.advance(seconds); }
 
     /** A nuclear blast's scorch over its blast area (GpuGroundDamage.scorch). */
     void scorch(BoardScene scene, GpuGroundDamage.Scorch scorch) {
@@ -3485,6 +3521,14 @@ final class GpuTerrain implements Disposable {
         tiles = scene.tiles();
         // The structures this commit removes break into their pieces in the very frame they go.
         startCollapses();
+        destruction.committed(at -> {
+            var tile = coverScene.tile(at);
+            return tile != null && BoardScene.TileTransition.structure(tile);
+        });
+        // A chunk finished before structures came down (or were restored) draws them as they are now.
+        for (Chunk chunk : chunks) {
+            if (chunk.fallsRevision != destruction.revision()) { refall(chunk); }
+        }
         editorPropsInstalled = true;
         flagScene++;
         lavaLighting.setFungus(chunks.stream().flatMap(chunk -> chunk.fungalLights.stream()).toList());
@@ -3552,6 +3596,8 @@ final class GpuTerrain implements Disposable {
             for (Prop prop : chunk.props) { if (prop.industrial || prop.levels != null) { liveIndustrial.add(prop.instance.model); } }
             for (ModelInstance pane : chunk.glass) { liveIndustrial.add(pane.model); }
         }
+        // Falling pieces borrow their kits' meshes until they have sunk.
+        liveBuildings.addAll(destruction.buildings());
         Set<Mesh> sharedSources = new HashSet<>();
         for (Chunk chunk : chunks) {
             for (Renderable part : chunk.sharedShadows) { sharedSources.add(part.meshPart.mesh); }
@@ -3740,6 +3786,8 @@ final class GpuTerrain implements Disposable {
         scarSurfaceRevision++;
         flagScene++;
         Chunk old = chunks.set(index, next);
+        // A level kept while structures came down or were restored draws them as they are now.
+        if (next.fallsRevision != destruction.revision()) { refall(next); }
         // Level tops of one family are the same at every detail: the cache keeps their pages and forgets only the old
         // materials. Tops that follow the detail (detailTops) rebuild theirs.
         materialCache.retireTwins();
@@ -5507,7 +5555,7 @@ final class GpuTerrain implements Disposable {
                     }
                 }
             }
-            chunk.cacheProps();
+            refall(chunk);
             // Building shells' programs and those programs' twins link behind the loading stage (Prepass.OBJECTS).
             for (Renderable part : chunk.shadowPropRenderables) {
                 if (prepass(part.material) == Prepass.OBJECTS) {
@@ -7025,7 +7073,7 @@ final class GpuTerrain implements Disposable {
                     }
                 }
                 if (changedOccupancy) {
-                    chunk.cacheProps();
+                    refall(chunk);
                     // A building faded away fully casts no shadow (renderDepth).
                     if (buildingOpacity == 0) { shadowMap.invalidate(); }
                 }
@@ -7453,6 +7501,7 @@ final class GpuTerrain implements Disposable {
      * their structure's place by then (the transition was skipped) go.
      */
     private void presentCollapses(BoardScene.TileTransition transition, float progress) {
+        presentFalls(transition, progress);
         collapsing.removeIf(fall -> {
             boolean dropped = fall.transition() != transition && !fall.collapse().started();
             if (dropped) { fall.collapse().dispose(); }
@@ -7466,7 +7515,8 @@ final class GpuTerrain implements Disposable {
         // A transition that brings dozens down at once, as a nuclear blast does, breaks those nearest its middle, where the
         // camera frames it; the rest make way for what replaces them as the terrain installs it, as before pieces fell.
         var middle = GpuCollapse.middle(transition);
-        var broken = transition.collapses().stream().sorted(Comparator.comparingDouble(collapse ->
+        var broken = transition.collapses().stream().filter(collapse -> !destruction.taken(collapse.coords()))
+              .sorted(Comparator.comparingDouble(collapse ->
               BoardGeometry.center(collapse.coords(), collapse.before().elevation()).dst2(middle))).limit(MAX_COLLAPSES).toList();
         installedSettings.run(() -> {
             for (var collapse : broken) {
@@ -7478,6 +7528,181 @@ final class GpuTerrain implements Disposable {
 
     /** At most this many hexes of one transition break into pieces. */
     private static final int MAX_COLLAPSES = 24;
+
+    /** The transition whose kit structures were taken for their pieces, and whether they have begun to give way. */
+    private BoardScene.TileTransition fallsFor;
+    private boolean fallsStarted;
+    /** A building's hexes give way one after another, this many playback seconds a hex from where it was hit. */
+    private static final float FALL_CHAIN_SECONDS = .06f, FALL_CHAIN_LIMIT = 1.5f;
+
+    /**
+     * Takes the kit structures {@code transition} brings down from their chunks as it begins: their pieces stand where they
+     * stood (GpuDestruction) and give way once its clock runs, after the camera has framed them ({@code progress} above
+     * 0), hex after hex from the one hit. A transition that ends unframed lets them go at once. Classic columns snap.
+     */
+    private void presentFalls(BoardScene.TileTransition transition, float progress) {
+        if (fallsFor != null && fallsFor != transition) {
+            fallsFor.collapses().forEach(collapse -> destruction.start(collapse.coords(), 0));
+            fallsFor = null;
+        }
+        if (transition == null || transition.collapses().isEmpty() || coverScene == null || installedColumns) { return; }
+        if (fallsFor == null) {
+            fallsFor = transition;
+            fallsStarted = false;
+            Set<Chunk> taken = new LinkedHashSet<>();
+            installedSettings.run(() -> {
+                for (var collapse : transition.collapses()) {
+                    // A strike's front took it already: its pieces fall or lie there.
+                    Chunk chunk = destruction.taken(collapse.coords()) ? null : takeFall(collapse);
+                    if (chunk != null) { taken.add(chunk); }
+                }
+            });
+            if (!taken.isEmpty()) {
+                taken.forEach(this::refall);
+                // The structures leave the cached shadow too: their pieces cast over it.
+                refreshShadows();
+            }
+            stampFalls();
+        }
+        if (progress > 0 && !fallsStarted) {
+            fallsStarted = true;
+            // From where a unit's weight brought it down, else from the hardest hit.
+            var first = transition.collapses().stream().max(Comparator.comparing(
+                  (BoardScene.TileTransition.Collapse collapse) -> !collapse.loads().isEmpty())
+                  .thenComparingDouble(BoardScene.TileTransition.Collapse::strength)).orElseThrow().coords();
+            for (var collapse : transition.collapses()) {
+                destruction.start(collapse.coords(), Math.min(FALL_CHAIN_LIMIT, FALL_CHAIN_SECONDS * first.distance(collapse.coords())));
+            }
+        }
+    }
+
+    /**
+     * Takes the kit structures standing at the collapse's hex for their pieces: every part of every node the terrain
+     * draws there, but glass, which shatters to nothing; each in a solid copy of its material drawn from both sides (a
+     * kit storey is open below), its mesh part's box its node's, about which the piece turns. The chunk that drew them,
+     * or null where none stands.
+     */
+    private Chunk takeFall(BoardScene.TileTransition.Collapse change) {
+        Coords at = change.coords();
+        if (at.getX() < 0 || at.getY() < 0 || at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE >= chunks.size()) {
+            return null;
+        }
+        Chunk chunk = chunks.get(at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE);
+        TileMesh mesh = chunk.tileMeshes.get(at);
+        if (mesh == null) { return null; }
+        Array<Renderable> pieces = new Array<>();
+        Set<GpuBuilding.Assembly> buildings = new HashSet<>();
+        BoundingBox bounds = new BoundingBox().inf();
+        Map<Material, Material> copies = new IdentityHashMap<>();
+        for (Prop prop : mesh.props) {
+            if (prop.building == null || isFlag(prop)) { continue; }
+            ModelInstance drawn = prop.instance();
+            for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces); }
+            buildings.add(prop.building);
+            bounds.ext(prop.bounds());
+        }
+        if (pieces.isEmpty()) { return null; }
+        var middle = BoardGeometry.center(at, change.before().elevation());
+        var push = new Vector2();
+        int flags = change.loads().isEmpty() ? 0 : GpuDestruction.LOADED;
+        if (change.from() != null && change.strength() > 0) {
+            var from = BoardGeometry.center(change.from().coords(), change.from().elevation());
+            // From above (a death from above) it drives the structure down; else it pushes it away, level.
+            if (from.z > bounds.max.z) { flags |= GpuDestruction.LOADED; }
+            else { push.set(middle.x - from.x, middle.y - from.y).nor().scl(change.strength()); }
+        }
+        destruction.take(at, pieces, buildings, bounds, middle.x, middle.y, push, flags);
+        return chunk;
+    }
+
+    private static void addPieces(ModelInstance instance, Node node, Map<Material, Material> copies,
+          Array<Renderable> pieces) {
+        // One box for the node's parts, in its mesh's frame: they turn about it as one piece.
+        BoundingBox box = new BoundingBox().inf();
+        var corner = new Vector3();
+        for (NodePart part : node.parts) {
+            if (!part.enabled || part.meshPart.size == 0) { continue; }
+            box.ext(corner.set(part.meshPart.center).sub(part.meshPart.halfExtents));
+            box.ext(corner.set(part.meshPart.center).add(part.meshPart.halfExtents));
+        }
+        for (NodePart part : node.parts) {
+            // Glass is what blends in the model itself: a building faded around its occupants or the pointer still falls.
+            Material own = instance.model.getMaterial(part.material.id);
+            if (!part.enabled || part.meshPart.primitiveType != GL20.GL_TRIANGLES || part.meshPart.size == 0
+                  || blended(own != null ? own : part.material)) { continue; }
+            Renderable piece = instance.getRenderable(new Renderable(), node, part);
+            if (!GpuTreeInstances.instanceable(piece.worldTransform)) { continue; }
+            piece.material = copies.computeIfAbsent(part.material, GpuTerrain::fallMaterial);
+            box.getCenter(piece.meshPart.center);
+            box.getDimensions(piece.meshPart.halfExtents).scl(.5f);
+            pieces.add(piece);
+        }
+        for (Node child : node.getChildren()) { addPieces(instance, child, copies, pieces); }
+    }
+
+    /** A falling piece's copy of a drawn material: solid, whatever fade or hover cut its building wore, from both sides. */
+    private static Material fallMaterial(Material drawn) {
+        var copy = new Material(drawn);
+        opaque(copy);
+        copy.remove(GpuBuildingCutaway.TYPE);
+        copy.set(IntAttribute.createCullFace(GL20.GL_NONE));
+        return copy;
+    }
+
+    /** This frame's live shock fronts, which {@code source} writes (GpuArtilleryBlast#shocks) and counts. */
+    void shocks(java.util.function.ToIntFunction<float[]> source) { shockCount = source.applyAsInt(shocks); }
+
+    /** Runs the falls' clock on by {@code seconds} of playback under {@code gravity} standard gravities. */
+    void advanceFalls(float seconds, float gravity) {
+        int before = destruction.revision();
+        destruction.advance(seconds, gravity);
+        // A pile that sank lay on a hex its chunk already shows without the structure.
+        if (destruction.revision() != before) { stampFalls(); }
+    }
+
+    /**
+     * The installed chunks agree with the falls as they now are: called once the chunks holding the hexes that changed
+     * have snapshotted again (refall). Chunks kept at another detail level snapshot again when they come back.
+     */
+    private void stampFalls() {
+        for (Chunk chunk : chunks) { chunk.fallsRevision = destruction.revision(); }
+    }
+
+    /**
+     * A strike going off now: the kit structures it brings down leave their chunks for their pieces, and each gives way
+     * as its front reaches it (GpuArtilleryBlast#shockArrival, on the blast's clock, twice the playback's). Classic
+     * columns snap.
+     */
+    void strike(BoardScene.Detonation detonation) {
+        if (coverScene == null || installedColumns || detonation.collapses().isEmpty()) { return; }
+        var result = detonation.result();
+        float radius = GpuArtilleryBlast.nuclearRadius(result.stats());
+        var groundZero = BoardGeometry.center(result.coords(), result.elevation());
+        Set<Chunk> taken = new LinkedHashSet<>();
+        installedSettings.run(() -> {
+            for (var collapse : detonation.collapses()) {
+                if (destruction.taken(collapse.coords())) { continue; }
+                Chunk chunk = takeFall(collapse);
+                if (chunk == null) { continue; }
+                taken.add(chunk);
+                var middle = BoardGeometry.center(collapse.coords(), collapse.before().elevation());
+                float distance = Vector2.dst(middle.x, middle.y, groundZero.x, groundZero.y);
+                destruction.start(collapse.coords(),
+                      GpuArtilleryBlast.shockArrival(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK);
+            }
+        });
+        if (!taken.isEmpty()) {
+            taken.forEach(this::refall);
+            refreshShadows();
+        }
+        stampFalls();
+    }
+
+    /** Whether the hex's structure lies as pieces (falling, resting or sinking) instead of in its chunk. */
+    boolean fallTaken(Coords at) { return destruction.taken(at); }
+
+    /** Whether the hex's structure has begun to give way. */
+    boolean fallStarted(Coords at) { return destruction.started(at); }
 
     /**
      * At most this many triangles of the structures one transition brings down are cut, shared among their hexes: a finer
@@ -7756,13 +7981,43 @@ final class GpuTerrain implements Disposable {
         });
     }
 
-    /** The collapses under way, whose dust the attack effects draw. */
+    /** The collapses under way, cut pieces. */
     List<GpuCollapse> collapses() {
         return collapsing.stream().map(Collapsing::collapse).toList();
     }
 
+    /** The dust of every structure coming down, which the attack effects draw: cut pieces' and falling kits'. */
+    List<java.util.function.Consumer<GpuExplosionEffects>> dust() {
+        List<java.util.function.Consumer<GpuExplosionEffects>> result = new ArrayList<>();
+        int count = collapsing.size();
+        for (Collapsing fall : collapsing) { result.add(effects -> fall.collapse().explosions(effects, count)); }
+        if (!destruction.isEmpty()) { result.add(destruction::dust); }
+        return result;
+    }
+
     /** Ends every collapse at once, as Instant playback does: the terrain shows what replaced them. */
     void clearCollapses() {
+        disposeCollapses();
+        fallsFor = null;
+        // What the installed scene still shows standing (a strike's buildings the rules bring down at the phase's end)
+        // goes back into its chunk.
+        Set<Chunk> standing = new LinkedHashSet<>();
+        for (Coords at : destruction.taken()) {
+            var tile = coverScene == null ? null : coverScene.tile(at);
+            int index = at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE;
+            if (tile != null && BoardScene.TileTransition.structure(tile) && index < chunks.size()) {
+                standing.add(chunks.get(index));
+            }
+        }
+        destruction.clear();
+        if (!standing.isEmpty()) {
+            standing.forEach(this::refall);
+            refreshShadows();
+        }
+        stampFalls();
+    }
+
+    private void disposeCollapses() {
         collapsing.forEach(fall -> fall.collapse().dispose());
         collapsing.clear();
     }
@@ -8594,6 +8849,8 @@ final class GpuTerrain implements Disposable {
                       && !"bridge".equals(prop.receiver) && Float.isNaN(prop.floorZ)) { continue; }
                 // What the zoom hides is looked through. What the Tactical View hides is still picked (shown).
                 if ((prop.tree() || prop.industrial) && !includeFoliage || !shown(prop, false)) { continue; }
+                // A structure giving way is no longer there to pick: its pieces fall where the pointer looks through.
+                if (prop.building != null && destruction.started(prop.coords())) { continue; }
                 if ((placement || walkable ? hitSupport(prop, ray, hit) : hitProp(prop, ray, hit))) {
                     float distance = ray.origin.dst2(hit);
                     if (distance < nearest) {
@@ -8752,7 +9009,16 @@ final class GpuTerrain implements Disposable {
         scarSurfaceRevision++;
         GpuPropBatch.disposeMeshes(chunk.shadowPropRenderables);
         chunk.shadowPropRenderables.clear();
-        chunk.cacheProps();
+        refall(chunk);
+    }
+
+    /**
+     * Snapshots the chunk's props without the structures that lie as pieces (GpuDestruction), stamped with the falls'
+     * revision: a chunk kept at another detail level is snapshotted again when it comes back (replaceDetail).
+     */
+    private void refall(Chunk chunk) {
+        chunk.cacheProps(destruction::taken);
+        chunk.fallsRevision = destruction.revision();
     }
 
     /**
@@ -8932,6 +9198,7 @@ final class GpuTerrain implements Disposable {
         }
         if (lifts != null) { lifts.render(batch, environment); }
         renderCollapses(batch, environment);
+        if (!destruction.isEmpty()) { batch.render(destruction.pieces(GpuTreeInstances.Pass.COLOUR), environment); }
         // Trees first: the opaque sorter keeps this order of shaders, so the ground hidden under crowns fails the depth
         // test instead of being shaded and painted over.
         batch.render(trees, environment);
@@ -9497,6 +9764,7 @@ final class GpuTerrain implements Disposable {
             }
         }
         depthBatch.render(trees);
+        if (!destruction.isEmpty()) { depthBatch.render(destruction.pieces(GpuTreeInstances.Pass.DEPTH)); }
         depthBatch.end();
     }
 
@@ -9558,6 +9826,7 @@ final class GpuTerrain implements Disposable {
                 }
             }
             pass.render(instances);
+            if (!shadows && includeScatter && !destruction.isEmpty()) { pass.render(destruction.pieces(GpuTreeInstances.Pass.DEPTH)); }
             if (lifts != null && !shadows) { lifts.render(pass, null); }
             if (!shadows) { renderCollapses(pass, null); }
             renderDepthUnits(camera, units, pass);
@@ -9566,9 +9835,16 @@ final class GpuTerrain implements Disposable {
 
     private void renderDepthUnits(Camera camera, List<ModelInstance> units, ModelBatch pass) {
         for (ModelInstance unit : units) {
-            if (camera.frustum.boundsInFrustum(unitBounds(unit))) { GpuUnitInstance.renderDepth(pass, unit); }
+            if (unit == fallCaster) { pass.render(destruction.pieces(GpuTreeInstances.Pass.SHADOW)); }
+            else if (camera.frustum.boundsInFrustum(unitBounds(unit))) { GpuUnitInstance.renderDepth(pass, unit); }
         }
     }
+
+    /**
+     * The falling pieces among the shadow map's units: drawn over its cached terrain like a unit, again whenever their
+     * clock has moved on (revision), within the bounds their structures stood in, a hex wider all round.
+     */
+    private final ModelInstance fallCaster = new ModelInstance(new Model());
 
     void renderShadows(List<ModelInstance> units) {
         renderShadows(null, units);
@@ -9576,9 +9852,10 @@ final class GpuTerrain implements Disposable {
 
     void renderShadows(Camera view, List<ModelInstance> units) {
         if (view != null) { updateDetail(view); }
-        if (lifts != null || !flagRevisions.isEmpty() || !collapsing.isEmpty()) {
+        if (lifts != null || !flagRevisions.isEmpty() || !collapsing.isEmpty() || !destruction.isEmpty()) {
             // Moving lifts and falling pieces cast like units, over the cached terrain's shadow, which leaves them out.
             units = new ArrayList<>(units);
+            if (!destruction.isEmpty()) { units.add(fallCaster); }
             if (lifts != null) { units.addAll(lifts.models); }
             for (Collapsing fall : collapsing) {
                 if (fall.collapse().instance() != null) { units.add(fall.collapse().instance()); }
@@ -9691,7 +9968,8 @@ final class GpuTerrain implements Disposable {
     @Override
     public void dispose() {
         if (lifts != null) { lifts.dispose(); lifts = null; }
-        clearCollapses();
+        disposeCollapses();
+        destruction.clear();
         meshGeneration++;
         detailWorker.shutdownNow();
         // Workers borrow chunk/asset data. ForkJoinPool.close may return once termination has started after
@@ -9747,6 +10025,7 @@ final class GpuTerrain implements Disposable {
         environmentLighting.dispose();
         crystalTransmission.dispose();
         lavaLighting.dispose();
+        destruction.dispose();
         depthBatch.dispose();
         shadowMap.dispose();
         if (borrowedAssets) { assets.release(this); } else { assets.dispose(); }

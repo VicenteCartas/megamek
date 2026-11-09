@@ -40,7 +40,7 @@ class UnitPlaybackTest {
         playback.advance((UnitPlayback.DETONATION_CONTACT_SECONDS - .001) / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
         assertEquals(0, playback.present(after).tiles().getFirst().elevation());
         playback.advance(.001 / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
-        assertEquals(List.of(strike), playback.takeDetonations());
+        assertEquals(List.of(strike), playback.takeDetonations().stream().map(BoardScene.Detonation::result).toList());
         assertEquals(-3, playback.present(after).tiles().getFirst().elevation());
         assertTrue(playback.present(after).units().contains(victim), "The queued casualty retains its observed model");
         playback.advance(.1, UnitMotion.Speed.NORMAL);
@@ -60,7 +60,7 @@ class UnitPlaybackTest {
               new BoardScene.SceneUpdate(unchanged), new BoardScene.Detonation(second), new BoardScene.SceneUpdate(unchanged));
         playback.accept(events, unchanged, ignored -> false);
         playback.advance(0, UnitMotion.Speed.INSTANT);
-        assertEquals(List.of(first, second), playback.takeDetonations());
+        assertEquals(List.of(first, second), playback.takeDetonations().stream().map(BoardScene.Detonation::result).toList());
         assertFalse(playback.busy());
         playback.accept(events, unchanged, ignored -> false);
         playback.clear();

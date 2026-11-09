@@ -84,6 +84,23 @@ class GpuArtilleryBlastTest {
     }
 
     @Test
+    void structuresFallOnTheRingsOwnFrontAndANukeOutlastsABarrage() {
+        float radius = 400;
+        for (float distance = 0; distance <= radius; distance += 25) {
+            float arrival = GpuArtilleryBlast.shockArrival(distance, radius);
+            assertEquals(distance, GpuArtilleryBlast.shockReach(arrival, radius), .05f);
+        }
+        assertEquals(GpuArtilleryBlast.SHOCK_SECONDS, GpuArtilleryBlast.shockArrival(radius, radius), 1e-6f);
+        var blasts = new GpuArtilleryBlast();
+        blasts.detonate(Vector3.Zero, shot(false).withNuclearType(2).withDamagePerHit(0), null, 1);
+        for (int shell = 0; shell < GpuArtilleryBlast.MAX_BLASTS; shell++) {
+            blasts.detonate(Vector3.Zero, shot(true), null, 10 + shell);
+        }
+        blasts.advance(.05f);
+        assertTrue(blasts.flash().intensity() > 0, "A barrage never evicts the nuclear blast that times the collapses");
+    }
+
+    @Test
     void changingBoardsClearsLiveNuclearEffectsAndPendingScorch() {
         var effects = new GpuAttackEffects();
         try {

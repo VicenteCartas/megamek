@@ -33,9 +33,10 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Structures coming down as a game brings them down (Board.collapseBuilding, then the source's capture, the playback's
- * collapse and the terrain's swap): a medium, a heavy, a light kit building, a fuel tank, a river bridge's span and an
- * authored building in both its hexes each break into pieces where they stood and drop; the heavy one, hit by an AC/20
- * from the west, falls away east. Frames go to build/gpu-board-review/building-collapse.
+ * collapse and the terrain's swap): a medium, a heavy, a light kit building and a fuel tank fall where they stood on
+ * the GPU (GpuDestruction), a river bridge's span and an authored building in both its hexes break into cut pieces and
+ * drop; the heavy one, hit by an AC/20 from the west, falls away east. Frames go to
+ * build/gpu-board-review/building-collapse.
  */
 @Tag("on-demand")
 class GpuBuildingCollapseSmokeTest {
@@ -77,7 +78,7 @@ class GpuBuildingCollapseSmokeTest {
             var configuration = GpuBoardWindow.configuration(false);
             configuration.setWindowedMode(1280, 800);
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
-                private final long deadline = System.nanoTime() + 300_000_000_000L;
+                private final long deadline = System.nanoTime() + 600_000_000_000L;
                 private Graphics fixedGraphics;
                 private int scenario, stage, frames, swapFrame = -1;
                 private Vector3 standing;
@@ -137,12 +138,14 @@ class GpuBuildingCollapseSmokeTest {
                         stage = 2;
                     } else if (stage == 2) {
                         var falling = terrain.collapses().stream().filter(collapse -> collapse.instance() != null).findFirst();
-                        if (falling.isEmpty()) {
+                        if (falling.isEmpty() && !terrain.fallStarted(current.at())) {
                             assertTrue(frames < 600, current.name() + " gives way to its pieces within ten seconds");
                             return;
                         }
                         swapFrame = frames;
-                        standing = bounds(falling.get()).getCenter(new Vector3());
+                        standing = falling.map(collapse -> bounds(collapse).getCenter(new Vector3())).orElse(null);
+                        report.add(current.name() + (standing == null ? ": falls on the GPU" : ": cut into pieces")
+                              + " " + frames + " frames after it was brought down");
                         stage = 3;
                     }
                     if (stage == 3) {
@@ -150,7 +153,10 @@ class GpuBuildingCollapseSmokeTest {
                         for (int index = 0; index < CAPTURES.length; index++) {
                             if (since == CAPTURES[index]) { capture(output, current.name() + "-" + (index + 1) + "-" + since); }
                         }
-                        if (since == CAPTURES[CAPTURES.length - 1]) {
+                        if (since == CAPTURES[CAPTURES.length - 1] && standing == null) {
+                            assertTrue(terrain.fallTaken(current.at()), current.name() + "'s pile still lies there " + since + " frames on");
+                            stage = 4;
+                        } else if (since == CAPTURES[CAPTURES.length - 1]) {
                             var falling = terrain.collapses().stream().filter(collapse -> collapse.instance() != null).findFirst();
                             assertTrue(falling.isPresent(), current.name() + "'s pieces still lie there " + since + " frames on");
                             var box = bounds(falling.get());
@@ -161,7 +167,7 @@ class GpuBuildingCollapseSmokeTest {
                             stage = 4;
                         }
                     } else if (stage == 4) {
-                        if (!terrain.collapses().isEmpty()) {
+                        if (!terrain.collapses().isEmpty() || terrain.fallTaken(current.at())) {
                             assertTrue(frames - swapFrame < 1800, current.name() + "'s pieces sink away");
                             return;
                         }

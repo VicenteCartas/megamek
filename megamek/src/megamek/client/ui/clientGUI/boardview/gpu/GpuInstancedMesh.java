@@ -24,6 +24,11 @@ final class GpuInstancedMesh extends Mesh {
      * clockwise winding as the front, so each pass's culling keeps the faces it keeps for the model unmirrored.
      */
     boolean mirrored;
+    /**
+     * A debris batch's piece (GpuDestruction): the centre and half size of its node's box in the model's frame, about
+     * which every instance's piece turns as it falls; null for every other batch.
+     */
+    float[] piece;
 
     GpuInstancedMesh(int vertices, int indices, VertexAttributes attributes) {
         super(true, vertices, indices, attributes);

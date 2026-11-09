@@ -283,9 +283,7 @@ class GpuAuthoredScorchSmokeTest {
             int[] freshClose = pixels();
             GpuReviewFrame.save(new File(output, "nuclear-fresh-close.png"));
             // Advance only the renderer's existing heat clock; no 30-second wait and no different shader path.
-            var clock = GpuGroundDamage.class.getDeclaredField("scorchedAt");
-            clock.setAccessible(true);
-            clock.setLong(damage, System.nanoTime() - 30_000_000_000L);
+            damage.advance(30);
             frame.render(terrain, camera, scene);
             int[] coolClose = pixels();
             GpuReviewFrame.save(new File(output, "nuclear-30-seconds-close.png"));

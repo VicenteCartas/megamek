@@ -290,18 +290,13 @@ final class GpuBoardSource implements BoardSource {
                             var consequences = nuclearCapture.consequences();
                             nuclearCapture = null;
                             recordBlast(result, before.scene());
-                            // The crater's structures come down in the strike's own checkpoint, after its flash.
-                            var crater = before.boardGeneration() == next.boardGeneration()
-                                  ? BoardScene.TileTransition.of(before.scene(), next.scene(), structureHits::get) : null;
+                            var falls = strikeCollapses(result, before.scene(),
+                                  before.boardGeneration() == next.boardGeneration() ? next.scene() : null);
                             Set<Integer> concealed = consequences.stream().filter(BoardScene.Concealed.class::isInstance)
                                   .map(BoardScene.Animation::entityId).collect(Collectors.toSet());
                             consequences.stream().filter(BoardScene.Concealed.class::isInstance)
                                   .forEach(GpuBoardSource.this::queueAnimation);
-                            queueAnimation(new BoardScene.Detonation(result));
-                            if (crater != null && !crater.collapses().isEmpty()) {
-                                queueAnimation(new BoardScene.TileTransition(crater.boardId(), List.of(), crater.collapses()));
-                                crater.collapses().forEach(collapse -> structureHits.remove(collapse.coords()));
-                            }
+                            queueAnimation(new BoardScene.Detonation(result, falls));
                             queueAnimation(new BoardScene.SceneUpdate(next.scene()));
                             consequences.stream().filter(action -> !(action instanceof BoardScene.Concealed)
                                   && !concealed.contains(action.entityId())
@@ -709,6 +704,25 @@ final class GpuBoardSource implements BoardSource {
             float strength = distance < crater ? 1 : Math.min(1, (damage - 10) / 10);
             if (strength > 0) { structureHits.put(tile.coords(), new BoardScene.TileTransition.Hit(strength, from)); }
         }
+    }
+
+    /**
+     * Everything a strike brings down, each pushed away from ground zero (recordBlast): what its own checkpoint
+     * ({@code after}, null on another board) shows gone, and what the server names it took to CF 0, which the rules bring
+     * down at the phase's end; their later transition finds them fallen already.
+     */
+    private List<BoardScene.TileTransition.Collapse> strikeCollapses(megamek.common.NuclearDetonation strike,
+          BoardScene before, BoardScene after) {
+        Map<Coords, BoardScene.TileTransition.Collapse> falls = new LinkedHashMap<>();
+        var crater = after == null ? null : BoardScene.TileTransition.of(before, after, structureHits::get);
+        if (crater != null) { crater.collapses().forEach(collapse -> falls.put(collapse.coords(), collapse)); }
+        for (var at : strike.collapses()) {
+            var tile = at.boardId() == strike.boardId() ? before.tile(at.coords()) : null;
+            if (tile != null && BoardScene.TileTransition.structure(tile) && !falls.containsKey(at.coords())) {
+                falls.put(at.coords(), BoardScene.TileTransition.collapse(before, tile, structureHits.get(at.coords())));
+            }
+        }
+        return List.copyOf(falls.values());
     }
 
     /** The damage the rules give a physical attack, 0 for one that deals none to a structure or cannot be read. */

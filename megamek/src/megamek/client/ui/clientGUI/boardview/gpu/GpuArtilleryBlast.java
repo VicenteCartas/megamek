@@ -60,10 +60,17 @@ final class GpuArtilleryBlast {
     static final float NUCLEAR_SECONDS = 18;
     /** The shock front crosses the blast area in this time, slowing as it spreads. */
     static final float SHOCK_SECONDS = 2.4f;
+    /**
+     * Blast seconds per second of the playback clock: the playback runs at half real time at 1x
+     * ({@link UnitMotion.Speed#rate}), and a blast at 1x keeps real time.
+     */
+    static final float SECONDS_PER_PLAYBACK = (float) (1 / UnitMotion.Speed.NORMAL.rate);
     /** The nuclear type an artillery round's Davy Crockett-M warhead detonates as (doNuclearExplosion). */
     static final int DAVY_CROCKETT_TYPE = 1;
     /** At most this many blasts draw at once. A heavier barrage reuses the oldest blast's slot. */
     static final int MAX_BLASTS = 6;
+    /** At most this many live nuclear blasts move the plants and spread their scorch (terrain-shocks.glsl). */
+    static final int MAX_SHOCKS = 4;
     /** At most this many pieces of debris per blast: every hex of four rings, a Cruise Missile/120's R4. */
     static final int MAX_DEBRIS = 60;
     /**
@@ -628,8 +635,10 @@ final class GpuArtilleryBlast {
             if (blast.key == key) { return; }
         }
         if (blasts.size() == MAX_BLASTS) {
+            // A nuclear front times what it brings down: the oldest other blast makes way first.
+            Blast oldest = blasts.stream().filter(blast -> blast.nuke == null).findFirst().orElse(blasts.getFirst());
             LOGGER.debug("[ArtilleryBlast] {} blasts already drawing, the oldest makes way", MAX_BLASTS);
-            blasts.removeFirst();
+            blasts.remove(oldest);
         }
         var blast = new Blast(ground, opening, profile, attack, key, fuelAirStrength, scheduledNuke);
         blasts.add(blast);
@@ -745,6 +754,38 @@ final class GpuArtilleryBlast {
             }
         }
         return brightest;
+    }
+
+    /**
+     * How far a nuclear shock front has spread after {@code seconds} of its blast: it slows as it spreads and reaches
+     * {@code radius} at {@link #SHOCK_SECONDS}.
+     */
+    static float shockReach(float seconds, float radius) {
+        float left = 1 - MathUtils.clamp(seconds / SHOCK_SECONDS, 0, 1);
+        return radius * (1 - left * left);
+    }
+
+    /** The blast seconds at which the front reaches {@code distance} from Ground Zero: {@link #shockReach} inverted. */
+    static float shockArrival(float distance, float radius) {
+        return SHOCK_SECONDS * (1 - (float) Math.sqrt(1 - MathUtils.clamp(distance / radius, 0, 1)));
+    }
+
+    /**
+     * The live nuclear blasts' shock fronts, newest first, at most {@link #MAX_SHOCKS}, as terrain-shocks.glsl reads them:
+     * ground zero's x and y, the blast area's radius in world units and the blast's seconds. Returns how many.
+     */
+    int shocks(float[] out) {
+        int count = 0;
+        for (int index = blasts.size() - 1; index >= 0 && count < MAX_SHOCKS; index--) {
+            Blast blast = blasts.get(index);
+            if (blast.nuke == null || blast.seconds < 0) { continue; }
+            out[count * 4] = blast.ground.x;
+            out[count * 4 + 1] = blast.ground.y;
+            out[count * 4 + 2] = nuclearRadius(blast.nuke);
+            out[count * 4 + 3] = blast.seconds;
+            count++;
+        }
+        return count;
     }
 
     /** A nuclear blast area's radius in world units: where its damage, falling by the Degradation per hex, ends. */
@@ -1227,7 +1268,7 @@ final class GpuArtilleryBlast {
         float front = seconds / SHOCK_SECONDS;
         if (front < 1) {
             // The front slows as it spreads; its dust thins toward the edge of the blast area.
-            float reach = radius * (1 - (1 - front) * (1 - front));
+            float reach = shockReach(seconds, radius);
             int puffs = 96;
             for (int puff = 0; puff < puffs; puff++) {
                 float bearing = (puff + random(seed, puff + 300)) * MathUtils.PI2 / puffs;

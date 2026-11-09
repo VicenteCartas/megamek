@@ -76,6 +76,15 @@ final class GpuLavaLighting implements Disposable {
     private float[] hexes = new float[ROW * 4];
     private int hexWidth = 1, hexRow;
     private boolean hexesUploaded;
+    /**
+     * The falling structures' slots (GpuDestruction), in whole rows: just above the hex table, which the list's growth
+     * leaves where it is; the instanced pieces' vertex stages read them (tree-instances.glsl). None while nothing falls.
+     */
+    private float[] falls = new float[0];
+    private int fallRow;
+    private boolean fallsUploaded = true;
+    private float fallClock, fallGravity;
+    private boolean falling;
 
     GpuLavaLighting(GpuAssets assets) { this.assets = assets; }
 
@@ -99,6 +108,21 @@ final class GpuLavaLighting implements Disposable {
     int hexRow() {
         texture();
         return hexRow;
+    }
+
+    /** The falling structures' slots, GpuDestruction#TEXELS RGBA texels each, from the first; empty when none falls. */
+    void setFalls(float[] slots) {
+        float[] rows = new float[(slots.length / 4 + ROW - 1) / ROW * ROW * 4];
+        System.arraycopy(slots, 0, rows, 0, slots.length);
+        falls = rows;
+        fallsUploaded = false;
+    }
+
+    /** The falls' clock in playback seconds and their gravity in world units per second squared; off while none falls. */
+    void setFallClock(float clock, float gravity, boolean falling) {
+        fallClock = clock;
+        fallGravity = gravity;
+        this.falling = falling;
     }
 
     /** Chunk installation replaces the whole derived prop-light snapshot together with its rendered meshes. */
@@ -330,16 +354,17 @@ final class GpuLavaLighting implements Disposable {
      * texture binder never assigns (its units start at 1), so the draw's tracked sampler bindings stay intact.
      */
     Texture texture() {
-        if (texture != null && uploaded == revision && hexesUploaded) { return texture; }
-        int height = list.length / (ROW * 4), hexHeight = hexes.length / (ROW * 4);
+        if (texture != null && uploaded == revision && hexesUploaded && fallsUploaded) { return texture; }
+        int height = list.length / (ROW * 4), hexHeight = hexes.length / (ROW * 4), fallHeight = falls.length / (ROW * 4);
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
-        if (texture == null || texture.getHeight() < height + hexHeight) {
+        if (texture == null || texture.getHeight() < height + fallHeight + hexHeight) {
             if (texture != null) { texture.dispose(); }
             int capacity = 1;
-            while (capacity < height + hexHeight) { capacity <<= 1; }
+            while (capacity < height + fallHeight + hexHeight) { capacity <<= 1; }
             texture = new Texture(new GLOnlyTextureData(ROW, capacity, 0, GL30.GL_RGBA32F, GL20.GL_RGBA, GL20.GL_FLOAT));
             uploaded = -1;
             hexesUploaded = false;
+            fallsUploaded = false;
         }
         texture.bind();
         if (uploaded != revision) {
@@ -350,6 +375,11 @@ final class GpuLavaLighting implements Disposable {
             hexRow = texture.getHeight() - hexHeight;
             upload(hexes, hexRow, hexHeight);
             hexesUploaded = true;
+        }
+        if (!fallsUploaded) {
+            fallRow = texture.getHeight() - hexHeight - fallHeight;
+            if (fallHeight > 0) { upload(falls, fallRow, fallHeight); }
+            fallsUploaded = true;
         }
         return texture;
     }
@@ -398,6 +428,25 @@ final class GpuLavaLighting implements Disposable {
                 if (field != null) { target.set(id, field.hexRow(), field.hexWidth()); }
             }
         });
+        // The falls' slots and clock, after u_lavaLights' setter too (tree-instances.glsl): off without falls.
+        shader.register("u_destructSlots", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                var field = GpuEnvironmentLighting.lavaLighting(attributes);
+                if (field == null) { field = tables; }
+                if (field == null || !field.falling) { target.set(id, 0, 0); } else { target.set(id, field.fallRow * ROW, 1); }
+            }
+        });
+        shader.register("u_destruct", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                var field = GpuEnvironmentLighting.lavaLighting(attributes);
+                if (field == null) { field = tables; }
+                if (field != null && field.falling) {
+                    target.set(id, field.fallClock, field.fallGravity, BoardGeometry.level(), BoardGeometry.height() * .5f);
+                }
+            }
+        });
     }
 
     @Override
@@ -405,5 +454,6 @@ final class GpuLavaLighting implements Disposable {
         if (texture != null) { texture.dispose(); texture = null; }
         uploaded = -1;
         hexesUploaded = false;
+        fallsUploaded = false;
     }
 }

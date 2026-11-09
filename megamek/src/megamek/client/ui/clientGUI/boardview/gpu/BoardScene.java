@@ -1124,16 +1124,19 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                 if (old != null && old.elevation() != tile.elevation() && BoardFeatures.shaft(old) && BoardFeatures.shaft(tile)) {
                     changes.add(new Change(tile.coords(), old, tile));
                 } else if (hits != null && old != null && structure(old) && !structure(tile)) {
-                    Hit hit = hits.apply(tile.coords());
-                    // Who stood on it: on its roof, an upper floor or its deck, above the hex's ground.
-                    List<Waypoint> loads = before.units().stream().filter(unit -> !unit.sensorContact()
-                          && unit.location().coords().equals(tile.coords()) && unit.location().elevation() > old.elevation())
-                          .map(Unit::location).toList();
-                    collapses.add(new Collapse(tile.coords(), old, hit == null ? 0 : hit.strength(),
-                          hit == null ? null : hit.from(), loads));
+                    collapses.add(collapse(before, old, hits.apply(tile.coords())));
                 }
             }
             return changes.isEmpty() && collapses.isEmpty() ? null : new TileTransition(after.boardId(), changes, collapses);
+        }
+
+        /** The structure on {@code old} coming down after {@code hit} (null: its own weight), with who stood on it. */
+        static Collapse collapse(BoardScene before, Tile old, Hit hit) {
+            // Who stood on it: on its roof, an upper floor or its deck, above the hex's ground.
+            List<Waypoint> loads = before.units().stream().filter(unit -> !unit.sensorContact()
+                  && unit.location().coords().equals(old.coords()) && unit.location().elevation() > old.elevation())
+                  .map(Unit::location).toList();
+            return new Collapse(old.coords(), old, hit == null ? 0 : hit.strength(), hit == null ? null : hit.from(), loads);
         }
 
         /** Whether the tile holds what can come down: a building, a fuel tank or a bridge span. */
@@ -1154,7 +1157,17 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     }
 
     /** A scheduled strike has a location and resolved blast parameters, but no attacking unit. */
-    record Detonation(megamek.common.NuclearDetonation result) implements Animation {
+    /**
+     * A scheduled nuclear strike, with everything it brings down ({@code collapses}): what its own checkpoint shows gone
+     * and what the rules bring down at the phase's end, each falling as its front reaches it.
+     */
+    record Detonation(megamek.common.NuclearDetonation result, List<TileTransition.Collapse> collapses) implements Animation {
+        Detonation {
+            collapses = List.copyOf(collapses);
+        }
+
+        Detonation(megamek.common.NuclearDetonation result) { this(result, List.of()); }
+
         @Override
         public int entityId() { return -1; }
 

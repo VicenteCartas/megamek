@@ -386,6 +386,9 @@ final class GpuAttackEffects implements Disposable {
     /** Ages the artillery blasts, which outlive the attacks that landed them, by the frame's real time. */
     void advance(float seconds) { artilleryBlasts.advance(seconds); }
 
+    /** The live nuclear blasts' shock fronts (GpuArtilleryBlast#shocks); how many. */
+    int shocks(float[] out) { return artilleryBlasts.shocks(out); }
+
     /** A different board ends persistent blasts; their reusable GPU effects and warm programs stay owned here. */
     void clearArtilleryBlasts() { artilleryBlasts.clear(); }
 
@@ -474,7 +477,8 @@ final class GpuAttackEffects implements Disposable {
     }
 
     /** With the dust of the structures coming down ({@code collapses}) beside the casualties' explosions. */
-    void render(Camera camera, GpuEffectDepth depth, List<MeepleCasualties.Casualty> casualties, List<GpuCollapse> collapses) {
+    void render(Camera camera, GpuEffectDepth depth, List<MeepleCasualties.Casualty> casualties,
+          List<java.util.function.Consumer<GpuExplosionEffects>> collapses) {
         interceptionBeams.clear();
         airbursts = 0;
         explosions.begin();
@@ -487,7 +491,7 @@ final class GpuAttackEffects implements Disposable {
               && collapses.isEmpty()) { return; }
         this.camera = camera;
         casualties.forEach(casualty -> casualty.explosions(explosions));
-        collapses.forEach(collapse -> collapse.explosions(explosions, collapses.size()));
+        collapses.forEach(collapse -> collapse.accept(explosions));
         for (var shot : volley) {
             if (shot.defensive() && shot.interception() != null) { continue; }
             if (shot.seconds < (shot.death() ? 0 : UnitAttack.ANTICIPATION_SECONDS) && !shot.chargingPpc()

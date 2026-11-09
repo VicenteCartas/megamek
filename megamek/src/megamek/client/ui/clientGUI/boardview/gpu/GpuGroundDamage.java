@@ -199,7 +199,8 @@ final class GpuGroundDamage implements Disposable {
     private boolean directoryDirty;
     private int marks;
     private boolean scorched;
-    private long scorchedAt;
+    /** Blast seconds since the last scorch ({@link #advance}). */
+    private float scorchAge;
     private long scorchRevision;
     /** The hexes' authored scorch bytes as last written to the directory's alpha byte, and the tiles they came from. */
     private byte[] authored = new byte[0];
@@ -289,8 +290,11 @@ final class GpuGroundDamage implements Disposable {
 
     /** Ground Zero's glow after the last blast: 1 as it goes off, a third left after {@link #HEAT_SECONDS}. */
     float scorchHeat() {
-        return scorched ? (float) Math.exp(-(System.nanoTime() - scorchedAt) / 1e9 / HEAT_SECONDS) : 0;
+        return scorched ? (float) Math.exp(-scorchAge / HEAT_SECONDS) : 0;
     }
+
+    /** Ages Ground Zero's glow on the blasts' clock (GpuArtilleryBlast#advance), which pauses with the playback. */
+    void advance(float seconds) { scorchAge += seconds; }
 
     /**
      * A nuclear blast's scorch (GpuArtilleryBlast): Ground Zero at {@code centre}, the blast area's radius and the
@@ -327,7 +331,7 @@ final class GpuGroundDamage implements Disposable {
             }
         }
         scorched = true;
-        scorchedAt = System.nanoTime();
+        scorchAge = 0;
         scorchRevision++;
         directoryDirty = true;
     }

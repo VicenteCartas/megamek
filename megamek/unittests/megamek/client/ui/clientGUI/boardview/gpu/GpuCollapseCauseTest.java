@@ -68,6 +68,8 @@ import org.mockito.Answers;
  */
 class GpuCollapseCauseTest {
     private static final int LOCAL = 0, OPPONENT = 1;
+    /** Milliseconds the server takes after sending a collapse, as a live server's damage, reports and saves do. */
+    private static long collapsePause;
     private static final int MOVER = 1;
     /** The 16x17 Grassland's span beside the dry ground at 1008, its deck a level up. */
     private static final Coords SPAN = new Coords(8, 7);
@@ -99,6 +101,29 @@ class GpuCollapseCauseTest {
             assertEquals(((BoardScene.Movement) earlier.getFirst()).type(), step.type(), "The step keeps the walk's pace");
         } else {
             assertEquals(List.of(), earlier, "No other move shows the Atlas before the span gives way");
+        }
+    }
+
+    /**
+     * A live server sends the mover's path long after the collapse it caused; the playback still shows the walk onto the
+     * span, the span giving way under it and the fall, never the walk again from where it started.
+     */
+    @Test
+    void aSlowServerStillShowsTheWalkOntoTheSpanBeforeItGivesWay() throws Exception {
+        collapsePause = 1500;
+        try {
+            var frames = move("Atlas AS7-D.mtf", BESIDE, 5, path -> {
+                path.addStep(MoveStepType.FORWARDS);
+                path.addStep(MoveStepType.FORWARDS);
+            }, Map.of());
+            var step = comesDownUnder(frames, SPAN, 1);
+            assertEquals(BESIDE, step.path().getFirst().coords(), "It steps on from where it was last shown");
+            assertEquals(1, frames.moved().timeline().stream()
+                  .filter(event -> event instanceof BoardScene.Movement move && move.entityId() == MOVER
+                        && move.path().getLast().coords().equals(SPAN) && move.path().getLast().elevation() > 0).count(),
+                  "It walks onto the span once: " + brief(frames.moved().timeline()));
+        } finally {
+            collapsePause = 0;
         }
     }
 
@@ -177,17 +202,14 @@ class GpuCollapseCauseTest {
                   call(manager, "applyBuildingDamage");
               });
         var events = frames.moved().timeline();
-        int flash = -1;
-        for (int index = 0; index < events.size(); index++) {
-            if (events.get(index) instanceof BoardScene.Detonation) { flash = index; }
-        }
-        assertTrue(flash >= 0, "The strike plays: " + brief(events));
-        assertTrue(events.get(flash + 1) instanceof BoardScene.TileTransition craterFall && craterFall.collapses(crater),
-              "The crater's building comes down right after the flash: " + brief(events));
-        var falls = events.subList(flash + 1, events.size()).stream().filter(BoardScene.TileTransition.class::isInstance)
-              .flatMap(transition -> ((BoardScene.TileTransition) transition).collapses().stream()).toList();
+        var strike = events.stream().filter(BoardScene.Detonation.class::isInstance).map(BoardScene.Detonation.class::cast)
+              .findFirst().orElseThrow(() -> new AssertionError("The strike plays: " + brief(events)));
+        var falls = strike.collapses();
+        assertTrue(falls.stream().anyMatch(fall -> fall.coords().equals(crater)),
+              "The crater's building comes down with the strike: " + brief(events));
         assertTrue(falls.stream().anyMatch(fall -> fall.coords().equals(blast)),
-              "The blast's building comes down too: " + brief(events));
+              "The blast's building, which the rules bring down at the phase's end, falls with the strike's front too: "
+                    + brief(events));
         for (var fall : falls) {
             assertEquals(1, fall.strength(), .01f, fall.coords() + " comes down at full strength");
             assertEquals(groundZero, fall.from().coords(), fall.coords() + " falls away from ground zero");
@@ -339,6 +361,7 @@ class GpuCollapseCauseTest {
                         throw new IllegalStateException(failure);
                     }
                 });
+                if (received.command() == megamek.common.net.enums.PacketCommand.BLDG_COLLAPSE) { Thread.sleep(collapsePause); }
             }
             return Answers.RETURNS_DEFAULTS.answer(invocation);
         });

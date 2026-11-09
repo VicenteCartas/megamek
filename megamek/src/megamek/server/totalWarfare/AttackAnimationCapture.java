@@ -3,6 +3,7 @@ package megamek.server.totalWarfare;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -10,6 +11,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import megamek.common.HitData;
+import megamek.common.NuclearDetonation;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.BoardLocation;
 import megamek.common.net.enums.PacketCommand;
@@ -25,8 +27,24 @@ final class AttackAnimationCapture {
     private final Map<UUID, List<BoardLocation>> collapses = new HashMap<>();
     /** How deep the resolution is in consequences whose collapses no attack takes ({@link #uncredited}). */
     private int consequenceDepth;
+    /** A scheduled strike's resolution: its start packet's detonation, and everything it brings down. */
+    private NuclearDetonation strike;
+    private final LinkedHashSet<BoardLocation> strikeCollapses = new LinkedHashSet<>();
 
-    void packet(Integer connection, Packet packet) { deliveries.add(new Delivery(connection, packet)); }
+    void packet(Integer connection, Packet packet) {
+        if (strike(packet) instanceof NuclearDetonation detonation && !completes(packet)) { strike = detonation; }
+        deliveries.add(new Delivery(connection, packet));
+    }
+
+    private static NuclearDetonation strike(Packet packet) {
+        return packet.command() == PacketCommand.NUCLEAR_DETONATION && packet.getObject(0) instanceof NuclearDetonation
+              detonation ? detonation : null;
+    }
+
+    /** Whether a strike's packet is its completion rather than its start. */
+    private static boolean completes(Packet packet) {
+        return Boolean.TRUE.equals(packet.getObject(1));
+    }
 
     void attack(ResolvedAttack result, List<Integer> recipients) {
         attacks.add(result);
@@ -51,9 +69,14 @@ final class AttackAnimationCapture {
      * The attack being resolved took the construction factor of the structure hex {@code at} to zero: the rules bring it
      * down at the phase's end, which its collapse plays as this attack's doing. It takes it when it hit, or for artillery
      * when its shell landed and went off, even scattered; a miss, a dud or what a consequence brings down
-     * ({@link #uncredited}) is no attack's doing.
+     * ({@link #uncredited}) is no attack's doing. A scheduled strike takes everything it brings down, its chain
+     * explosions too: its completion names them, so their falls follow its front.
      */
     void collapse(BoardLocation at) {
+        if (strike != null && attacks.isEmpty()) {
+            strikeCollapses.add(at);
+            return;
+        }
         if (consequenceDepth > 0) { return; }
         for (int index = attacks.size() - 1; index >= 0; index--) {
             var attack = attacks.get(index);
@@ -81,6 +104,9 @@ final class AttackAnimationCapture {
             if (packet.command() == PacketCommand.ENTITY_ATTACK_RESOLVED && packet.getObject(0) instanceof ResolvedAttack attack) {
                 packet = new Packet(packet.command(), attack.withImpacts(impacts.getOrDefault(attack.id(), attack.impacts()))
                       .withCollapses(collapses.getOrDefault(attack.id(), attack.collapses())));
+            } else if (strike(packet) instanceof NuclearDetonation detonation && completes(packet)
+                  && strike != null && detonation.id().equals(strike.id())) {
+                packet = new Packet(packet.command(), detonation.withCollapses(List.copyOf(strikeCollapses)), true);
             }
             if (delivery.connection() == null) { broadcast.accept(packet); }
             else { targeted.accept(delivery.connection(), packet); }

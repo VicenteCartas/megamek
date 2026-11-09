@@ -23,7 +23,8 @@ import org.junit.jupiter.api.Test;
 class NuclearDetonationTest {
     @Test
     void customStrikeSurvivesSerializationAndDispatchWithoutAnEntity() throws Exception {
-        var original = new NuclearDetonation(UUID.randomUUID(), 7, new Coords(3, 8), -2, 1234, 31, 93, 2);
+        var original = new NuclearDetonation(UUID.randomUUID(), 7, new Coords(3, 8), -2, 1234, 31, 93, 2)
+              .withCollapses(List.of(megamek.common.board.BoardLocation.of(new Coords(4, 8), 7)));
         var bytes = new ByteArrayOutputStream();
         var marshaller = PacketMarshallerFactory.getInstance()
               .getMarshaller(PacketMarshaller.NATIVE_SERIALIZATION_MARSHALING);

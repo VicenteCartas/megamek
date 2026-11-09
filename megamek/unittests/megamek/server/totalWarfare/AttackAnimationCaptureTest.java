@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.UUID;
 
 import megamek.common.HitData;
+import megamek.common.NuclearDetonation;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
@@ -122,5 +123,26 @@ class AttackAnimationCaptureTest {
         var collapses = sent.stream().map(packet -> ((ResolvedAttack) packet.getObject(0)).collapses()).toList();
         assertEquals(List.of(List.of(BoardLocation.of(new Coords(5, 5), 0)), List.of()), collapses,
               "The scattered shell takes its own hex; the dud and the tank's explosion take nothing");
+    }
+
+    /** A scheduled strike's completion names everything it brings down, its chain explosions too; the order stays. */
+    @Test
+    void aStrikesCompletionNamesEverythingItBringsDown() {
+        var capture = new AttackAnimationCapture();
+        var strike = new NuclearDetonation(new UUID(3, 1), 0, new Coords(4, 4), 0, 1000, 23, 86, 1);
+        capture.packet(null, new Packet(PacketCommand.NUCLEAR_DETONATION, strike, false));
+        capture.packet(null, new Packet(PacketCommand.ENTITY_UPDATE));
+        capture.collapse(BoardLocation.of(new Coords(4, 5), 0));
+        capture.uncredited(() -> capture.collapse(BoardLocation.of(new Coords(9, 9), 0)));
+        capture.collapse(BoardLocation.of(new Coords(4, 5), 0));
+        capture.packet(null, new Packet(PacketCommand.NUCLEAR_DETONATION, strike, true));
+        var sent = new ArrayList<Packet>();
+        capture.flush(sent::add, (recipient, packet) -> sent.add(packet));
+        assertEquals(List.of(PacketCommand.NUCLEAR_DETONATION, PacketCommand.ENTITY_UPDATE, PacketCommand.NUCLEAR_DETONATION),
+              sent.stream().map(Packet::command).toList());
+        assertEquals(List.of(), ((NuclearDetonation) sent.getFirst().getObject(0)).collapses());
+        assertEquals(true, sent.getLast().getObject(1));
+        assertEquals(List.of(BoardLocation.of(new Coords(4, 5), 0), BoardLocation.of(new Coords(9, 9), 0)),
+              ((NuclearDetonation) sent.getLast().getObject(0)).collapses());
     }
 }

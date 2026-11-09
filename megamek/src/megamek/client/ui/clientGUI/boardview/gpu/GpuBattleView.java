@@ -773,6 +773,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (history.speed() == UnitMotion.Speed.INSTANT) {
             casualties.dispose();
             terrain.clearCollapses();
+            attackEffects.clearArtilleryBlasts();
         }
         updateSlowMotion();
         history.advance(Gdx.graphics.getDeltaTime() * timeScale, state -> preparePlaybackCamera(state, scene));
@@ -923,6 +924,7 @@ class GpuBattleView extends ApplicationAdapter {
         prepareUnits();
         casualties.advance(animationSeconds(), debrisGround, atmosphereSettings.gravity() / BoardAtmosphere.STANDARD_GRAVITY);
         terrain.advanceCollapses(animationSeconds(), collapseGround, atmosphereSettings.gravity() / BoardAtmosphere.STANDARD_GRAVITY);
+        terrain.advanceFalls(animationSeconds(), atmosphereSettings.gravity() / BoardAtmosphere.STANDARD_GRAVITY);
         applyHover();
         for (var unit : scene.units()) {
             var instance = unitInstances.get(unit.id() + ":" + unit.part());
@@ -962,8 +964,16 @@ class GpuBattleView extends ApplicationAdapter {
             GpuGlsl.offscreen(terrainEffects::prepare);
         }
         attackEffects.update(playback.attacks(), completedAttacks, unitModels, unitInstances);
-        detonations.forEach(attackEffects::detonate);
-        attackEffects.advance(Gdx.graphics.getDeltaTime() * timeScale);
+        for (var detonation : detonations) {
+            attackEffects.detonate(detonation.result());
+            // What it brings down falls with its front; Instant shows only the outcome.
+            if (history.speed() != UnitMotion.Speed.INSTANT) { terrain.strike(detonation); }
+        }
+        // Blasts run on the playback clock: they pause with it and follow its speed, at 1x in real time.
+        float blastSeconds = animationSeconds() * GpuArtilleryBlast.SECONDS_PER_PLAYBACK;
+        attackEffects.advance(blastSeconds);
+        terrain.advanceScorch(blastSeconds);
+        terrain.shocks(attackEffects::shocks);
         // No craters on the Classic columns.
         if (!terrain.columns()) {
             attackEffects.groundImpacts(completedAttacks, impact -> terrain.impact(scene, impact));
@@ -1073,7 +1083,7 @@ class GpuBattleView extends ApplicationAdapter {
               ray -> terrain.hit(scene, ray));
         jumpJets.render(boardCamera.camera);
         pilotFlames.render(boardCamera.camera);
-        attackEffects.render(boardCamera.camera, effectDepth, casualties.casualties(), terrain.collapses());
+        attackEffects.render(boardCamera.camera, effectDepth, casualties.casualties(), terrain.dust());
         designators.render(boardCamera.camera, scene.designations(), Gdx.graphics.getDeltaTime());
         starShells.renderFlares(boardCamera.camera, atmosphere.lighting().daylight());
         if (!terrain.waterVisible()) { waterImpacts.clear(); }

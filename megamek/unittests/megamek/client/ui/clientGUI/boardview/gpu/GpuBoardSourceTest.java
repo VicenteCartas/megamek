@@ -113,7 +113,8 @@ class GpuBoardSourceTest {
             var playback = new UnitPlayback();
             playback.accept(timeline, completed.scene(), ignored -> false);
             playback.advance(1f, UnitMotion.Speed.NORMAL);
-            assertEquals(List.of(strike), playback.takeDetonations(), "Public flash survives the visibility reset");
+            assertEquals(List.of(strike), playback.takeDetonations().stream().map(BoardScene.Detonation::result).toList(),
+                  "Public flash survives the visibility reset");
             assertEquals(-3, playback.present(completed.scene()).tiles().stream().filter(tile -> tile.coords().equals(coords))
                   .findFirst().orElseThrow().elevation());
             if (concealed) {

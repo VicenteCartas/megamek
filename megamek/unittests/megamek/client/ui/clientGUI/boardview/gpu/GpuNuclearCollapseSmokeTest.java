@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.spy;
 
 import java.io.File;
@@ -14,7 +16,6 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -26,9 +27,6 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Graphics;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.Mesh;
-import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.NuclearDetonation;
 import megamek.common.Player;
 import megamek.common.board.Board;
@@ -41,36 +39,30 @@ import megamek.common.net.packets.Packet;
 import megamek.common.options.OptionsConstants;
 import megamek.common.interfaces.IEntityRemovalConditions;
 import megamek.common.units.Terrains;
+import megamek.server.Server;
 import megamek.server.totalWarfare.TWGameManager;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
  * An Alamo strike on the dense 48x48 city board as its client gets it: the real server resolves it
- * (TWGameManager#resolveScheduledNukes, then the phase's end, applyBuildingDamage), and its changed hexes and collapses
- * reach the client's board as their packets do. What it brings down breaks into pieces that fly away from ground zero,
- * as many as one scene change breaks (GpuTerrain#MAX_COLLAPSES, those nearest its middle). Prints each collapse's cut
- * time, the pieces' memory and the frame times (synchronized with glFinish, so CPU and GPU together); frames go to
- * build/gpu-board-review/nuclear-collapse.
+ * (TWGameManager#resolveScheduledNukes, then the phase's end, applyBuildingDamage) and its packets, the completion naming
+ * every structure it took to CF 0, reach the client as they do in a game. Every building it brings down falls where it
+ * stood (GpuDestruction), each as the front reaches it (GpuArtilleryBlast#shockArrival), near ones first. Prints the
+ * frame that took the city, the frame times through the wave (synchronized with glFinish, so CPU and GPU together) and
+ * how closely the falls kept to the front; frames go to build/gpu-board-review/nuclear-collapse.
  */
 @Tag("on-demand")
 class GpuNuclearCollapseSmokeTest {
     private static final float FRAME = 1 / 60f;
     private static final File BOARD = new File("data/boards/unofficial/VictorMorson/48x48.board");
-    /** Frames after the first pieces fall that the review captures, and the one that checks where they went. */
-    private static final int[] CAPTURES = { 0, 30, 90, 180 };
-    private static final int CHECK = 90;
-
-    /** One structure breaking: when the terrain began reading it, when its cut was ready and its pieces fell. */
-    private static final class Break {
-        long read, cut = -1, started = -1;
-        int frame = -1;
-        long bytes;
-        Vector3 standing;
-    }
+    /** Frames after the flash the review captures: .1, .2, .4, .8, 1.6 and 3 playback seconds at 1x. */
+    private static final int[] CAPTURES = { 12, 24, 48, 96, 192, 360 };
+    /** Playback seconds a frame at 1x. */
+    private static final float PLAYBACK_FRAME = (float) (FRAME * UnitMotion.Speed.NORMAL.rate);
 
     @Test
-    void aStrikeOnACityThrowsWhatItBringsDownAwayFromGroundZero() throws Exception {
+    void aStrikeOnACityFallsWithItsFront() throws Exception {
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "nuclear-collapse");
         Files.createDirectories(output.toPath());
         Board before = board();
@@ -80,11 +72,31 @@ class GpuNuclearCollapseSmokeTest {
         server.getGame().addPlayer(0, new Player(0, "Nuclear review"));
         server.getGame().initializeRulesManager(OptionsConstants.RULES_CORE);
         server.addScheduledNuke(new int[] { groundZero.getX(), groundZero.getY(), 2 });
-        call(server, "resolveScheduledNukes");
-        var strike = server.updates();
-        call(server, "applyBuildingDamage");
-        var phaseEnd = server.updates();
+        Map<BoardLocation, megamek.common.Hex> strike, phaseEnd;
+        // The rules' packets go through the server's animation capture, which names on the strike's completion what it
+        // brought down; only the transport records them.
+        var transport = mock(Server.class, invocation -> {
+            if ("send".equals(invocation.getMethod().getName()) && invocation.getArguments().length == 1
+                  && invocation.getArgument(0) instanceof Packet packet) { server.sent(packet); }
+            if ("getGame".equals(invocation.getMethod().getName())) { return server.getGame(); }
+            return org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+        });
+        try (var servers = mockStatic(Server.class)) {
+            servers.when(Server::getServerInstance).thenReturn(transport);
+            call(server, "resolveScheduledNukes");
+            strike = server.updates();
+            call(server, "applyBuildingDamage");
+            phaseEnd = server.updates();
+        }
         assertFalse(server.collapsed.isEmpty(), "The strike's blast brings buildings down as the phase ends");
+        assertFalse(server.completion.collapses().isEmpty(), "The strike's completion names what it brought down");
+        // Every building it brings down, in its crater or as the phase ends: the city's kit buildings.
+        Set<Coords> falls = new HashSet<>(server.collapsed);
+        strike.forEach((at, hex) -> {
+            if (structure(before.getHex(at.coords())) && !structure(hex)) { falls.add(at.coords()); }
+        });
+        falls.removeIf(at -> !before.getHex(at).containsTerrain(Terrains.BUILDING));
+        float radius = GpuArtilleryBlast.nuclearRadius(server.completion.stats());
         var failure = new AtomicReference<Throwable>();
         List<String> report = new ArrayList<>();
         try (var fixture = GpuBoardFixture.create(before)) {
@@ -96,15 +108,27 @@ class GpuNuclearCollapseSmokeTest {
             var configuration = GpuBoardWindow.configuration(false);
             configuration.setWindowedMode(1280, 800);
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
-                private final long deadline = System.nanoTime() + 300_000_000_000L;
-                private final Map<GpuCollapse, Break> breaks = new IdentityHashMap<>();
-                private final List<Double> frameMs = new ArrayList<>();
-                /** How far each broken hex's pieces moved away from ground zero by CHECK frames after they fell. */
-                private final List<Float> pushes = new ArrayList<>();
+                private final long deadline = System.nanoTime() + 600_000_000_000L;
+                /** The frame each building began to give way. */
+                private final Map<Coords, Integer> starts = new HashMap<>();
+                private final List<Double> waveMs = new ArrayList<>();
                 private Graphics fixedGraphics;
-                private int stage, frames, firstFall = -1;
+                private int stage, frames, contact = -1;
                 private long last, triggered, status;
-                private double readFrameMs;
+                private double takeMs;
+                /** This frame's stages as they began (renderStage), and the slowest wave frame's, in ms a stage. */
+                private final List<String> stageNames = new ArrayList<>();
+                private final List<Long> stageTimes = new ArrayList<>();
+                private String slowest = "";
+                private double slowestMs;
+                /** Programs linked after loading: at the flash, before this frame, and over the wave. */
+                private int linksAtFlash = -1, linksBefore;
+
+                @Override
+                void renderStage(String name) {
+                    stageNames.add(name);
+                    stageTimes.add(System.nanoTime());
+                }
 
                 @Override
                 public void create() {
@@ -143,7 +167,7 @@ class GpuNuclearCollapseSmokeTest {
                         SwingUtilities.invokeLater(() -> {
                             fixture.game.processGameEvent(new GameNuclearDetonationEvent(fixture.game, server.detonation, false));
                             fixture.game.getBoard().setHexes(strike);
-                            fixture.game.processGameEvent(new GameNuclearDetonationEvent(fixture.game, server.detonation, true));
+                            fixture.game.processGameEvent(new GameNuclearDetonationEvent(fixture.game, server.completion, true));
                             fixture.game.getBoard().collapseBuilding(new Vector<>(server.collapsed));
                             fixture.game.getBoard().setHexes(phaseEnd);
                             fixture.source.refresh();
@@ -153,7 +177,6 @@ class GpuNuclearCollapseSmokeTest {
                         triggered = status = now;
                     } else if (stage == 2) {
                         double ms = (now - last) / 1e6;
-                        frameMs.add(ms);
                         if (now - status > 5_000_000_000L) {
                             // Where a slow strike waits: its blast, the pieces being cut or falling, or the terrain.
                             status = now;
@@ -161,93 +184,94 @@ class GpuNuclearCollapseSmokeTest {
                             var effects = (GpuAttackEffects) field(this, "attackEffects");
                             var playback = (UnitPlayback) field(this, "playback");
                             System.out.println("t=" + seconds + "s frames=" + frames + " blasts=" + effects.artilleryBlastCount()
-                                  + " collapses=" + terrain.collapses().size() + " ready="
-                                  + terrain.collapses().stream().filter(GpuCollapse::ready).count() + " falling="
-                                  + terrain.collapses().stream().filter(collapse -> collapse.instance() != null).count()
-                                  + " seen=" + breaks.size() + " terrainBusy=" + GpuBoardTestUi.busy(this)
+                                  + " taken=" + falls.stream().filter(terrain::fallTaken).count() + " started="
+                                  + starts.size() + "/" + falls.size() + " terrainBusy=" + GpuBoardTestUi.busy(this)
                                   + " transition=" + (playback.transition() == null ? "none"
                                         : playback.transition().collapses().size() + " collapses"));
                             if (seconds % 20 < 5) { capture(output, "t" + seconds); }
                         }
-                        boolean read = false;
-                        for (GpuCollapse collapse : terrain.collapses()) {
-                            var known = breaks.get(collapse);
-                            if (known == null) {
-                                known = new Break();
-                                known.read = now;
-                                breaks.put(collapse, known);
-                                read = true;
-                            }
-                            if (known.cut < 0 && collapse.ready()) { known.cut = now; }
-                            if (known.started < 0 && collapse.instance() != null) {
-                                known.started = now;
-                                known.frame = frames;
-                                known.standing = centroid(collapse);
-                                for (Mesh mesh : collapse.instance().model.meshes) {
-                                    known.bytes += (long) mesh.getNumVertices() * mesh.getVertexSize();
+                        int links = GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading();
+                        if (contact < 0 && falls.stream().anyMatch(terrain::fallTaken)) {
+                            // The flash: the frame that took the city from its chunks.
+                            contact = frames;
+                            takeMs = ms;
+                            linksAtFlash = links;
+                        }
+                        for (Coords at : falls) {
+                            if (!starts.containsKey(at) && terrain.fallStarted(at)) { starts.put(at, frames); }
+                        }
+                        if (contact >= 0 && frames > contact && frames - contact <= CAPTURES[CAPTURES.length - 1]) {
+                            waveMs.add(ms);
+                            if (ms > slowestMs) {
+                                slowestMs = ms;
+                                // Each stage's time to the next, the last to the frame's end (glFinish included).
+                                StringBuilder stages = new StringBuilder("frame " + (frames - contact) + " after the flash, "
+                                      + (links - linksBefore) + " programs linked in it:");
+                                long from = last;
+                                String name = "before the first stage";
+                                for (int index = 0; index <= stageNames.size(); index++) {
+                                    long to = index < stageTimes.size() ? stageTimes.get(index) : now;
+                                    if (to - from > 2_000_000L) { stages.append(' ').append(name).append(' ').append((to - from) / 1_000_000L); }
+                                    if (index < stageNames.size()) { name = stageNames.get(index); from = to; }
                                 }
-                                if (firstFall < 0) { firstFall = frames; }
-                            }
-                            if (known.frame >= 0 && frames - known.frame == CHECK) {
-                                // Away from ground zero: its pieces' mean position moved out along the line from it.
-                                var drift = centroid(collapse).sub(known.standing);
-                                var out = new Vector3(known.standing).sub(BoardGeometry.center(groundZero, 0));
-                                out.z = 0;
-                                out.nor();
-                                var fall = fall(terrain, collapse);
-                                System.out.println("moved " + drift + " out " + out + " along " + drift.dot(out)
-                                      + (fall == null ? "" : " strength " + fall.strength() + " from "
-                                            + (fall.from() == null ? "nothing" : fall.from().coords().getBoardNum()) + " at "
-                                            + fall.coords().getBoardNum()));
-                                pushes.add(drift.dot(out));
+                                slowest = stages.toString();
                             }
                         }
-                        if (read) { readFrameMs = Math.max(readFrameMs, ms); }
-                        for (int index = 0; firstFall >= 0 && index < CAPTURES.length; index++) {
-                            if (frames - firstFall == CAPTURES[index]) { capture(output, (index + 1) + "-" + CAPTURES[index]); }
+                        for (int index = 0; contact >= 0 && index < CAPTURES.length; index++) {
+                            if (frames - contact == CAPTURES[index]) { capture(output, (index + 1) + "-" + CAPTURES[index]); }
                         }
-                        if (firstFall >= 0 && frames - firstFall > CHECK && terrain.collapses().isEmpty()
-                              && !GpuBoardTestUi.busy(this)) {
+                        if (contact >= 0 && frames - contact > CAPTURES[CAPTURES.length - 1]
+                              && falls.stream().noneMatch(terrain::fallTaken) && !GpuBoardTestUi.busy(this)) {
                             capture(output, "9-after");
-                            summarize(terrain);
+                            summarize();
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                             Gdx.app.exit();
                         }
                     }
                     last = now;
+                    linksBefore = GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading();
+                    stageNames.clear();
+                    stageTimes.clear();
                 }
 
-                private void summarize(GpuTerrain terrain) {
-                    assertFalse(breaks.isEmpty(), "The strike's structures break into pieces");
-                    assertTrue(pushes.stream().filter(away -> away > 0).count() > pushes.size() / 2,
-                          "Most broken structures' pieces move away from ground zero: " + pushes);
-                    List<Double> cuts = new ArrayList<>(), waits = new ArrayList<>();
-                    long bytes = 0;
-                    for (Break broken : breaks.values()) {
-                        if (broken.cut >= 0) { cuts.add((broken.cut - broken.read) / 1e6); }
-                        if (broken.started >= 0) { waits.add((broken.started - broken.read) / 1e6); }
-                        bytes += broken.bytes;
+                private void summarize() {
+                    assertTrue(starts.size() >= falls.size() * 9 / 10,
+                          "The buildings it brings down fall: " + starts.size() + " of " + falls.size());
+                    // Each as the front reaches it: its arrival in blast seconds, the playback's half.
+                    var centre = BoardGeometry.center(groundZero, 0);
+                    List<Double> lateness = new ArrayList<>();
+                    float near = 0, far = 0;
+                    int nearCount = 0, farCount = 0;
+                    for (var entry : starts.entrySet()) {
+                        var middle = BoardGeometry.center(entry.getKey(), 0);
+                        float distance = com.badlogic.gdx.math.Vector2.dst(middle.x, middle.y, centre.x, centre.y);
+                        float arrival = GpuArtilleryBlast.shockArrival(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK;
+                        lateness.add((double) Math.abs(entry.getValue() - contact - arrival / PLAYBACK_FRAME));
+                        int hexes = groundZero.distance(entry.getKey());
+                        if (hexes <= 4) { near += entry.getValue(); nearCount++; }
+                        if (hexes >= 12) { far += entry.getValue(); farCount++; }
                     }
-                    var sorted = new ArrayList<>(frameMs);
+                    lateness.sort(null);
+                    assertTrue(percentile(lateness, .95) <= 2, "The falls keep to the front within two frames: " + lateness);
+                    assertTrue(nearCount == 0 || farCount == 0 || near / nearCount < far / farCount,
+                          "Near buildings fall before far ones");
+                    var sorted = new ArrayList<>(waveMs);
                     sorted.sort(null);
-                    report.add("ground zero " + groundZero.getBoardNum() + "; structure hexes the crater took: "
-                          + taken(before, strike) + ", brought down as the phase ended: " + server.collapsed.size());
-                    report.add("broken into pieces: " + breaks.size() + "; piece memory " + bytes / 1024 + " KiB in all");
-                    report.add("cut (read to ready) ms: " + spread(cuts) + "; read to falling ms: " + spread(waits));
-                    report.add("frame ms: median " + percentile(sorted, .5) + ", p95 " + percentile(sorted, .95) + ", max "
-                          + percentile(sorted, 1) + "; the frame that read the structures: " + Math.round(readFrameMs) + " ms");
+                    report.add("ground zero " + groundZero.getBoardNum() + "; buildings the crater took: " + taken(before, strike)
+                          + ", brought down as the phase ended: " + server.collapsed.size() + "; listed on the completion: "
+                          + server.completion.collapses().size() + "; falling: " + starts.size() + " of " + falls.size());
+                    report.add("frames off the front: median " + percentile(lateness, .5) + ", p95 " + percentile(lateness, .95)
+                          + ", max " + percentile(lateness, 1));
+                    report.add("frame ms through the wave: median " + percentile(sorted, .5) + ", p95 " + percentile(sorted, .95)
+                          + ", max " + percentile(sorted, 1) + "; the frame that took the city: " + Math.round(takeMs) + " ms");
+                    report.add("the slowest wave frame's stages over 2 ms: " + slowest);
+                    report.add("programs linked from the flash on: "
+                          + (GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading() - linksAtFlash));
                 }
             }, configuration);
         }
         report.forEach(System.out::println);
         if (failure.get() != null) { throw new AssertionError("Nuclear collapse review failed", failure.get()); }
-    }
-
-    private static String spread(List<Double> values) {
-        if (values.isEmpty()) { return "none"; }
-        var sorted = new ArrayList<>(values);
-        sorted.sort(null);
-        return "min " + percentile(sorted, 0) + ", median " + percentile(sorted, .5) + ", max " + percentile(sorted, 1);
     }
 
     private static long percentile(List<Double> sorted, double share) {
@@ -263,32 +287,6 @@ class GpuNuclearCollapseSmokeTest {
     private static boolean structure(megamek.common.Hex hex) {
         return hex != null && (hex.containsTerrain(Terrains.BUILDING) || hex.containsTerrain(Terrains.BRIDGE)
               || hex.containsTerrain(Terrains.FUEL_TANK));
-    }
-
-    /** The mean of its pieces' middles, where they are now on the board. */
-    private static Vector3 centroid(GpuCollapse collapse) {
-        var instance = collapse.instance();
-        var sum = new Vector3();
-        int count = 0;
-        for (var piece : instance.nodes.first().getChildren()) {
-            if (piece.parts.isEmpty()) { continue; }
-            var placed = new com.badlogic.gdx.math.Matrix4(instance.transform).mul(piece.globalTransform);
-            sum.add(new Vector3(piece.parts.first().meshPart.center).mul(placed));
-            count++;
-        }
-        return sum.scl(1f / Math.max(1, count));
-    }
-
-    /** The scene change's record of the structure {@code collapse} breaks, as the terrain keeps it. */
-    private static BoardScene.TileTransition.Collapse fall(GpuTerrain terrain, GpuCollapse collapse) {
-        List<?> collapsing = field(terrain, "collapsing");
-        for (Object entry : collapsing) {
-            if (field(entry, "collapse") != collapse) { continue; }
-            BoardScene.TileTransition transition = field(entry, "transition");
-            Coords at = field(entry, "coords");
-            return transition.collapses().stream().filter(fall -> fall.coords().equals(at)).findFirst().orElse(null);
-        }
-        return null;
     }
 
     private static void capture(File output, String name) {
@@ -334,15 +332,18 @@ class GpuNuclearCollapseSmokeTest {
     private static final class ResolutionServer extends TWGameManager {
         private final Set<Coords> changed = new HashSet<>();
         final List<Coords> collapsed = new ArrayList<>();
-        NuclearDetonation detonation;
+        /** The strike as it starts, and as it completes with what it brought down. */
+        NuclearDetonation detonation, completion;
 
         @Override
         public void sendChangedHex(Coords coords, int boardId) { changed.add(coords); }
 
-        @Override
         @SuppressWarnings("unchecked")
-        public void send(Packet packet) {
-            if (packet.command() == PacketCommand.NUCLEAR_DETONATION) { detonation = (NuclearDetonation) packet.getObject(0); }
+        void sent(Packet packet) {
+            if (packet.command() == PacketCommand.NUCLEAR_DETONATION) {
+                var strike = (NuclearDetonation) packet.getObject(0);
+                if (Boolean.TRUE.equals(packet.getObject(1))) { completion = strike; } else { detonation = strike; }
+            }
             if (packet.command() == PacketCommand.BLDG_COLLAPSE) { collapsed.addAll((Vector<Coords>) packet.getObject(0)); }
         }
 
