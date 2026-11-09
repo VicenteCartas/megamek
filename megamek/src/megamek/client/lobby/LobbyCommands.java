@@ -799,12 +799,12 @@ public class LobbyCommands {
     }
 
     /**
-     * Adds {@code entities}, read from their unit files, to the game for {@code requested}, as the unit selector
-     * dialog's Add does ({@code MegaMekUnitSelectorDialog}): Clan pilots for Clan units, a regular crew for a
-     * Battlefield Support asset, the skills {@code skills} names, random names when the client generates them, then the
-     * units go to the server over the local connection and the chat says who selected them for whom. The units go to
-     * {@code requested} when they are in the game and the local player may add units for them, else to the local
-     * player, as the dialog's chooser decides.
+     * Adds {@code entities}, read from their unit files, to the game for {@code requested}, as the Requisition's Add
+     * does: Clan pilots for Clan units, a regular crew for a Battlefield Support asset, the skills {@code skills} names,
+     * random names when the client generates them, then the units go to the server over the local connection and the
+     * chat says who selected them for whom. Once the game is under way they arrive as reinforcements next round
+     * ({@link Reinforcements#prepare}). The units go to {@code requested} when they are in the game and the local
+     * player may add units for them, else to the local player.
      *
      * @return the player who got the units, or null when there were none to add
      */
@@ -844,8 +844,8 @@ public class LobbyCommands {
                           owner.getName()), slot);
                 }
             }
-            entity.setOwner(owner);
         }
+        Reinforcements.prepare(entities, owner, game());
         client().sendAddEntity(entities);
         String message = local + " selected " + ((entities.size() == 1) ? "a unit" : entities.size() + " units")
               + " for player: " + owner.getName();

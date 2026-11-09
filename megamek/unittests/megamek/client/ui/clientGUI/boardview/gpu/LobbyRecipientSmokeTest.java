@@ -18,6 +18,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
@@ -31,12 +32,14 @@ import megamek.client.lobby.LobbyRequisition.Recipient;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.lobby.LobbySnapshot.PlayerRow;
 import megamek.client.lobby.LobbySnapshot.TeamGroup;
+import megamek.client.lobby.LobbyUnit;
 import megamek.client.lobby.RequisitionCatalog;
 import megamek.client.lobby.RequisitionRow;
 import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTestStage;
+import megamek.common.force.Force;
 import megamek.common.loaders.MekSummary;
 import megamek.common.units.UnitType;
 import org.junit.jupiter.api.Tag;
@@ -182,6 +185,61 @@ class LobbyRecipientSmokeTest {
             frame(ui);
             assertPreviews(requisition, green);
             body.remove();
+        });
+    }
+
+    @Test
+    void reinforcementsShowAsPlainChipsWhileLobbyUnitsCanBeTakenBack() {
+        UiTestStage.run(ui -> {
+            for (boolean undoable : new boolean[] { true, false }) {
+                List<Integer> removed = new ArrayList<>();
+                MekSummary atlas = new MekSummary();
+                atlas.setChassis("Atlas");
+                atlas.setModel("AS7-D");
+                atlas.setName("Atlas AS7-D");
+                atlas.setUnitType(UnitType.getTypeName(UnitType.MEK));
+                atlas.setTechBase("Inner Sphere");
+                atlas.setLevel("A");
+                LobbyRequisitionPanel requisition = new LobbyRequisitionPanel(ui.kit, new RequisitionActions() {
+                    @Override
+                    public void search(RequisitionSearch.Query query, Consumer<RequisitionSearch.Result> done) {
+                        done.accept(new RequisitionSearch.Result(query, List.of(RequisitionRow.of(atlas)), 1,
+                              List.of(), 0, 0));
+                    }
+
+                    @Override
+                    public void remove(int id) {
+                        removed.add(id);
+                    }
+
+                    @Override
+                    public boolean undoable() {
+                        return undoable;
+                    }
+                }, key -> null, false);
+                Table body = place(ui, requisition.body(), 20, 1400);
+                LobbyRequisition rules = recipients("red");
+                requisition.show(rules, LobbyForces.EMPTY);
+                requisition.opened(LobbyForces.EMPTY);
+                requisition.probePick();
+                frame(ui);
+                body.findActor("lobby-requisition-add").fire(new ChangeListener.ChangeEvent());
+                requisition.show(rules, new LobbyForces(List.of(new LobbyUnit(7, ME, "Atlas AS7-D", "", "", 100,
+                      1897, "", "", "", List.of(), 0, LobbyUnit.Link.NONE, false, null, Force.NO_FORCE, true, false,
+                      null)), List.of(), List.of(), List.of(), List.of(), -1));
+                frame(ui);
+                Group added = body.findActor("lobby-requisition-added");
+                assertEquals(1, added.getChildren().size, "the added unit shows");
+                Actor chip = added.getChildren().first();
+                if (undoable) {
+                    assertTrue(chip instanceof Button, "a lobby unit can be taken back");
+                    click(ui, chip);
+                    assertEquals(List.of(7), removed);
+                } else {
+                    assertFalse(chip instanceof Button, "a sent reinforcement is not taken back from the card");
+                }
+                body.remove();
+            }
         });
     }
 

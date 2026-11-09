@@ -19,7 +19,6 @@ import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.common.Player;
 import megamek.common.board.Board;
-import megamek.common.eras.Eras;
 import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
 import megamek.common.interfaces.IStartingPositions;
@@ -351,16 +350,8 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
               mapSummary(client.getMapSettings()), server(client.getHost(), client.getPort()),
               forces, LobbyBattlefield.of(game.getOptions(), game.getPlanetaryConditions(),
               client.getMapSettings(), autoResolve), LobbyReadiness.of(game, local, localBots, forces,
-              client.getMapSettings()), LobbyRequisition.of(game, local, session.localBots().keySet(), eras()));
-    }
-
-    /** The eras of the timeline as year spans, or none when they cannot be read. */
-    private static List<RequisitionCatalog.YearSpan> eras() {
-        try {
-            return LobbyRequisition.spans(Eras.getEras());
-        } catch (RuntimeException failure) {
-            return List.of();
-        }
+              client.getMapSettings()), LobbyRequisition.of(game, local, session.localBots().keySet(),
+              LobbyRequisition.knownEras()));
     }
 
     /** Where a team goes in the list: the local player's team first, the players on no team last. */

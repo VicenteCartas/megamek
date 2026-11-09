@@ -149,7 +149,7 @@ class GameMasterCardsSmokeTest {
             chat.clear();
             GameMasterPlayerSetup setup = new GameMasterPlayerSetup(game, local.getId(), joiner);
             setup.team(3);
-            cards.playerSetup(setup, NOW, chat::add, player -> { }, player -> { });
+            cards.playerSetup(setup, NOW, chat::add, player -> { }, player -> { }, player -> { });
             ui.draw();
             find(ui, "setup-player");
             find(ui, "setup-team");
@@ -158,11 +158,18 @@ class GameMasterCardsSmokeTest {
             assertEquals(List.of("/changeTeam playerID=3 teamID=2"), chat);
             assertFalse(cards.isOpen());
             List<Player> generated = new ArrayList<>();
+            List<Player> requisitioned = new ArrayList<>();
             cards.playerSetup(new GameMasterPlayerSetup(game, local.getId(), other), NOW, chat::add,
-                  player -> { }, generated::add);
+                  requisitioned::add, player -> { }, generated::add);
             ui.draw();
             click(ui, find(ui, "setup-reinforce-generator"));
             assertEquals(List.of(other), generated, "the force generator is opened for the chosen player");
+            assertFalse(cards.isOpen());
+            cards.playerSetup(new GameMasterPlayerSetup(game, local.getId(), other), NOW, chat::add,
+                  requisitioned::add, player -> { }, player -> { });
+            ui.draw();
+            click(ui, find(ui, "setup-reinforce-requisition"));
+            assertEquals(List.of(other), requisitioned, "the Requisition is opened for the chosen player");
             assertFalse(cards.isOpen());
 
             // The building, put up in an empty hex
