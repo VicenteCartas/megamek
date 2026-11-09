@@ -154,12 +154,15 @@ final class BayKit {
         Map<String, GeneratedMesh> result = new LinkedHashMap<>();
         result.put("", module(spec, modelled, role, piece, 0, lod, square, footprintScale, fitting, layout, halfLength));
         int links = closing ? KitOutline.links(piece) : 0;
+        boolean fills = !role.startsWith("roof") && !piece.tags().endsWith("-cap") && joined(spec, role, lod);
+        if (fills) { putFill(result, "-fill", fill(spec, modelled, role, piece, 0, lod, square)); }
         for (int closed = links; closed > 0; closed = (closed - 1) & links) {
             // Its new corners round like the kit's others.
             var closedPiece = KitOutline.rounded(KitOutline.closed(piece, closed), spec.cornerRadius(),
                   Math.max(1, spec.cornerSegments()));
             result.put("-closed-" + closed, module(spec, modelled, role, closedPiece, closed, lod,
                   square, footprintScale, fitting, layout, halfLength));
+            if (fills) { putFill(result, "-closed-" + closed + "-fill", fill(spec, modelled, role, closedPiece, closed, lod, square)); }
         }
         // At a notch its walls ending open turn the corner with the next hex's ({@link KitOutline#notched}): a twin for
         // each set of such corners, which ConnectedKit picks; not where modules part at their joints.
@@ -451,6 +454,36 @@ final class BayKit {
         underside(result, List.of(p, q, qq, pp), -depth);
         result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(qq, -depth, back), darkVertex(pp, -depth, back), darkVertex(pp, 0, back),
               darkVertex(qq, 0, back));
+    }
+
+    private static boolean joined(Spec spec, String role, int lod) {
+        List<Run> runs = spec.modules().get(role);
+        return runs.get(Math.min(lod, runs.size() - 1)).joints() != null;
+    }
+
+    private static void putFill(Map<String, GeneratedMesh> result, String key, GeneratedMesh fill) {
+        if (!fill.parts.isEmpty()) { result.put(key, fill); }
+    }
+
+    /**
+     * Where another storey stands on this one (ConnectedKit places it), its joint pieces' top corners filled to the
+     * crossing their bottoms have: {@code <joint piece>-fill} at each wall end where its module ends at a joint.
+     */
+    private static GeneratedMesh fill(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece, int closed,
+          int lod, boolean square) {
+        List<Run> runs = spec.modules().get(role);
+        Run run = runs.get(Math.min(lod, runs.size() - 1));
+        List<KitOutline.Wall> joints = KitOutline.joints(square, KitOutline.links(piece) & ~closed);
+        var result = new GeneratedMesh();
+        for (var wall : piece.walls()) {
+            List<Placed> placed = new ArrayList<>();
+            if (meet(wall, true, joints).kind() == Meeting.ENDS) { placed.add(new Placed(0, run.joints().start() + "-fill", 1)); }
+            if (meet(wall, false, joints).kind() == Meeting.ENDS) {
+                placed.add(new Placed(wall.length() - run.joints().length(), run.joints().end() + "-fill", 1));
+            }
+            lay(result, placed, wall, 0, modelled, lod);
+        }
+        return piece.direction() != null ? result.clipped(KitOutline.sector(piece.direction(), KitOutline.SEAM_OVERLAP)) : result;
     }
 
     /** A dark floor facing up at {@code z} over a convex {@code polygon}. */

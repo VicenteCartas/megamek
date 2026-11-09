@@ -52,7 +52,7 @@ final class ConnectedKit {
     private static final Pattern NODE = Pattern.compile(
           ".*-(base|floor|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)(-bend|-cap|-closed-[1-9][0-9]*|-notch-[1-9][0-9]*)?");
     private static final Pattern TAG = Pattern.compile("-(link|end)-(" + DIRECTION + ")");
-    private static final Pattern JUNCTION = Pattern.compile(".*-junction-[0-9]+");
+    private static final Pattern JUNCTION = Pattern.compile(".*-(junction-[0-9]+|fill)");
     /** How far a link arm's far end may lie from its edge line (authored seams overlap the neighbour's slightly). */
     private static final float REACH_TOLERANCE = 1;
     private static final Map<File, BoardKit<Kit>> KITS = new ConcurrentHashMap<>();
@@ -99,7 +99,7 @@ final class ConnectedKit {
         // Terrain workers read kit metadata concurrently; libGDX's cached Array iterator is shared.
         for (int index = 0; index < data.nodes.size; index++) {
             var node = data.nodes.get(index);
-            // A corner piece's junction twins are placed by their corners' walls, not chosen as pieces (placements).
+            // A corner piece's junction twins and a piece's fill are placed with what they belong to, not chosen as pieces.
             if (JUNCTION.matcher(node.id).matches()) { continue; }
             require(!node.id.matches(".*\\.[0-9]{3}"), "Rename Blender's duplicate suffix: " + node.id);
             var match = NODE.matcher(node.id);
@@ -542,6 +542,8 @@ final class ConnectedKit {
             }
         }
         List<Placement> result = new ArrayList<>();
+        Set<String> ids = new HashSet<>();
+        for (int index = 0; index < source.nodes.size; index++) { ids.add(source.nodes.get(index).id); }
         Set<Long> identities = new HashSet<>();
         byRole.values().forEach(pieces -> identities.addAll(pieces.keySet()));
         // The ground connections choose the footprint. With caps it continues to the roof, while each exposed link
@@ -589,11 +591,17 @@ final class ConnectedKit {
                         result.add(new Placement(piece.node(), role, level, placement(level * GpuBuilding.LEVEL_HEIGHT
                               - ground.get(role), turn + steps), piece.node() + "@" + turn + "/" + role + "-at-" + level + "/"));
                     }
+                    // A storey another stands on takes its fill there (BayKit#fill).
+                    String fill = piece == null ? null : piece.node() + "-fill";
+                    if (holds && level < height - 1 && ids.contains(fill)) {
+                        result.add(new Placement(fill, role, level, placement(level * GpuBuilding.LEVEL_HEIGHT - ground.get(role),
+                              turn + steps), fill + "@" + turn + "/" + role + "-at-" + level + "/"));
+                    }
                     before = holds;
                 }
             }
         }
-        if (junctions != null) { placeJunctions(result, kit, source, byRole, selected, ground, junctions, steps); }
+        if (junctions != null) { placeJunctions(result, kit, ids, byRole, selected, ground, junctions, steps); }
         return List.copyOf(result);
     }
 
@@ -610,10 +618,8 @@ final class ConnectedKit {
      * Each storey's junctions at its corners but notches ({@link #junctions}): twins of the corner piece linked both
      * ways, turned to the corner in a kit that holds north only.
      */
-    private static void placeJunctions(List<Placement> result, Kit kit, RigidGlb.Data source, Map<String, Map<Long, Piece>> byRole,
+    private static void placeJunctions(List<Placement> result, Kit kit, Set<String> ids, Map<String, Map<Long, Piece>> byRole,
           List<String> selected, Map<String, Float> ground, int[] junctions, int steps) {
-        Set<String> ids = new HashSet<>();
-        for (int index = 0; index < source.nodes.size; index++) { ids.add(source.nodes.get(index).id); }
         for (int level = 0; level < selected.size() - 1; level++) {
             String role = selected.get(level);
             for (int corner = 0; corner < 6; corner++) {
