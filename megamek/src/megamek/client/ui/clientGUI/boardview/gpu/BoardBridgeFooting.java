@@ -26,6 +26,12 @@ import megamek.common.board.HexAppearance;
 record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bareExits, int solidExits, int easedExits,
       Map<Integer, BoardRoad> bankCurves) {
     static final float APRON_METRES = 7;
+    /**
+     * A built deck landing level on a natural bank that is no cliff ({@link #abutted}) stands on a concrete abutment set
+     * into the bank, whatever the drop below it. False: an abutment only where the bank's corners fall away and no cliff
+     * drops below the deck, the bank coming out under the deck's end elsewhere (BoardRelief#push).
+     */
+    static final boolean BRIDGE_CONCRETE_ABUTMENT_ON_SLOPES = false;
     /** The kit was authored for a 1.5px shoulder; only its outward reach follows the widened deck. */
     private static final float TERMINAL_WIDTH_SCALE = BoardBridge.SHOULDER / 1.5f;
 
@@ -403,8 +409,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         Map<Integer, BoardRoad> bankCurves = new HashMap<>();
         int bareExits = 0, solidExits = 0;
         for (int d = 0; d < 6; d++) {
-            float lane = ((tile.deckCorridor().sides() & 1 << d) != 0 ? BoardRoad.CORRIDOR_HALF
-                  : BoardRoad.Kind.PAVED.halfWidth) * scale, width = lane + BoardBridge.SHOULDER * scale;
+            float lane = lane(tile, d), width = lane + BoardBridge.SHOULDER * scale;
             var next = scene.tile(tile.coords().translated(d));
             if (!BoardBridge.bank(tile, next, d)) { lengths.add(0f); continue; }
             var bank = ground(scene, next, lod, surfaces, columns);
@@ -432,17 +437,44 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 continue;
             }
             float reach = BoardRelief.metres(1);
+            boolean firm = false;
             // The widened terminal blocks also need firm bank underneath. Loose rocks are not foundations.
             for (; reach < half * .9f; reach += BoardRelief.metres(.25f)) {
-                boolean supported = true;
+                firm = true;
                 for (int i = -4; i <= 4; i++) {
                     var p = new Vector3(gate).mulAdd(along, reach)
                           .mulAdd(across, (lane + block.size().x * TERMINAL_WIDTH_SCALE * scale) * i / 4);
-                    supported &= (bank.columns() || bank.relief.clearance(p.x, p.y) >= BoardRelief.metres(.5f))
+                    firm &= (bank.columns() || bank.relief.clearance(p.x, p.y) >= BoardRelief.metres(.5f))
                           && Float.isFinite(BoardSurface.sampleHeight(ground, p.x, p.y, Float.NaN));
                 }
-                if (supported) { break; }
+                if (firm) { break; }
             }
+            int edge = Math.floorMod(1 - d, 6);
+            var corner = BoardGeometry.corner(tile.coords(), level, edge);
+            var edgeVector = BoardGeometry.corner(tile.coords(), level, edge + 1).sub(corner);
+            var normal = new Vector3(-edgeVector.y, edgeVector.x, 0).nor();
+            float[] offsets = { -width, -lane, lane, width };
+            Vector3[] start = new Vector3[4], end = new Vector3[4];
+            for (int i = 0; i < offsets.length; i++) {
+                start[i] = new Vector3(gate).mulAdd(across, offsets[i]);
+                // The board lattice is slightly non-regular: use the GLB's real clipping edge at the join.
+                start[i].mulAdd(along, new Vector3(corner).sub(start[i]).dot(normal) / along.dot(normal));
+            }
+            boolean ramp = !bare && BoardRoadGrade.ground(next) != level;
+            // A level road landing on a natural bank that falls away below its edge stands on an abutment (Enhanced). Set
+            // into a bank that is no cliff (#abutted) wherever the ground falls under the deck's end; where that bank never
+            // firms up under the terminal blocks, as on a neck between cliffs, the abutment carries them. Otherwise
+            // (!BRIDGE_CONCRETE_ABUTMENT_ON_SLOPES) only where the bank's corners fall away: over a cliff's drop the cliff
+            // itself comes out under the deck's end (BoardRelief#ends).
+            float underside = gate.z - BoardBridge.SLAB * scale;
+            boolean seated = !columns && abutted(tile, next, d) && falls(List.of(ground,
+                  ground(scene, tile, lod, surfaces, columns).foundation()), underside, along, -BoardRelief.metres(.5f),
+                  start[0], start[1], new Vector3(start[1]).lerp(start[2], .5f), start[2], start[3]);
+            boolean abutment = seated || !BRIDGE_CONCRETE_ABUTMENT_ON_SLOPES && !bare && !ramp && !columns
+                  && gate.z - BoardGeometry.groundZ(tile) <= 2.5f * BoardGeometry.level()
+                  && next.surface() != BoardScene.Surface.CONCRETE
+                  && falls(List.of(ground), underside, along, BoardRelief.metres(.5f), start[0], start[3]);
+            if (seated && !firm) { reach = BoardRelief.metres(1); }
             float length = block.size().y * scale;
             // Each rail and its terminal block stop short of the bank road's carriageway beyond the deck's lane: a
             // junction's other arms and corners. A bent bank road has none, and its frame is not this straight one.
@@ -457,42 +489,34 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                     stops[i] = MathUtils.clamp(clear - length, 0, reach);
                 }
             }
-            boolean ramp = !bare && BoardRoadGrade.ground(next) != level;
             boolean concreteGrade = !bare && bank.ramps != 0 && next.surface() == BoardScene.Surface.CONCRETE;
             reach = Math.max(stops[0], stops[1]) + length;
             lengths.add(reach / scale);
             // A ramp's road climbs over the bank's inset half (BoardRoadGrade#BRIDGE_START), then runs level.
             float climb = ramp ? Math.min(1, (1 - BoardRoadGrade.BRIDGE_START) * half / reach) : 1;
-            int edge = Math.floorMod(1 - d, 6);
-            var corner = BoardGeometry.corner(tile.coords(), level, edge);
-            var edgeVector = BoardGeometry.corner(tile.coords(), level, edge + 1).sub(corner);
-            var normal = new Vector3(-edgeVector.y, edgeVector.x, 0).nor();
-            float[] offsets = { -width, -lane, lane, width };
-            Vector3[] start = new Vector3[4], end = new Vector3[4];
             for (int i = 0; i < offsets.length; i++) {
-                start[i] = new Vector3(gate).mulAdd(across, offsets[i]);
-                // The board lattice is slightly non-regular: use the GLB's real clipping edge at the join.
-                start[i].mulAdd(along, new Vector3(corner).sub(start[i]).dot(normal) / along.dot(normal));
                 end[i] = new Vector3(gate).mulAdd(along, reach).mulAdd(across, offsets[i]);
                 end[i].z = BoardSurface.sampleHeight(ground, end[i].x, end[i].y, BoardGeometry.groundZ(next))
                       + GpuRoads.SURFACE_LIFT * scale;
             }
-            // A level road landing on a natural bank that falls away below its edge stands on an abutment (Enhanced). Over
-            // a cliff's drop the cliff itself comes out under the deck's end (BoardRelief#ends): an abutment there would
-            // only show through its rock.
-            boolean cliff = gate.z - BoardGeometry.groundZ(tile) > 2.5f * BoardGeometry.level();
-            boolean abutment = !bare && !ramp && !columns && !cliff && next.surface() != BoardScene.Surface.CONCRETE
-                  && falls(ground, start, along, gate.z - BoardBridge.SLAB * scale);
             float bottom = Float.NaN;
             if (ramp || abutment) {
-                var below = ground(scene, tile, lod, surfaces, columns);
-                bottom = (float) below.groundFaces().stream()
+                // One set into the bank stands in the lowest ground round the deck's end: the bank's and that beside it.
+                List<BoardScene.Tile> under = new ArrayList<>(List.of(tile));
+                if (seated) {
+                    under.add(next);
+                    for (int turn : new int[] { 1, 5 }) {
+                        var beside = scene.tile(tile.coords().translated((d + turn) % 6));
+                        if (beside != null) { under.add(beside); }
+                    }
+                }
+                bottom = (float) under.stream().flatMap(hex -> ground(scene, hex, lod, surfaces, columns).groundFaces().stream())
                       .mapToDouble(f -> Math.min(f.a().z, Math.min(f.b().z, f.c().z))).min().orElse(BoardGeometry.groundZ(tile))
                       - BoardRelief.metres(.05f);
             }
             if (abutment) {
                 // From the slab down past the bank over the whole landing, its face a hair out under the deck: the bank
-                // runs on under the deck to its face and along its sides, and the road's own fill stays inside it.
+                // stands on the edge behind it and flush beside it (BoardRelief#room), and the road's own fill stays inside.
                 var out = new Vector3(along).scl(-BoardRelief.metres(.1f));
                 support(faces, List.of(new Vector3(start[0]).add(out), end[0], end[3], new Vector3(start[3]).add(out)),
                       bottom, -BoardBridge.SLAB * scale);
@@ -675,11 +699,46 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         else { quad(faces, d, c, b, a, BoardBridge.Part.STRUCTURE); }
     }
 
-    /** Whether the bank ({@code ground}) lies below {@code underside} just inside either outer corner of the gate's row. */
-    private static boolean falls(List<BoardSurface.Face> ground, Vector3[] start, Vector3 along, float underside) {
-        for (var corner : new Vector3[] { start[0], start[3] }) {
-            var p = new Vector3(corner).mulAdd(along, BoardRelief.metres(.5f));
-            if (!(BoardSurface.sampleHeight(ground, p.x, p.y, Float.NaN) >= underside)) { return true; }
+    /** Half the carriageway of the tile's deck toward {@code d}, world units: a road and rail corridor's or a road's. */
+    private static float lane(BoardScene.Tile tile, int d) {
+        return ((tile.deckCorridor().sides() & 1 << d) != 0 ? BoardRoad.CORRIDOR_HALF : BoardRoad.Kind.PAVED.halfWidth)
+              * BoardGeometry.hexScale();
+    }
+
+    /** Half the width of the abutment under the tile's deck end toward {@code d} ({@link #abutted}), world units. */
+    static float abutmentHalfWidth(BoardScene.Tile tile, int d) {
+        return lane(tile, d) + BoardBridge.SHOULDER * BoardGeometry.hexScale();
+    }
+
+    /**
+     * Whether the tile's built deck lands toward {@code d} level on its natural bank {@code next}, by its road, where the
+     * bank falls to the deck's hex as no cliff: at most two levels above its surface and no cliff-top side
+     * ({@link BoardRim#high}), and at most three down to its ground or bed ({@link BoardRelief#levels}); a bank a level
+     * above water two deep is no cliff, a sea cliff is. The deck's end stands on a concrete abutment wherever the ground
+     * falls away below it, and the bank's step keeps its place round it rather than coming out under the deck's end
+     * (BoardRelief#push). A cliff stays natural rock. Never without {@link #BRIDGE_CONCRETE_ABUTMENT_ON_SLOPES}. Scene
+     * data only.
+     */
+    static boolean abutted(BoardScene.Tile tile, BoardScene.Tile next, int d) {
+        return BRIDGE_CONCRETE_ABUTMENT_ON_SLOPES
+              && BoardBridge.bank(tile, next, d) && BoardBridge.road(tile, next, d) && !BoardBridge.guideway(tile)
+              && BoardBridge.family(tile) != BoardBridge.Family.NATURAL && next.surface() != BoardScene.Surface.CONCRETE
+              && BoardRoadGrade.ground(next) == tile.elevation() + BoardBridge.feature(tile).elevation()
+              && !BoardRim.high(next, (d + 3) % 6, next.groundLevel() - tile.groundLevel())
+              && BoardRelief.levels(next, tile) <= 3;
+    }
+
+    /**
+     * Whether the highest of the {@code grounds} lies below {@code underside}, or is missing, at any of these points of
+     * the gate's row moved {@code reach} along {@code along} (into the bank; negative: out under the deck's end).
+     */
+    private static boolean falls(List<List<BoardSurface.Face>> grounds, float underside, Vector3 along, float reach,
+          Vector3... points) {
+        for (var point : points) {
+            var p = new Vector3(point).mulAdd(along, reach);
+            float height = Float.NEGATIVE_INFINITY;
+            for (var ground : grounds) { height = Math.max(height, BoardSurface.sampleHeight(ground, p.x, p.y, height)); }
+            if (height < underside) { return true; }
         }
         return false;
     }
@@ -769,8 +828,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         var corner = BoardGeometry.corner(tile.coords(), 0, edge);
         var edgeVector = BoardGeometry.corner(tile.coords(), 0, edge + 1).sub(corner);
         var normal = new Vector3(-edgeVector.y, edgeVector.x, 0).nor();
-        float lane = ((tile.deckCorridor().sides() & 1 << direction) != 0 ? BoardRoad.CORRIDOR_HALF
-              : BoardRoad.Kind.PAVED.halfWidth) * scale, width = lane + BoardBridge.SHOULDER * scale;
+        float lane = lane(tile, direction), width = lane + BoardBridge.SHOULDER * scale;
         float[] offsets = { -width, -lane, lane, width };
         Vector3[] top = new Vector3[4], base = new Vector3[4], end = new Vector3[4];
         var inner = new Vector3(center).lerp(corner, .5f);

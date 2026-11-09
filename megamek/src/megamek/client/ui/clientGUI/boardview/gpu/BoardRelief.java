@@ -245,10 +245,11 @@ final class BoardRelief {
 
     /**
      * One hex as the sculpt sees it. A water hex's family is the ground of the land around it (see
-     * {@link #waterFamily}).
+     * {@link #waterFamily}). {@code abutments}: the sides whose bank this hex's built deck lands on, on an abutment
+     * ({@link BoardBridgeFooting#abutted}), the widest {@code abutment} half wide.
      */
     record Site(Coords coords, int level, boolean sculpted, boolean detailed, int family, boolean ultraSublevel, boolean liquid, boolean molten,
-          int depth, boolean road, int ramps, int cliffTopExits, int deckRoads, int ix, int iy) {
+          int depth, boolean road, int ramps, int cliffTopExits, int deckRoads, int abutments, float abutment, int ix, int iy) {
         float x() { return cornerX(ix); }
 
         float y() { return cornerY(iy); }
@@ -355,9 +356,18 @@ final class BoardRelief {
                 if (BoardBridge.road(tile, scene.tile(tile.coords().translated(d)), d)) { deckRoads |= 1 << d; }
             }
         }
+        int abutments = 0;
+        float abutment = 0;
+        for (int d = 0; BoardBridge.feature(tile) != null && d < 6; d++) {
+            var next = scene.tile(tile.coords().translated(d));
+            if (next != null && BoardBridgeFooting.abutted(tile, next, d)) {
+                abutments |= 1 << d;
+                abutment = Math.max(abutment, BoardBridgeFooting.abutmentHalfWidth(tile, d));
+            }
+        }
         return new Site(tile.coords(), tile.groundLevel(), shaped, shaped && tile.detailedGround(), family.ordinal(),
-              tile.ultraSublevel(), liquid, tile.liquid().molten(), liquid ? Math.max(0, tile.waterDepth()) : 0, road,
-              liquid ? 0 : ramps, tile.cliffTopExits(), deckRoads, centerIx(tile.coords()), centerIy(tile.coords()));
+              tile.ultraSublevel(), liquid, tile.liquid().molten(), depth(tile), road, liquid ? 0 : ramps,
+              tile.cliffTopExits(), deckRoads, abutments, abutment, centerIx(tile.coords()), centerIy(tile.coords()));
     }
 
     /**
@@ -1771,9 +1781,9 @@ final class BoardRelief {
         });
     }
 
-    /** Whether the road of an edge's upper hex ends on this edge's step (#ends). */
+    /** Whether the road of an edge's upper hex ends on this edge's step (#ends), with no abutment holding it. */
     private boolean endsOn(Edge edge) {
-        if (edge.upper == null || edge.lower == null || !edge.upper.road()) { return false; }
+        if (edge.upper == null || edge.lower == null || !edge.upper.road() || abutted(edge.upper, edge.lower)) { return false; }
         for (int d = 0; d < 6; d++) {
             if ((scene.tile(edge.upper.coords()).wayExits() & 1 << d) != 0
                   && edge.upper.coords().translated(d).equals(edge.lower.coords())) { return ends(edge.upper, edge.lower, d); }
@@ -1898,6 +1908,21 @@ final class BoardRelief {
 
     /** Metres a bank's rim stays behind the high end of a deck's ramp. */
     private static final float BAY_MARGIN = .75f;
+
+    /**
+     * The share of a step's outward relief kept at {@code t} along its edge: none across the face of the abutment of a
+     * deck landing on it, so the earth stays behind the concrete there; all of it beside, where the rock stands out over
+     * the concrete's edges as it would round anything set into it (#abutted).
+     */
+    private static float held(Edge edge, float t) {
+        if (!abutted(edge.upper, edge.lower)) { return 1; }
+        return smooth((Math.abs(t - .5f) * edge.length - edge.lower.abutment()) / BoardGeometry.hexScale() + .5f);
+    }
+
+    /** Whether the built deck in {@code deck} lands on {@code bank} on an abutment ({@link BoardBridgeFooting#abutted}). */
+    private static boolean abutted(Site bank, Site deck) {
+        return bank != null && deck != null && (deck.abutments() & 1 << deck.coords().direction(bank.coords())) != 0;
+    }
 
     /** Half the width of a deck's passage over this edge: the stretch of its bank the deck's ramp needs cleared. */
     private float deckLane(Site water, Site road) {
@@ -2264,8 +2289,22 @@ final class BoardRelief {
                 float gy = road.distance(bx, by + .25f) - road.distance(bx, by - .25f);
                 // A road carried on by a bridge's deck past these corners ends on the step's top: the step comes out
                 // under the deck's end, straight across the edge or away from the road's hex at a corner, as a
-                // natural pillar or bank under an abutment.
+                // natural pillar or bank. Where a built deck lands level, its abutment holds the bank instead: the step it
+                // lands on keeps its place (BoardBridgeFooting#abutted), its corners recede from the road as any corner
+                // does, and the steps beside still come out under the road's sides.
                 boolean landing = landing(site, ends);
+                if (landing && across && abutted(edge.upper, edge.lower)) { continue; }
+                if (landing && !across && landing(site, ends, true)) {
+                    // Only along the abutment's face, never out in front of it: the concrete's side stays clear.
+                    landing = false;
+                    for (Site deck : end.around) {
+                        if (!abutted(site, deck)) { continue; }
+                        float dx = deck.x() - site.x(), dy = deck.y() - site.y(), between = (float) Math.hypot(dx, dy);
+                        float out = Math.max(0, (gx * dx + gy * dy) / between);
+                        gx -= out * dx / between;
+                        gy -= out * dy / between;
+                    }
+                }
                 if (landing && !across) {
                     gx = px - site.x();
                     gy = py - site.y();
@@ -2365,7 +2404,13 @@ final class BoardRelief {
     }
 
     /** Whether a site's road ends on the step's top towards a hex around these corners (see {@link #ends}). */
-    private boolean landing(Site site, Corner[] ends) {
+    private boolean landing(Site site, Corner[] ends) { return landing(site, ends, false); }
+
+    /**
+     * Whether a site's road ends on the step's top towards a hex around these corners; with {@code abutted}, onto a
+     * built deck's level end, which stands on an abutment ({@link BoardBridgeFooting#abutted}).
+     */
+    private boolean landing(Site site, Corner[] ends, boolean abutted) {
         int exits = scene.tile(site.coords()).wayExits();
         for (Corner end : ends) {
             // The board ends at its edge: no road ends on a step there.
@@ -2374,7 +2419,7 @@ final class BoardRelief {
                 if (other == null || other.coords().equals(site.coords())) { continue; }
                 for (int d = 0; d < 6; d++) {
                     if ((exits & 1 << d) != 0 && site.coords().translated(d).equals(other.coords())
-                          && ends(site, other, d)) {
+                          && (abutted ? abutted(site, other) : ends(site, other, d))) {
                         return true;
                     }
                 }
@@ -2494,6 +2539,7 @@ final class BoardRelief {
             float fx = px + bx, fy = py + by;
             d = profile(fx, fy, z, edge.bottom(), edge.top(), edge.drop, edge.upper.family(), edge.footPinned,
                   edge.rimPinned, edge.room > 0);
+            if (d > 0) { d *= held(edge, t); }
         }
         // A corner's relief slides the edges through it along themselves too. A band can shorten the available edge,
         // so its relief needs a longer fade to keep adjacent columns from reversing into a thin folded strip.
@@ -2696,12 +2742,28 @@ final class BoardRelief {
      * profile and rock material. The actual rim and foot heights still come from the two sites' levels.
      */
     private static float drop(Site upper, Site lower) {
-        int levels = upper.level() - lower.level() + lower.depth();
-        if (upper.level() > lower.level() && upper.cliffTopExits() != 0
-              && (upper.cliffTopExits() & (1 << upper.coords().direction(lower.coords()))) != 0) {
+        return levels(upper.level(), lower.level(), lower.depth(), upper.cliffTopExits(), upper.coords(), lower.coords())
+              * BoardGeometry.level();
+    }
+
+    /** {@link #drop} in levels: the two hexes' levels, the lower one's water depth and the upper one's cliff-top sides. */
+    private static int levels(int upper, int lower, int depth, int cliffTopExits, Coords from, Coords to) {
+        int levels = upper - lower + depth;
+        if (upper > lower && cliffTopExits != 0 && (cliffTopExits & (1 << from.direction(to))) != 0) {
             levels = Math.max(3, levels);
         }
-        return levels * BoardGeometry.level();
+        return levels;
+    }
+
+    /** {@link #drop} in levels from {@code upper} down to the next hex {@code lower}: to its ground, or its bed under water. */
+    static int levels(BoardScene.Tile upper, BoardScene.Tile lower) {
+        return levels(upper.groundLevel(), lower.groundLevel(), depth(lower), upper.cliffTopExits(), upper.coords(),
+              lower.coords());
+    }
+
+    /** A hex's water depth for its landforms: its bed lies that many levels below its surface. */
+    private static int depth(BoardScene.Tile tile) {
+        return tile.liquid().present() ? Math.max(0, tile.waterDepth()) : 0;
     }
 
     /** 0 for drops up to two levels, 1 from three levels: the user-visible prominence of rim formations. */
@@ -2714,7 +2776,8 @@ final class BoardRelief {
      * only between detailed grounds, water among them. Special artwork, buildings and roads keep their outline
      * on the hex edge, natural ground carrying a road down onto a concrete one sloping down onto it there (a cliff beside
      * stands at the paving's edge); water keeps its own where
-     * {@link #band} says. Pits have no ground to carry a talus apron.
+     * {@link #band} says. Pits have no ground to carry a talus apron. A bank a built deck lands on stands on its edge,
+     * flush with the deck's abutment set into it (#abutted, #held).
      * Dry cliffs need less transition width than gentle slopes, leaving more of their plateau and ridge connections.
      */
     private static float room(Site upper, Site lower) {
@@ -2724,7 +2787,7 @@ final class BoardRelief {
               && !upper.fixedRoad() && !(lower.fixedRoad() && (upper.family() == CONCRETE || !upper.road()))
               && !upper.ultraSublevel() && !lower.ultraSublevel()
               && !(upper.family() == CONCRETE && wall(upper, lower))
-              && !wetCliff(upper, lower) && !canal(upper, lower)
+              && !wetCliff(upper, lower) && !canal(upper, lower) && !abutted(upper, lower)
               ? stepRoom() : 0;
         if (width > 0 && BoardGeometry.tuning().padding() == 0 && !upper.fixedOutline() && !lower.fixedOutline()) {
             // Keep the existing cliff relief and shared corners; reduce only the room spent on its inset and apron.
