@@ -225,6 +225,8 @@ class GpuBattleView extends ApplicationAdapter {
     /** The presentation settings the board reads; the HUD's developer tuning panel edits them. */
     private GpuBoardTuning tuning;
     private BoardScene scene;
+    /** The live scene's tiles, which the played events lead to: a falling hex's labels come from them (GpuHexText). */
+    private List<BoardScene.Tile> comingTiles = List.of();
     private GpuHexText hexText;
     private GpuHexGrid hexGrid;
     private GpuBoardPrint boardPrint;
@@ -782,6 +784,7 @@ class GpuBattleView extends ApplicationAdapter {
             editorTiles = frame.scene().tiles();
         }
         scene = history.live(scene);
+        comingTiles = scene.tiles();
         // Apply HUD state independently of camera framing; panels overlay the full board viewport.
         if (ui instanceof GpuHud hud) { hud.updateState(frame, playbackBusy(), dialog()); }
         playback.gravityOverride = tuning.gravityOverride();
@@ -2767,7 +2770,7 @@ class GpuBattleView extends ApplicationAdapter {
         var overlays = source.uiPreferences().overlays();
         hexText.update(scene, theme.skin.getFont("default-font"), theme.skin.getFont(GpuBoardSkin.OUTLINE_FONT),
               terrain::roofBounds, boardCamera.tactical(), overlays.hexTypes(),
-              overlays.hexLabelOutline() || wireframeView, terrain::fallTaken, terrain.fallsRevision());
+              overlays.hexLabelOutline() || wireframeView, terrain::fallTaken, terrain.fallsRevision(), comingTiles);
         hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(), 0,
               atmosphere, wireframeView);
     }

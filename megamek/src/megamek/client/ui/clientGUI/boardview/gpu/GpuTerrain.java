@@ -2199,6 +2199,19 @@ final class GpuTerrain implements Disposable {
 
         /** The falls' revision its prop snapshot left out the falling structures at (GpuTerrain#refall). */
         int fallsRevision = -1;
+        /** Its props by hex, in their order, gathered on first use (#propsAt). */
+        private Map<Coords, List<Prop>> propsByHex;
+
+        /** The props standing on a hex of a game's board, where they keep their hexes; an editor's moves them. */
+        List<Prop> propsAt(Coords coords) {
+            if (propsByHex == null) {
+                propsByHex = new HashMap<>();
+                for (Prop prop : props) {
+                    propsByHex.computeIfAbsent(prop.coords(), at -> new ArrayList<>(2)).add(prop);
+                }
+            }
+            return propsByHex.getOrDefault(coords, List.of());
+        }
 
         /** Caches the props for drawing and shadows; the kit structures at {@code falling} hexes fall as pieces instead. */
         void cacheProps(Predicate<Coords> falling) {
@@ -7223,7 +7236,9 @@ final class GpuTerrain implements Disposable {
         }
         var tile = chunks.get(index).tileMeshes.get(coords);
         if (tile != null && tile.bridgeShape != null) { result = new BoundingBox(tile.bridgeShape.bounds()); }
-        for (Prop prop : chunks.get(index).props) {
+        // The hex labels ask for every labelled roof of the board at each change: a walk of the chunk's every prop for
+        // each took up to 18 ms on a city.
+        for (Prop prop : editable ? chunks.get(index).props : chunks.get(index).propsAt(coords)) {
             if (prop.coords().equals(coords) && tile != null && tile.bridgeShape != null) {
                 result.ext(prop.bounds());
             } else if (prop.coords().equals(coords)
