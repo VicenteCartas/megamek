@@ -429,7 +429,8 @@ final class GpuAttackEffects implements Disposable {
 
     /** A packet-confirmed scheduled strike has no unit flight, but shares normal nuclear flash, blast and scorch. */
     void detonate(megamek.common.NuclearDetonation event) {
-        artilleryBlasts.detonateNuclear(BoardGeometry.center(event.coords(), event.elevation()), event.stats(), event.id().hashCode());
+        artilleryBlasts.detonateNuclear(BoardGeometry.center(event.coords(), event.elevation()), event.stats(),
+              event.id().hashCode(), event.orbital());
     }
 
     /** Each nuclear blast's scorch over its blast area, once, as it goes off. */

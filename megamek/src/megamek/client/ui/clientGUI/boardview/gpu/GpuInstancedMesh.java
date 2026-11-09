@@ -25,10 +25,12 @@ final class GpuInstancedMesh extends Mesh {
      */
     boolean mirrored;
     /**
-     * A debris batch's piece (GpuDestruction): the centre and half size of its node's box in the model's frame, about
-     * which every instance's piece turns as it falls; null for every other batch.
+     * What moves the batch's instances (tree-instances.glsl): for a kit's falling pieces (GpuDestruction) the centre and
+     * half size of their node's box in the model's frame, about which each turns, then {@link #PIECES}; for trees zeros,
+     * then {@link #FELLED} or {@link #STANDING}. Null for every other batch, which nothing moves.
      */
     float[] piece;
+    static final float PIECES = 1, FELLED = 2, STANDING = 3;
 
     GpuInstancedMesh(int vertices, int indices, VertexAttributes attributes) {
         super(true, vertices, indices, attributes);

@@ -290,13 +290,14 @@ final class GpuBoardSource implements BoardSource {
                             var consequences = nuclearCapture.consequences();
                             nuclearCapture = null;
                             recordBlast(result, before.scene());
-                            var falls = strikeCollapses(result, before.scene(),
-                                  before.boardGeneration() == next.boardGeneration() ? next.scene() : null);
+                            var after = before.boardGeneration() == next.boardGeneration() ? next.scene() : null;
+                            var falls = strikeCollapses(result, before.scene(), after);
+                            var felled = strikeFelled(result, before.scene(), after);
                             Set<Integer> concealed = consequences.stream().filter(BoardScene.Concealed.class::isInstance)
                                   .map(BoardScene.Animation::entityId).collect(Collectors.toSet());
                             consequences.stream().filter(BoardScene.Concealed.class::isInstance)
                                   .forEach(GpuBoardSource.this::queueAnimation);
-                            queueAnimation(new BoardScene.Detonation(result, falls));
+                            queueAnimation(new BoardScene.Detonation(result, falls, felled));
                             queueAnimation(new BoardScene.SceneUpdate(next.scene()));
                             consequences.stream().filter(action -> !(action instanceof BoardScene.Concealed)
                                   && !concealed.contains(action.entityId())
@@ -723,6 +724,28 @@ final class GpuBoardSource implements BoardSource {
             }
         }
         return List.copyOf(falls.values());
+    }
+
+    /**
+     * The trees a strike fells in its blast area: each hex's tree features of {@code before} that stand nowhere in its
+     * checkpoint ({@code after}, null on another board, where none are known), where the rules took its woods down.
+     */
+    private static List<BoardScene.Detonation.Felled> strikeFelled(megamek.common.NuclearDetonation strike,
+          BoardScene before, BoardScene after) {
+        if (after == null || strike.degradation() < 1) { return List.of(); }
+        int reach = strike.baseDamage() / strike.degradation();
+        List<BoardScene.Detonation.Felled> result = new ArrayList<>();
+        for (var tile : before.tiles()) {
+            if (strike.coords().distance(tile.coords()) > reach) { continue; }
+            var next = after.tile(tile.coords());
+            List<BoardScene.Feature> felled = tile.features().stream()
+                  .filter(tree -> tree.kind() == BoardScene.FeatureKind.TREE && (next == null || next.features().stream()
+                        .noneMatch(kept -> kept.kind() == BoardScene.FeatureKind.TREE && Math.abs(kept.x() - tree.x()) < 1e-3f
+                              && Math.abs(kept.y() - tree.y()) < 1e-3f)))
+                  .toList();
+            if (!felled.isEmpty()) { result.add(new BoardScene.Detonation.Felled(tile.coords(), felled)); }
+        }
+        return result;
     }
 
     /** The damage the rules give a physical attack, 0 for one that deals none to a structure or cannot be read. */

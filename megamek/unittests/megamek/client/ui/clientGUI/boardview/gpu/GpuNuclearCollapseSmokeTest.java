@@ -41,8 +41,10 @@ import megamek.common.interfaces.IEntityRemovalConditions;
 import megamek.common.units.Terrains;
 import megamek.server.Server;
 import megamek.server.totalWarfare.TWGameManager;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * An Alamo strike on the dense 48x48 city board as its client gets it: the real server resolves it
@@ -56,14 +58,25 @@ import org.junit.jupiter.api.Test;
 class GpuNuclearCollapseSmokeTest {
     private static final float FRAME = 1 / 60f;
     private static final File BOARD = new File("data/boards/unofficial/VictorMorson/48x48.board");
-    /** Frames after the flash the review captures: .1, .2, .4, .8, 1.6 and 3 playback seconds at 1x. */
-    private static final int[] CAPTURES = { 12, 24, 48, 96, 192, 360 };
+    /**
+     * Frames after the flash the review captures: through the front every .05 playback seconds at 1x up to .2, then at
+     * .3, .4, .6, .8, 1.6 and 3.
+     */
+    private static final int[] CAPTURES = { 6, 12, 18, 24, 36, 48, 72, 96, 192, 360 };
     /** Playback seconds a frame at 1x. */
     private static final float PLAYBACK_FRAME = (float) (FRAME * UnitMotion.Speed.NORMAL.rate);
 
-    @Test
-    void aStrikeOnACityFallsWithItsFront() throws Exception {
-        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "nuclear-collapse");
+    /**
+     * An Alamo, or a Game Master's orbital bombardment of 1,000,000 damage over 10 hexes; megamek.gpu.strikes
+     * (comma-separated: nuclear, orbital) picks them, else both.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = { "nuclear", "orbital" })
+    void aStrikeOnACityFallsWithItsFront(String kind) throws Exception {
+        String chosen = System.getProperty("megamek.gpu.strikes", "");
+        Assumptions.assumeTrue(chosen.isBlank() || List.of(chosen.split(",")).contains(kind));
+        boolean orbital = kind.equals("orbital");
+        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), kind + "-collapse");
         Files.createDirectories(output.toPath());
         Board before = board();
         Coords groundZero = densest(before);
@@ -71,7 +84,12 @@ class GpuNuclearCollapseSmokeTest {
         server.getGame().setBoard(board());
         server.getGame().addPlayer(0, new Player(0, "Nuclear review"));
         server.getGame().initializeRulesManager(OptionsConstants.RULES_CORE);
-        server.addScheduledNuke(new int[] { groundZero.getX(), groundZero.getY(), 2 });
+        if (orbital) {
+            server.addScheduledOrbitalBombardment(new megamek.server.props.OrbitalBombardment.Builder()
+                  .x(groundZero.getX()).y(groundZero.getY()).radius(10).damage(1_000_000).build());
+        } else {
+            server.addScheduledNuke(new int[] { groundZero.getX(), groundZero.getY(), 2 });
+        }
         Map<BoardLocation, megamek.common.Hex> strike, phaseEnd;
         // The rules' packets go through the server's animation capture, which names on the strike's completion what it
         // brought down; only the transport records them.
@@ -83,7 +101,7 @@ class GpuNuclearCollapseSmokeTest {
         });
         try (var servers = mockStatic(Server.class)) {
             servers.when(Server::getServerInstance).thenReturn(transport);
-            call(server, "resolveScheduledNukes");
+            call(server, orbital ? "resolveScheduledOrbitalBombardments" : "resolveScheduledNukes");
             strike = server.updates();
             call(server, "applyBuildingDamage");
             phaseEnd = server.updates();
@@ -119,10 +137,25 @@ class GpuNuclearCollapseSmokeTest {
                 /** This frame's stages as they began (renderStage), and the slowest wave frame's, in ms a stage. */
                 private final List<String> stageNames = new ArrayList<>();
                 private final List<Long> stageTimes = new ArrayList<>();
-                private String slowest = "";
+                private String slowest = "", takeStages = "";
                 private double slowestMs;
                 /** Programs linked after loading: at the flash, before this frame, and over the wave. */
                 private int linksAtFlash = -1, linksBefore;
+                /** The most hexes whose trees were felled at once. */
+                private int felledHexes;
+
+                /** This frame's programs linked and each stage over 2 ms: its time to the next, the last to the frame's end. */
+                private String stages(long now, int links) {
+                    StringBuilder result = new StringBuilder((links - linksBefore) + " programs linked in it:");
+                    long from = last;
+                    String name = "before the first stage";
+                    for (int index = 0; index <= stageNames.size(); index++) {
+                        long to = index < stageTimes.size() ? stageTimes.get(index) : now;
+                        if (to - from > 2_000_000L) { result.append(' ').append(name).append(' ').append((to - from) / 1_000_000L); }
+                        if (index < stageNames.size()) { name = stageNames.get(index); from = to; }
+                    }
+                    return result.toString();
+                }
 
                 @Override
                 void renderStage(String name) {
@@ -185,7 +218,8 @@ class GpuNuclearCollapseSmokeTest {
                             var playback = (UnitPlayback) field(this, "playback");
                             System.out.println("t=" + seconds + "s frames=" + frames + " blasts=" + effects.artilleryBlastCount()
                                   + " taken=" + falls.stream().filter(terrain::fallTaken).count() + " started="
-                                  + starts.size() + "/" + falls.size() + " terrainBusy=" + GpuBoardTestUi.busy(this)
+                                  + starts.size() + "/" + falls.size() + " felled=" + terrain.felledHexes()
+                                  + " terrainBusy=" + GpuBoardTestUi.busy(this)
                                   + " transition=" + (playback.transition() == null ? "none"
                                         : playback.transition().collapses().size() + " collapses"));
                             if (seconds % 20 < 5) { capture(output, "t" + seconds); }
@@ -195,26 +229,18 @@ class GpuNuclearCollapseSmokeTest {
                             // The flash: the frame that took the city from its chunks.
                             contact = frames;
                             takeMs = ms;
+                            takeStages = stages(now, links);
                             linksAtFlash = links;
                         }
                         for (Coords at : falls) {
                             if (!starts.containsKey(at) && terrain.fallStarted(at)) { starts.put(at, frames); }
                         }
+                        felledHexes = Math.max(felledHexes, terrain.felledHexes());
                         if (contact >= 0 && frames > contact && frames - contact <= CAPTURES[CAPTURES.length - 1]) {
                             waveMs.add(ms);
                             if (ms > slowestMs) {
                                 slowestMs = ms;
-                                // Each stage's time to the next, the last to the frame's end (glFinish included).
-                                StringBuilder stages = new StringBuilder("frame " + (frames - contact) + " after the flash, "
-                                      + (links - linksBefore) + " programs linked in it:");
-                                long from = last;
-                                String name = "before the first stage";
-                                for (int index = 0; index <= stageNames.size(); index++) {
-                                    long to = index < stageTimes.size() ? stageTimes.get(index) : now;
-                                    if (to - from > 2_000_000L) { stages.append(' ').append(name).append(' ').append((to - from) / 1_000_000L); }
-                                    if (index < stageNames.size()) { name = stageNames.get(index); from = to; }
-                                }
-                                slowest = stages.toString();
+                                slowest = "frame " + (frames - contact) + " after the flash, " + stages(now, links);
                             }
                         }
                         for (int index = 0; contact >= 0 && index < CAPTURES.length; index++) {
@@ -222,7 +248,7 @@ class GpuNuclearCollapseSmokeTest {
                         }
                         if (contact >= 0 && frames - contact > CAPTURES[CAPTURES.length - 1]
                               && falls.stream().noneMatch(terrain::fallTaken) && !GpuBoardTestUi.busy(this)) {
-                            capture(output, "9-after");
+                            capture(output, "after");
                             summarize();
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                             Gdx.app.exit();
@@ -263,8 +289,10 @@ class GpuNuclearCollapseSmokeTest {
                     report.add("frames off the front: median " + percentile(lateness, .5) + ", p95 " + percentile(lateness, .95)
                           + ", max " + percentile(lateness, 1));
                     report.add("frame ms through the wave: median " + percentile(sorted, .5) + ", p95 " + percentile(sorted, .95)
-                          + ", max " + percentile(sorted, 1) + "; the frame that took the city: " + Math.round(takeMs) + " ms");
+                          + ", max " + percentile(sorted, 1) + "; the frame that took the city: " + Math.round(takeMs) + " ms, "
+                          + takeStages);
                     report.add("the slowest wave frame's stages over 2 ms: " + slowest);
+                    report.add("hexes whose trees the strike felled: " + felledHexes);
                     report.add("programs linked from the flash on: "
                           + (GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading() - linksAtFlash));
                 }

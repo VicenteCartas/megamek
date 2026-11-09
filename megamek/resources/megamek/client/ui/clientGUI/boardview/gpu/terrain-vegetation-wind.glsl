@@ -1,4 +1,5 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
+// SHOCKS
 uniform vec3 u_wind;
 uniform float u_worldMetre;
 uniform float u_vegetationPhase;

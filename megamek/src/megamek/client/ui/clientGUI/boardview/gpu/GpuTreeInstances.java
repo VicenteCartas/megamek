@@ -89,6 +89,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
 
         Batch(Model model) {
             mesh = new GpuInstancedMesh(model.meshes.first());
+            // A stand's trees sway in a blast's wind; a felled stand's fall (tree-instances.glsl).
+            mesh.piece = new float[] { 0, 0, 0, 0, 0, 0, felled ? GpuInstancedMesh.FELLED : GpuInstancedMesh.STANDING };
             stride = STRIDE;
             mesh.enableInstancedRendering(false, capacity, attributes(false));
             forEachPart(model.nodes, part -> {
@@ -240,13 +242,16 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
          * A tree's transform is a translation, a turn about z and a scale that is equal along x and y; {@code diameter}
          * is its bounds' diagonal in world units, against which its detail level is chosen.
          */
-        void add(String species, Matrix4 transform, float diameter) {
+        void add(String species, Matrix4 transform, float diameter) { add(species, transform, diameter, 0); }
+
+        /** A felled tree ({@link GpuDestruction}), whose instance names its hex's slot + 1 ({@code owner}). */
+        void add(String species, Matrix4 transform, float diameter, int owner) {
             FloatArray sizes = diameters.computeIfAbsent(species, key -> new FloatArray());
             int at = sizes.size;
             while (at > 0 && sizes.get(at - 1) < diameter) { at--; }
             sizes.insert(at, diameter);
             FloatArray tree = new FloatArray(STRIDE);
-            append(tree, transform, 0);
+            append(tree, transform, owner);
             FloatArray placed = trees.computeIfAbsent(species, key -> new FloatArray());
             placed.insertRange(at * STRIDE, STRIDE);
             System.arraycopy(tree.items, 0, placed.items, at * STRIDE, STRIDE);
@@ -440,6 +445,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     private final BiFunction<String, Integer, Model> models;
+    /** Whether its trees are felled ones (GpuDestruction), whose instances name their slots instead of a dissolve. */
+    private final boolean felled;
     private final Map<String, Species[]> species = new HashMap<>();
     private final List<Species> stands = new ArrayList<>();
     /** A part's batch key: mirror images draw in their own batch, whose front face is flipped. */
@@ -452,8 +459,12 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     private long uploads;
 
     /** models: loads a tree model, already marked for the foliage shader, by asset name. */
-    GpuTreeInstances(BiFunction<String, Integer, Model> models) {
+    GpuTreeInstances(BiFunction<String, Integer, Model> models) { this(models, false); }
+
+    /** With {@code felled} its trees fall (GpuDestruction): their stands never dissolve between levels. */
+    GpuTreeInstances(BiFunction<String, Integer, Model> models, boolean felled) {
         this.models = models;
+        this.felled = felled;
     }
 
     /** Starts gathering one pass's trees and building parts. */
@@ -563,7 +574,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             if (placed.pieces.get(i) && batch.mesh.piece == null) {
                 var part = placed.samples.get(i).meshPart;
                 batch.mesh.piece = new float[] { part.center.x, part.center.y, part.center.z,
-                      part.halfExtents.x, part.halfExtents.y, part.halfExtents.z };
+                      part.halfExtents.x, part.halfExtents.y, part.halfExtents.z, GpuInstancedMesh.PIECES };
             }
             batch.data.addAll(placed.data.get(i));
         }
@@ -647,7 +658,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 float[] piece = piece(renderable);
-                if (piece == null) { target.set(id, 0f, 0f, 0f, 0f); } else { target.set(id, piece[0], piece[1], piece[2], 1f); }
+                if (piece == null) { target.set(id, 0f, 0f, 0f, 0f); } else { target.set(id, piece[0], piece[1], piece[2], piece[6]); }
             }
         });
         shader.register("u_pieceHalf", new BaseShader.LocalSetter() {
@@ -734,7 +745,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         source = insert(source, "vec4 pos = u_worldTrans * vec4(a_position, 1.0);",
               "fallBegin();\n#ifdef impostorFlag\nvec4 pos = vec4(impostorPosition(a_position), 1.0);\n#else\n"
                     + "vec4 pos = vec4(instancePosition(a_position), 1.0);\n#endif\n"
-                    + "#ifdef treeDissolveFlag\nv_treeDissolve = a_instance1.w;\n#endif\n");
+                    + "#ifdef treeDissolveFlag\nv_treeDissolve = instanceDissolve();\n#endif\n");
         // A recolourable model's placement passes its colours in the instance data instead of the uniform.
         source = insert(source, "slotColour(a_color.rgb, a_colourSlot, u_slotColours)", "slotColour(a_color.rgb, a_colourSlot, a_instance2)");
         // An impostor's quad stands where it shows, at the depth of its plant's front (tree-instances.glsl).

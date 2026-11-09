@@ -20,7 +20,7 @@ class GpuDestructionTest {
     private static final float FRAME = 1 / 30f;
 
     private static GpuDestruction taken() {
-        var destruction = new GpuDestruction(new GpuLavaLighting(null));
+        var destruction = new GpuDestruction(new GpuLavaLighting(null), (name, level) -> null);
         var bounds = new BoundingBox(new Vector3(-30, -30, 0), new Vector3(30, 30, 90));
         destruction.take(HEX, new Array<Renderable>(), Set.of(), bounds, 0, 0, new Vector2(), 0);
         return destruction;
@@ -43,10 +43,10 @@ class GpuDestructionTest {
         assertTrue(destruction.started(HEX));
         // The terrain still shows the structure (a strike's building the rules bring down at the phase's end): its pile
         // lies there however long that takes.
-        destruction.committed(at -> true);
+        destruction.committed(at -> true, (at, trees) -> true);
         run(destruction, 30);
         assertTrue(destruction.taken(HEX), "It lies there while the terrain still shows it standing");
-        destruction.committed(at -> false);
+        destruction.committed(at -> false, (at, trees) -> true);
         run(destruction, GpuDestruction.REST_SECONDS);
         assertTrue(destruction.taken(HEX), "Its pile rests on the rubble before it sinks");
         run(destruction, GpuDestruction.SINK_SECONDS + .1f);
@@ -59,7 +59,7 @@ class GpuDestructionTest {
         var destruction = taken();
         destruction.start(HEX, 0);
         // Its rubble shows at once: the pile rests only once its pieces have come down.
-        destruction.committed(at -> false);
+        destruction.committed(at -> false, (at, trees) -> true);
         run(destruction, GpuDestruction.REST_SECONDS + GpuDestruction.SINK_SECONDS);
         assertTrue(destruction.taken(HEX), "A 90-unit structure still falls and settles before its pile's rest begins");
         destruction.clear();
@@ -73,7 +73,7 @@ class GpuDestructionTest {
         // The game's order: the clock and its gravity run every frame before anything gives way.
         destruction.advance(0, 0);
         destruction.start(HEX, 0);
-        destruction.committed(at -> false);
+        destruction.committed(at -> false, (at, trees) -> true);
         for (float elapsed = 0; elapsed < 20; elapsed += FRAME) { destruction.advance(FRAME, 0); }
         assertFalse(destruction.taken(HEX));
     }
@@ -82,7 +82,7 @@ class GpuDestructionTest {
     @Test
     void rubbleShownBeforeTheFallStillLetsItsPileSink() {
         var destruction = taken();
-        destruction.committed(at -> false);
+        destruction.committed(at -> false, (at, trees) -> true);
         run(destruction, 1);
         destruction.start(HEX, 0);
         run(destruction, 10);

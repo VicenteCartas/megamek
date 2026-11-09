@@ -1159,14 +1159,28 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     /** A scheduled strike has a location and resolved blast parameters, but no attacking unit. */
     /**
      * A scheduled nuclear strike, with everything it brings down ({@code collapses}): what its own checkpoint shows gone
-     * and what the rules bring down at the phase's end, each falling as its front reaches it.
+     * and what the rules bring down at the phase's end; and the trees it fells ({@code felled}). Each falls as its front
+     * reaches it.
      */
-    record Detonation(megamek.common.NuclearDetonation result, List<TileTransition.Collapse> collapses) implements Animation {
-        Detonation {
-            collapses = List.copyOf(collapses);
+    record Detonation(megamek.common.NuclearDetonation result, List<TileTransition.Collapse> collapses, List<Felled> felled)
+          implements Animation {
+        /** A hex's trees a strike fells: its scene's tree features that stand nowhere in the strike's checkpoint. */
+        record Felled(Coords coords, List<Feature> trees) {
+            Felled {
+                trees = List.copyOf(trees);
+            }
         }
 
-        Detonation(megamek.common.NuclearDetonation result) { this(result, List.of()); }
+        Detonation {
+            collapses = List.copyOf(collapses);
+            felled = List.copyOf(felled);
+        }
+
+        Detonation(megamek.common.NuclearDetonation result, List<TileTransition.Collapse> collapses) {
+            this(result, collapses, List.of());
+        }
+
+        Detonation(megamek.common.NuclearDetonation result) { this(result, List.of(), List.of()); }
 
         @Override
         public int entityId() { return -1; }

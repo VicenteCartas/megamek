@@ -20302,9 +20302,22 @@ public class TWGameManager extends AbstractGameManager {
         r.newlines = 2;
         getMainPhaseReport().add(r);
 
-        scheduledOrbitalBombardment.forEach(ob -> doOrbitalBombardment(new Coords(ob.getX(), ob.getY()),
-              ob.getDamage(),
-              ob.getRadius()));
+        // Each bombardment's blast between its start and completion packets, as a scheduled nuke's (animation only): the
+        // capture names on the completion what it brought down, which falls as its shock front passes.
+        scheduledOrbitalBombardment.forEach(ob -> captureAttackAnimation(() -> {
+            Coords position = new Coords(ob.getX(), ob.getY());
+            Hex hex = game.getBoard().getHex(position);
+            var strike = hex == null ? null : megamek.common.NuclearDetonation.orbitalBombardment(
+                  java.util.UUID.randomUUID(), game.getBoard().getBoardId(), position, hex.getLevel(), ob.getDamage(),
+                  ob.getRadius());
+            if (strike != null) { send(new Packet(PacketCommand.NUCLEAR_DETONATION, strike, false)); }
+            try {
+                doOrbitalBombardment(position, ob.getDamage(), ob.getRadius());
+            } finally {
+                if (strike != null) { send(new Packet(PacketCommand.NUCLEAR_DETONATION, strike, true)); }
+            }
+            return null;
+        }));
         scheduledOrbitalBombardment.forEach(this::drawOrbitalBombardmentOnBoard);
         scheduledOrbitalBombardment.clear();
         getGame().resetOrbitalBombardmentAttacks();

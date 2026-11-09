@@ -58,8 +58,12 @@ final class GpuArtilleryBlast {
     static final float SECONDS = 5.5f;
     /** A nuclear round's blast lasts longer: its mushroom keeps rising after the shock front has crossed the board. */
     static final float NUCLEAR_SECONDS = 18;
-    /** The shock front crosses the blast area in this time, slowing as it spreads. */
+    /**
+     * The shock front crosses a blast area of {@link #SHOCK_HEXES} hexes or more in this time; a smaller blast's front
+     * crosses its area quicker ({@link #shockSeconds}).
+     */
     static final float SHOCK_SECONDS = 2.4f;
+    private static final float SHOCK_HEXES = 40;
     /**
      * Blast seconds per second of the playback clock: the playback runs at half real time at 1x
      * ({@link UnitMotion.Speed#rate}), and a blast at 1x keeps real time.
@@ -245,6 +249,8 @@ final class GpuArtilleryBlast {
         boolean marksReported;
         /** A nuclear round's stats (its blast area, crater), null for every other round. */
         NukeStats nuke;
+        /** An orbital bombardment's blast: no mushroom cloud, a lance of fire from the sky (GpuArtilleryBlast#nuclear). */
+        boolean orbital;
         /** Its scorch has been handed to the terrain (scorches). */
         boolean scorched;
 
@@ -626,7 +632,15 @@ final class GpuArtilleryBlast {
 
     /** Scheduled stock/custom strike using its server-resolved blast parameters, with no invented weapon or unit. */
     void detonateNuclear(Vector3 ground, NukeStats stats, int key) {
+        detonateNuclear(ground, stats, key, false);
+    }
+
+    /** With {@code orbital} an orbital bombardment's: a lance of fire from the sky instead of a mushroom cloud. */
+    void detonateNuclear(Vector3 ground, NukeStats stats, int key, boolean orbital) {
         detonate(ground, null, null, null, key, stats);
+        for (Blast blast : blasts) {
+            if (blast.key == key) { blast.orbital = orbital; }
+        }
     }
 
     private void detonate(Vector3 ground, @Nullable Vector3 opening, @Nullable ResolvedAttack.Shot profile,
@@ -757,32 +771,48 @@ final class GpuArtilleryBlast {
     }
 
     /**
-     * How far a nuclear shock front has spread after {@code seconds} of its blast: it slows as it spreads and reaches
-     * {@code radius} at {@link #SHOCK_SECONDS}.
+     * The blast seconds a shock front takes to cross a blast area of {@code radius} world units: {@link #SHOCK_SECONDS}
+     * from {@link #SHOCK_HEXES} hexes, less for a smaller blast, at least half of it.
+     */
+    static float shockSeconds(float radius) {
+        return SHOCK_SECONDS * MathUtils.clamp((float) Math.sqrt(radius / BoardGeometry.height() / SHOCK_HEXES), .5f, 1);
+    }
+
+    /**
+     * How far a nuclear shock front has spread after {@code seconds} of its blast: it slows as it spreads, to half its
+     * first speed at the edge of the area, which it reaches at {@link #shockSeconds}. Never slower: what it brings down
+     * goes like a wave, without a pause between the last buildings.
      */
     static float shockReach(float seconds, float radius) {
-        float left = 1 - MathUtils.clamp(seconds / SHOCK_SECONDS, 0, 1);
-        return radius * (1 - left * left);
+        return radius * ((float) Math.sqrt(1 + 3 * MathUtils.clamp(seconds / shockSeconds(radius), 0, 1)) - 1);
     }
 
     /** The blast seconds at which the front reaches {@code distance} from Ground Zero: {@link #shockReach} inverted. */
     static float shockArrival(float distance, float radius) {
-        return SHOCK_SECONDS * (1 - (float) Math.sqrt(1 - MathUtils.clamp(distance / radius, 0, 1)));
+        float share = MathUtils.clamp(distance / radius, 0, 1);
+        return shockSeconds(radius) * share * (2 + share) / 3;
+    }
+
+    /** The blast seconds the front takes per world unit at {@code distance} from Ground Zero: {@link #shockArrival}'s slope. */
+    static float shockSlowness(float distance, float radius) {
+        return shockSeconds(radius) * 2 * (1 + MathUtils.clamp(distance / radius, 0, 1)) / (3 * radius);
     }
 
     /**
      * The live nuclear blasts' shock fronts, newest first, at most {@link #MAX_SHOCKS}, as terrain-shocks.glsl reads them:
-     * ground zero's x and y, the blast area's radius in world units and the blast's seconds. Returns how many.
+     * ground zero's x and y, the blast area's radius in world units and the front's clock: the blast's seconds, scaled
+     * so that every front crosses its area in {@link #SHOCK_SECONDS}. Returns how many.
      */
     int shocks(float[] out) {
         int count = 0;
         for (int index = blasts.size() - 1; index >= 0 && count < MAX_SHOCKS; index--) {
             Blast blast = blasts.get(index);
             if (blast.nuke == null || blast.seconds < 0) { continue; }
+            float radius = nuclearRadius(blast.nuke);
             out[count * 4] = blast.ground.x;
             out[count * 4 + 1] = blast.ground.y;
-            out[count * 4 + 2] = nuclearRadius(blast.nuke);
-            out[count * 4 + 3] = blast.seconds;
+            out[count * 4 + 2] = radius;
+            out[count * 4 + 3] = blast.seconds * SHOCK_SECONDS / shockSeconds(radius);
             count++;
         }
         return count;
@@ -801,7 +831,7 @@ final class GpuArtilleryBlast {
     void emit(GpuExplosionEffects explosions) {
         for (Blast blast : blasts) {
             if (blast.nuke != null) {
-                nuclear(explosions, blast.ground, nuclearRadius(blast.nuke), blast.seconds, blast.drawSeed);
+                nuclear(explosions, blast.ground, nuclearRadius(blast.nuke), blast.seconds, blast.drawSeed, blast.orbital);
                 continue;
             }
             var scatter = new Scatter(blast.pieces, blast.landings, blast.heading, blast.opening, blast.intensity);
@@ -849,7 +879,7 @@ final class GpuArtilleryBlast {
     private void emit(GpuExplosionEffects explosions, Vector3 ground, float size, Scatter scatter, Style style,
           float seconds, int seed) {
         if (style == Style.NUCLEAR) {
-            nuclear(explosions, ground, nuclearRadius(AreaEffectHelper.getNukeStats(DAVY_CROCKETT_TYPE)), seconds, seed);
+            nuclear(explosions, ground, nuclearRadius(AreaEffectHelper.getNukeStats(DAVY_CROCKETT_TYPE)), seconds, seed, false);
             return;
         }
         if (seconds < 0 || seconds >= SECONDS) { return; }
@@ -1252,8 +1282,18 @@ final class GpuArtilleryBlast {
      * as the front passes, and the base surge rolling out beneath. The fireball lights the ground as it burns
      * (GpuExplosionEffects.lights).
      */
-    private void nuclear(GpuExplosionEffects explosions, Vector3 ground, float radius, float seconds, int seed) {
+    private void nuclear(GpuExplosionEffects explosions, Vector3 ground, float radius, float seconds, int seed,
+          boolean orbital) {
         if (seconds < 0 || seconds >= NUCLEAR_SECONDS) { return; }
+        float lance = seconds / .5f;
+        if (orbital && lance < 1) {
+            // An orbital bombardment comes down from the sky as a lance of fire, gone into its fireball within half a second.
+            for (int puff = 0; puff < 6; puff++) {
+                point.set(ground).add(0, 0, radius * (.08f + .22f * puff) * (1 - lance * .8f));
+                explosions.add(point, radius * (.05f - .005f * puff), lance, 1, fadeOut(lance, .4f), seed + 61 + puff,
+                      BRIGHT_FIRE, Vector3.Zero);
+            }
+        }
         float flash = seconds / 1.8f;
         if (flash < 1) {
             float swell = 1 - (float) Math.exp(-seconds * 5);
@@ -1264,8 +1304,8 @@ final class GpuArtilleryBlast {
             explosions.add(point, radius * (.03f + .07f * swell), flash * .2f, 1, fadeOut(flash, .25f), seed + 3,
                   BRIGHT_FIRE, Vector3.Zero);
         }
-        mushroom(explosions, ground, radius * .42f, seconds * SECONDS / NUCLEAR_SECONDS, seed);
-        float front = seconds / SHOCK_SECONDS;
+        if (!orbital) { mushroom(explosions, ground, radius * .42f, seconds * SECONDS / NUCLEAR_SECONDS, seed); }
+        float front = seconds / shockSeconds(radius);
         if (front < 1) {
             // The front slows as it spreads; its dust thins toward the edge of the blast area.
             float reach = shockReach(seconds, radius);
@@ -1280,7 +1320,7 @@ final class GpuArtilleryBlast {
             }
         }
         float ring = (seconds - .3f) / 2.6f;
-        if (ring > 0 && ring < 1) {
+        if (!orbital && ring > 0 && ring < 1) {
             point.set(ground).add(0, 0, radius * .3f);
             explosions.addFlat(point, radius * (.15f + .2f * ring), ring, 0, .5f * MathUtils.sin(ring * MathUtils.PI),
                   seed + 41, FUEL_HAZE, .1f);

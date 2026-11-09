@@ -89,8 +89,14 @@ class GpuArtilleryBlastTest {
         for (float distance = 0; distance <= radius; distance += 25) {
             float arrival = GpuArtilleryBlast.shockArrival(distance, radius);
             assertEquals(distance, GpuArtilleryBlast.shockReach(arrival, radius), .05f);
+            // Each piece's own moment follows the front's slope (GpuDestruction#blastFrom).
+            float near = Math.max(0, distance - .5f), far = Math.min(radius, distance + .5f);
+            float slope = (GpuArtilleryBlast.shockArrival(far, radius) - GpuArtilleryBlast.shockArrival(near, radius)) / (far - near);
+            assertEquals(slope, GpuArtilleryBlast.shockSlowness(distance, radius), slope * .01f + 1e-6f);
         }
-        assertEquals(GpuArtilleryBlast.SHOCK_SECONDS, GpuArtilleryBlast.shockArrival(radius, radius), 1e-6f);
+        assertEquals(GpuArtilleryBlast.shockSeconds(radius), GpuArtilleryBlast.shockArrival(radius, radius), 1e-6f);
+        // No crawl at the edge: its last buildings go at most twice as far apart in time as those by ground zero.
+        assertEquals(2 * GpuArtilleryBlast.shockSlowness(0, radius), GpuArtilleryBlast.shockSlowness(radius, radius), 1e-6f);
         var blasts = new GpuArtilleryBlast();
         blasts.detonate(Vector3.Zero, shot(false).withNuclearType(2).withDamagePerHit(0), null, 1);
         for (int shell = 0; shell < GpuArtilleryBlast.MAX_BLASTS; shell++) {

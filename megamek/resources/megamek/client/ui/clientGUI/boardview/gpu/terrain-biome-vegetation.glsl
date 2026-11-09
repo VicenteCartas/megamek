@@ -42,6 +42,10 @@ bool biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
     // Flexible marsh leaves form an arch, with no displacement at the grounded base. Strength scales both lean and
     // angular excursion.
     float flex = u_wind.z * (1.0 + .28 * vegetationGust(root.xy));
+    // A blast's wind arches them away from ground zero as its front passes (terrain-shocks.glsl).
+    vec2 arch = wind * flex + shockWind(root.xy) * .45;
+    flex = min(length(arch), 1.4);
+    if (flex > 1e-4) { wind = arch / length(arch); }
     float angleAtHeight = flex * point.z / top;
     float sine = sin(angleAtHeight), cosine = cos(angleAtHeight);
     vec2 bend = wind * sine * point.z;

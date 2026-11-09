@@ -997,7 +997,22 @@ final class GpuTerrain implements Disposable {
     void shadersChanged() { refreshShadows(); }
 
     /** The local lights' texture and the falls in it, for a shadow program: falling pieces cast where they are. */
-    private void registerTables(DepthShader shader) { GpuLavaLighting.register(shader, lavaLighting); }
+    private void registerTables(DepthShader shader) {
+        GpuLavaLighting.register(shader, lavaLighting);
+        // Standing trees sway in a blast's wind in the depth passes too (terrain-shocks.glsl).
+        shader.register("u_shockCount", new BaseShader.GlobalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, shockCount);
+            }
+        });
+        shader.register("u_shocks", new BaseShader.GlobalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                if (shockCount > 0 && target.has(id)) { target.program.setUniform4fv(target.loc(id), shocks, 0, shockCount * 4); }
+            }
+        });
+    }
 
     /** What selects a sculpt material's generic program besides its families; the family marker is left out. */
     private static Object familyVariant(Material material) {
@@ -1511,7 +1526,7 @@ final class GpuTerrain implements Disposable {
             materialCache.prepare();
         }
         lavaLighting = new GpuLavaLighting(assets);
-        destruction = new GpuDestruction(lavaLighting);
+        destruction = new GpuDestruction(lavaLighting, (name, level) -> foliage(assets.lodModel(name, level)));
         environmentLighting.lavaLighting = lavaLighting;
         biomes = new GpuBiomeSurface(lavaLighting);
         trees = new GpuTreeInstances((name, level) -> foliage(assets.lodModel(name, level)));
@@ -1580,6 +1595,8 @@ final class GpuTerrain implements Disposable {
         private BoardScene.Feature decorationFeature;
         private megamek.common.board.BoardDecoration.Colours buildingColours = megamek.common.board.BoardDecoration.Colours.NONE;
         private BoardScene.Feature previewFeature;
+        /** A stand tree's scene feature, by which a blast's felled trees are told apart (GpuTerrain#strike). */
+        private BoardScene.Feature plantFeature;
         // Render-thread presentation only. Rebuilds continue borrowing the untouched installed instance/bounds.
         private ModelInstance previewInstance;
         private BoundingBox previewBounds;
@@ -2222,10 +2239,13 @@ final class GpuTerrain implements Disposable {
          * Fills the plain tree stand from the chunk's standing trees at their drawn poses. New arrays, never edited in
          * place: the stand's buffers find a changed chunk by array identity, so an editor preview moves its trees.
          */
-        void restand() {
+        void restand(Predicate<Matrix4> felled) {
             stand.clear();
             for (Prop prop : props) {
-                if (!prop.scatter && prop.standing()) { stand.add(prop.treeAsset, prop.instance().transform, prop.treeDiameter); }
+                // A blast's felled trees fall from their own stand (GpuDestruction).
+                if (!prop.scatter && prop.standing() && !felled.test(prop.instance().transform)) {
+                    stand.add(prop.treeAsset, prop.instance().transform, prop.treeDiameter);
+                }
             }
         }
 
@@ -3524,6 +3544,9 @@ final class GpuTerrain implements Disposable {
         destruction.committed(at -> {
             var tile = coverScene.tile(at);
             return tile != null && BoardScene.TileTransition.structure(tile);
+        }, (at, trees) -> {
+            var tile = coverScene.tile(at);
+            return tile != null && tile.features().stream().anyMatch(trees::contains);
         });
         // A chunk finished before structures came down (or were restored) draws them as they are now.
         for (Chunk chunk : chunks) {
@@ -4830,6 +4853,7 @@ final class GpuTerrain implements Disposable {
                         || feature.asset().startsWith("buildings/"),
                   Float.NaN, feature.kind() == BoardScene.FeatureKind.INDUSTRIAL);
             prop.editorBounds = editorBounds;
+            if (standTree) { prop.plantFeature = feature; }
             prop.infrastructure = routeFeature(tile, feature);
             if (feature.kind() == BoardScene.FeatureKind.BUILDING || authored != null) {
                 prop.buildingColours = feature.colours();
@@ -5544,7 +5568,7 @@ final class GpuTerrain implements Disposable {
                 }
             }
             fungalHexes.forEach((at, colony) -> chunk.spores.add(GpuFungus.cloud(at, colony)));
-            chunk.restand();
+            chunk.restand(destruction::felled);
             // With the depth pre-pass, or in the editor, the trees' programs and twins also build behind the loading stage.
             if (editable || depthPrepass.contains(Prepass.FOLIAGE) || depthPrepass.contains(Prepass.IMPOSTORS)) {
                 for (GpuTreeInstances.Stand stand : List.of(chunk.stand, chunk.scatterStand)) {
@@ -7232,7 +7256,7 @@ final class GpuTerrain implements Disposable {
                 }
                 if (changed) {
                     scarSurfaceRevision++;
-                    if (trees) { chunk.restand(); }
+                    if (trees) { chunk.restand(destruction::felled); }
                     chunk.cacheDecorations();
                     refreshShadows();
                     chunk.previewed = true;
@@ -7553,7 +7577,7 @@ final class GpuTerrain implements Disposable {
             installedSettings.run(() -> {
                 for (var collapse : transition.collapses()) {
                     // A strike's front took it already: its pieces fall or lie there.
-                    Chunk chunk = destruction.taken(collapse.coords()) ? null : takeFall(collapse);
+                    Chunk chunk = destruction.taken(collapse.coords()) ? null : takeFall(collapse, 0);
                     if (chunk != null) { taken.add(chunk); }
                 }
             });
@@ -7582,7 +7606,7 @@ final class GpuTerrain implements Disposable {
      * kit storey is open below), its mesh part's box its node's, about which the piece turns. The chunk that drew them,
      * or null where none stands.
      */
-    private Chunk takeFall(BoardScene.TileTransition.Collapse change) {
+    private Chunk takeFall(BoardScene.TileTransition.Collapse change, float blast) {
         Coords at = change.coords();
         if (at.getX() < 0 || at.getY() < 0 || at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE >= chunks.size()) {
             return null;
@@ -7602,6 +7626,15 @@ final class GpuTerrain implements Disposable {
             bounds.ext(prop.bounds());
         }
         if (pieces.isEmpty()) { return null; }
+        // What stands on the structure, not on the ground beside it, comes down with its roof. Its interior floors show
+        // only in a cutaway, which a falling hex never draws (Chunk#cacheProps).
+        for (Prop prop : mesh.props) {
+            if (prop.building != null || prop.tree() || isFlag(prop) || !Float.isNaN(prop.floorZ)
+                  || prop.bounds().min.z < bounds.min.z + BoardGeometry.level()) { continue; }
+            ModelInstance drawn = prop.instance();
+            for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces); }
+            carried.add(prop);
+        }
         var middle = BoardGeometry.center(at, change.before().elevation());
         var push = new Vector2();
         int flags = change.loads().isEmpty() ? 0 : GpuDestruction.LOADED;
@@ -7609,7 +7642,7 @@ final class GpuTerrain implements Disposable {
             var from = BoardGeometry.center(change.from().coords(), change.from().elevation());
             // From above (a death from above) it drives the structure down; else it pushes it away, level.
             if (from.z > bounds.max.z) { flags |= GpuDestruction.LOADED; }
-            else { push.set(middle.x - from.x, middle.y - from.y).nor().scl(change.strength()); }
+            else { push.set(middle.x - from.x, middle.y - from.y).nor().scl(blast > 0 ? blast : change.strength()); }
         }
         destruction.take(at, pieces, buildings, bounds, middle.x, middle.y, push, flags);
         return chunk;
@@ -7657,7 +7690,10 @@ final class GpuTerrain implements Disposable {
         int before = destruction.revision();
         destruction.advance(seconds, gravity);
         // A pile that sank lay on a hex its chunk already shows without the structure.
-        if (destruction.revision() != before) { stampFalls(); }
+        if (destruction.revision() != before) {
+            stampFalls();
+            carried.removeIf(prop -> !destruction.taken(prop.coords));
+        }
     }
 
     /**
@@ -7669,12 +7705,14 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * A strike going off now: the kit structures it brings down leave their chunks for their pieces, and each gives way
-     * as its front reaches it (GpuArtilleryBlast#shockArrival, on the blast's clock, twice the playback's). Classic
+     * A strike going off now: the kit structures it brings down leave their chunks for their pieces, and each piece gives
+     * way as its front reaches it (GpuArtilleryBlast#shockArrival, on the blast's clock, twice the playback's). Classic
      * columns snap.
      */
     void strike(BoardScene.Detonation detonation) {
-        if (coverScene == null || installedColumns || detonation.collapses().isEmpty()) { return; }
+        if (coverScene == null || installedColumns || detonation.collapses().isEmpty() && detonation.felled().isEmpty()) {
+            return;
+        }
         var result = detonation.result();
         float radius = GpuArtilleryBlast.nuclearRadius(result.stats());
         var groundZero = BoardGeometry.center(result.coords(), result.elevation());
@@ -7682,12 +7720,27 @@ final class GpuTerrain implements Disposable {
         installedSettings.run(() -> {
             for (var collapse : detonation.collapses()) {
                 if (destruction.taken(collapse.coords())) { continue; }
-                Chunk chunk = takeFall(collapse);
-                if (chunk == null) { continue; }
-                taken.add(chunk);
                 var middle = BoardGeometry.center(collapse.coords(), collapse.before().elevation());
                 float distance = Vector2.dst(middle.x, middle.y, groundZero.x, groundZero.y);
+                // Stronger toward the epicentre: up to four heavy hits' push beside it, one at the blast's edge.
+                float near = 1 - MathUtils.clamp(distance / radius, 0, 1);
+                Chunk chunk = takeFall(collapse, 1 + 3 * near * near);
+                if (chunk == null) { continue; }
+                taken.add(chunk);
+                destruction.blastFrom(collapse.coords(), groundZero.x, groundZero.y,
+                      GpuArtilleryBlast.shockSlowness(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK);
                 destruction.start(collapse.coords(),
+                      GpuArtilleryBlast.shockArrival(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK);
+            }
+            for (var grove : detonation.felled()) {
+                Chunk chunk = takeTrees(grove, groundZero);
+                if (chunk == null) { continue; }
+                taken.add(chunk);
+                var middle = BoardGeometry.center(grove.coords(), 0);
+                float distance = Vector2.dst(middle.x, middle.y, groundZero.x, groundZero.y);
+                destruction.blastFrom(grove.coords(), groundZero.x, groundZero.y,
+                      GpuArtilleryBlast.shockSlowness(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK);
+                destruction.startTrees(grove.coords(),
                       GpuArtilleryBlast.shockArrival(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK);
             }
         });
@@ -7697,6 +7750,35 @@ final class GpuTerrain implements Disposable {
         }
         stampFalls();
     }
+
+    /**
+     * Fells the hex's trees the blast clears ({@code grove}, as its scene's features): they leave their chunk's stand to
+     * fall away from ground zero (GpuDestruction). The chunk that drew them, or null where none stands.
+     */
+    private Chunk takeTrees(BoardScene.Detonation.Felled grove, Vector3 groundZero) {
+        Coords at = grove.coords();
+        int index = at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE;
+        if (at.getX() < 0 || at.getY() < 0 || index >= chunks.size()) { return null; }
+        Chunk chunk = chunks.get(index);
+        Set<BoardScene.Feature> features = Set.copyOf(grove.trees());
+        List<GpuDestruction.Tree> trees = new ArrayList<>();
+        BoundingBox bounds = new BoundingBox().inf();
+        for (Prop prop : chunk.props) {
+            if (prop.scatter || !prop.standing() || prop.plantFeature == null || !prop.coords().equals(at)
+                  || !features.contains(prop.plantFeature)) { continue; }
+            trees.add(new GpuDestruction.Tree(prop.treeAsset, new Matrix4(prop.instance().transform), prop.treeDiameter));
+            bounds.ext(prop.bounds());
+        }
+        if (trees.isEmpty()) { return null; }
+        var middle = BoardGeometry.center(at, 0);
+        var push = new Vector2(middle.x - groundZero.x, middle.y - groundZero.y);
+        if (push.len2() < 1e-6f) { push.set(1, 0); }
+        destruction.takeTrees(at, trees, features, bounds, middle.x, middle.y, push.nor());
+        return chunk;
+    }
+
+    /** How many hexes' trees a blast has felled, falling or lying. */
+    int felledHexes() { return destruction.groveCount(); }
 
     /** Whether the hex's structure lies as pieces (falling, resting or sinking) instead of in its chunk. */
     boolean fallTaken(Coords at) { return destruction.taken(at); }
@@ -7999,15 +8081,12 @@ final class GpuTerrain implements Disposable {
     void clearCollapses() {
         disposeCollapses();
         fallsFor = null;
-        // What the installed scene still shows standing (a strike's buildings the rules bring down at the phase's end)
-        // goes back into its chunk.
+        // What the installed scene still shows standing (a strike's buildings the rules bring down at the phase's end, or
+        // its trees) goes back into its chunk.
         Set<Chunk> standing = new LinkedHashSet<>();
         for (Coords at : destruction.taken()) {
-            var tile = coverScene == null ? null : coverScene.tile(at);
             int index = at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE;
-            if (tile != null && BoardScene.TileTransition.structure(tile) && index < chunks.size()) {
-                standing.add(chunks.get(index));
-            }
+            if (coverScene != null && index < chunks.size()) { standing.add(chunks.get(index)); }
         }
         destruction.clear();
         if (!standing.isEmpty()) {
@@ -9018,6 +9097,8 @@ final class GpuTerrain implements Disposable {
      */
     private void refall(Chunk chunk) {
         chunk.cacheProps(destruction::taken);
+        // Its stand leaves felled trees out: it is gathered again only when the falls changed since.
+        if (chunk.fallsRevision != destruction.revision()) { chunk.restand(destruction::felled); }
         chunk.fallsRevision = destruction.revision();
     }
 
@@ -9467,6 +9548,11 @@ final class GpuTerrain implements Disposable {
             }
         }
         batch.render(trees, environment);
+        // Felled trees keep the faded texels they had standing (GpuDestruction).
+        if (destruction.groveCount() > 0) {
+            batch.render(destruction.pieces(GpuTreeInstances.Pass.FADE), environment);
+            fadeBounds.ext(destruction.bounds(new BoundingBox()));
+        }
         if (batch.gathered().isEmpty()) { batch.end(); }
         else { cutoutFade.flush(batch, camera, fadeBounds); }
     }
@@ -9561,7 +9647,11 @@ final class GpuTerrain implements Disposable {
      * Whether this pass draws this prop: what the zoom shows ({@link #shown}). No packed prop is small: only placed
      * objects are, and they are never packed.
      */
+    /** Objects that stood on a falling structure (a helipad, roof fittings): they fall with it, as its pieces. */
+    private final Set<Prop> carried = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+
     private boolean drawn(Prop prop, boolean shadows) {
+        if (!carried.isEmpty() && carried.contains(prop) && destruction.taken(prop.coords)) { return false; }
         if (!Float.isNaN(prop.floorZ) && chunks.get(prop.coords.getX() / CHUNK_SIZE * chunkRows
               + prop.coords.getY() / CHUNK_SIZE).hiddenInteriors.contains(prop.coords)) { return false; }
         return !replaced(prop) && shown(prop, shadows);
@@ -9910,10 +10000,7 @@ final class GpuTerrain implements Disposable {
         for (Chunk chunk : chunks) {
             if (perspective) {
                 // A chunk uses its nearest possible depth, preserving detail for all of its trees and scatter.
-                nearest.set(camera.direction.x >= 0 ? chunk.bounds.min.x : chunk.bounds.max.x,
-                      camera.direction.y >= 0 ? chunk.bounds.min.y : chunk.bounds.max.y,
-                      camera.direction.z >= 0 ? chunk.bounds.min.z : chunk.bounds.max.z);
-                pixelsPerUnit = BoardCamera.pixelsPerUnit(camera, nearest);
+                pixelsPerUnit = BoardCamera.pixelsPerUnit(camera, nearest(camera, chunk.bounds, nearest));
             }
             float scatterPixels = chunk.scatterDiameter * pixelsPerUnit;
             // Scatter this small casts a shadow under a texel: its appearance waits for the next refit.
@@ -9936,6 +10023,17 @@ final class GpuTerrain implements Disposable {
             }
             detailTrees(chunk, pixelsPerUnit);
         }
+        // Felled trees take the scale at their own nearest depth, as a chunk's do.
+        if (perspective && destruction.groveCount() > 0) {
+            pixelsPerUnit = BoardCamera.pixelsPerUnit(camera, nearest(camera, destruction.bounds(new BoundingBox()), nearest));
+        }
+        destruction.detail(pixelsPerUnit);
+    }
+
+    /** The corner of {@code box} nearest along the camera's view, where a perspective view chooses its detail. */
+    private static Vector3 nearest(Camera camera, BoundingBox box, Vector3 out) {
+        return out.set(camera.direction.x >= 0 ? box.min.x : box.max.x, camera.direction.y >= 0 ? box.min.y : box.max.y,
+              camera.direction.z >= 0 ? box.min.z : box.max.z);
     }
 
     /**

@@ -27,6 +27,7 @@ import megamek.common.net.packets.Packet;
 import megamek.common.options.OptionsConstants;
 import megamek.server.Server;
 import megamek.server.commands.NukeCommand;
+import megamek.server.props.OrbitalBombardment;
 import org.junit.jupiter.api.Test;
 
 class NuclearDetonationServerTest {
@@ -86,5 +87,28 @@ class NuclearDetonationServerTest {
               packets.stream().map(Packet::command).toList());
         assertFalse(packets.getFirst().getBooleanValue(1));
         assertTrue(packets.getLast().getBooleanValue(1));
+    }
+
+    /** A Game Master's orbital bombardment plays as a strike: its blast between a start and a completion, no crater. */
+    @Test
+    void anOrbitalBombardmentIsBracketedLikeAStrike() throws Exception {
+        var manager = spy(new TWGameManager());
+        manager.getGame().setBoard(new Board(4, 4, Stream.generate(Hex::new).limit(16).toArray(Hex[]::new)));
+        manager.getGame().addPlayer(0, new Player(0, "Orbital test"));
+        List<Packet> packets = new ArrayList<>();
+        doAnswer(call -> { packets.add(call.getArgument(0)); return null; }).when(manager).send(any(Packet.class));
+        doNothing().when(manager).doOrbitalBombardment(any(), anyInt(), anyInt());
+        manager.addScheduledOrbitalBombardment(new OrbitalBombardment.Builder().x(1).y(1).radius(10).damage(1_000_000).build());
+        packets.clear();
+        manager.resolveScheduledOrbitalBombardments();
+        var boundaries = packets.stream().filter(packet -> packet.command() == PacketCommand.NUCLEAR_DETONATION).toList();
+        assertEquals(2, boundaries.size());
+        assertFalse(boundaries.getFirst().getBooleanValue(1));
+        assertTrue(boundaries.getLast().getBooleanValue(1));
+        var strike = (NuclearDetonation) boundaries.getFirst().getObject(0);
+        assertTrue(strike.orbital());
+        assertEquals(new Coords(1, 1), strike.coords());
+        assertEquals(0, strike.craterDepth(), "An orbital bombardment digs no crater");
+        assertEquals(11, strike.baseDamage() / strike.degradation(), "Its blast reaches its radius and the hex beyond");
     }
 }

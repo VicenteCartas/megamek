@@ -1,5 +1,6 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Shared by terrain and grass. Directory texels name sparse, fixed-ground-size image layers.
+// SHOCKS
 uniform sampler2DArray u_groundDamage;
 uniform vec2 u_groundDamageSize;
 uniform vec3 u_groundDamageGrid;
@@ -16,7 +17,7 @@ vec4 groundDamageEntry(ivec2 cell) {
 }
 
 // The scorch here, 0 to 1: x a nuclear blast's, y the hexes' authored one; bilinear between the tiles' centres, so its
-// 8 m tiles never show.
+// 8 m tiles never show. A blast's scorch shows where its front has passed (terrain-shocks.glsl).
 vec2 groundScorches(vec2 world) {
     if (u_groundScorch.x <= 0.0) return vec2(0.0);
     vec2 position = vec2(world.x, -world.y) / u_groundDamageGrid.x - .5;
@@ -24,7 +25,7 @@ vec2 groundScorches(vec2 world) {
     vec2 f = position - vec2(cell);
     vec2 near = mix(groundDamageEntry(cell).ba, groundDamageEntry(cell + ivec2(1, 0)).ba, f.x);
     vec2 far = mix(groundDamageEntry(cell + ivec2(0, 1)).ba, groundDamageEntry(cell + ivec2(1, 1)).ba, f.x);
-    return mix(near, far, f.y);
+    return mix(near, far, f.y) * vec2(shockReached(world), 1.0);
 }
 
 // The scorch that shows here: the stronger of a nuclear blast's and the authored one.

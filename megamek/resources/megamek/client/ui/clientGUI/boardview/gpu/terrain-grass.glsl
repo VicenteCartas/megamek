@@ -70,7 +70,8 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
         float plant = u_levelHeight * CROP_HEIGHT * mix(.92, 1.06, variation) * (1.0 - scar * .5);
         float growth = clamp((density - a_coverRoot.w) / 512.0, 0.0, 1.0) / widening;
         float gust = vegetationGust(root.xy);
-        vec3 up = normalize(vec3(u_wind.xy * u_wind.z * (.04 + .04 * gust), 1.0));
+        // A blast's wind leans the stalk away from ground zero as its front passes (terrain-shocks.glsl).
+        vec3 up = normalize(vec3(u_wind.xy * u_wind.z * (.04 + .04 * gust) + shockWind(root.xy) * .8, 1.0));
         float t = samplePoint.y;
         float tone = grassRandom(seed + 71u);
         if (part == 2) {
@@ -130,6 +131,15 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
               u_wind.z * (wheat ? .5 : 1.0));
         tip = height * (acrossWind * (cos(windAngle) / acrossLength) + vec3(u_wind.xy * sin(windAngle), 0.0));
         control = vec3(0.0, 0.0, height * (wheat ? .5 : .65));
+    }
+    // A blast's wind flattens the blade away from ground zero as its front passes, and lets it spring back
+    // (terrain-shocks.glsl).
+    vec2 blast = shockWind(root.xy);
+    float flattened = min(length(blast), 1.0);
+    if (flattened > 0.0) {
+        vec2 away = blast / length(blast);
+        tip = mix(tip, height * vec3(away * .96, .14), flattened);
+        control = mix(control, height * vec3(away * .42, .32), flattened);
     }
     vec3 curve = 2.0 * (1.0 - t) * t * control + t * t * tip;
     vec3 tangent = 2.0 * (1.0 - t) * control + 2.0 * t * (tip - control);
