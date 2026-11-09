@@ -209,21 +209,38 @@ public class TWGameManager extends AbstractGameManager {
 
     /**
      * For the animation alone: the structure hex {@code coords} of {@code building} lost its last construction factor
-     * to the attack being resolved, if any, which its collapse then plays as that attack's doing.
+     * to the detonation or the attack being resolved, if any, which its collapse then plays as their doing.
      */
     void noteCollapse(IBuilding building, Coords coords) {
         var capture = attackAnimationCapture.get();
         if (capture != null) { capture.collapse(BoardLocation.of(coords, building.getBoardId())); }
     }
 
-    /** Runs {@code consequence} (a fuel tank's explosion) without crediting what it brings down to the attack. */
-    private void uncredited(Runnable consequence) {
-        var capture = attackAnimationCapture.get();
-        if (capture == null) {
-            consequence.run();
-        } else {
-            capture.uncredited(consequence);
-        }
+    /**
+     * Runs {@code resolution}, the rules' blast, between {@code detonation}'s start and completion packets (none when it
+     * is null: its hex is off the board), in an attack animation capture, which names on the completion what it brought
+     * down (animation only).
+     */
+    private void detonation(megamek.common.NuclearDetonation detonation, Runnable resolution) {
+        captureAttackAnimation(() -> {
+            if (detonation != null) { send(new Packet(PacketCommand.NUCLEAR_DETONATION, detonation, false)); }
+            try {
+                resolution.run();
+            } finally {
+                if (detonation != null) { send(new Packet(PacketCommand.NUCLEAR_DETONATION, detonation, true)); }
+            }
+            return null;
+        });
+    }
+
+    /**
+     * Runs {@code blast}, the rules' explosion at {@code centre} on {@code boardId} with {@code damage} at ground zero
+     * over {@code reach} hexes, as a detonation of its own (NuclearDetonation#explosion; animation only).
+     */
+    void explosion(Coords centre, int boardId, int damage, int reach, Runnable blast) {
+        Hex hex = centre == null ? null : game.getHex(centre, boardId);
+        detonation(hex == null ? null : megamek.common.NuclearDetonation.explosion(java.util.UUID.randomUUID(), boardId,
+              centre, hex.getLevel(), damage, reach), blast);
     }
 
     private final Vector<Report> mainPhaseReport = new Vector<>();
@@ -20259,31 +20276,24 @@ public class TWGameManager extends AbstractGameManager {
      */
     void resolveScheduledNukes() {
         for (int[] nuke : scheduledNukes) {
-            captureAttackAnimation(() -> {
-                Coords position = new Coords(nuke[0], nuke[1]);
-                NukeStats stats = nuke.length == 3 ? AreaEffectHelper.getNukeStats(nuke[2]) : null;
-                if (nuke.length == 6) {
-                    stats = new NukeStats();
-                    stats.baseDamage = nuke[2];
-                    stats.degradation = nuke[3];
-                    stats.secondaryRadius = nuke[4];
-                    stats.craterDepth = nuke[5];
-                }
-                if (stats == null) { return null; }
-                Hex hex = game.getBoard().getHex(position);
-                if (hex == null) { return null; }
-                var detonation = new megamek.common.NuclearDetonation(
-                      java.util.UUID.randomUUID(), game.getBoard().getBoardId(), position, hex.getLevel(),
-                      stats.baseDamage, stats.degradation, stats.secondaryRadius, stats.craterDepth);
-                send(new Packet(PacketCommand.NUCLEAR_DETONATION, detonation, false));
-                try {
-                    drawNukeHitOnBoard(nuke);
-                    doNuclearExplosion(position, stats.baseDamage, stats.degradation, stats.secondaryRadius,
-                          stats.craterDepth, mainPhaseReport);
-                } finally {
-                    send(new Packet(PacketCommand.NUCLEAR_DETONATION, detonation, true));
-                }
-                return null;
+            Coords position = new Coords(nuke[0], nuke[1]);
+            NukeStats stats = nuke.length == 3 ? AreaEffectHelper.getNukeStats(nuke[2]) : null;
+            if (nuke.length == 6) {
+                stats = new NukeStats();
+                stats.baseDamage = nuke[2];
+                stats.degradation = nuke[3];
+                stats.secondaryRadius = nuke[4];
+                stats.craterDepth = nuke[5];
+            }
+            Hex hex = game.getBoard().getHex(position);
+            if (stats == null || hex == null) { continue; }
+            NukeStats blast = stats;
+            detonation(new megamek.common.NuclearDetonation(java.util.UUID.randomUUID(), game.getBoard().getBoardId(),
+                  position, hex.getLevel(), blast.baseDamage, blast.degradation, blast.secondaryRadius,
+                  blast.craterDepth), () -> {
+                drawNukeHitOnBoard(nuke);
+                doNuclearExplosion(position, blast.baseDamage, blast.degradation, blast.secondaryRadius,
+                      blast.craterDepth, mainPhaseReport);
             });
         }
         scheduledNukes.clear();
@@ -20304,20 +20314,13 @@ public class TWGameManager extends AbstractGameManager {
 
         // Each bombardment's blast between its start and completion packets, as a scheduled nuke's (animation only): the
         // capture names on the completion what it brought down, which falls as its shock front passes.
-        scheduledOrbitalBombardment.forEach(ob -> captureAttackAnimation(() -> {
+        scheduledOrbitalBombardment.forEach(ob -> {
             Coords position = new Coords(ob.getX(), ob.getY());
             Hex hex = game.getBoard().getHex(position);
-            var strike = hex == null ? null : megamek.common.NuclearDetonation.orbitalBombardment(
+            detonation(hex == null ? null : megamek.common.NuclearDetonation.orbitalBombardment(
                   java.util.UUID.randomUUID(), game.getBoard().getBoardId(), position, hex.getLevel(), ob.getDamage(),
-                  ob.getRadius());
-            if (strike != null) { send(new Packet(PacketCommand.NUCLEAR_DETONATION, strike, false)); }
-            try {
-                doOrbitalBombardment(position, ob.getDamage(), ob.getRadius());
-            } finally {
-                if (strike != null) { send(new Packet(PacketCommand.NUCLEAR_DETONATION, strike, true)); }
-            }
-            return null;
-        }));
+                  ob.getRadius()), () -> doOrbitalBombardment(position, ob.getDamage(), ob.getRadius()));
+        });
         scheduledOrbitalBombardment.forEach(this::drawOrbitalBombardmentOnBoard);
         scheduledOrbitalBombardment.clear();
         getGame().resetOrbitalBombardmentAttacks();
@@ -29211,7 +29214,6 @@ public class TWGameManager extends AbstractGameManager {
 
                 // If the CF is zero, the building should fall.
                 if ((curCF == 0) && (startingCF != 0)) {
-                    noteCollapse(bldg, coords);
                     if (bldg instanceof FuelTank) {
                         // If this is a fuel tank, we'll give it its own
                         // message.
@@ -29225,21 +29227,27 @@ public class TWGameManager extends AbstractGameManager {
                         r.newlines = 1;
                         vPhaseReport.add(r);
                         Vector<Report> vRep = new Vector<>();
-                        // What the tank's explosion brings down is its doing, not the attack's (animation only).
-                        uncredited(() -> doExplosion(((FuelTank) bldg).getMagnitude(),
-                              10,
-                              false,
-                              bldg.getCoords().nextElement(),
-                              bldg.getBoardId(),
-                              true,
-                              vRep,
-                              null,
-                              -1,
-                              false));
+                        int magnitude = ((FuelTank) bldg).getMagnitude();
+                        Coords centre = bldg.getCoords().nextElement();
+                        // The tank's own hex and what its explosion brings down are the explosion's (animation only).
+                        explosion(centre, bldg.getBoardId(), magnitude, magnitude / 10, () -> {
+                            noteCollapse(bldg, coords);
+                            doExplosion(magnitude,
+                                  10,
+                                  false,
+                                  centre,
+                                  bldg.getBoardId(),
+                                  true,
+                                  vRep,
+                                  null,
+                                  -1,
+                                  false);
+                        });
                         Report.indentAll(vRep, 2);
                         vPhaseReport.addAll(vRep);
                         return vPhaseReport;
                     }
+                    noteCollapse(bldg, coords);
                     if (bldg.getBuildingType() == BuildingType.WALL) {
                         r = new Report(3442);
                     } else {
@@ -29406,7 +29414,10 @@ public class TWGameManager extends AbstractGameManager {
             boolean standing = curCF > 0;
             curCF -= Math.min(curCF, boom);
             bldg.setCurrentCF(curCF, coords);
-            if (standing && curCF == 0) { noteCollapse(bldg, coords); }
+            // A fuel tank about to burst is its explosion's (below).
+            if (standing && curCF == 0 && !(bldg instanceof FuelTank && bldg.getPhaseCF(coords) != 0)) {
+                noteCollapse(bldg, coords);
+            }
             r.add(bldg.getCurrentCF(coords));
             vDesc.add(r);
             // If the CF is zero, the building should fall.
@@ -29431,16 +29442,22 @@ public class TWGameManager extends AbstractGameManager {
                     r.newlines = 1;
                     vDesc.add(r);
                     Vector<Report> vRep = new Vector<>();
-                    doExplosion(((FuelTank) bldg).getMagnitude(),
-                          10,
-                          false,
-                          bldg.getCoords().nextElement(),
-                          bldg.getBoardId(),
-                          true,
-                          vRep,
-                          null,
-                          -1,
-                          false);
+                    int magnitude = ((FuelTank) bldg).getMagnitude();
+                    Coords centre = bldg.getCoords().nextElement();
+                    // The tank's own hex and what its explosion brings down are the explosion's (animation only).
+                    explosion(centre, bldg.getBoardId(), magnitude, magnitude / 10, () -> {
+                        if (standing) { noteCollapse(bldg, coords); }
+                        doExplosion(magnitude,
+                              10,
+                              false,
+                              centre,
+                              bldg.getBoardId(),
+                              true,
+                              vRep,
+                              null,
+                              -1,
+                              false);
+                    });
                     Report.indentAll(vRep, 2);
                     vDesc.addAll(vRep);
                     return mainPhaseReport;

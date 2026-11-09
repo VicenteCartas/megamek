@@ -1,11 +1,15 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.server.totalWarfare;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -25,25 +29,64 @@ final class AttackAnimationCapture {
     private final List<ResolvedAttack> attacks = new ArrayList<>();
     private final Map<UUID, List<ResolvedAttack.Impact>> impacts = new HashMap<>();
     private final Map<UUID, List<BoardLocation>> collapses = new HashMap<>();
-    /** How deep the resolution is in consequences whose collapses no attack takes ({@link #uncredited}). */
-    private int consequenceDepth;
-    /** A scheduled strike's resolution: its start packet's detonation, and everything it brings down. */
-    private NuclearDetonation strike;
-    private final LinkedHashSet<BoardLocation> strikeCollapses = new LinkedHashSet<>();
+
+    private record Bracket(NuclearDetonation detonation, Set<BoardLocation> collapses) { }
+    /** The detonations being resolved, innermost first: what comes down while one is open is its doing. */
+    private final Deque<Bracket> open = new ArrayDeque<>();
+    /** Each closed detonation's collapses, by id, for its completion packet. */
+    private final Map<UUID, List<BoardLocation>> named = new HashMap<>();
+    /** Explosions never sent: folded into what set them off, or bringing nothing down. */
+    private final Set<UUID> unsent = new HashSet<>();
 
     void packet(Integer connection, Packet packet) {
-        if (strike(packet) instanceof NuclearDetonation detonation && !completes(packet)) { strike = detonation; }
+        if (detonation(packet) instanceof NuclearDetonation detonation) {
+            if (completes(packet)) { close(detonation); } else { open(detonation); }
+        }
         deliveries.add(new Delivery(connection, packet));
     }
 
-    private static NuclearDetonation strike(Packet packet) {
+    private static NuclearDetonation detonation(Packet packet) {
         return packet.command() == PacketCommand.NUCLEAR_DETONATION && packet.getObject(0) instanceof NuclearDetonation
               detonation ? detonation : null;
     }
 
-    /** Whether a strike's packet is its completion rather than its start. */
+    /** Whether a detonation's packet is its completion rather than its start. */
     private static boolean completes(Packet packet) {
         return Boolean.TRUE.equals(packet.getObject(1));
+    }
+
+    /**
+     * A detonation starts. An explosion a strike's front or a nuclear round sets off is theirs, and one going off again
+     * where an open explosion did (a multi-hex fuel tank's next hex) is that one: what it brings down falls with them,
+     * and it is never sent. Any other opens a bracket of its own.
+     */
+    private void open(NuclearDetonation detonation) {
+        var outer = open.peek();
+        boolean folded = detonation.kind() == NuclearDetonation.Kind.EXPLOSION && (outer == null ? nuclearRoundResolving()
+              : outer.detonation().kind() != NuclearDetonation.Kind.EXPLOSION || open.stream().anyMatch(bracket ->
+                    bracket.detonation().coords().equals(detonation.coords())
+                          && bracket.detonation().boardId() == detonation.boardId()));
+        if (folded) { unsent.add(detonation.id()); } else { open.push(new Bracket(detonation, new LinkedHashSet<>())); }
+    }
+
+    /** A detonation completes: its bracket names what it brought down; an explosion that brought nothing down is not sent. */
+    private void close(NuclearDetonation detonation) {
+        if (open.isEmpty() || !open.peek().detonation().id().equals(detonation.id())) { return; }
+        var bracket = open.pop();
+        named.put(detonation.id(), List.copyOf(bracket.collapses()));
+        if (detonation.kind() == NuclearDetonation.Kind.EXPLOSION && bracket.collapses().isEmpty()) {
+            unsent.add(detonation.id());
+        }
+    }
+
+    /** Whether the newest attack being resolved, past the deaths it caused, is a nuclear round's. */
+    private boolean nuclearRoundResolving() {
+        for (int index = attacks.size() - 1; index >= 0; index--) {
+            var attack = attacks.get(index);
+            if (attack.kind() == ResolvedAttack.Kind.DEATH) { continue; }
+            return attack.shot() != null && attack.shot().nuclearType() != null;
+        }
+        return false;
     }
 
     void attack(ResolvedAttack result, List<Integer> recipients) {
@@ -66,18 +109,17 @@ final class AttackAnimationCapture {
     }
 
     /**
-     * The attack being resolved took the construction factor of the structure hex {@code at} to zero: the rules bring it
-     * down at the phase's end, which its collapse plays as this attack's doing. It takes it when it hit, or for artillery
-     * when its shell landed and went off, even scattered; a miss, a dud or what a consequence brings down
-     * ({@link #uncredited}) is no attack's doing. A scheduled strike takes everything it brings down, its chain
-     * explosions too: its completion names them, so their falls follow its front.
+     * The construction factor of the structure hex {@code at} went to zero: the rules bring it down at the phase's end,
+     * which its collapse plays as the doing of the innermost detonation being resolved (a scheduled strike, an orbital
+     * bombardment, an explosion), whose completion names it, so it falls with its front. Outside one, the attack being
+     * resolved takes it when it hit, or for artillery when its shell landed and went off, even scattered; a miss or a
+     * dud takes nothing.
      */
     void collapse(BoardLocation at) {
-        if (strike != null && attacks.isEmpty()) {
-            strikeCollapses.add(at);
+        if (!open.isEmpty()) {
+            open.peek().collapses().add(at);
             return;
         }
-        if (consequenceDepth > 0) { return; }
         for (int index = attacks.size() - 1; index >= 0; index--) {
             var attack = attacks.get(index);
             if (attack.kind() == ResolvedAttack.Kind.DEATH) { continue; }
@@ -88,25 +130,17 @@ final class AttackAnimationCapture {
         }
     }
 
-    /** Runs {@code consequence}, a fuel tank's explosion, crediting nothing it brings down to the attack. */
-    void uncredited(Runnable consequence) {
-        consequenceDepth++;
-        try {
-            consequence.run();
-        } finally {
-            consequenceDepth--;
-        }
-    }
-
     void flush(Consumer<Packet> broadcast, BiConsumer<Integer, Packet> targeted) {
         for (var delivery : deliveries) {
             Packet packet = delivery.packet();
             if (packet.command() == PacketCommand.ENTITY_ATTACK_RESOLVED && packet.getObject(0) instanceof ResolvedAttack attack) {
                 packet = new Packet(packet.command(), attack.withImpacts(impacts.getOrDefault(attack.id(), attack.impacts()))
                       .withCollapses(collapses.getOrDefault(attack.id(), attack.collapses())));
-            } else if (strike(packet) instanceof NuclearDetonation detonation && completes(packet)
-                  && strike != null && detonation.id().equals(strike.id())) {
-                packet = new Packet(packet.command(), detonation.withCollapses(List.copyOf(strikeCollapses)), true);
+            } else if (detonation(packet) instanceof NuclearDetonation detonation) {
+                if (unsent.contains(detonation.id())) { continue; }
+                if (completes(packet) && named.containsKey(detonation.id())) {
+                    packet = new Packet(packet.command(), detonation.withCollapses(named.get(detonation.id())), true);
+                }
             }
             if (delivery.connection() == null) { broadcast.accept(packet); }
             else { targeted.accept(delivery.connection(), packet); }

@@ -154,19 +154,8 @@ class GpuCollapseCauseTest {
     void aStrongHitPushesWhatItBringsDownOnlyRightBeforeItComesDown(boolean laserAfter) throws Exception {
         var atlas = new Coords(11, 10);
         var frames = play("Atlas AS7-D.mtf", atlas, 0, Map.of("1209", "bldg_elev:2;building:1:0;bldg_cf:10"),
-              GamePhase.FIRING, (manager, game, attacker) -> {
-                  int building = new BuildingTarget(ROOF, game.getBoard(), false).getId();
-                  for (String weapon : laserAfter ? List.of("ISAC20", "ISMediumLaser") : List.of("ISAC20")) {
-                      int mount = attacker.getWeaponList().stream()
-                            .filter(gun -> gun.getType() == EquipmentType.get(weapon) && !gun.isRearMounted())
-                            .findFirst().map(attacker::getEquipmentNum).orElseThrow();
-                      game.addAction(new WeaponAttackAction(MOVER, Targetable.TYPE_BUILDING, building, mount));
-                  }
-                  call(manager, "resolveOnlyWeaponAttacks");
-                  manager.assignAMS();
-                  call(manager, "handleAttacks");
-                  call(manager, "applyBuildingDamage");
-              });
+              GamePhase.FIRING, (manager, game, attacker) ->
+                    fire(manager, game, attacker, laserAfter ? List.of("ISAC20", "ISMediumLaser") : List.of("ISAC20")));
         var events = frames.moved().timeline();
         var collapse = events.stream().filter(event -> event instanceof BoardScene.TileTransition transition
               && transition.collapses(ROOF)).map(BoardScene.TileTransition.class::cast).findFirst().orElseThrow(
@@ -184,6 +173,33 @@ class GpuCollapseCauseTest {
         } else {
             assertEquals(1, fall.strength(), .01f, "An AC/20 pushes at full strength");
             assertEquals(atlas, fall.from().coords(), "It falls away from the Atlas");
+        }
+    }
+
+    /**
+     * An AC/20 bursts a fuel tank at 1209 (magnitude 30: 30 damage in its hex, 20 a hex out), whose explosion brings down
+     * the building beside it: the explosion takes both, each falling away from the tank, and the shot takes neither.
+     */
+    @Test
+    void aFuelTanksExplosionTakesWhatItBringsDown() throws Exception {
+        var beside = ROOF.translated(2);
+        var frames = play("Atlas AS7-D.mtf", new Coords(11, 10), 0,
+              Map.of(ROOF.getBoardNum(), "fuel_tank_cf:10;fuel_tank_elev:2;fuel_tank_magn:30;fuel_tank:1:0",
+                    beside.getBoardNum(), "bldg_elev:2;building:1:0;bldg_cf:15"),
+              GamePhase.FIRING, (manager, game, attacker) -> fire(manager, game, attacker, List.of("ISAC20")));
+        var events = frames.moved().timeline();
+        var shot = events.stream().filter(BoardScene.Combat.class::isInstance).map(BoardScene.Combat.class::cast)
+              .findFirst().orElseThrow(() -> new AssertionError("The shot plays: " + brief(events)));
+        var explosion = events.stream().filter(BoardScene.Detonation.class::isInstance).map(BoardScene.Detonation.class::cast)
+              .findFirst().orElseThrow(() -> new AssertionError("The tank's explosion plays: " + brief(events)));
+        assertTrue(events.indexOf(shot) < events.indexOf(explosion), "after the shot: " + brief(events));
+        assertEquals(List.of(), shot.result().collapses(), "The AC/20 takes neither");
+        assertEquals(megamek.common.NuclearDetonation.Kind.EXPLOSION, explosion.result().kind());
+        assertEquals(ROOF, explosion.result().coords());
+        assertEquals(java.util.Set.of(ROOF, beside), java.util.Set.copyOf(explosion.collapses().stream()
+              .map(BoardScene.TileTransition.Collapse::coords).toList()), brief(events));
+        for (var fall : explosion.collapses()) {
+            assertEquals(ROOF, fall.from().coords(), fall.coords() + " falls away from the tank");
         }
     }
 
@@ -225,6 +241,21 @@ class GpuCollapseCauseTest {
         return events.stream().map(event -> event instanceof BoardScene.TileTransition transition
               ? "TileTransition" + transition.collapses().stream().map(fall -> fall.coords().getBoardNum()).toList()
               : event.getClass().getSimpleName()).toList().toString();
+    }
+
+    /** The attacker fires {@code weapons} at the structure at 1209, and the firing phase resolves, to its end. */
+    private static void fire(TWGameManager manager, Game game, Entity attacker, List<String> weapons) throws Exception {
+        int building = new BuildingTarget(ROOF, game.getBoard(), false).getId();
+        for (String weapon : weapons) {
+            int mount = attacker.getWeaponList().stream()
+                  .filter(gun -> gun.getType() == EquipmentType.get(weapon) && !gun.isRearMounted())
+                  .findFirst().map(attacker::getEquipmentNum).orElseThrow();
+            game.addAction(new WeaponAttackAction(MOVER, Targetable.TYPE_BUILDING, building, mount));
+        }
+        call(manager, "resolveOnlyWeaponAttacks");
+        manager.assignAMS();
+        call(manager, "handleAttacks");
+        call(manager, "applyBuildingDamage");
     }
 
     private static void call(TWGameManager manager, String method) throws ReflectiveOperationException {

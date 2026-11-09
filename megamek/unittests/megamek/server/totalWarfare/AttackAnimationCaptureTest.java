@@ -102,7 +102,7 @@ class AttackAnimationCaptureTest {
 
     /**
      * A shell that missed but landed and went off, scattered, takes what it brings down; a dud does not, nor does what a
-     * consequence of the attack, a fuel tank's explosion, brings down.
+     * consequence of the attack, a fuel tank's explosion, brings down: that is the explosion's.
      */
     @Test
     void aShellThatLandedTakesWhatItBringsDownButNotWhatItsConsequencesDo() {
@@ -116,16 +116,20 @@ class AttackAnimationCaptureTest {
             capture.attack(new ResolvedAttack(ids[index], ResolvedAttack.Kind.SHOT, launcher, landing,
                   Targetable.TYPE_HEX_ARTILLERY, 0, "Long Tom", Entity.LOC_NONE, false, null, shell), List.of(7));
             capture.collapse(BoardLocation.of(new Coords(5, 5), 0));
-            capture.uncredited(() -> capture.collapse(BoardLocation.of(new Coords(5, 6), 0)));
+            explode(capture, explosion(new UUID(2, 3 + index), new Coords(5, 6)),
+                  () -> capture.collapse(BoardLocation.of(new Coords(5, 6), 0)));
         }
         var sent = new ArrayList<Packet>();
         capture.flush(sent::add, (recipient, packet) -> sent.add(packet));
-        var collapses = sent.stream().map(packet -> ((ResolvedAttack) packet.getObject(0)).collapses()).toList();
+        var collapses = sent.stream().filter(packet -> packet.command() == PacketCommand.ENTITY_ATTACK_RESOLVED)
+              .map(packet -> ((ResolvedAttack) packet.getObject(0)).collapses()).toList();
         assertEquals(List.of(List.of(BoardLocation.of(new Coords(5, 5), 0)), List.of()), collapses,
               "The scattered shell takes its own hex; the dud and the tank's explosion take nothing");
+        assertEquals(List.of(List.of(BoardLocation.of(new Coords(5, 6), 0)), List.of(BoardLocation.of(new Coords(5, 6), 0))),
+              completions(sent).stream().map(NuclearDetonation::collapses).toList(), "Each explosion names its own");
     }
 
-    /** A scheduled strike's completion names everything it brings down, its chain explosions too; the order stays. */
+    /** A scheduled strike's completion names everything it brings down, the explosions it sets off too; the order stays. */
     @Test
     void aStrikesCompletionNamesEverythingItBringsDown() {
         var capture = new AttackAnimationCapture();
@@ -133,7 +137,9 @@ class AttackAnimationCaptureTest {
         capture.packet(null, new Packet(PacketCommand.NUCLEAR_DETONATION, strike, false));
         capture.packet(null, new Packet(PacketCommand.ENTITY_UPDATE));
         capture.collapse(BoardLocation.of(new Coords(4, 5), 0));
-        capture.uncredited(() -> capture.collapse(BoardLocation.of(new Coords(9, 9), 0)));
+        // A fuel tank the strike sets off is the strike's: never sent, what it brings down falls with the front.
+        explode(capture, explosion(new UUID(3, 2), new Coords(8, 9)),
+              () -> capture.collapse(BoardLocation.of(new Coords(9, 9), 0)));
         capture.collapse(BoardLocation.of(new Coords(4, 5), 0));
         capture.packet(null, new Packet(PacketCommand.NUCLEAR_DETONATION, strike, true));
         var sent = new ArrayList<Packet>();
@@ -144,5 +150,74 @@ class AttackAnimationCaptureTest {
         assertEquals(true, sent.getLast().getObject(1));
         assertEquals(List.of(BoardLocation.of(new Coords(4, 5), 0), BoardLocation.of(new Coords(9, 9), 0)),
               ((NuclearDetonation) sent.getLast().getObject(0)).collapses());
+    }
+
+    /**
+     * A fuel tank an AC/20 bursts: the explosion takes the tank and what it brings down, the attack neither. A tank it
+     * sets off elsewhere is its own explosion, sent and completed inside the first; the first tank's next hex going off
+     * again from the same centre is the first explosion, not another; an explosion that brings nothing down is not sent.
+     */
+    @Test
+    void anExplosionTakesWhatItBringsDownAndEachChainedTankIsItsOwn() {
+        var capture = new AttackAnimationCapture();
+        var attacker = new UnitLocation(1, new Coords(1, 2), 0, 0, 0);
+        var tank = new Coords(5, 5);
+        capture.attack(new ResolvedAttack(new UUID(4, 1), ResolvedAttack.Kind.SHOT, attacker,
+              new UnitLocation(Entity.NONE, tank, 0, 0, 0), Targetable.TYPE_BUILDING, 0, "AC20", Entity.LOC_NONE, true),
+              List.of(7));
+        var first = explosion(new UUID(4, 2), tank);
+        var chained = explosion(new UUID(4, 3), new Coords(7, 5));
+        explode(capture, first, () -> {
+            capture.collapse(BoardLocation.of(tank, 0));
+            explode(capture, chained, () -> {
+                capture.collapse(BoardLocation.of(new Coords(7, 5), 0));
+                explode(capture, explosion(new UUID(4, 4), tank),
+                      () -> capture.collapse(BoardLocation.of(new Coords(5, 6), 0)));
+            });
+            capture.collapse(BoardLocation.of(new Coords(4, 5), 0));
+        });
+        explode(capture, explosion(new UUID(4, 5), new Coords(9, 9)), () -> { });
+        var sent = new ArrayList<Packet>();
+        capture.flush(sent::add, (recipient, packet) -> sent.add(packet));
+        assertEquals(List.of(), ((ResolvedAttack) sent.getFirst().getObject(0)).collapses(), "The AC/20 takes nothing");
+        assertEquals(List.of(first.id(), chained.id(), chained.id(), first.id()), sent.stream().skip(1)
+              .map(packet -> ((NuclearDetonation) packet.getObject(0)).id()).toList(), "Nested in order, none folded or empty");
+        assertEquals(List.of(List.of(BoardLocation.of(new Coords(7, 5), 0), BoardLocation.of(new Coords(5, 6), 0)),
+              List.of(BoardLocation.of(tank, 0), BoardLocation.of(new Coords(4, 5), 0))),
+              completions(sent).stream().map(NuclearDetonation::collapses).toList(), "Each hex named once, by the innermost");
+    }
+
+    /** A fuel tank a nuclear round sets off is the round's: never sent, and the round takes what it brings down. */
+    @Test
+    void aNuclearRoundTakesTheTanksItSetsOff() {
+        var capture = new AttackAnimationCapture();
+        var launcher = new UnitLocation(1, new Coords(1, 2), 0, 0, 0);
+        var landing = new UnitLocation(Entity.NONE, new Coords(5, 5), 0, 0, 0);
+        var shell = new ResolvedAttack.Shot("", java.util.Set.of(), true, false, 1, 0, true, null, launcher, landing,
+              false, 0, false, false, false, null, 100, false, 1);
+        capture.attack(new ResolvedAttack(new UUID(5, 1), ResolvedAttack.Kind.SHOT, launcher, landing,
+              Targetable.TYPE_HEX_ARTILLERY, 0, "Davy Crockett-M", Entity.LOC_NONE, true, null, shell), List.of(7));
+        explode(capture, explosion(new UUID(5, 2), new Coords(6, 5)),
+              () -> capture.collapse(BoardLocation.of(new Coords(6, 5), 0)));
+        var sent = new ArrayList<Packet>();
+        capture.flush(sent::add, (recipient, packet) -> sent.add(packet));
+        assertEquals(List.of(PacketCommand.ENTITY_ATTACK_RESOLVED), sent.stream().map(Packet::command).toList());
+        assertEquals(List.of(BoardLocation.of(new Coords(6, 5), 0)), ((ResolvedAttack) sent.getFirst().getObject(0)).collapses());
+    }
+
+    private static NuclearDetonation explosion(UUID id, Coords at) {
+        return NuclearDetonation.explosion(id, 0, at, 0, 80, 8);
+    }
+
+    /** As TWGameManager#detonation sends it: the blast between the explosion's start and completion. */
+    private static void explode(AttackAnimationCapture capture, NuclearDetonation explosion, Runnable blast) {
+        capture.packet(null, new Packet(PacketCommand.NUCLEAR_DETONATION, explosion, false));
+        blast.run();
+        capture.packet(null, new Packet(PacketCommand.NUCLEAR_DETONATION, explosion, true));
+    }
+
+    private static List<NuclearDetonation> completions(List<Packet> sent) {
+        return sent.stream().filter(packet -> packet.command() == PacketCommand.NUCLEAR_DETONATION
+              && Boolean.TRUE.equals(packet.getObject(1))).map(packet -> (NuclearDetonation) packet.getObject(0)).toList();
     }
 }
