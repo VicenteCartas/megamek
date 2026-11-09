@@ -17,8 +17,9 @@ import megamek.client.ui.util.KeyCommandBind;
 
 /**
  * Menu panel (C.1 G14, C.2, user corrections 3 and 6): the commands of the removed menu bar as the client captures
- * them (File, Game, Board, View, Help, Commands, Maps) in a centred dialog. Its first row opens the players panel;
- * groups expand in place; every item shows its shortcut and check mark and runs its own action, except the C.2
+ * them (File, Game, Board, View, Help, Commands, Maps) in a centred dialog. Its first row opens the players panel and
+ * its last row quits to the main menu; groups expand in place; every item shows its shortcut and check mark and runs
+ * its own action, except the C.2
  * redirects, which open the native surfaces instead of Swing. Choosing an item closes the panel, as a menu closes.
  */
 final class GpuMenuPanel implements GpuHud.Component {
@@ -70,6 +71,11 @@ final class GpuMenuPanel implements GpuHud.Component {
             rows.add(GpuCommandTree.SEPARATOR);
             tree.rows(menuBar, "", 0, rows);
         }
+        // The window has no close button in fullscreen, so the panel always offers the way out of the game.
+        BoardScene.Command quit = new BoardScene.Command("quit", text("GpuBoard.hud.menu.quit"), "", true, false,
+              false, List.of(), source::quitGame, "", null);
+        rows.add(GpuCommandTree.SEPARATOR);
+        tree.rows(List.of(quit), "", 0, rows);
         tree.show(rows, null, this::run);
     }
 

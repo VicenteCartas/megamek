@@ -155,8 +155,8 @@ class GpuHudRoutingSmokeTest {
      * A1: for every phase and every default bind exactly one handler runs: the HUD (consumed, never forwarded and no
      * camera move), the camera, or Swing (one press and one release, with the modifiers of the press); Swing's GUI scale
      * keys reach none, as the GUI scale is Swing's alone. The phase
-     * displays' own binds (TURN_*, UNDO_*, CANCEL, MOVE_*, TWIST_*) therefore never run twice, and Esc is withheld in
-     * the phases whose CANCEL clears declared attacks.
+     * displays' own binds (TURN_*, UNDO_*, CANCEL, MOVE_*, TWIST_*) therefore never run twice, and Esc with nothing to
+     * close opens the Menu, except in MegaMek's own movement turn, where it reaches the movement display.
      */
     @Test
     void everyKeyReachesExactlyOneHandlerInEveryPhase() throws Exception {
@@ -1195,10 +1195,11 @@ class GpuHudRoutingSmokeTest {
         GamePhase phase = scenario.phase();
         boolean firing = scenario.myTurn() && phase.isFiring();
         return switch (bind) {
-            case CANCEL -> phase.isFiring() || phase.isTargeting() || phase.isOffboard() || phase.isPhysical();
-            case SHOW_NAMEPLATES, ROUND_REPORT, KEY_BINDS, BOT_COMMANDS, LOS_SETTING, UNIT_OVERVIEW, FORCE_DISPLAY,
-                 UNIT_DISPLAY, UD_GENERAL, UD_PILOT, UD_ARMOR, UD_WEAPONS, UD_SYSTEMS, UD_EXTRAS, FORCES_GRID,
-                 TOGGLE_CHAT, TOGGLE_CHAT_CMD, DONE -> true;
+            // The last Esc opens the Menu, except in MegaMek's own movement turn; F10 always toggles it.
+            case CANCEL -> !(scenario.myTurn() && phase.isMovement() && !scenario.planner());
+            case GAME_MENU, SHOW_NAMEPLATES, ROUND_REPORT, KEY_BINDS, BOT_COMMANDS, LOS_SETTING,
+                 UNIT_OVERVIEW, FORCE_DISPLAY, UNIT_DISPLAY, UD_GENERAL, UD_PILOT, UD_ARMOR, UD_WEAPONS, UD_SYSTEMS,
+                 UD_EXTRAS, FORCES_GRID, TOGGLE_CHAT, TOGGLE_CHAT_CMD, DONE -> true;
             case MOVE_MODE_WALK, MOVE_MODE_RUN, MOVE_MODE_JUMP, TURN_LEFT, TURN_RIGHT -> scenario.planning();
             case TWIST_LEFT, TWIST_RIGHT -> firing;
             case UNDO_LAST_STEP, CLEAR_ORDERS -> scenario.planning() || firing;

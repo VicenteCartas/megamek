@@ -186,6 +186,8 @@ public enum KeyCommandBind {
     /** Expands or collapses the Tactical View's Overlays panel. */
     TACTICAL_OVERLAYS("tacticalOverlays", VK_H),
     CLEAR_ORDERS("clearOrders", VK_DELETE),
+    /** Opens or closes the battle HUD's Menu, which Esc also opens once nothing is left to close. */
+    GAME_MENU("gameMenu", VK_F10),
     PLAYBACK_TOGGLE("playbackToggle", VK_SPACE),
     PLAYBACK_PREV("playbackPrev", VK_LEFT),
     PLAYBACK_NEXT("playbackNext", VK_RIGHT),

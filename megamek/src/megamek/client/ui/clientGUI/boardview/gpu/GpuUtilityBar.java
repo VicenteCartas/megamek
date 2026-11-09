@@ -4,14 +4,17 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.gdx.UiKit.onChange;
 
 import java.util.List;
+import java.util.StringJoiner;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.EventListener;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
+import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.utils.Align;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -19,6 +22,7 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.client.ui.util.KeyCommandBind;
 
 /**
  * Top-right camera controls and utilities, the Tactical View chip and the
@@ -56,6 +60,7 @@ final class GpuUtilityBar implements GpuHud.Component {
     private final UiButton log;
     private final UiButton help;
     private final UiButton menu;
+    private final Label menuTip;
     private GpuHud.Inputs inputs;
 
     GpuUtilityBar(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera,
@@ -77,6 +82,7 @@ final class GpuUtilityBar implements GpuHud.Component {
         UiKit.size(help.getLabel(), "hud-medium", 19);
         help.add(help.getLabel());
         menu = iconButton(ui, "menu", Messages.getString("GpuBoard.hud.menu.title"), "utility-menu");
+        menuTip = tipLabel(menu);
         for (UiButton utility : List.of(tactical, wireframe, map, contacts, log)) {
             root.add(utility).height(HEIGHT).padLeft(GAP);
         }
@@ -188,6 +194,7 @@ final class GpuUtilityBar implements GpuHud.Component {
         log.pressed(state.logOpen()).badge(reviewable > 0 ? String.valueOf(reviewable) : null);
         help.pressed(state.dialog == GpuHudState.Dialog.HELP);
         menu.pressed(state.dialog == GpuHudState.Dialog.MENU);
+        menuTip.setText(menuTip(inputs.preferences()));
         chip.setVisible(tacticalView);
         north.setVisible(tacticalView);
         // Scene2D turns counterclockwise; the camera's azimuth turns the board's north that far clockwise on screen.
@@ -198,6 +205,29 @@ final class GpuUtilityBar implements GpuHud.Component {
     /** As the T key: the camera enters the Tactical View or returns to the 3D pose it replaced. */
     private void setTactical(boolean enabled) {
         camera.setTactical(enabled, inputs.frame().scene());
+    }
+
+    /** The Menu utility's tooltip with the keys that open the Menu: the CANCEL bind (Esc) and the GAME_MENU bind. */
+    static String menuTip(GpuBoardSource.UiPreferences preferences) {
+        StringJoiner keys = new StringJoiner(" / ");
+        for (KeyCommandBind bind : List.of(KeyCommandBind.CANCEL, KeyCommandBind.GAME_MENU)) {
+            String key = GpuHintLine.key(preferences, bind);
+            if (!key.isEmpty()) {
+                keys.add(key);
+            }
+        }
+        return keys.length() == 0 ? Messages.getString("GpuBoard.hud.menu.title")
+              : Messages.getString("GpuBoard.hud.menu.tip", keys.toString());
+    }
+
+    /** The text of the tooltip {@link #iconButton} gave {@code button}. */
+    private static Label tipLabel(Actor button) {
+        for (EventListener listener : button.getListeners()) {
+            if (listener instanceof TextTooltip tip) {
+                return tip.getActor();
+            }
+        }
+        throw new IllegalStateException("No tooltip on " + button.getName());
     }
 
     /**
