@@ -16,6 +16,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.util.LauncherReadySignal;
 import megamek.client.ui.util.ScreenFit;
 import megamek.logging.MMLogger;
 import org.lwjgl.glfw.GLFW;
@@ -289,6 +290,7 @@ public final class GpuHost {
                     GpuNativeDialogOwner.Win32.useWindowIconsForClass(window.getWindowHandle());
                     fitOnScreen(window);
                     windowHandle = window.getWindowHandle();
+                    LauncherReadySignal.nativeWindowOpened();
                 }
 
                 @Override

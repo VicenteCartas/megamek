@@ -61,6 +61,7 @@ public final class LauncherReadySignal {
 
     private static final MMLogger LOGGER = MMLogger.create(LauncherReadySignal.class);
     private static final AtomicBoolean installed = new AtomicBoolean();
+    private static final AtomicBoolean signalled = new AtomicBoolean();
 
     private LauncherReadySignal() {
     }
@@ -76,23 +77,43 @@ public final class LauncherReadySignal {
             return;
         }
         Toolkit toolkit = Toolkit.getDefaultToolkit();
-        listen(readyFile, toolkit::addAWTEventListener, toolkit::removeAWTEventListener);
+        listen(readyFile, signalled, toolkit::addAWTEventListener, toolkit::removeAWTEventListener);
+    }
+
+    /**
+     * Any thread: a native window that AWT does not see, such as the 3D start screen, is on screen. MegaMek opens it
+     * before any Swing window, so it has to tell the launcher itself. Nothing happens unless the launcher asked; only
+     * the first window, of either kind, counts.
+     */
+    public static void nativeWindowOpened() {
+        String readyFile = System.getProperty(READY_FILE_PROPERTY);
+        if (readyFile != null && !readyFile.isBlank()) {
+            signalOnce(readyFile, signalled);
+        }
     }
 
     /**
      * Registers, through {@code add}, a window-event listener that removes itself through {@code remove} and creates
-     * {@code readyFile} when the first window opens.
+     * {@code readyFile} when the first window opens, unless {@code signalled} shows another window already did.
      */
-    static void listen(String readyFile, BiConsumer<AWTEventListener, Long> add, Consumer<AWTEventListener> remove) {
+    static void listen(String readyFile, AtomicBoolean signalled, BiConsumer<AWTEventListener, Long> add,
+          Consumer<AWTEventListener> remove) {
         add.accept(new AWTEventListener() {
             @Override
             public void eventDispatched(AWTEvent event) {
                 if (event.getID() == WindowEvent.WINDOW_OPENED) {
                     remove.accept(this);
-                    signal(readyFile);
+                    signalOnce(readyFile, signalled);
                 }
             }
         }, AWTEvent.WINDOW_EVENT_MASK);
+    }
+
+    /** Creates {@code readyFile} unless {@code signalled} shows it was already created in this run. */
+    static void signalOnce(String readyFile, AtomicBoolean signalled) {
+        if (signalled.compareAndSet(false, true)) {
+            signal(readyFile);
+        }
     }
 
     /** Creates the empty file at {@code readyFile}; a file that cannot be created is only logged. */

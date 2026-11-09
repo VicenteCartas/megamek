@@ -46,6 +46,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -79,7 +80,7 @@ class LauncherReadySignalTest {
         List<Long> masks = new ArrayList<>();
         List<AWTEventListener> removed = new ArrayList<>();
 
-        LauncherReadySignal.listen(readyFile.toString(), (listener, mask) -> {
+        LauncherReadySignal.listen(readyFile.toString(), new AtomicBoolean(), (listener, mask) -> {
             added.add(listener);
             masks.add(mask);
         }, removed::add);
@@ -99,6 +100,45 @@ class LauncherReadySignalTest {
 
     private static AWTEvent event(int id) {
         return new AWTEvent(new Object(), id) {};
+    }
+
+    @Test
+    void signalOnceCreatesTheFileOnlyForTheFirstWindow() throws IOException {
+        Path readyFile = temp.resolve("ready");
+        AtomicBoolean signalled = new AtomicBoolean();
+
+        LauncherReadySignal.signalOnce(readyFile.toString(), signalled);
+        assertTrue(Files.isRegularFile(readyFile));
+
+        Files.delete(readyFile);
+        LauncherReadySignal.signalOnce(readyFile.toString(), signalled);
+        assertFalse(Files.exists(readyFile), "a later window does not create the file again");
+    }
+
+    @Test
+    void windowOpenedAfterANativeWindowDoesNotSignalAgain() {
+        Path readyFile = temp.resolve("ready");
+        List<AWTEventListener> added = new ArrayList<>();
+        List<AWTEventListener> removed = new ArrayList<>();
+
+        LauncherReadySignal.listen(readyFile.toString(), new AtomicBoolean(true),
+              (listener, mask) -> added.add(listener), removed::add);
+        added.get(0).eventDispatched(event(WindowEvent.WINDOW_OPENED));
+
+        assertFalse(Files.exists(readyFile), "the native window already told the launcher");
+        assertEquals(added, removed, "the listener still removes itself");
+    }
+
+    @Test
+    void nativeWindowOpenedDoesNothingWithoutTheProperty() {
+        String previous = System.clearProperty(LauncherReadySignal.READY_FILE_PROPERTY);
+        try {
+            assertDoesNotThrow(LauncherReadySignal::nativeWindowOpened);
+        } finally {
+            if (previous != null) {
+                System.setProperty(LauncherReadySignal.READY_FILE_PROPERTY, previous);
+            }
+        }
     }
 
     @Test
