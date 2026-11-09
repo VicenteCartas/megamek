@@ -38,6 +38,7 @@ import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeArc;
 import megamek.common.compute.TurretFacing;
+import megamek.common.enums.AimingMode;
 import megamek.common.enums.FacingArc;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.AmmoMounted;
@@ -89,11 +90,13 @@ final class GpuFireOrders implements AutoCloseable {
      * that bin's shots (-1 none). The TN column shows {@code target}: the target of the weapon's queued attack, else
      * the focus, else {@code TargetKey.NONE}; {@code value} and {@code odds} are its roll (TargetRoll values, odds
      * 0-100), and {@code reason} the rules' or the display's reason, non-empty only for an impossible shot.
-     * {@code usable}: it can be assigned (valid for the phase) or is queued.
+     * {@code usable}: it can be assigned (valid for the phase) or is queued. {@code aimable}: it may make an aimed shot
+     * at a location of that target (H36, R4); {@code aimedAt} names the location its queued attack aims at, "" for
+     * none.
      */
     record WeaponRow(int eqNum, String name, String location, String kind, String damage, int heat, String mode,
           List<GpuUnitRecord.AmmoChoice> ammo, int loadedAmmo, int shots, TargetKey target, int value, double odds,
-          String reason, boolean usable, boolean locationDestroyed) {
+          String reason, boolean usable, boolean locationDestroyed, boolean aimable, String aimedAt) {
         WeaponRow {
             ammo = List.copyOf(ammo);
         }
@@ -173,15 +176,24 @@ final class GpuFireOrders implements AutoCloseable {
     record Badge(int targetId, int value, double odds, String reason) { }
 
     /**
-     * The aimed shot choice on the focus (R4, H36): the locations the aimed shot handler offers in place of its dialog,
-     * each enabled or not as the dialog's, the location it aims at ({@code Entity.LOC_NONE}: none), and the actor's
-     * weapons that may aim.
+     * The aimed shot dialog's weapon, by the unit that declares and its equipment number, and the unit it aims at (H36,
+     * R4).
      */
-    record Aim(List<String> locations, List<Boolean> enabled, int location, Set<Integer> weapons) {
-        Aim {
-            locations = List.copyOf(locations);
+    record AimTarget(int actorId, int eqNum, TargetKey target) { }
+
+    /**
+     * The aimed shot dialog's choice (H36, R4) for its weapon and unit ({@code aim}): the weapon's and the unit's
+     * names, the unit's armor record for its paperdoll (its locations in the rules' order), for each location whether
+     * the weapon may aim there (the aimed shot handler's mask, and a roll left to make) and its roll aimed there, the
+     * location its attack aims at ({@code Entity.LOC_NONE}: none), and its roll without an aimed shot (TargetRoll
+     * values). {@code rear}: the shot strikes the unit's rear armor; {@code aptitude}: its rolls are made on 3d6
+     * (natural aptitude), for their odds.
+     */
+    record AimChoice(AimTarget aim, String weapon, String unit, GpuUnitRecord.Snapshot record, List<Boolean> enabled,
+          List<Integer> rolls, int location, int value, boolean rear, boolean aptitude) {
+        AimChoice {
             enabled = List.copyOf(enabled);
-            weapons = Set.copyOf(weapons);
+            rolls = List.copyOf(rolls);
         }
     }
 
@@ -194,13 +206,14 @@ final class GpuFireOrders implements AutoCloseable {
      * of each other own unit's draft (H33; units with none left out) on every turn of the firing phase;
      * {@code pendingUnits} is, while active, the own units left to declare in this phase, the actor included; while
      * "Resolve phase" is on, {@code autoDeclareRemaining} is the own units it has left to declare, on every turn of
-     * the phase, else 0. {@code aim} is the aimed shot choice on the focus, null while none is offered.
+     * the phase, else 0. {@code aimChoice} is the aimed shot dialog's choice ({@link #showAim}), null while the dialog
+     * asks for none or its weapon may not aim at its unit.
      */
     record Snapshot(boolean active, boolean editable, int actorId, Focus focus, int selectedWeapon,
           List<WeaponRow> weapons, List<Target> targets, List<Attack> attacks, int twist, boolean canTwistLeft,
           boolean canTwistRight, String torsoLabel, Heat heat, Solution solution, FrontArc frontArc,
           List<Badge> badges, Badge hoverBest, Map<Integer, Integer> drafted, int pendingUnits,
-          int autoDeclareRemaining, Aim aim) {
+          int autoDeclareRemaining, AimChoice aimChoice) {
         static final Snapshot EMPTY = idle(Map.of(), 0);
 
         /**
@@ -243,15 +256,16 @@ final class GpuFireOrders implements AutoCloseable {
         }
     }
 
-    /** One weapon's roll for the snapshot: the target it is against and the to-hit. */
-    private record Shot(TargetKey target, @Nullable ToHitData toHit) { }
+    /** One weapon's roll for the snapshot: the target it is against, the to-hit and its queued attack (or null). */
+    private record Shot(TargetKey target, @Nullable ToHitData toHit, @Nullable WeaponAttackAction attack) { }
 
     /**
-     * What the TN badges are computed from: the actor, the selected weapon and what changes its rolls locally (mode,
-     * loaded bin, called shot), the focus, the queue (its targets and secondary-target modifiers), the twist and arms,
-     * and the game's revision for everything the server changes.
+     * What a weapon's rolls on a target are computed from (the TN badges with the focus, the aimed shot choice with its
+     * unit): the actor, the weapon and what changes its rolls locally (mode, loaded bin, called shot), the target, the
+     * queue (its targets, secondary-target modifiers and aims), the twist and arms, and the game's revision for
+     * everything the server changes.
      */
-    private record BadgeKey(int actorId, int weapon, String setting, TargetKey focus, List<EntityAction> queue,
+    private record RollKey(int actorId, int weapon, String setting, TargetKey target, List<EntityAction> queue,
           int facing, boolean flipped, long revision) { }
 
     /** A unit's saved orders (H33): its queued actions in fire order and the serials of its targets' letters. */
@@ -271,9 +285,14 @@ final class GpuFireOrders implements AutoCloseable {
     private boolean commanding;
     private Snapshot published = Snapshot.EMPTY;
     // The TN badges, over budget for a capture at 100 v 100 (rule 9): computed in their own event for badgeKey.
-    private BadgeKey badgeKey;
+    private RollKey badgeKey;
     private List<Badge> badges = List.of();
     private boolean badgeJob;
+    /** GL thread writes, EDT reads: the aimed shot dialog's weapon and unit, null while it is closed. */
+    private volatile AimTarget aimRequest;
+    // EDT: the dialog's choice as last computed (a roll per location), kept for its key.
+    private RollKey aimKey;
+    private AimChoice aimChoice;
     // Drafts (H33), EDT only, for one firing phase of one round (draftRound, draftPhase): the orders of the own units
     // that are not the actor, whose orders are the display's queue. The actor, turn index, orders and letters noted
     // where no operation of the display is half-done (see track) tell a unit switch the display made (Next unit, a
@@ -415,7 +434,7 @@ final class GpuFireOrders implements AutoCloseable {
                 ToHitData toHit = attack.toHit(game, true);
                 attacks.add(attack(game, actor, attack, toHit, actor.isUseNaturalAptitudeGunnery(game, attack)));
                 if (attack.getEntityId() == actor.getId()) {
-                    shots.putIfAbsent(attack.getWeaponId(), new Shot(TargetKey.of(attack), toHit));
+                    shots.putIfAbsent(attack.getWeaponId(), new Shot(TargetKey.of(attack), toHit, attack));
                 }
             }
         }
@@ -429,10 +448,11 @@ final class GpuFireOrders implements AutoCloseable {
             int eqNum = actor.getEquipmentNum(weapon);
             boolean queued = shots.containsKey(eqNum);
             Shot shot = queued ? shots.get(eqNum)
-                  : (focus != null) ? new Shot(focusKey, fd.toHitFor(weapon, focus))
-                  : new Shot(TargetKey.NONE, null);
+                  : (focus != null) ? new Shot(focusKey, fd.toHitFor(weapon, focus), null)
+                  : new Shot(TargetKey.NONE, null, null);
             shots.put(eqNum, shot);
-            rows.add(row(game, actor, weapon, eqNum, shot, queued, actor.isUseNaturalAptitudeGunnery(game, weapon)));
+            rows.add(row(game, fd, actor, weapon, eqNum, shot, queued,
+                  actor.isUseNaturalAptitudeGunnery(game, weapon)));
         }
         List<Target> targets = new ArrayList<>();
         for (int index = 0; index < lettered.size(); index++) {
@@ -466,7 +486,8 @@ final class GpuFireOrders implements AutoCloseable {
               ((selected == null) && shown) ? frontArc(game, actor) : null,
               badges(badgeKey(fd, actor, queue, focusKey), carded),
               hoverBest(game, fd, actor, hover, queue, carded), drafted(actor.getId()),
-              GpuBattleStatus.unitsToAct(game, source.currentView().getLocalPlayer()), remaining, aim(fd, actor)));
+              GpuBattleStatus.unitsToAct(game, source.currentView().getLocalPlayer()), remaining,
+              aimChoice(game, fd, actor, queue)));
     }
 
     /**
@@ -474,7 +495,7 @@ final class GpuFireOrders implements AutoCloseable {
      * its own event and republishes (rule 9); until then the weapon's previous badges stay, but none on a unit with a
      * card.
      */
-    private List<Badge> badges(@Nullable BadgeKey key, Set<TargetKey> carded) {
+    private List<Badge> badges(@Nullable RollKey key, Set<TargetKey> carded) {
         if ((key != null) && !key.equals(badgeKey) && !badgeJob) {
             badgeJob = true;
             SwingUtilities.invokeLater(this::badgeJob);
@@ -495,7 +516,7 @@ final class GpuFireOrders implements AutoCloseable {
         }
         List<EntityAction> queue = fd.getAttacks();
         TargetKey focus = key(focus(fd));
-        BadgeKey key = badgeKey(fd, actor, queue, focus);
+        RollKey key = badgeKey(fd, actor, queue, focus);
         if ((key == null) || key.equals(badgeKey)) {
             return;
         }
@@ -506,16 +527,18 @@ final class GpuFireOrders implements AutoCloseable {
     }
 
     /** The key of the badges for the display's state, null without a selected weapon. */
-    private @Nullable BadgeKey badgeKey(WeaponDeclarationDisplay fd, Entity actor, List<EntityAction> queue,
+    private @Nullable RollKey badgeKey(WeaponDeclarationDisplay fd, Entity actor, List<EntityAction> queue,
           TargetKey focus) {
         WeaponMounted weapon = selectedWeapon(fd, actor);
-        if (weapon == null) {
-            return null;
-        }
+        return (weapon == null) ? null : rollKey(actor, weapon, focus, queue);
+    }
+
+    /** The key of the weapon's rolls on the target with the queue, as the actor and the game stand now. */
+    private RollKey rollKey(Entity actor, WeaponMounted weapon, TargetKey target, List<EntityAction> queue) {
         AmmoMounted ammo = weapon.getLinkedAmmo();
         String setting = weapon.curMode().getName() + ':' + ((ammo == null) ? -1
               : ammo.getEntity().getEquipmentNum(ammo)) + ':' + weapon.getCalledShot().getCall();
-        return new BadgeKey(actor.getId(), actor.getEquipmentNum(weapon), setting, focus, queue,
+        return new RollKey(actor.getId(), actor.getEquipmentNum(weapon), setting, target, queue,
               actor.getSecondaryFacing(), actor.getArmsFlipped(), revision);
     }
 
@@ -783,8 +806,10 @@ final class GpuFireOrders implements AutoCloseable {
                 return;
             }
             WeaponAttackAction attack = queued(fd.getAttacks(), actor, eqNum);
+            // The attack keeps its aim where the new ammunition may still aim (the handler's rule at Fire).
             boolean changed = (attack == null) ? load(fd, actor, weapon, bin)
-                  : redeclare(fd, actor, attack, weapon, attack.getTarget(source.currentView().game), bin);
+                  : redeclare(fd, actor, attack, weapon, attack.getTarget(source.currentView().game), bin,
+                        aimed(attack));
             if (changed && (acting(fd) == actor)) {
                 toast(fd, ToastLevel.INFO, "GpuBoard.hud.fire.ammoChanged", weapon.getPlainDesc(),
                       WeaponDisplayData.formatAmmo(actor, bin));
@@ -820,19 +845,40 @@ final class GpuFireOrders implements AutoCloseable {
     }
 
     /**
-     * H36, R4: aims at a location of the focused unit ({@code Entity.LOC_NONE}: no aim) that the aimed shot handler
-     * offers in place of its dialog, with a weapon that may aim, as a choice in the dialog does.
+     * GL thread: the aimed shot dialog's weapon and unit (null: it closed). The next capture describes the weapon's
+     * choice there in the orders ({@link Snapshot#aimChoice}).
      */
-    void aim(int eqNum, int location) {
+    void showAim(@Nullable AimTarget request) {
+        if (!Objects.equals(request, aimRequest)) {
+            aimRequest = request;
+            SwingUtilities.invokeLater(source::refresh);
+        }
+    }
+
+    /**
+     * H36, R4: the weapon's aimed shot at a location of the unit ({@code Entity.LOC_NONE}: none), as the aimed shot
+     * dialog picks it, while its unit still declares; a location its choice disables is refused. The weapon's queued
+     * attack on the unit is declared again with the new aim, at its place in the fire order; a weapon without an attack
+     * is assigned to the unit, aimed there. Every other shot keeps its own aim, and a new assignment has none.
+     */
+    void aim(AimTarget aim, int location) {
         command((fd, actor) -> {
-            WeaponMounted weapon = weapon(actor, eqNum);
-            AimedShotHandler aims = fd.getAimedShotHandler();
-            AimedShotHandler.Offer offer = (aims == null) ? null : aims.getOffer();
-            if ((weapon != null) && (offer != null) && aims.allowAimedShotWith(weapon)
-                  && ((location == Entity.LOC_NONE) || ((location >= 0) && (location < offer.enabled().size())
-                  && offer.enabled().get(location)))) {
-                show(fd, actor, weapon);
-                aims.aimAt(location);
+            WeaponMounted weapon = (actor.getId() == aim.actorId()) ? weapon(actor, aim.eqNum()) : null;
+            Targetable target = (weapon == null) ? null : target(fd, actor, aim.target());
+            WeaponAttackAction attack = queued(fd.getAttacks(), actor, aim.eqNum());
+            AimChoice choice = ((target == null) || ((attack != null)
+                  && !TargetKey.of(attack).equals(aim.target()))) ? null
+                  : choice(source.currentView().game, fd, actor, weapon, target, attack);
+            if ((choice == null) || ((location != Entity.LOC_NONE) && ((location < 0)
+                  || (location >= choice.enabled().size()) || !choice.enabled().get(location)))) {
+                return;
+            }
+            if (attack != null) {
+                if (aimed(attack) != location) {
+                    redeclare(fd, actor, attack, weapon, target, null, location);
+                }
+            } else if (location != Entity.LOC_NONE) {
+                queue(fd, actor, weapon, target, location);
             }
         });
     }
@@ -930,32 +976,43 @@ final class GpuFireOrders implements AutoCloseable {
         }
     }
 
-    /** Assigns the weapon to the target, or moves its queued attack there at the attack's place in the fire order. */
+    /**
+     * Assigns the weapon to the target, or moves its queued attack there at the attack's place in the fire order; an
+     * attack on the target already keeps its aim, and a new or moved one has none.
+     */
     private void declare(WeaponDeclarationDisplay fd, Entity actor, WeaponMounted weapon, Targetable target) {
-        List<EntityAction> before = fd.getAttacks();
-        WeaponAttackAction attack = queued(before, actor, actor.getEquipmentNum(weapon));
+        WeaponAttackAction attack = queued(fd.getAttacks(), actor, actor.getEquipmentNum(weapon));
         if ((attack != null) && TargetKey.of(attack).equals(TargetKey.of(target))) {
             setTarget(fd, target);
         } else if (attack != null) {
-            redeclare(fd, actor, attack, weapon, target, null);
+            redeclare(fd, actor, attack, weapon, target, null, Entity.LOC_NONE);
         } else {
-            TargetKey lead = lead(source.currentView().game, actor, before);
-            // Fire may end the turn (auto-end firing, after the last weapon); the display sent the queue as it was.
-            if ((shoot(fd, actor, weapon, target) != null) && (acting(fd) == actor)) {
-                order(fd, actor, fd.getAttacks(), lead);
-            }
+            queue(fd, actor, weapon, target, Entity.LOC_NONE);
         }
     }
 
     /**
-     * Declares the queued attack again, at the target (retarget) or with the bin (setAmmo; null: the bin stays), at
-     * its place in the canonical order. The attacks after that place leave the queue first: Fire, which ends the turn
-     * once no weapon is left to fire (the auto-end setting), can then end it only when nothing follows the attack, the
-     * queue being in that order already; otherwise they come back after the attack. A refusal, or a bin the weapon
-     * does not load, puts the bin, the queue and the letters back as they were. True when the attack was declared.
+     * A new shot of the weapon at the target, aimed at {@code aim} ({@code Entity.LOC_NONE}: not aimed), then the
+     * canonical order.
+     */
+    private void queue(WeaponDeclarationDisplay fd, Entity actor, WeaponMounted weapon, Targetable target, int aim) {
+        TargetKey lead = lead(source.currentView().game, actor, fd.getAttacks());
+        // Fire may end the turn (auto-end firing, after the last weapon); the display sent the queue as it was.
+        if ((shoot(fd, actor, weapon, target, aim) != null) && (acting(fd) == actor)) {
+            order(fd, actor, fd.getAttacks(), lead);
+        }
+    }
+
+    /**
+     * Declares the queued attack again, at the target (retarget) or with the bin (setAmmo; null: the bin stays),
+     * aimed at {@code aim} ({@code Entity.LOC_NONE}: not aimed), at its place in the canonical order. The attacks
+     * after that place leave the queue first: Fire, which ends the turn once no weapon is left to fire (the auto-end
+     * setting), can then end it only when nothing follows the attack, the queue being in that order already;
+     * otherwise they come back after the attack. A refusal, or a bin the weapon does not load, puts the bin, the queue
+     * and the letters back as they were. True when the attack was declared.
      */
     private boolean redeclare(WeaponDeclarationDisplay fd, Entity actor, WeaponAttackAction attack,
-          WeaponMounted weapon, Targetable target, @Nullable AmmoMounted bin) {
+          WeaponMounted weapon, Targetable target, @Nullable AmmoMounted bin, int aim) {
         Game game = source.currentView().game;
         List<EntityAction> before = fd.getAttacks();
         AmmoMounted loaded = GpuUnitRecord.ammoWeapon(weapon).getLinkedAmmo();
@@ -969,7 +1026,7 @@ final class GpuFireOrders implements AutoCloseable {
         order = canonical(game, actor, order, lead);
         int place = order.indexOf(standIn);
         fd.replaceAttacks(order.subList(0, place));
-        EntityAction declared = ((bin == null) || load(fd, actor, weapon, bin)) ? shoot(fd, actor, weapon, target)
+        EntityAction declared = ((bin == null) || load(fd, actor, weapon, bin)) ? shoot(fd, actor, weapon, target, aim)
               : null;
         if (acting(fd) != actor) {
             // Fire ended the turn and the display sent the queue: the attack came last in the canonical order.
@@ -992,22 +1049,34 @@ final class GpuFireOrders implements AutoCloseable {
 
     /**
      * Declares a shot of the weapon at the target as the Fire button does: the Unit Display shows the weapon, the
-     * display targets the target and fires when it allows it; else the refusal toast (H17). Returns the new weapon
-     * attack, null when none was queued.
+     * display targets the target and fires when it allows it; else the refusal toast (H17). The aimed shot handler
+     * aims at {@code aim} for this shot alone ({@code Entity.LOC_NONE}: not aimed), as the dialog's choice before Fire
+     * would. Returns the new weapon attack, null when none was queued.
      */
     private @Nullable EntityAction shoot(WeaponDeclarationDisplay fd, Entity actor, WeaponMounted weapon,
-          Targetable target) {
+          Targetable target, int aim) {
         show(fd, actor, weapon);
         setTarget(fd, target);
-        if (!fd.isFireAllowed()) {
-            toast(fd, ToastLevel.WARNING, "GpuBoard.hud.fire.refused", weapon.getPlainDesc(), name(target),
-                  fd.toHitFor(weapon, target).getDesc());
-            return null;
+        AimedShotHandler aims = (aim == Entity.LOC_NONE) ? null : fd.getAimedShotHandler();
+        if (aims != null) {
+            aims.setAimingMode();
+            aims.aimAt(aim);
         }
-        List<EntityAction> before = fd.getAttacks();
-        fd.fire();
-        return fd.getAttacks().stream().filter(action -> (action instanceof WeaponAttackAction)
-              && before.stream().noneMatch(old -> old == action)).findFirst().orElse(null);
+        try {
+            if (!fd.isFireAllowed()) {
+                toast(fd, ToastLevel.WARNING, "GpuBoard.hud.fire.refused", weapon.getPlainDesc(), name(target),
+                      fd.toHitFor(weapon, target).getDesc());
+                return null;
+            }
+            List<EntityAction> before = fd.getAttacks();
+            fd.fire();
+            return fd.getAttacks().stream().filter(action -> (action instanceof WeaponAttackAction)
+                  && before.stream().noneMatch(old -> old == action)).findFirst().orElse(null);
+        } finally {
+            if (aims != null) {
+                aims.aimAt(Entity.LOC_NONE);
+            }
+        }
     }
 
     /**
@@ -1539,8 +1608,8 @@ final class GpuFireOrders implements AutoCloseable {
 
     // ------------------------------------------------------------------ snapshot parts
 
-    private static WeaponRow row(Game game, Entity actor, WeaponMounted weapon, int eqNum, Shot shot, boolean queued,
-          boolean aptitude) {
+    private static WeaponRow row(Game game, WeaponDeclarationDisplay fd, Entity actor, WeaponMounted weapon, int eqNum,
+          Shot shot, boolean queued, boolean aptitude) {
         UnitDisplayData.RowParts parts = UnitDisplayData.rowParts(game, weapon);
         AmmoMounted loaded = GpuUnitRecord.ammoWeapon(weapon).getLinkedAmmo();
         List<AmmoMounted> bins = bins(actor, weapon);
@@ -1549,32 +1618,104 @@ final class GpuFireOrders implements AutoCloseable {
             bins = List.of(loaded);
         }
         int location = weapon.getLocation();
+        Targetable target = shot.target().equals(TargetKey.NONE) ? null : resolve(game, shot.target());
+        int aimed = aimed(shot.attack());
         return new WeaponRow(eqNum, weapon.getPlainDesc(), parts.location(), kind(weapon.getType()),
               damage(game, actor, weapon), weapon.getCurrentHeat(), (parts.mode() == null) ? "" : parts.mode(),
               bins.stream().map(bin -> GpuUnitRecord.AmmoChoice.of(actor, bin)).toList(),
               (loaded == null) ? -1 : bins.indexOf(loaded),
               parts.loadedShots(), shot.target(), value(shot.toHit()), odds(shot.toHit(), aptitude),
               reason(shot.toHit()), queued || actor.isWeaponValidForPhase(weapon),
-              (location >= 0) && actor.isLocationBad(location));
+              (location >= 0) && actor.isLocationBad(location), !aimingMode(fd, actor, weapon, target).isNone(),
+              ((aimed != Entity.LOC_NONE) && (target instanceof Entity unit)) ? unit.getLocationName(aimed) : "");
     }
 
     /**
-     * R4: the choice the aimed shot handler offers on the display's unit target in place of its dialog, with the
-     * location it aims at and the actor's listed weapons that may aim; null while it offers none.
+     * The aiming mode in which the actor's weapon may aim at a location of the target (H36, R4): the aimed shot
+     * handler's for the actor against the target (a targeting computer, or an immobile target) where the weapon may
+     * aim in it and the dialog offers the target's locations; {@code AimingMode.NONE} otherwise, and in a phase whose
+     * display aims no shots.
      */
-    private static @Nullable Aim aim(WeaponDeclarationDisplay fd, Entity actor) {
-        AimedShotHandler aims = fd.getAimedShotHandler();
-        AimedShotHandler.Offer offer = (aims == null) ? null : aims.getOffer();
-        if ((offer == null) || !(fd.getTarget() instanceof Entity)) {
+    private static AimingMode aimingMode(WeaponDeclarationDisplay fd, Entity actor, WeaponMounted weapon,
+          @Nullable Targetable target) {
+        if ((fd.getAimedShotHandler() == null) || !AimedShotHandler.aimsAtLocations(target)) {
+            return AimingMode.NONE;
+        }
+        AimingMode mode = AimedShotHandler.aimingMode(actor, target);
+        return Compute.allowAimedShotWith(weapon, mode) ? mode : AimingMode.NONE;
+    }
+
+    /** The location the attack aims at, {@code Entity.LOC_NONE} for none (or no attack). */
+    private static int aimed(@Nullable WeaponAttackAction attack) {
+        return ((attack == null) || attack.getAimingMode().isNone()) ? Entity.LOC_NONE : attack.getAimedLocation();
+    }
+
+    /**
+     * The aimed shot dialog's choice ({@link #showAim}) for the actor's weapon and unit it asks for, kept while nothing
+     * it is computed from changes (a roll per location, rule 9); null without a request or where the weapon may not aim
+     * at the unit.
+     */
+    private @Nullable AimChoice aimChoice(Game game, WeaponDeclarationDisplay fd, Entity actor,
+          List<EntityAction> queue) {
+        AimTarget request = aimRequest;
+        WeaponMounted weapon = ((request == null) || (request.actorId() != actor.getId())) ? null
+              : weapon(actor, request.eqNum());
+        if ((weapon == null) || (weapon.getEntity() != actor)) {
             return null;
         }
-        Set<Integer> weapons = new LinkedHashSet<>();
-        for (WeaponMounted weapon : WeaponDisplayData.listedWeapons(actor)) {
-            if ((weapon.getEntity() == actor) && aims.allowAimedShotWith(weapon)) {
-                weapons.add(actor.getEquipmentNum(weapon));
-            }
+        RollKey key = rollKey(actor, weapon, request.target(), queue);
+        if (!key.equals(aimKey)) {
+            WeaponAttackAction attack = queued(queue, actor, request.eqNum());
+            Targetable target = resolve(game, request.target());
+            aimKey = key;
+            aimChoice = ((target == null) || ((attack != null) && !TargetKey.of(attack).equals(request.target())))
+                  ? null : choice(game, fd, actor, weapon, target, attack);
         }
-        return new Aim(offer.locations(), offer.enabled(), aims.getAimingAt(), weapons);
+        return aimChoice;
+    }
+
+    /**
+     * The weapon's aimed shot choice on the target (null where it may not aim there): its queued attack there
+     * ({@code attack}), else a shot at the target as Fire would declare it, rolled without an aimed shot and at each
+     * location of the aimed shot handler's mask, which the roll's partial cover narrows, so the rolls hold every rule
+     * the aim changes (a targeting computer's, an immobile target's head). A location is enabled while both rolls are
+     * left to make; a disabled one rolls {@code TargetRoll.IMPOSSIBLE}.
+     */
+    private static @Nullable AimChoice choice(Game game, WeaponDeclarationDisplay fd, Entity actor,
+          WeaponMounted weapon, Targetable target, @Nullable WeaponAttackAction attack) {
+        AimingMode mode = aimingMode(fd, actor, weapon, target);
+        if (mode.isNone() || !(target instanceof Entity unit)) {
+            return null;
+        }
+        WeaponAttackAction shot = (attack != null) ? new WeaponAttackAction(attack)
+              : new WeaponAttackAction(actor.getId(), target.getTargetType(), target.getId(),
+                    actor.getEquipmentNum(weapon));
+        shot.setAimedLocation(Entity.LOC_NONE);
+        shot.setAimingMode(AimingMode.NONE);
+        ToHitData unaimed = shot.toHit(game, true);
+        int length = unit.getLocationNames().length;
+        boolean[] mask = AimedShotHandler.enabledMask(actor, target, mode, unaimed.getCover(), length);
+        List<Boolean> enabled = new ArrayList<>();
+        List<Integer> rolls = new ArrayList<>();
+        for (int location = 0; location < length; location++) {
+            int roll = TargetRoll.IMPOSSIBLE;
+            if (mask[location] && rolled(unaimed.getValue())) {
+                shot.setAimedLocation(location);
+                shot.setAimingMode(mode);
+                roll = shot.toHit(game, true).getValue();
+            }
+            enabled.add(rolled(roll));
+            rolls.add(rolled(roll) ? roll : TargetRoll.IMPOSSIBLE);
+        }
+        return new AimChoice(new AimTarget(actor.getId(), actor.getEquipmentNum(weapon), TargetKey.of(target)),
+              weapon.getPlainDesc(), name(target), GpuUnitRecord.armor(unit), enabled, rolls, aimed(attack),
+              unaimed.getValue(), unaimed.getSideTable() == ToHitData.SIDE_REAR,
+              actor.isUseNaturalAptitudeGunnery(game, weapon));
+    }
+
+    /** Whether a roll is a number to make: neither impossible nor an automatic failure or success. */
+    private static boolean rolled(int value) {
+        return GpuSolutionCard.possible(value) && (value != TargetRoll.AUTOMATIC_SUCCESS);
     }
 
     private static Attack attack(Game game, Entity actor, WeaponAttackAction attack, ToHitData toHit,

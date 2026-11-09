@@ -46,7 +46,6 @@ import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
-import megamek.common.units.Mek;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -435,38 +434,22 @@ class GpuContextMenuSmokeTest {
     }
 
     @Test
-    void aimAtLocationListsTheAimedShotHandlersChoicesInItsSubmenu() {
+    void aimedShotOpensTheAimDialogForTheWeaponAndTheUnitItsRowShows() {
         GpuHudTestStage.run(hud -> {
-            // R4: the handler aims at the focused King Crab's head and offers every location but the covered legs.
-            GpuFireOrders.Aim aim = new GpuFireOrders.Aim(List.of("Head", "Center Torso", "Right Torso",
-                  "Left Torso", "Right Arm", "Left Arm", "Right Leg", "Left Leg"), List.of(true, true, true, true,
-                  true, true, false, false), Mek.LOC_HEAD, Set.of(AC20, LASER));
-            Menu menu = new Menu(hud).update(hud, frame(firing(), fire(true, aim)));
+            // R4: the laser may aim at the focused King Crab and aims at its head; the SRM may not aim.
+            Menu menu = new Menu(hud).update(hud, frame(firing(), fire(true, LASER, "Head")));
             menu.menu.weapon(LASER, false, () -> { }, 1400, 600);
             assertEquals(List.of("MEDIUM LASER", "LA · 5 dmg · 3 heat", "Assign to A · Timber Wolf",
                   "Assign to B · BattleMaster", "Assign to King Crab", "---", "Show solution and arc",
-                  "Next mode [Pulse]", "Previous mode", "Aim at location… › [Head]"), lines(menu.popover));
-            click(hud, menu.item("Aim at location…"));
-            UiPopover locations = menu.root.findActor("context-submenu-1");
-            assertEquals(List.of("✓ Head", "Center Torso", "Right Torso", "Left Torso", "Right Arm", "Left Arm",
-                  "Right Leg" + OFF, "Left Leg" + OFF, "---", "Don't aim"), lines(locations));
-            assertTrue(menu.popover.isVisible(), "the weapon menu stays open beside it");
-            hud.draw();
-            hud.capture("context-menu-aim").dispose();
-            click(hud, find(locations, "Left Arm"));
-            verify(menu.fire).aim(LASER, Mek.LOC_LEFT_ARM);
-            assertFalse(menu.popover.isVisible() || locations.isVisible(), "a choice closes both");
-            menu.menu.weapon(LASER, false, () -> { }, 1400, 600);
-            click(hud, menu.item("Aim at location…"));
-            click(hud, find(locations, "Don't aim"));
-            verify(menu.fire).aim(LASER, Entity.LOC_NONE);
+                  "Next mode [Pulse]", "Previous mode", "Aimed shot… [Head]"), lines(menu.popover));
+            click(hud, menu.item("Aimed shot…"));
+            assertEquals(new GpuFireOrders.AimTarget(ATLAS, LASER, TargetKey.unit(KING_CRAB)), menu.state.aiming,
+                  "the item opens the aimed shot dialog for the laser and the King Crab");
+            assertFalse(menu.popover.isVisible(), "and closes the menu");
 
-            // A weapon that cannot aim, and no offer at all, show no item.
+            // A weapon that cannot aim shows no item.
             menu.menu.weapon(SRM, false, () -> { }, 1400, 600);
-            assertTrue(lines(menu.popover).stream().noneMatch(line -> line.startsWith("Aim at location")));
-            menu.update(hud, frame(firing(), fire(true)));
-            menu.menu.weapon(LASER, false, () -> { }, 1400, 600);
-            assertTrue(lines(menu.popover).stream().noneMatch(line -> line.startsWith("Aim at location")));
+            assertTrue(lines(menu.popover).stream().noneMatch(line -> line.startsWith("Aimed shot")));
         });
     }
 
@@ -641,11 +624,11 @@ class GpuContextMenuSmokeTest {
      * rear laser's column shows the King Crab, which it cannot hit.
      */
     private static GpuFireOrders.Snapshot fire(boolean editable) {
-        return fire(editable, null);
+        return fire(editable, -1, "");
     }
 
-    /** Shot 13's orders with an aimed shot choice on the focused King Crab (null: none offered). */
-    private static GpuFireOrders.Snapshot fire(boolean editable, GpuFireOrders.Aim aim) {
+    /** Shot 13's orders where the weapon {@code aimable} may aim at its row's unit, aimed at {@code aimedAt}. */
+    private static GpuFireOrders.Snapshot fire(boolean editable, int aimable, String aimedAt) {
         List<GpuFireOrders.WeaponRow> weapons = List.of(
               row(AC20, "AC/20", "RT", "20", 7, "", List.of(bin(STANDARD, "[RT] AC/20  (8)"),
                     bin(ARMOR_PIERCING, "[RT] AC/20 Armor-Piercing  (4)")), 0, 8, TIMBER_WOLF, ""),
@@ -653,7 +636,11 @@ class GpuContextMenuSmokeTest {
                     ""),
               row(SRM, "SRM 6", "LT", "2×6", 4, "", List.of(bin(14, "[LT] SRM 6  (9)")), 0, 9, TIMBER_WOLF, ""),
               row(LASER, "Medium Laser", "LA", "5", 3, "Pulse", List.of(), -1, -1, KING_CRAB, ""),
-              row(REAR_LASER, "Medium Laser", "CT(R)", "5", 3, "", List.of(), -1, -1, KING_CRAB, "rear arc only"));
+              row(REAR_LASER, "Medium Laser", "CT(R)", "5", 3, "", List.of(), -1, -1, KING_CRAB, "rear arc only"))
+              .stream().map(row -> row.eqNum() != aimable ? row : new GpuFireOrders.WeaponRow(row.eqNum(), row.name(),
+                    row.location(), row.kind(), row.damage(), row.heat(), row.mode(), row.ammo(), row.loadedAmmo(),
+                    row.shots(), row.target(), row.value(), row.odds(), row.reason(), row.usable(),
+                    row.locationDestroyed(), true, aimedAt)).toList();
         List<GpuFireOrders.Target> targets = List.of(new GpuFireOrders.Target(TargetKey.unit(BATTLEMASTER), 'B',
               "BattleMaster", false, 1, false, null), new GpuFireOrders.Target(TargetKey.unit(TIMBER_WOLF), 'A',
               "Timber Wolf", true, 0, true, null));
@@ -662,7 +649,7 @@ class GpuContextMenuSmokeTest {
               attack(LRM, BATTLEMASTER, "LRM 20"));
         return new GpuFireOrders.Snapshot(true, editable, ATLAS,
               new GpuFireOrders.Focus(TargetKey.unit(KING_CRAB), "King Crab", null), AC20, weapons, targets, attacks, 0,
-              true, true, "Center", null, null, null, List.of(), null, Map.of(), 4, 0, aim);
+              true, true, "Center", null, null, null, List.of(), null, Map.of(), 4, 0, null);
     }
 
     /** One of the Atlas's own bins, by its number and Unit Display entry. */
@@ -673,7 +660,7 @@ class GpuContextMenuSmokeTest {
     private static GpuFireOrders.WeaponRow row(int eqNum, String name, String location, String damage, int heat,
           String mode, List<GpuUnitRecord.AmmoChoice> ammo, int loaded, int shots, int target, String reason) {
         return new GpuFireOrders.WeaponRow(eqNum, name, location, "", damage, heat, mode, ammo, loaded, shots,
-              TargetKey.unit(target), 7, .58, reason, true, false);
+              TargetKey.unit(target), 7, .58, reason, true, false, false, "");
     }
 
     private static GpuFireOrders.Attack attack(int eqNum, int target, String weapon) {

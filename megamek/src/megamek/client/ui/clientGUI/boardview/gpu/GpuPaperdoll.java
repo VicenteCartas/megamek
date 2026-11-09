@@ -76,6 +76,9 @@ final class GpuPaperdoll extends WidgetGroup {
         }
     }
 
+    /** A line under a location's number in its own colour, such as the aimed shot dialog's to-hit change there. */
+    record Note(String text, Color color) { }
+
     static final String CROSS = "\u2715";
     private static final String FONT = "hud-heading";
     /** The number fit (6.6): f = min(maxF, 1.6 rho, 2.3 rho / w), drawn only when f >= 8. */
@@ -85,6 +88,7 @@ final class GpuPaperdoll extends WidgetGroup {
     /** A shield's two numbers may be smaller: the card shows both (user correction 17, "smaller text if needed"). */
     private static final float MIN_SHIELD_FONT = 6;
     private static final float DELTA_SIZE = .85f;
+    private static final float NOTE_SIZE = .8f;
     /** Outline widths in units; the feather is the anti-aliased edge on each side of a line. */
     private static final float MARK_WIDTH = 2;
     private static final float BREACHED_WIDTH = 1.5f;
@@ -108,6 +112,7 @@ final class GpuPaperdoll extends WidgetGroup {
     private GpuPaperdolls.Doll doll;
     private Map<String, Cell> armor = Map.of();
     private Map<String, Cell> structure = Map.of();
+    private Map<String, Note> notes = Map.of();
     private float maxFont = 14;
     private boolean dimmed;
     /** Whether a critical region takes the stronger red, as the lobby's damage editor asks; the board's never do. */
@@ -127,8 +132,15 @@ final class GpuPaperdoll extends WidgetGroup {
     private List<Ring> hullOutline = List.of();
     private float[] scratch = new float[0];
 
-    /** A region's labels: its number, the crit dot after it and the playback change above it; each may be null. */
-    private record Figure(GpuPaperdolls.Region region, Label text, Label dot, Label delta) { }
+    /**
+     * A region's labels: its number, the crit dot after it, the playback change above it and its note below it; each
+     * may be null.
+     */
+    private record Figure(GpuPaperdolls.Region region, Label text, Label dot, Label delta, Label note) {
+        Label[] labels() {
+            return new Label[] { text, dot, delta, note };
+        }
+    }
 
     GpuPaperdoll(Skin skin) {
         white = skin.get("white", Texture.class);
@@ -199,19 +211,27 @@ final class GpuPaperdoll extends WidgetGroup {
      * {@code structure} by code for the structure regions and value boxes. A region without a cell is drawn neutral.
      */
     void show(GpuPaperdolls.Doll next, Map<String, Cell> nextArmor, Map<String, Cell> nextStructure) {
-        if (next == doll && nextArmor.equals(armor) && nextStructure.equals(structure)) {
+        show(next, nextArmor, nextStructure, Map.of());
+    }
+
+    /** {@link #show(GpuPaperdolls.Doll, Map, Map)} with a note under each location's number in {@code nextNotes}. */
+    void show(GpuPaperdolls.Doll next, Map<String, Cell> nextArmor, Map<String, Cell> nextStructure,
+          Map<String, Note> nextNotes) {
+        if (next == doll && nextArmor.equals(armor) && nextStructure.equals(structure) && nextNotes.equals(notes)) {
             return;
         }
         doll = next;
         armor = Map.copyOf(nextArmor);
         structure = Map.copyOf(nextStructure);
+        notes = Map.copyOf(nextNotes);
         clearChildren();
         figures.clear();
         fittedWidth = -1;
         if (doll != null) {
             for (GpuPaperdolls.Region region : doll.regions()) {
                 Cell cell = cell(region);
-                if (cell == null || cell.text().isEmpty() && !cell.crit() && cell.delta() == 0) {
+                Note note = region.layer().equals(GpuPaperdolls.SHIELD_LAYER) ? null : notes.get(region.code());
+                if (cell == null || cell.text().isEmpty() && !cell.crit() && cell.delta() == 0 && note == null) {
                     continue;
                 }
                 boolean lit = vivid && cell.tier() == DamageTier.CRITICAL;
@@ -221,9 +241,10 @@ final class GpuPaperdoll extends WidgetGroup {
                       : UiTheme.AMBER) : null;
                 Label delta = cell.delta() > 0 ? label("\u2212" + cell.delta(), lit ? UiTheme.TEXT
                       : vivid && cell.tier() == DamageTier.EXPOSED ? UiTheme.FILL_INK : UiTheme.CORAL) : null;
-                Figure figure = new Figure(region, text, dot, delta);
+                Figure figure = new Figure(region, text, dot, delta, note == null ? null
+                      : label(note.text(), note.color()));
                 figures.add(figure);
-                for (Label label : new Label[] { figure.text(), figure.dot(), figure.delta() }) {
+                for (Label label : figure.labels()) {
                     if (label != null) {
                         addActor(label);
                     }
@@ -303,7 +324,7 @@ final class GpuPaperdoll extends WidgetGroup {
         for (Figure figure : figures) {
             Cell cell = cell(figure.region());
             float alpha = dimmed && cell.tier() != DamageTier.DESTROYED ? DIM : 1;
-            for (Label label : new Label[] { figure.text(), figure.dot(), figure.delta() }) {
+            for (Label label : figure.labels()) {
                 if (label != null) {
                     label.getColor().a = alpha;
                 }
@@ -389,7 +410,7 @@ final class GpuPaperdoll extends WidgetGroup {
         }
         boolean shown = size >= (figure.region().layer().equals(GpuPaperdolls.SHIELD_LAYER) ? MIN_SHIELD_FONT
               : MIN_FONT);
-        for (Label label : new Label[] { figure.text(), figure.dot(), figure.delta() }) {
+        for (Label label : figure.labels()) {
             if (label != null) {
                 label.setVisible(shown);
             }
@@ -399,14 +420,25 @@ final class GpuPaperdoll extends WidgetGroup {
             return;
         }
         float width = 0;
+        float height = 0;
         for (Label label : row) {
             if (label != null) {
                 size(label, size);
                 width += label.getPrefWidth();
+                height = Math.max(height, label.getPrefHeight());
             }
         }
-        float x = left + (anchor[0] - doll.bounds()[0]) * scale - width / 2;
+        float centre = left + (anchor[0] - doll.bounds()[0]) * scale;
+        float x = centre - width / 2;
         float y = top - (anchor[1] - doll.bounds()[1]) * scale;
+        Label note = figure.note();
+        if (note != null) {
+            // The number and its note are centred on the anchor together, the note under the number.
+            size(note, Math.max(NOTE_SIZE * size, MIN_FONT));
+            y += note.getPrefHeight() / 2;
+            note.setBounds(centre - note.getPrefWidth() / 2, y - height / 2 - note.getPrefHeight(),
+                  note.getPrefWidth(), note.getPrefHeight());
+        }
         for (Label label : row) {
             if (label != null) {
                 label.setBounds(x, y - label.getPrefHeight() / 2, label.getPrefWidth(), label.getPrefHeight());

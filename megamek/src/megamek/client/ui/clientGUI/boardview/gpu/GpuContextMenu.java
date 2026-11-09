@@ -363,7 +363,7 @@ final class GpuContextMenu implements GpuHud.Component {
         item(list, text(solutionShown ? "GpuBoard.hud.context.hideSolution" : "GpuBoard.hud.context.showSolution"),
               null, true, solution);
         if (fire.editable()) {
-            settings(list, row, eqNum, fire.aim());
+            settings(list, row, fire.actorId(), !assigned.equals(TargetKey.NONE));
         }
         show(row.name(), GpuWeaponsPanel.detail(row), list);
         popover.showAt(x, y);
@@ -371,10 +371,12 @@ final class GpuContextMenu implements GpuHud.Component {
 
     /**
      * MegaMek's weapon settings: its next and previous mode for a weapon with modes, the called shot while the phase
-     * offers it, the aimed shot's locations when the weapon may aim (R4), and each ammunition when it has several (the
-     * loaded one says so and stays loaded).
+     * offers it, the aimed shot dialog with the location aimed at when the weapon may aim (R4; open while it has an
+     * attack, {@code queued}, or may be assigned), and each ammunition when it has several (the loaded one says so and
+     * stays loaded). {@code actorId}: the unit whose weapon it is.
      */
-    private void settings(UiMenuList list, GpuFireOrders.WeaponRow row, int eqNum, GpuFireOrders.Aim aim) {
+    private void settings(UiMenuList list, GpuFireOrders.WeaponRow row, int actorId, boolean queued) {
+        int eqNum = row.eqNum();
         if (row.mode() != null && !row.mode().isEmpty()) {
             item(list, text("GpuBoard.hud.context.nextMode"), row.mode(), true,
                   () -> source.fire().cycleMode(eqNum, true));
@@ -386,11 +388,10 @@ final class GpuContextMenu implements GpuHud.Component {
               && command.id().equals(FiringCommand.FIRE_CALLED.getCmd()))) {
             item(list, text("GpuBoard.hud.context.calledShot"), null, true, () -> source.fire().calledShot(eqNum));
         }
-        if (aim != null && aim.weapons().contains(eqNum)) {
-            String aimed = aim.location() >= 0 && aim.location() < aim.locations().size()
-                  ? aim.locations().get(aim.location()) : null;
-            submenu(popover, list, text("GpuBoard.hud.context.aimAtLocation"), aimed, null, true,
-                  (menu, choices) -> aim(choices, eqNum, aim));
+        if (row.aimable()) {
+            item(list, text("GpuBoard.hud.context.aimAtLocation"), row.aimedAt().isEmpty() ? null : row.aimedAt(),
+                  queued || shot(row, row.target()),
+                  () -> state.aiming = new GpuFireOrders.AimTarget(actorId, eqNum, row.target()));
         }
         if (row.ammo().size() > 1) {
             for (int index = 0; index < row.ammo().size(); index++) {
@@ -404,21 +405,6 @@ final class GpuContextMenu implements GpuHud.Component {
                 });
             }
         }
-    }
-
-    /**
-     * The aimed shot's choice in place of MegaMek's dialog (R4), in {@code list}: the locations of the focus it lists,
-     * those it disables dim and the one aimed at checked, then "Don't aim".
-     */
-    private void aim(UiMenuList list, int eqNum, GpuFireOrders.Aim aim) {
-        for (int location = 0; location < aim.locations().size(); location++) {
-            int chosen = location;
-            item(list, aim.locations().get(location), null, location == aim.location(), aim.enabled().get(location),
-                  () -> source.fire().aim(eqNum, chosen));
-        }
-        list.separator();
-        item(list, text("AimedShotDialog.dontAim"), null, aim.location() == Entity.LOC_NONE, true,
-              () -> source.fire().aim(eqNum, Entity.LOC_NONE));
     }
 
     /**

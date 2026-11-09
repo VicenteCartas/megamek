@@ -37,8 +37,6 @@ import java.awt.event.ActionListener;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
 import java.util.Arrays;
-import java.util.List;
-import java.util.stream.IntStream;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
@@ -59,19 +57,9 @@ import megamek.common.units.LargeSupportTank;
 import megamek.common.units.Mek;
 import megamek.common.units.SuperHeavyTank;
 import megamek.common.units.Tank;
+import megamek.common.units.Targetable;
 
 public class AimedShotHandler implements ActionListener, ItemListener {
-    /**
-     * The aimed shot dialog's choices while the native battle window offers them in its place: the target's location
-     * names and, for each, whether an aimed shot may pick it.
-     */
-    public record Offer(List<String> locations, List<Boolean> enabled) {
-        public Offer {
-            locations = List.copyOf(locations);
-            enabled = List.copyOf(enabled);
-        }
-    }
-
     private final FiringDisplay firingDisplay;
 
     private int aimingAt = Entity.LOC_NONE;
@@ -82,34 +70,24 @@ public class AimedShotHandler implements ActionListener, ItemListener {
 
     private AimedShotDialog asd;
 
-    /** The dialog's choices while the native window offers them instead of the dialog; null otherwise. */
-    private Offer offer;
-
     public AimedShotHandler(FiringDisplay firingDisplay) {
         this.firingDisplay = firingDisplay;
         // ignore
     }
 
     public void showDialog() {
-        if ((asd != null) || (offer != null)) {
+        if (asd != null) {
             AimingMode oldAimingMode = aimingMode;
             closeDialog();
             aimingMode = oldAimingMode;
         }
 
         if (!getAimingMode().isNone()) {
-            String[] options;
-            boolean[] enabled;
-
-            if (this.firingDisplay.getTarget().isBuildingEntityOrGunEmplacement()) {
+            if (!aimsAtLocations(this.firingDisplay.getTarget())) {
                 return;
             }
-            if (this.firingDisplay.getTarget() instanceof Entity) {
-                options = ((Entity) this.firingDisplay.getTarget()).getLocationNames();
-                enabled = createEnabledMask(options.length);
-            } else {
-                return;
-            }
+            String[] options = ((Entity) this.firingDisplay.getTarget()).getLocationNames();
+            boolean[] enabled = createEnabledMask(options.length);
             if (this.firingDisplay.getTarget() instanceof Mek) {
                 if (aimingMode.isImmobile()) {
                     aimingAt = Mek.LOC_HEAD;
@@ -145,15 +123,12 @@ public class AimedShotHandler implements ActionListener, ItemListener {
                 }
             } else if (this.firingDisplay.getTarget() instanceof BattleArmor) {
                 aimingAt = BattleArmor.LOC_TROOPER_1;
-            } else {
-                // no aiming allowed for MekWarrior or BattleArmor
-                return;
             }
 
             if ((this.firingDisplay.getClientGUI() instanceof ClientGUI gui) && GpuBoardWindow.drawsDialogsFor(gui)) {
-                // The native window offers the same choices; it aims through aimAt as the dialog's buttons do.
-                offer = new Offer(Arrays.asList(options),
-                      IntStream.range(0, enabled.length).mapToObj(index -> enabled[index]).toList());
+                // The native window aims weapon by weapon in its own dialog, and only at a location the player picks:
+                // nothing is preselected, so a weapon is assigned without an aimed shot.
+                aimingAt = Entity.LOC_NONE;
             } else {
                 asd = new AimedShotDialog(
                       this.firingDisplay.getClientGUI().getFrame(),
@@ -169,11 +144,6 @@ public class AimedShotHandler implements ActionListener, ItemListener {
         }
     }
 
-    /** The dialog's choices while the native battle window offers them in its place, else null. */
-    public @Nullable Offer getOffer() {
-        return offer;
-    }
-
     /**
      * Aims at a location of the current target ({@link Entity#LOC_NONE}: no aimed shot), as a choice in the aimed shot
      * dialog does.
@@ -183,24 +153,42 @@ public class AimedShotHandler implements ActionListener, ItemListener {
         this.firingDisplay.updateTarget();
     }
 
+    /**
+     * Whether an aimed shot at the target picks one of its locations, as the dialog offers them: a Mek, a tank or
+     * battle armor, but no building or gun emplacement.
+     */
+    public static boolean aimsAtLocations(@Nullable Targetable target) {
+        return ((target instanceof Mek) || (target instanceof Tank) || (target instanceof BattleArmor))
+              && !target.isBuildingEntityOrGunEmplacement();
+    }
+
     boolean[] createEnabledMask(int length) {
+        return enabledMask(firingDisplay.currentEntity(), firingDisplay.getTarget(), aimingMode, partialCover, length);
+    }
+
+    /**
+     * The locations of the target, {@code length} of them, that an aimed shot of the attacker in that aiming mode may
+     * pick through the partial cover the attacker sees ({@code LosEffects.COVER_*} flags), as the dialog enables them.
+     */
+    public static boolean[] enabledMask(Entity attacker, Targetable target, AimingMode aimingMode, int partialCover,
+          int length) {
         boolean[] mask = new boolean[length];
 
         Arrays.fill(mask, true);
 
-        int side = ComputeSideTable.sideTable(firingDisplay.currentEntity(), firingDisplay.getTarget());
+        int side = ComputeSideTable.sideTable(attacker, target);
 
         // on a tank, remove turret if its missing
         // also, remove body
-        if (firingDisplay.getTarget() instanceof Tank) {
+        if (target instanceof Tank) {
             mask[Tank.LOC_BODY] = false;
-            Tank tank = (Tank) this.firingDisplay.getTarget();
+            Tank tank = (Tank) target;
             if (tank.hasNoTurret()) {
                 int turretLoc = tank.getLocTurret();
                 mask[turretLoc] = false;
             }
             // remove non-visible sides
-            if (firingDisplay.getTarget() instanceof LargeSupportTank) {
+            if (target instanceof LargeSupportTank) {
                 if (side == ToHitData.SIDE_FRONT) {
                     mask[LargeSupportTank.LOC_FRONT_LEFT] = false;
                     mask[LargeSupportTank.LOC_REAR_LEFT] = false;
@@ -237,7 +225,7 @@ public class AimedShotHandler implements ActionListener, ItemListener {
                     mask[LargeSupportTank.LOC_FRONT_RIGHT] = false;
                     mask[LargeSupportTank.LOC_REAR_RIGHT] = false;
                 }
-            } else if (this.firingDisplay.getTarget() instanceof SuperHeavyTank) {
+            } else if (target instanceof SuperHeavyTank) {
                 if (side == ToHitData.SIDE_FRONT) {
                     mask[SuperHeavyTank.LOC_FRONT_LEFT] = false;
                     mask[SuperHeavyTank.LOC_REAR_LEFT] = false;
@@ -292,14 +280,14 @@ public class AimedShotHandler implements ActionListener, ItemListener {
 
         // remove squad location on BAs
         // also remove dead troopers
-        if (this.firingDisplay.getTarget() instanceof BattleArmor) {
+        if (target instanceof BattleArmor) {
             mask[BattleArmor.LOC_SQUAD] = false;
         }
 
         // Partial cover hides a Mek's legs, arms and torsos, and the indexes below are Mek locations. A tank or a
         // battle armor squad in cover (a short building, partial water) has fewer locations and none of them are
         // hidden, so the cover rules apply to Meks only.
-        if (this.firingDisplay.getTarget() instanceof Mek) {
+        if (target instanceof Mek) {
             if ((partialCover & LosEffects.COVER_HORIZONTAL) != 0) {
                 mask[Mek.LOC_LEFT_LEG] = false;
                 mask[Mek.LOC_RIGHT_LEG] = false;
@@ -338,7 +326,7 @@ public class AimedShotHandler implements ActionListener, ItemListener {
 
         }
 
-        if (aimingMode.isTargetingComputer() && (firingDisplay.getTarget() instanceof Mek)) {
+        if (aimingMode.isTargetingComputer() && (target instanceof Mek)) {
             // Can't target head with targeting computer (TW p.143).
             mask[Mek.LOC_HEAD] = false;
         }
@@ -346,14 +334,11 @@ public class AimedShotHandler implements ActionListener, ItemListener {
     }
 
     public void closeDialog() {
-        if ((asd != null) || (offer != null)) {
+        if (asd != null) {
             aimingAt = Entity.LOC_NONE;
             aimingMode = AimingMode.NONE;
-            if (asd != null) {
-                asd.dispose();
-                asd = null;
-            }
-            offer = null;
+            asd.dispose();
+            asd = null;
             this.firingDisplay.updateTarget();
         }
     }
@@ -401,39 +386,40 @@ public class AimedShotHandler implements ActionListener, ItemListener {
      */
 
     public void setAimingMode() {
+        aimingMode = aimingMode(this.firingDisplay.currentEntity(), this.firingDisplay.getTarget());
+    }
+
+    /** The aiming mode of the attacker against the target, as {@link #setAimingMode()} sets it for the display's. */
+    public static AimingMode aimingMode(@Nullable Entity attacker, @Nullable Targetable target) {
         boolean allowAim;
 
         // BA cannot use aimed shots - their anti-mek attacks (swarm/leg) don't support
         // aimed shots, and EI's +2 aimed shot penalty makes it impractical for ranged weapons.
         // This prevents the confusing aimed shot dialog from appearing for BA.
-        Entity attacker = this.firingDisplay.currentEntity();
         if (attacker instanceof BattleArmor) {
-            aimingMode = AimingMode.NONE;
-            return;
+            return AimingMode.NONE;
         }
 
         // TC against a mek, tank or battle armor. Not against a ProtoMek: they are too small for a targeting
         // computer to pick a hit location, though the TC's usual -1 still applies (TW p.185).
-        allowAim = ((this.firingDisplay.getTarget() != null) && (attacker != null)
-              && attacker.hasAimModeTargComp() && ((this.firingDisplay.getTarget() instanceof Mek)
-              || (this.firingDisplay.getTarget() instanceof Tank)
-              || (this.firingDisplay.getTarget() instanceof BattleArmor)));
+        allowAim = ((target != null) && (attacker != null)
+              && attacker.hasAimModeTargComp() && ((target instanceof Mek)
+              || (target instanceof Tank)
+              || (target instanceof BattleArmor)));
         if (allowAim) {
-            aimingMode = AimingMode.TARGETING_COMPUTER;
-            return;
+            return AimingMode.TARGETING_COMPUTER;
         }
         // immobile mek or gun emplacement
-        allowAim = ((this.firingDisplay.getTarget() != null)
-              && ((this.firingDisplay.getTarget().isImmobile()
-              && ((this.firingDisplay.getTarget() instanceof Mek)
-              || (this.firingDisplay.getTarget() instanceof Tank)))
-              || (this.firingDisplay.getTarget().isBuildingEntityOrGunEmplacement())));
+        allowAim = ((target != null)
+              && ((target.isImmobile()
+              && ((target instanceof Mek)
+              || (target instanceof Tank)))
+              || (target.isBuildingEntityOrGunEmplacement())));
         if (allowAim) {
-            aimingMode = AimingMode.IMMOBILE;
-            return;
+            return AimingMode.IMMOBILE;
         }
 
-        aimingMode = AimingMode.NONE;
+        return AimingMode.NONE;
     }
 
     /**

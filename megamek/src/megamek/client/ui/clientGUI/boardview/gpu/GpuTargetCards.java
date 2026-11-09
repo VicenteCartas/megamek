@@ -48,11 +48,12 @@ import megamek.common.units.Entity;
  * Target cards over the board while the local unit declares its attacks (C.1 G9; r1 3.13, r2 5, plan A.8 H24-H29,
  * H31): one card per target in letter order, then one for the focus without attacks; a target that is no unit has its
  * card at its hex (GpuHud.HudView.head). A card shows the letter,
- * the name and the primary state, then the target's attacks in fire order (grip, weapon, ammunition, roll, remove)
- * over a footer; with more than two targets only the focused card, or one opened by "Show attacks", lists
- * them. GpuCardPlacement keeps the cards clear of the HUD panels and the units; {@link #placed()} gives their
- * rectangles to the board labels' leaders. The rows are a reorderable UiList: a row with a grip drags to another place
- * of the card, and its focused grip moves it on Alt+Up/Down; every move goes through the fire orders.
+ * the name and the primary state, then the target's attacks in fire order (grip, weapon, ammunition, the aim toggle of
+ * a weapon that may make an aimed shot (H36), roll, remove) over a footer; with more than two targets only the focused
+ * card, or one opened by "Show attacks", lists them. GpuCardPlacement keeps the cards clear of the HUD panels and the
+ * units; {@link #placed()} gives their rectangles to the board labels' leaders. The rows are a reorderable UiList: a
+ * row with a grip drags to another place of the card, and its focused grip moves it on Alt+Up/Down; every move goes
+ * through the fire orders.
  */
 final class GpuTargetCards implements GpuHud.Component {
     /** The cards keep this far inside the window (layout.js: bounds 8, 8, W - 16, H - 16). */
@@ -75,6 +76,8 @@ final class GpuTargetCards implements GpuHud.Component {
     /** The footer's 11-unit text on the body's 1.35 line height (.cf). */
     private static final float FOOT_SIZE = 11;
     private static final float FOOT_LINE = FOOT_SIZE * 1.35f;
+    /** A row's aim toggle (H36), between the weapon and the roll. */
+    private static final float AIM = 24;
 
     /**
      * What one card shows, so that a frame that changes none of it rebuilds nothing. {@code target} is null for the
@@ -82,10 +85,15 @@ final class GpuTargetCards implements GpuHud.Component {
      * expanded; {@code selected}: a weapon is selected (the empty card's hint).
      */
     private record CardView(TargetKey key, Target target, String name, boolean expanded, List<Row> rows, int attacks,
-          boolean selected, boolean editable, float width) { }
+          boolean selected, boolean editable, float width, int actorId) { }
 
     /** An attack row: the attack, its place in the fire order (1 first) and its weapon's row, null without one. */
-    private record Row(Attack attack, int number, WeaponRow weapon) { }
+    private record Row(Attack attack, int number, WeaponRow weapon) {
+        /** Whether its weapon may aim at the card's unit (H36): the row then has the aim toggle. */
+        boolean aimable() {
+            return weapon != null && weapon.aimable();
+        }
+    }
 
     /** A card as built: what it shows, its table, the rows' grips by weapon, and the list of its rows (or null). */
     private record Card(CardView view, Table table, Map<Integer, Grip> grips, UiList list) {
@@ -202,7 +210,7 @@ final class GpuTargetCards implements GpuHud.Component {
         }
         String name = target != null ? target.name() : fire.focus().name();
         return new CardView(key, target, name, expanded, expanded ? rows : List.of(), rows.size(),
-              fire.selectedWeapon() >= 0, fire.editable(), expanded ? metrics.card() : COMPACT_WIDTH);
+              fire.selectedWeapon() >= 0, fire.editable(), expanded ? metrics.card() : COMPACT_WIDTH, fire.actorId());
     }
 
     /**
@@ -377,9 +385,10 @@ final class GpuTargetCards implements GpuHud.Component {
 
     /**
      * An attack row (.or), the {@code index}th of the card's {@code list}: the grip (no fire-order number, which only
-     * took room), the weapon over its ammunition (a select when it can switch bins) or its location and kind, the roll and the remove
-     * mark. A right click opens the queued-attack menu (H28, H37); a drag takes the row to another place of the card
-     * (H29). A handheld weapon's attack has no number on the actor, so it has no controls.
+     * took room), the weapon over its ammunition (a select when it can switch bins) or its location and kind, the aim
+     * toggle (H36), the roll and the remove mark. A right click opens the queued-attack menu (H28, H37); a drag takes
+     * the row to another place of the card (H29). A handheld weapon's attack has no number on the actor, so it has no
+     * controls.
      */
     private Table row(Row row, CardView view, UiList list, int index, Map<Integer, Grip> grips) {
         Attack attack = row.attack();
@@ -406,6 +415,11 @@ final class GpuTargetCards implements GpuHud.Component {
         Actor sub = sub(row, controls);
         weapon.add(sub).minWidth(0).height(SUB_LINE);
         line.add(weapon).growX().minWidth(0).padLeft(9);
+        if (view.editable() && view.rows().stream().anyMatch(Row::aimable)) {
+            // The card's rows keep one column for the toggles, so their rolls line up.
+            line.add(controls && row.aimable() ? GpuAimDialog.toggle(ui, state, view.actorId(), row.weapon(), true,
+                  AIM) : null).size(AIM).padLeft(9);
+        }
         Table roll = new Table();
         if (GpuSolutionCard.possible(attack.value())) {
             roll.add(ui.label(text("GpuBoard.hud.common.targetNumber", shown(attack.value())), "hud-heading", 16,

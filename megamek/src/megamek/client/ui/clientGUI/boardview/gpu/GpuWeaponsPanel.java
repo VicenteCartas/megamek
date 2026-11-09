@@ -45,9 +45,10 @@ import megamek.common.units.Entity;
 
 /**
  * Weapons panel in the right column during weapon declaration (C.1 G10; r1 3.12, r2 5, plan A.8 H8-H20, H39): the
- * target pills in letter order, the assign line, one row per weapon of the acting unit with its roll and slot button,
- * and the heat if the queued weapons fire. A weapon's name selects and arms it, a pill focuses its target (a unit, a
- * hex, a building or a minefield), and the slots assign, remove or retarget; every order goes through the fire orders.
+ * target pills in letter order, the assign line, one row per weapon of the acting unit with its roll, its aim toggle
+ * where it may make an aimed shot (H36) and its slot button, and the heat if the queued weapons fire. A weapon's name
+ * selects and arms it, a pill focuses its target (a unit, a hex, a building or a minefield), and the slots assign,
+ * remove or retarget; every order goes through the fire orders.
  * The fixed footer's Alpha Strike assigns all available weapons to the focus. On another player's firing turn it
  * shows the own focus unit's draft read-only (H33).
  */
@@ -65,6 +66,8 @@ final class GpuWeaponsPanel implements GpuHud.Component {
     private static final float GLOW = 3;
     /** The margin above each row (.wrow: margin 6 10 0), which a row scrolled into view shows too. */
     private static final float ROW_GAP = 6;
+    /** The slot's square, which the aim toggle beside it shares. */
+    private static final float SLOT = 30;
     // The focused pill's text (.pill.on), and a focused enemy without attacks (.pill.new.on): the focused fill in a
     // dashed white border, with its "+" on grey.
     private static final Color ON_INK = Color.valueOf("17201D");
@@ -80,6 +83,11 @@ final class GpuWeaponsPanel implements GpuHud.Component {
           Map<Integer, String> names) {
         boolean sortable() {
             return editable && weapons.size() > 1;
+        }
+
+        /** The rows keep a column for the aim toggles while any weapon may aim at the target its row shows (H36). */
+        boolean aims() {
+            return editable && weapons.stream().anyMatch(WeaponRow::aimable);
         }
     }
 
@@ -353,9 +361,14 @@ final class GpuWeaponsPanel implements GpuHud.Component {
         alphaStrike.setDisabled(!view.editable() || focus.equals(TargetKey.NONE)
               || view.weapons().stream().noneMatch(weapon -> {
                   Attack attack = attack(view.attacks(), weapon.eqNum());
-                  return attack != null ? !attack.target().equals(focus)
-                        : weapon.usable() && weapon.target().equals(focus) && weapon.reason().isEmpty();
+                  return attack != null ? !attack.target().equals(focus) : assignable(weapon, focus);
               }));
+    }
+
+    /** Whether "+" assigns the weapon to the focus: its row rolls on the focus, and nothing keeps it from firing. */
+    private static boolean assignable(WeaponRow weapon, TargetKey focus) {
+        return !focus.equals(TargetKey.NONE) && weapon.target().equals(focus) && weapon.usable()
+              && weapon.reason().isEmpty();
     }
 
     /** The row and its spacing travel together while dragging. */
@@ -446,8 +459,12 @@ final class GpuWeaponsPanel implements GpuHud.Component {
         });
         ui.tip(name).getActor().setText(text(view.sortable() ? "GpuBoard.hud.weapons.nameSortTip"
               : "GpuBoard.hud.weapons.nameTip"));
-        Table row = row(name, roll(!weapon.target().equals(TargetKey.NONE), weapon.value(), weapon.odds()),
-              slot(weapon, attack(view.attacks(), eqNum), view), view.selected() == eqNum, view.armed() == eqNum);
+        Attack attack = attack(view.attacks(), eqNum);
+        // H36: a weapon aims through its attack, or is assigned aimed where "+" would assign it.
+        Actor aim = weapon.aimable() ? GpuAimDialog.toggle(ui, state, view.actorId(), weapon,
+              attack != null || assignable(weapon, view.focus().key()), SLOT) : null;
+        Table row = row(name, roll(!weapon.target().equals(TargetKey.NONE), weapon.value(), weapon.odds()), aim,
+              slot(weapon, attack, view), view.selected() == eqNum, view.armed() == eqNum);
         row.setName("weapons-row-" + eqNum);
         if (weapon.locationDestroyed()) {
             row.getColor().a = DEAD_ALPHA;
@@ -472,14 +489,15 @@ final class GpuWeaponsPanel implements GpuHud.Component {
               attack.location(), view.names().getOrDefault(unit, "")) : attack.location(),
               attack.value() == TargetRoll.IMPOSSIBLE ? attack.detail() : "",
               attack.ammo().isEmpty() ? null : ammoText(ui, attack.ammo(), UiTheme.ACCENT));
-        return row(name, roll(true, attack.value(), attack.odds()), null, false, false);
+        return row(name, roll(true, attack.value(), attack.odds()), null, null, false, false);
     }
 
     /**
      * A row (.wrow: padding 7 8 7 10 inside a 1-unit border, so 8 11 8 9 to the content, which the selected row's
-     * 2-unit white border keeps): the name block, the roll column and the slot; an armed row glows (r1 3.12).
+     * 2-unit white border keeps): the name block, the roll column, the aim toggle's column while the panel has one
+     * ({@code aim} null: an empty place) and the slot; an armed row glows (r1 3.12).
      */
-    private Table row(Table name, Actor roll, Actor slot, boolean selected, boolean armed) {
+    private Table row(Table name, Actor roll, Actor aim, Actor slot, boolean selected, boolean armed) {
         Table row = new Table() {
             @Override
             protected void drawBackground(Batch batch, float parentAlpha, float x, float y) {
@@ -498,8 +516,11 @@ final class GpuWeaponsPanel implements GpuHud.Component {
         }
         row.add(name).growX().minWidth(0);
         row.add(roll).minWidth(40).right().padLeft(10);
+        if (shown.aims()) {
+            row.add(aim).size(SLOT).padLeft(10);
+        }
         if (slot != null) {
-            row.add(slot).size(30).padLeft(10);
+            row.add(slot).size(SLOT).padLeft(shown.aims() ? 6 : 10);
         }
         return row;
     }
@@ -597,8 +618,7 @@ final class GpuWeaponsPanel implements GpuHud.Component {
                     source.fire().retarget(eqNum, focus);
                 }
             });
-        } else if (!focus.equals(TargetKey.NONE) && weapon.target().equals(focus) && weapon.usable()
-              && weapon.reason().isEmpty()) {
+        } else if (assignable(weapon, focus)) {
             slot = slotButton("+");
             tip = text("GpuBoard.hud.weapons.assignTo", view.focus().name());
             onChange(slot, () -> {

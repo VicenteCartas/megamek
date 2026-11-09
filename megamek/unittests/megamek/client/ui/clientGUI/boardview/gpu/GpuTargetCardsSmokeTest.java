@@ -611,7 +611,7 @@ class GpuTargetCardsSmokeTest {
 
     private static GpuFireOrders.WeaponRow weapon(int eqNum, String name, List<GpuUnitRecord.AmmoChoice> ammo) {
         return new GpuFireOrders.WeaponRow(eqNum, name, "", "", "", 0, "", ammo, ammo.isEmpty() ? -1 : 0, 0,
-              TargetKey.unit(TIMBER_WOLF), 7, 58.3, "", true, false);
+              TargetKey.unit(TIMBER_WOLF), 7, 58.3, "", true, false, false, "");
     }
 
     private static GpuUnitRecord.AmmoChoice bin(int eqNum, String label) {

@@ -383,6 +383,17 @@ final class GpuUnitRecord {
     }
 
     /**
+     * EDT: the armor part of a unit's record for a paperdoll shown apart from the card (the aimed shot dialog's): its
+     * paperdoll family, locations and mounted shields as the record reads them, every other part empty.
+     */
+    static Snapshot armor(Entity entity) {
+        return new Snapshot(entity.getId(), false, false, GpuPaperdolls.family(entity), "", locations(entity),
+              List.of(), List.of(), shields(entity), List.of(), List.of(), 0,
+              new WeaponDisplayData.HeatBuildup(0, 0, ""), List.of(), List.of(), List.of(), List.of(), List.of(),
+              List.of(), List.of(), List.of(), "", "", List.of(), List.of(), "");
+    }
+
+    /**
      * The heat levels at which a Mek's heat effects change (the {@link HeatEffects} text differs from the level below),
      * ascending. Empty for other units, whose heat the Unit Display does not describe with these effects.
      */

@@ -393,15 +393,17 @@ class GpuFireOrdersTest {
     }
 
     /**
-     * R4, H36: while the native window draws the client's dialogs, the aimed shot handler offers its dialog's choices
-     * through the orders and opens no Swing dialog. An immobile Mek offers every location, aimed at the head as the
-     * dialog preselects it; an immobile tank seen from behind leaves out its body and front (the handler's mask). The
-     * native choice aims the declared shot, a location the mask leaves out is refused, and "Don't aim" clears it.
+     * R4, H36: in the native window a weapon is assigned without an aimed shot, and aims only at the location the aimed
+     * shot dialog picks; no Swing dialog opens. Against an immobile Mek the dialog's choice offers every location, the
+     * head 7 harder (its +3 replaces the immobile -4) and the others at no cost; missiles cannot aim. A pick declares
+     * that weapon's shot aimed, assigning a weapon without one; "No aimed shot" declares it again unaimed; every other
+     * shot keeps its own aim. An immobile tank seen from its left refuses its body and its right side (the handler's
+     * mask).
      */
     @Test
-    void theAimedShotChoicesAreTheHandlersOfferInPlaceOfItsDialog() throws Exception {
+    void aWeaponAimsOnlyAtTheLocationTheDialogPicks() throws Exception {
         try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
-            Entity tank = GpuFiringFixture.enemy(firing, "Bulldog Medium Tank.blk", 46, GpuFiringFixture.NORTH);
+            Entity tank = GpuFiringFixture.enemy(firing, "Bulldog Medium Tank.blk", 46, GpuFiringFixture.EAST);
             onSwing(() -> {
                 firing.ahead.setShutDown(true);
                 tank.setShutDown(true);
@@ -411,38 +413,109 @@ class GpuFireOrdersTest {
             present(firing.gui, firing.board.view, firing.board.source);
             try {
                 int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+                int laser = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+                int right = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
                 int missiles = GpuFiringFixture.eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO);
-                GpuFireOrders.Aim archer = GpuFiringFixture.command(firing,
-                      fire -> fire.focusTarget(TargetKey.unit(firing.ahead.getId()))).aim();
-                assertEquals(List.of("Head", "Center Torso", "Right Torso", "Left Torso", "Right Arm", "Left Arm",
-                      "Right Leg", "Left Leg"), archer.locations());
-                assertEquals(Collections.nCopies(8, true), archer.enabled(), "An immobile Mek offers every location");
-                assertEquals(Mek.LOC_HEAD, archer.location());
-                assertEquals(List.of(true, false), List.of(archer.weapons().contains(cannon),
-                      archer.weapons().contains(missiles)), "Missiles cannot aim at an immobile unit");
+                TargetKey archer = TargetKey.unit(firing.ahead.getId());
+                GpuFireOrders.Snapshot focused = GpuFiringFixture.command(firing, fire -> fire.focusTarget(archer));
+                assertEquals(List.of(true, false), List.of(weaponRow(focused, cannon).aimable(),
+                      weaponRow(focused, missiles).aimable()), "Missiles cannot aim at an immobile unit");
                 assertEquals(List.of(), onSwing(() -> Arrays.stream(Window.getWindows())
                       .filter(AimedShotDialog.class::isInstance).toList()), "No Swing aimed shot dialog");
+                int unaimed = weaponRow(focused, cannon).value();
 
-                assertEquals(Mek.LOC_LEFT_ARM, GpuFiringFixture.command(firing, fire -> fire.aim(cannon, Mek.LOC_LEFT_ARM)).aim()
-                      .location());
-                GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
-                WeaponAttackAction attack = onSwing(() -> (WeaponAttackAction) firing.display.getAttacks().getFirst());
-                assertEquals(List.of(Mek.LOC_LEFT_ARM, AimingMode.IMMOBILE), List.of(attack.getAimedLocation(),
-                      attack.getAimingMode()), "The shot is declared aimed at the chosen location");
-                assertEquals(Entity.LOC_NONE, GpuFiringFixture.command(firing, fire -> fire.aim(cannon, Entity.LOC_NONE)).aim()
-                      .location(), "Don't aim");
+                GpuFiringFixture.command(firing, fire -> fire.assign(cannon, archer));
+                assertEquals(List.of(Entity.LOC_NONE, AimingMode.NONE), aim(firing, cannon),
+                      "A weapon is assigned without an aimed shot");
+                GpuFireOrders.AimChoice choice = GpuFiringFixture.command(firing,
+                      fire -> fire.showAim(aimAt(firing, cannon, archer))).aimChoice();
+                assertEquals(List.of("HD", "CT", "RT", "LT", "RA", "LA", "RL", "LL"), choice.record().locations()
+                      .stream().map(GpuUnitRecord.Location::abbr).toList());
+                assertEquals(Collections.nCopies(8, true), choice.enabled(), "An immobile Mek offers every location");
+                assertEquals(List.of(unaimed + 7, unaimed, unaimed, unaimed, unaimed, unaimed, unaimed, unaimed),
+                      choice.rolls(), "The head's +3 replaces the immobile -4; elsewhere the aim costs nothing");
+                assertEquals(List.of(Entity.LOC_NONE, unaimed), List.of(choice.location(), choice.value()));
 
-                GpuFireOrders.Aim bulldog = GpuFiringFixture.command(firing,
-                      fire -> fire.focusTarget(TargetKey.unit(tank.getId()))).aim();
-                assertEquals(List.of("Body", "Front", "Right", "Left", "Rear", "Turret"), bulldog.locations());
-                assertEquals(List.of(false, false, true, true, true, true), bulldog.enabled());
-                assertEquals(Tank.LOC_REAR, bulldog.location());
-                assertEquals(Tank.LOC_REAR, GpuFiringFixture.command(firing, fire -> fire.aim(cannon, Tank.LOC_FRONT)).aim()
-                      .location(), "The front, which the attacker cannot see, is refused");
+                GpuFireOrders.Snapshot aimed = GpuFiringFixture.command(firing,
+                      fire -> fire.aim(aimAt(firing, cannon, archer), Mek.LOC_HEAD));
+                assertEquals(List.of(Mek.LOC_HEAD, AimingMode.IMMOBILE), aim(firing, cannon));
+                assertEquals(List.of("Head", unaimed + 7), List.of(weaponRow(aimed, cannon).aimedAt(),
+                      weaponRow(aimed, cannon).value()), "The row rolls with the aim");
+                assertEquals(Mek.LOC_HEAD, aimed.aimChoice().location());
+
+                GpuFiringFixture.command(firing, fire -> fire.aim(aimAt(firing, laser, archer), Mek.LOC_LEFT_LEG));
+                assertEquals(List.of(Mek.LOC_LEFT_LEG, AimingMode.IMMOBILE), aim(firing, laser),
+                      "A pick assigns a weapon without an attack, aimed");
+                GpuFiringFixture.command(firing, fire -> fire.aim(aimAt(firing, cannon, archer), Entity.LOC_NONE));
+                assertEquals(List.of(List.of(Entity.LOC_NONE, AimingMode.NONE), List.of(Mek.LOC_LEFT_LEG,
+                      AimingMode.IMMOBILE)), List.of(aim(firing, cannon), aim(firing, laser)),
+                      "No aimed shot keeps the attack, unaimed; the laser keeps its own aim");
+
+                TargetKey bulldog = TargetKey.unit(tank.getId());
+                GpuFireOrders.AimChoice side = GpuFiringFixture.command(firing, fire -> {
+                    fire.focusTarget(bulldog);
+                    fire.showAim(aimAt(firing, right, bulldog));
+                }).aimChoice();
+                assertEquals(List.of(false, true, false, true, true, true), side.enabled(),
+                      "Body, Front, Right, Left, Rear, Turret: never the body, nor the right side from the left");
+                GpuFiringFixture.command(firing, fire -> fire.aim(aimAt(firing, right, bulldog), Tank.LOC_RIGHT));
+                assertNull(onSwing(() -> firing.display.getAttacks().stream().filter(action ->
+                      action instanceof WeaponAttackAction attack && attack.getWeaponId() == right).findFirst()
+                      .orElse(null)), "A location the dialog disables is refused");
             } finally {
                 dismiss();
             }
         }
+    }
+
+    /**
+     * R4, H36: a targeting computer's aimed shot (here the crew's TCP and VDNI, IO p.81) at a mobile Mek: every
+     * location but the head (TW p.143), each 3 harder than the unaimed roll, as the rules' own to-hit rolls it; the
+     * missiles cannot aim.
+     */
+    @Test
+    void aTargetingComputerAimsAtEveryLocationButTheHeadThreeHarder() throws Exception {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            onSwing(() -> {
+                firing.attacker.getCrew().getOptions().getOption(OptionsConstants.MD_TRIPLE_CORE_PROCESSOR)
+                      .setValue(true);
+                firing.attacker.getCrew().getOptions().getOption(OptionsConstants.MD_VDNI).setValue(true);
+                firing.board.source.refresh();
+                return null;
+            });
+            present(firing.gui, firing.board.view, firing.board.source);
+            try {
+                int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+                int missiles = GpuFiringFixture.eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO);
+                TargetKey archer = TargetKey.unit(firing.ahead.getId());
+                GpuFireOrders.Snapshot focused = GpuFiringFixture.command(firing, fire -> fire.focusTarget(archer));
+                assertEquals(List.of(true, false), List.of(weaponRow(focused, cannon).aimable(),
+                      weaponRow(focused, missiles).aimable()), "Only direct fire aims with a targeting computer");
+                int unaimed = weaponRow(focused, cannon).value();
+                GpuFireOrders.AimChoice choice = GpuFiringFixture.command(firing,
+                      fire -> fire.showAim(aimAt(firing, cannon, archer))).aimChoice();
+                List<Integer> rolls = new ArrayList<>(Collections.nCopies(8, unaimed + 3));
+                rolls.set(Mek.LOC_HEAD, TargetRoll.IMPOSSIBLE);
+                assertEquals(rolls, choice.rolls());
+                assertEquals(List.of(Entity.LOC_NONE, unaimed), List.of(choice.location(), choice.value()));
+            } finally {
+                dismiss();
+            }
+        }
+    }
+
+    /** The aimed shot dialog's request for the Atlas's weapon on the unit. */
+    private static GpuFireOrders.AimTarget aimAt(GpuFiringFixture firing, int eqNum, TargetKey unit) {
+        return new GpuFireOrders.AimTarget(firing.attacker.getId(), eqNum, unit);
+    }
+
+    /** The aimed location and aiming mode of the weapon's queued attack. */
+    private static List<Object> aim(GpuFiringFixture firing, int eqNum) throws Exception {
+        return onSwing(() -> firing.display.getAttacks().stream()
+              .filter(action -> action instanceof WeaponAttackAction attack && attack.getWeaponId() == eqNum)
+              .map(action -> (WeaponAttackAction) action)
+              .map(attack -> List.<Object>of(attack.getAimedLocation(), attack.getAimingMode())).findFirst()
+              .orElseThrow());
     }
 
     @Test

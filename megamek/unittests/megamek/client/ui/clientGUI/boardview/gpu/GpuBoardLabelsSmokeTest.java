@@ -1323,7 +1323,7 @@ class GpuBoardLabelsSmokeTest {
         return new GpuFireOrders.Snapshot(fire.active(), fire.editable(), fire.actorId(), fire.focus(),
               fire.selectedWeapon(), fire.weapons(), targets, fire.attacks(), fire.twist(), fire.canTwistLeft(),
               fire.canTwistRight(), fire.torsoLabel(), fire.heat(), fire.solution(), fire.frontArc(), badges,
-              fire.hoverBest(), fire.drafted(), fire.pendingUnits(), fire.autoDeclareRemaining(), fire.aim());
+              fire.hoverBest(), fire.drafted(), fire.pendingUnits(), fire.autoDeclareRemaining(), fire.aimChoice());
     }
 
     /** The preview from another hex, the plan's destination (shot 03 names the hex beside the fixture's). */

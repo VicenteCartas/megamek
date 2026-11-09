@@ -42,6 +42,8 @@ final class GpuHudState {
     int inspected = Entity.NONE;
     /** The equipment number of the weapon armed for click-to-assign, or -1. */
     int armedWeapon = -1;
+    /** The weapon and unit of the open aimed shot dialog (H36, R4), null while it is closed. */
+    GpuFireOrders.AimTarget aiming;
     Dialog dialog = Dialog.NONE;
     boolean overview;
     boolean chatOpen;

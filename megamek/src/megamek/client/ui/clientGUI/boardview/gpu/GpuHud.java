@@ -303,10 +303,11 @@ final class GpuHud implements GpuBoardHud {
         GpuToastStack toasts = new GpuToastStack(kit, source, state);
         modal = new GpuModalDialog(kit, source, state);
         GpuHexTip hexTip = new GpuHexTip(kit, state, contextMenu);
+        GpuAimDialog aim = new GpuAimDialog(kit, source, state, paperdolls);
         List<Component> parts = new ArrayList<>(List.of(nameplates, boardLabels, targetCards, losPanel, phaseHeader,
               initiativeCard, conditionsCard, forces, unitCard, otherUnitCard, recordSheet, utilities, hint, minimap, overlays,
-              contacts, weapons, solution, log, dock, chat, overview, help, menu, players, contextMenu, hexTip, toasts,
-              modal));
+              contacts, weapons, solution, log, dock, chat, overview, help, menu, players, contextMenu, hexTip, aim,
+              toasts, modal));
 
         // The Tactical View's north mark first: the prototype draws it on the board, under the labels (G4). Then the
         // prototype's #fx strokes (guides, traces, leaders) under every board label, the nameplates included (G8b).
@@ -350,6 +351,9 @@ final class GpuHud implements GpuBoardHud {
         // The modal's window-sized root is its scrim: every press around the dialog lands on it.
         modal.actor().setTouchable(Touchable.enabled);
         modalSlot = slot(modalLayer, modal.actor()).fill();
+
+        // The aimed shot dialog's window-sized scrim over the panels and menus, under the toasts and the native modal.
+        spanning.add(slot(dialogs, aim.actor()));
 
         // The developer tuning utility sits before Help and Menu; its panel places itself.
         // Before release, delete this block, the tuningModel parameter, GpuHudState.Dialog.TUNING and GpuTuningPanel.
