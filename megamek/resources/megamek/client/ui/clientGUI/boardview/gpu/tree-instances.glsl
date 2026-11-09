@@ -37,6 +37,7 @@ vec3 instanceScale() {
 // SHOCKS
 uniform vec4 u_destruct;       // the falls' clock in playback seconds, gravity, a level's height, a hex's reach
 uniform ivec2 u_destructSlots; // the first slot's texel, and 1 while anything falls
+uniform vec4 u_destructBoard;  // the board's columns and rows, a hex's width and height
 // The batch's piece: its node's box centre in the model's frame, and what moves its instances (GpuInstancedMesh#piece):
 // w 1 a kit's pieces falling, 2 trees falling, 3 trees standing, 0 nothing.
 uniform vec4 u_piece;
@@ -45,18 +46,20 @@ uniform vec4 u_pieceHalf;      // that box's half size; w: the fragments the par
 // [2k + 1] its half size. A vertex belongs to the last fragment whose first vertex it has reached.
 uniform vec4 u_fragments[2 * FALL_FRAGMENTS];
 
-// The fall's rigid motion, p' = fallShift + fallTurn (p - fallPivot), set once a vertex by fallBegin.
+// The fall's motion, p' = fallShift + fallScale fallTurn (p - fallPivot), set once a vertex by fallBegin: rigid but for
+// a piece shrinking away past the board's edge.
 bool falling = false;
 mat3 fallTurn = mat3(1.0);
 vec3 fallPivot = vec3(0.0);
 vec3 fallShift = vec3(0.0);
+float fallScale = 1.0;
 
 vec3 instancePlace(vec3 p) {
     return instanceTurn(p * instanceScale()) + a_instance0.xyz;
 }
 
 vec3 instancePosition(vec3 p) {
-    return falling ? fallShift + fallTurn * (instancePlace(p) - fallPivot) : instancePlace(p);
+    return falling ? fallShift + fallScale * (fallTurn * (instancePlace(p) - fallPivot)) : instancePlace(p);
 }
 
 vec3 instanceNormal(vec3 n) {
@@ -66,7 +69,19 @@ vec3 instanceNormal(vec3 n) {
 
 // Where a posed point stood: materials mapped along the board (v_modelUV) keep their place on a falling piece.
 vec3 fallRest(vec3 p) {
-    return falling ? fallPivot + transpose(fallTurn) * (p - fallShift) : p;
+    return falling ? fallPivot + transpose(fallTurn) * (p - fallShift) / max(fallScale, 1e-4) : p;
+}
+
+// Whether the ground point lies past the board's edge, by the hex that holds it (HexTile#centerX, #centerY): nothing to
+// land on there.
+bool offBoard(vec2 p) {
+    if (u_destructBoard.x < 0.5) { return false; }
+    float q = (p.x - .5 * u_destructBoard.z) / (.75 * u_destructBoard.z);
+    float r = (-p.y - .5 * u_destructBoard.w) / u_destructBoard.w - .5 * q;
+    vec3 cube = vec3(q, r, -q - r), hex = floor(cube + .5), off = abs(hex - cube);
+    if (off.x > off.y && off.x > off.z) { hex.x = -hex.y - hex.z; } else if (off.y > off.z) { hex.y = -hex.x - hex.z; }
+    float row = hex.y + floor(.5 * hex.x);
+    return hex.x < 0.0 || hex.x >= u_destructBoard.x || row < 0.0 || row >= u_destructBoard.y;
 }
 
 uint fallMix(uint h) {
@@ -230,6 +245,11 @@ void fallBegin() {
     // Without gravity (a zero-g board) a piece drifts on: it lands only when it moves down.
     float landing = gravity > 1e-4 ? (velocity.z + sqrt(velocity.z * velocity.z + 2.0 * gravity * drop)) / gravity
           : velocity.z < -1e-4 ? drop / -velocity.z : 1e9;
+    // A piece that would come to rest past the board's edge has nothing to land on: it falls on, and shrinks to nothing
+    // once below its floor's height.
+    float floored = landing;
+    bool beyond = offBoard(centre.xy + velocity.xy * (landing + 1.0 / FALL_GROUND_DRAG));
+    if (beyond) { landing = 1e9; }
     float flight = min(t, landing), slide = max(0.0, t - landing);
     vec3 position = centre + velocity * flight;
     position.z -= 0.5 * gravity * flight * flight;
@@ -246,7 +266,11 @@ void fallBegin() {
     vec2 lies = position.xy - site.xy;
     float rest = site.z + below + min(.12 * height, FALL_PILE_LEVELS * level) * share * pile
           * max(0.0, 1.0 - dot(lies, lies) / (reach * reach));
-    position.z = max(slide > 0.0 ? mix(position.z, rest, 1.0 - exp(-FALL_GROUND_DRAG * slide)) : position.z, rest);
+    if (beyond) {
+        fallScale = 1.0 - smoothstep(0.0, FALL_EDGE, t - floored);
+    } else {
+        position.z = max(slide > 0.0 ? mix(position.z, rest, 1.0 - exp(-FALL_GROUND_DRAG * slide)) : position.z, rest);
+    }
     float sinking = clamp((clock - sinks) / FALL_SINK, 0.0, 1.0);
     position.z -= 2.0 * length(extent) * sinking * sinking * (3.0 - 2.0 * sinking);
     falling = true;

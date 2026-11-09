@@ -57,9 +57,11 @@ import megamek.common.actions.*;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.bays.Bay;
 import megamek.common.board.Board;
+import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardDimensions;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.BuildingEditSpec;
+import megamek.common.board.BuildingVolumes;
 import megamek.common.board.Coords;
 import megamek.common.board.HexEditSpec;
 import megamek.common.board.RailRoute;
@@ -214,6 +216,21 @@ public class TWGameManager extends AbstractGameManager {
     void noteCollapse(IBuilding building, Coords coords) {
         var capture = attackAnimationCapture.get();
         if (capture != null) { capture.collapse(BoardLocation.of(coords, building.getBoardId())); }
+    }
+
+    /**
+     * A blast takes the hex's visual props (BoardDecoration, no rules meaning): none is left. Its painted decals, its
+     * route markers and the models of its buildings ({@code models}: BuildingVolumes#referenceIds) stay.
+     */
+    private void clearProps(Coords c, int boardId, Set<String> models) {
+        Hex hex = game.getBoard(boardId).getHex(c);
+        if (hex == null) { return; }
+        List<BoardDecoration> kept = hex.getDecorations().stream().filter(object -> !object.kind().equals("prop")
+              || RailRoute.isRoute(object)
+              || BuildingVolumes.of(object.asset()).present() && models.contains(object.id())).toList();
+        if (kept.size() == hex.getDecorations().size()) { return; }
+        hex.setDecorations(kept);
+        sendChangedHex(c, boardId);
     }
 
     /** For the animation alone: the woods or jungle of the hex lost trees to the attack being resolved, if any. */
@@ -19922,10 +19939,13 @@ public class TWGameManager extends AbstractGameManager {
             }
             vDesc.addAll(reports);
         }
-        // Its hex and those around it, each as hard as its damage there.
+        // Its hex and those around it, each as hard as its damage there; none of their visual props is left.
+        Board blasted = game.getBoard(boardId);
+        Set<String> models = BuildingVolumes.referenceIds(blasted, blasted::getHex);
         for (int dist = 0; dist < maxDist; dist++) {
             for (Coords c : dist == 0 ? List.of(position) : position.allAtDistance(dist)) {
                 vDesc.addAll(damageTerrain(c, boardId, damages[dist], Entity.NONE));
+                clearProps(c, boardId, models);
             }
         }
 

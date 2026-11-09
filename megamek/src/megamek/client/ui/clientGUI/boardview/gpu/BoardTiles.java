@@ -108,7 +108,7 @@ final class BoardTiles implements AutoCloseable {
 
     /** Preview neighbours come from the same pending edit, including rail corridors and ground clearance. */
     BoardScene.Tile preview(Board board, Coords coords, Hex hex, java.util.function.Function<Coords, Hex> pending) {
-        return preview(board, coords, hex, pending, referenceIds(board, pending));
+        return preview(board, coords, hex, pending, megamek.common.board.BuildingVolumes.referenceIds(board, pending));
     }
 
     BoardScene.Tile preview(Board board, Coords coords, Hex hex, java.util.function.Function<Coords, Hex> pending,
@@ -125,18 +125,6 @@ final class BoardTiles implements AutoCloseable {
         try {
             return BoardScene.captureTile(hex, artwork.capture(board, coords, hex), null, previewImages, pending, buildingReferences);
         } finally { artwork.invalidate(coords); }
-    }
-
-    /** A capture-time snapshot of saved membership, including collapsed hexes; never inferred from current artwork. */
-    static Set<String> referenceIds(Board board, java.util.function.Function<Coords, Hex> hexes) {
-        Set<String> result = new java.util.HashSet<>();
-        for (int x = 0; x < board.getWidth(); x++) {
-            for (int y = 0; y < board.getHeight(); y++) {
-                Hex hex = hexes.apply(new Coords(x, y));
-                if (hex != null && hex.getBuildingReference() != null) { result.add(hex.getBuildingReference().id()); }
-            }
-        }
-        return result;
     }
 
     /** Rereads the artwork (the 3D views' asset reload); every hex is recaptured. */
@@ -157,7 +145,7 @@ final class BoardTiles implements AutoCloseable {
             changed(null);
         }
         if (!all && dirty == null) { return tiles; }
-        Set<String> buildingReferences = referenceIds(board, board::getHex);
+        Set<String> buildingReferences = megamek.common.board.BuildingVolumes.referenceIds(board, board::getHex);
         Rectangle area = all ? new Rectangle(0, 0, width, height) : dirty.intersection(new Rectangle(0, 0, width, height));
         Map<Coords, List<BoardScene.Feature>> woods = woods(board, area);
         List<BoardScene.Tile> next = tiles.size() == width * height ? new ArrayList<>(tiles)

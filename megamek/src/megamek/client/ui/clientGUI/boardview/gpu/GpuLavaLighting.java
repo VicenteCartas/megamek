@@ -84,6 +84,7 @@ final class GpuLavaLighting implements Disposable {
     private int fallRow;
     private boolean fallsUploaded = true;
     private float fallClock, fallGravity;
+    private int fallColumns, fallRows;
     private boolean falling;
 
     GpuLavaLighting(GpuAssets assets) { this.assets = assets; }
@@ -118,10 +119,15 @@ final class GpuLavaLighting implements Disposable {
         fallsUploaded = false;
     }
 
-    /** The falls' clock in playback seconds and their gravity in world units per second squared; off while none falls. */
-    void setFallClock(float clock, float gravity, boolean falling) {
+    /**
+     * The falls' clock in playback seconds, their gravity in world units per second squared and the board's size in
+     * hexes; off while none falls.
+     */
+    void setFallClock(float clock, float gravity, int columns, int rows, boolean falling) {
         fallClock = clock;
         fallGravity = gravity;
+        fallColumns = columns;
+        fallRows = rows;
         this.falling = falling;
     }
 
@@ -444,6 +450,16 @@ final class GpuLavaLighting implements Disposable {
                 if (field == null) { field = tables; }
                 if (field != null && field.falling) {
                     target.set(id, field.fallClock, field.fallGravity, BoardGeometry.level(), BoardGeometry.height() * .5f);
+                }
+            }
+        });
+        shader.register("u_destructBoard", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                var field = GpuEnvironmentLighting.lavaLighting(attributes);
+                if (field == null) { field = tables; }
+                if (field != null && field.falling) {
+                    target.set(id, field.fallColumns, field.fallRows, BoardGeometry.width(), BoardGeometry.height());
                 }
             }
         });

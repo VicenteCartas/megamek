@@ -2394,10 +2394,11 @@ final class GpuTerrain implements Disposable {
     /** Request only the latest rendering snapshot. Game state and commands remain owned by the source. */
     void update(BoardScene scene, Camera camera) {
         // Part of every program's key: the editor keeps it, as it keeps the biome stage below, or the first crystal in a
-        // stroke or a palette card links every program again. Without a crystal its programs read no transmission.
+        // stroke or a palette card links every program again. Without a crystal its programs read no transmission. A
+        // board that had crystals keeps it too (boardChanged): an attack that destroys its last ones links nothing.
         if (crystalTiles != scene.tiles()) {
             crystalTiles = scene.tiles();
-            crystals = scene.tiles().stream().flatMap(tile -> tile.features().stream())
+            crystals |= scene.tiles().stream().flatMap(tile -> tile.features().stream())
                   .anyMatch(feature -> feature.asset().startsWith("crystal/"));
         }
         environmentLighting.crystals = (crystalStage != null ? crystalStage : editable || crystals) ? crystalTransmission : null;
@@ -2617,6 +2618,8 @@ final class GpuTerrain implements Disposable {
         groundDamage.dispose();
         clearCollapses();
         coverScene = null;
+        crystalTiles = null;
+        crystals = false;
         lunarSource = null;
         lunarTiles = null;
         scatterSource = null;
@@ -5630,6 +5633,18 @@ final class GpuTerrain implements Disposable {
                     prepareTerrainMaterial(part.material, part.meshPart.mesh.getVertexAttributes());
                 }
             }
+            // Cover that stands blended (a crystal) falls solid in the debris batches (breakGrove, fallMaterial): that
+            // program links behind the loading stage too.
+            for (Prop prop : chunk.props) {
+                var feature = prop.plantFeature != null ? prop.plantFeature : prop.decorationFeature;
+                if (!prop.translucent || prop.standing() || feature == null || !BoardFeatures.cover(feature)) { continue; }
+                for (Renderable part : GpuTerrainDepth.snapshot(List.of(prop.instance()))) {
+                    if (blended(part.material) || GpuCrystalTransmission.ruby(part.material)) {
+                        prepareTerrainMaterial(GpuTreeInstances.instancedMaterial(fallMaterial(part.material)),
+                              part.meshPart.mesh.getVertexAttributes());
+                    }
+                }
+            }
             // Multi-hex buildings' glass draws blended by its .tres: its program links behind the loading stage too.
             for (Renderable part : GpuTerrainDepth.snapshot(chunk.glass)) {
                 prepareTerrainMaterial(part.material, part.meshPart.mesh.getVertexAttributes());
@@ -7673,7 +7688,7 @@ final class GpuTerrain implements Disposable {
             // In fragments where its level's cut is in (KitFragments); else in whole modules, and the level is cut now.
             KitFragments broken = prop.building.kit().fragments(drawn.model);
             if (broken == null && fragments) { prop.building.kit().cutFragments(drawn.model); }
-            for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces, broken); }
+            for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces, broken, false); }
             buildings.add(prop.building);
             bounds.ext(prop.bounds());
         }
@@ -7684,7 +7699,7 @@ final class GpuTerrain implements Disposable {
             if (prop.building != null || prop.tree() || isFlag(prop) || !Float.isNaN(prop.floorZ)
                   || prop.bounds().min.z < bounds.min.z + BoardGeometry.level()) { continue; }
             ModelInstance drawn = prop.instance();
-            for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces, null); }
+            for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces, null, false); }
             carried.add(prop);
         }
         var middle = BoardGeometry.center(at, change.before().elevation());
@@ -7696,12 +7711,18 @@ final class GpuTerrain implements Disposable {
             if (from.z > bounds.max.z) { flags |= GpuDestruction.LOADED; }
             else { push.set(middle.x - from.x, middle.y - from.y).nor().scl(blast > 0 ? blast : change.strength()); }
         }
+        // Its pieces come down to the hex's ground: a hex inside a wide building holds its roof alone.
+        bounds.min.z = Math.min(bounds.min.z, middle.z);
         destruction.take(at, pieces, buildings, bounds, middle.x, middle.y, push, flags);
         return chunk;
     }
 
+    /**
+     * Adds the node's parts and its children's as falling pieces, in {@code broken}'s fragments where it holds them.
+     * {@code glass}: its blended parts too, solid.
+     */
     private static void addPieces(ModelInstance instance, Node node, Map<Material, Material> copies,
-          Array<Renderable> pieces, KitFragments broken) {
+          Array<Renderable> pieces, KitFragments broken, boolean glass) {
         // One box for the node's parts, in its mesh's frame: they turn about it as one piece.
         BoundingBox box = new BoundingBox().inf();
         var corner = new Vector3();
@@ -7714,7 +7735,7 @@ final class GpuTerrain implements Disposable {
             // Glass is what blends in the model itself: a building faded around its occupants or the pointer still falls.
             Material own = instance.model.getMaterial(part.material.id);
             if (!part.enabled || part.meshPart.primitiveType != GL20.GL_TRIANGLES || part.meshPart.size == 0
-                  || blended(own != null ? own : part.material)) { continue; }
+                  || !glass && blended(own != null ? own : part.material)) { continue; }
             Renderable piece = instance.getRenderable(new Renderable(), node, part);
             if (!GpuTreeInstances.instanceable(piece.worldTransform)) { continue; }
             piece.material = copies.computeIfAbsent(part.material, GpuTerrain::fallMaterial);
@@ -7728,7 +7749,7 @@ final class GpuTerrain implements Disposable {
             box.getDimensions(piece.meshPart.halfExtents).scl(.5f);
             pieces.add(piece);
         }
-        for (Node child : node.getChildren()) { addPieces(instance, child, copies, pieces, broken); }
+        for (Node child : node.getChildren()) { addPieces(instance, child, copies, pieces, broken, glass); }
     }
 
     /** The kit levels the installed chunks draw break into fragments on their own thread, ahead of any fall (KitFragments). */
@@ -7764,7 +7785,7 @@ final class GpuTerrain implements Disposable {
             for (Prop prop : mesh.props) {
                 if (!rubble(prop) || rising.contains(prop)) { continue; }
                 ModelInstance drawn = prop.instance();
-                for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces, null); }
+                for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces, null, false); }
                 rising.add(prop);
                 bounds.ext(prop.bounds());
             }
@@ -7795,12 +7816,14 @@ final class GpuTerrain implements Disposable {
     /** Runs the falls' clock on by {@code seconds} of playback under {@code gravity} standard gravities. */
     void advanceFalls(float seconds, float gravity) {
         int before = destruction.revision();
-        destruction.advance(seconds, gravity);
+        destruction.advance(seconds, gravity, coverScene == null ? 0 : coverScene.width(),
+              coverScene == null ? 0 : coverScene.height());
         // A pile that sank lay on a hex its chunk already shows without the structure.
         if (destruction.revision() != before) {
             stampFalls();
             carried.removeIf(prop -> !destruction.taken(prop.coords));
             rising.removeIf(prop -> !destruction.taken(prop.coords));
+            broken.removeIf(prop -> !destruction.felled(prop.instance().transform));
         }
     }
 
@@ -7848,15 +7871,18 @@ final class GpuTerrain implements Disposable {
                       GpuArtilleryBlast.shockArrival(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK);
             }
             for (var grove : detonation.felled()) {
+                var middle = BoardGeometry.center(grove.coords(), 0);
+                float distance = Vector2.dst(middle.x, middle.y, groundZero.x, groundZero.y);
+                float arrival = GpuArtilleryBlast.shockArrival(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK;
+                // What stands in no stand (crystals, a skin's rows) bursts as the front reaches its hex.
+                Chunk burst = breakGrove(grove, groundZero, arrival, false);
+                if (burst != null) { taken.add(burst); }
                 Chunk chunk = takeTrees(grove, groundZero);
                 if (chunk == null) { continue; }
                 taken.add(chunk);
-                var middle = BoardGeometry.center(grove.coords(), 0);
-                float distance = Vector2.dst(middle.x, middle.y, groundZero.x, groundZero.y);
                 destruction.blastFrom(grove.coords(), groundZero.x, groundZero.y,
                       GpuArtilleryBlast.shockSlowness(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK);
-                destruction.startTrees(grove.coords(),
-                      GpuArtilleryBlast.shockArrival(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK);
+                destruction.startTrees(grove.coords(), arrival);
             }
         });
         if (!taken.isEmpty()) {
@@ -7888,8 +7914,8 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * Fells the hex's trees the blast clears ({@code grove}, as its scene's features): they leave their chunk's stand to
-     * fall away from ground zero (GpuDestruction). The chunk that drew them, or null where none stands.
+     * Fells the hex's stand trees the blast clears ({@code grove}, as its scene's features): they leave their chunk's
+     * stand to fall away from ground zero (GpuDestruction). The chunk that drew them, or null where none stands.
      */
     private Chunk takeTrees(BoardScene.Detonation.Felled grove, Vector3 groundZero) {
         Coords at = grove.coords();
@@ -7899,6 +7925,7 @@ final class GpuTerrain implements Disposable {
         List<GpuDestruction.Tree> trees = new ArrayList<>();
         BoundingBox bounds = new BoundingBox().inf();
         for (Prop prop : grovesTrees(chunk, grove)) {
+            if (!prop.standing()) { continue; }
             trees.add(new GpuDestruction.Tree(prop.treeAsset, new Matrix4(prop.instance().transform), prop.treeDiameter));
             bounds.ext(prop.bounds());
         }
@@ -7916,19 +7943,24 @@ final class GpuTerrain implements Disposable {
         return at.getX() < 0 || at.getY() < 0 || index >= chunks.size() ? null : chunks.get(index);
     }
 
-    /** The chunk's standing trees of {@code grove}: its hex's, for its scene features. */
+    /**
+     * The chunk's cover of {@code grove}: its hex's props for its scene features, the trees of its stand
+     * ({@link Prop#standing}) and what draws on its own (crystals, a skin's rows).
+     */
     private static List<Prop> grovesTrees(Chunk chunk, BoardScene.Detonation.Felled grove) {
         Set<BoardScene.Feature> features = Set.copyOf(grove.trees());
         List<Prop> result = new ArrayList<>();
         for (Prop prop : chunk.props) {
-            if (prop.scatter || !prop.standing() || prop.plantFeature == null || !prop.coords().equals(grove.coords())
-                  || !features.contains(prop.plantFeature)) { continue; }
+            var feature = prop.plantFeature != null ? prop.plantFeature : prop.decorationFeature;
+            if (prop.scatter || feature == null || !prop.coords().equals(grove.coords()) || !features.contains(feature)) {
+                continue;
+            }
             result.add(prop);
         }
         return result;
     }
 
-    /** Splits the models of the trees an attack is about to break into their fragments, ahead of its hit (#breakTrees). */
+    /** Splits the models of the cover an attack is about to break into their fragments, ahead of its hit (#breakTrees). */
     void prepareBreak(List<BoardScene.Detonation.Felled> broken) {
         if (!fragments) { return; }
         for (var grove : broken) {
@@ -7947,9 +7979,9 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * The trees an attack took down (its checkpoint's, GpuBoardSource#publishScene) break as its hit lands: each in its
-     * fragments (whole parts where its split is not in yet), they burst away from {@code hit} and out (GpuDestruction
-     * #breakTrees) and sink once the terrain shows them gone.
+     * The woods cover an attack took down (its checkpoint's, GpuBoardSource#publishScene: trees, crystals, a skin's rows)
+     * breaks as its hit lands: each in its fragments (whole parts where its split is not in yet), they burst away from
+     * {@code hit} and out (GpuDestruction#breakTrees) and sink once the terrain shows them gone.
      */
     void breakTrees(List<BoardScene.Detonation.Felled> broken, BoardScene.TileTransition.Hit hit) {
         if (coverScene == null || installedColumns || broken.isEmpty() || hit == null) { return; }
@@ -7957,7 +7989,7 @@ final class GpuTerrain implements Disposable {
         Set<Chunk> taken = new LinkedHashSet<>();
         installedSettings.run(() -> {
             for (var grove : broken) {
-                Chunk chunk = breakGrove(grove, from);
+                Chunk chunk = breakGrove(grove, from, 0, true);
                 if (chunk != null) { taken.add(chunk); }
             }
         });
@@ -7968,26 +8000,34 @@ final class GpuTerrain implements Disposable {
         stampFalls();
     }
 
-    private Chunk breakGrove(BoardScene.Detonation.Felled grove, Vector3 from) {
+    /**
+     * Breaks the hex's cover into pieces that burst away from {@code from}, {@code delay} playback seconds from now:
+     * what draws on its own, and with {@code trees} its stand's trees too. The chunk that drew it, or null for none.
+     */
+    private Chunk breakGrove(BoardScene.Detonation.Felled grove, Vector3 from, float delay, boolean trees) {
         Coords at = grove.coords();
         Chunk chunk = chunkOf(at);
         if (chunk == null) { return null; }
         Array<Renderable> pieces = new Array<>();
         List<Matrix4> stood = new ArrayList<>();
+        List<Prop> alone = new ArrayList<>();
         BoundingBox bounds = new BoundingBox().inf();
         Map<Material, Material> copies = new IdentityHashMap<>();
         for (Prop prop : grovesTrees(chunk, grove)) {
+            if (prop.standing() && !trees) { continue; }
             ModelInstance drawn = prop.instance();
             KitFragments split = fragments ? treeSplit(drawn.model) : null;
-            for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces, split); }
+            for (Node node : drawn.nodes) { addPieces(drawn, node, copies, pieces, split, true); }
             stood.add(new Matrix4(drawn.transform));
+            if (!prop.standing()) { alone.add(prop); }
             bounds.ext(prop.bounds());
         }
         if (pieces.isEmpty()) { return null; }
         var middle = BoardGeometry.center(at, 0);
         var push = new Vector2(middle.x - from.x, middle.y - from.y);
         if (push.len2() < 1e-6f) { push.set(1, 0); }
-        destruction.breakTrees(at, pieces, stood, Set.copyOf(grove.trees()), bounds, middle.x, middle.y, push.nor());
+        destruction.breakTrees(at, pieces, stood, Set.copyOf(grove.trees()), bounds, middle.x, middle.y, push.nor(), delay);
+        broken.addAll(alone);
         return chunk;
     }
 
@@ -7996,6 +8036,9 @@ final class GpuTerrain implements Disposable {
 
     /** Whether the hex's structure lies as pieces (falling, resting or sinking) instead of in its chunk. */
     boolean fallTaken(Coords at) { return destruction.taken(at); }
+
+    /** Counts the changes of which hexes are taken (#fallTaken). */
+    int fallsRevision() { return destruction.revision(); }
 
     /** Whether the hex's structure has begun to give way. */
     boolean fallStarted(Coords at) { return destruction.started(at); }
@@ -10048,8 +10091,12 @@ final class GpuTerrain implements Disposable {
     /** Objects that stood on a falling structure (a helipad, roof fittings): they fall with it, as its pieces. */
     private final Set<Prop> carried = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
 
+    /** Woods cover that draws on its own (crystals, a skin's rows), broken into flying pieces while they last (#breakGrove). */
+    private final Set<Prop> broken = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+
     private boolean drawn(Prop prop, boolean shadows) {
         if (!carried.isEmpty() && carried.contains(prop) && destruction.taken(prop.coords)) { return false; }
+        if (!broken.isEmpty() && broken.contains(prop) && destruction.felled(prop.instance().transform)) { return false; }
         if (!shadows && !rising.isEmpty() && rising.contains(prop) && destruction.taken(prop.coords)) { return false; }
         if (!Float.isNaN(prop.floorZ) && chunks.get(prop.coords.getX() / CHUNK_SIZE * chunkRows
               + prop.coords.getY() / CHUNK_SIZE).hiddenInteriors.contains(prop.coords)) { return false; }

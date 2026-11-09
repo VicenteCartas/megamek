@@ -89,6 +89,27 @@ class MeepleDebrisTest {
         }
     }
 
+    @Test
+    void piecesThrownPastTheBoardsEdgeFallAwayBelowIt() {
+        // The board ends just east of the block; an AC/20 from the west throws it that way.
+        float edge = 24;
+        var block = block();
+        var debris = MeepleDebris.collapse(block.instance(), block.pieces(), block.supports(),
+              new MeepleDebris.Collapse(new Vector3(), STOREY, false, new Vector3(-400, 0, 20), 1, List.of()), 5);
+        run(debris, 6, (x, y, from, own) -> x > edge ? Float.NaN : 0);
+        assertTrue(debris.settled(), "Every piece comes to rest or is gone");
+        int gone = 0;
+        var settled = centers(block);
+        for (int index = 0; index < settled.size(); index++) {
+            // A piece may hang over the edge by less than its half; farther out nothing holds it.
+            if (settled.get(index).x < edge + 12) { continue; }
+            gone++;
+            assertTrue(settled.get(index).z < -1, "Past the edge a piece falls below the ground: " + settled.get(index));
+            assertTrue(lowest(block, index) > settled.get(index).z - .1f, "and has shrunk away");
+        }
+        assertTrue(gone > 0, "The hit throws pieces past the edge");
+    }
+
     /** How far, on average, a hit of {@code strength} from the west carries the block's pieces east. */
     private static float eastward(float strength) {
         var block = block();
@@ -145,8 +166,10 @@ class MeepleDebrisTest {
         return points;
     }
 
-    private static void run(MeepleDebris debris, float seconds) {
-        for (float elapsed = 0; elapsed < seconds; elapsed += FRAME) { debris.advance(FRAME, FLAT, 1); }
+    private static void run(MeepleDebris debris, float seconds) { run(debris, seconds, FLAT); }
+
+    private static void run(MeepleDebris debris, float seconds, MeepleDebris.Ground ground) {
+        for (float elapsed = 0; elapsed < seconds; elapsed += FRAME) { debris.advance(FRAME, ground, 1); }
         debris.pose();
     }
 

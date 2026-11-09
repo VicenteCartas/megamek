@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
@@ -139,6 +140,9 @@ final class GpuHexText implements Disposable {
     private Set<Coords> covered = Set.of();
     /** The roof each roof label was laid on at the last rebuild, by hex; null where the hex had none. */
     private final Map<Coords, BoundingBox> roofs = new HashMap<>();
+    /** The count of fall changes at the last update, and the hexes whose roof labels are left out (#update). */
+    private int falls;
+    private final Set<Coords> down = new HashSet<>();
 
     GpuHexText() {
         shader = GpuShaderManager.program(GpuHexText::program, next -> shader = next);
@@ -163,6 +167,20 @@ final class GpuHexText implements Disposable {
      */
     void update(BoardScene scene, BitmapFont font, BitmapFont outline, Function<Coords, BoundingBox> roofBounds,
           boolean tactical, boolean types, boolean outlined) {
+        update(scene, font, outline, roofBounds, tactical, types, outlined, at -> false, 0);
+    }
+
+    /**
+     * {@code fallen}: whether a hex's structure lies as pieces (GpuTerrain#fallTaken), {@code falls} counting the
+     * changes of that: such a hex has no roof to label until its collapse settles, so its roof label is left out.
+     */
+    void update(BoardScene scene, BitmapFont font, BitmapFont outline, Function<Coords, BoundingBox> roofBounds,
+          boolean tactical, boolean types, boolean outlined, Predicate<Coords> fallen, int falls) {
+        // Only a labelled roof coming down, or back, changes the labels.
+        if (this.falls != falls && roofs.keySet().stream().anyMatch(at -> fallen.test(at) != down.contains(at))) {
+            tiles = null;
+        }
+        this.falls = falls;
         Set<Coords> units = new HashSet<>();
         if (tactical) { scene.units().forEach(unit -> units.addAll(unit.footprint())); }
         boolean same = this.font == font && this.outline == outline && tuning == BoardGeometry.revision()
@@ -179,9 +197,18 @@ final class GpuHexText implements Disposable {
         Map<Plane, Map<Coords, Chunk>> next = new TreeMap<>(Comparator.comparing(Plane::overlay)
               .thenComparingInt(Plane::elevation));
         Map<Coords, BoundingBox> nextRoofs = new HashMap<>();
+        Set<Coords> nextDown = new HashSet<>();
         try {
             for (BoardScene.Tile tile : scene.tiles()) {
                 for (BoardHexText label : labels(tile, tactical, types, units.contains(tile.coords()))) {
+                    BoundingBox roof = label.elevation() > 0 ? roofBounds.apply(tile.coords()) : null;
+                    if (label.elevation() > 0) {
+                        nextRoofs.put(tile.coords(), roof == null ? null : new BoundingBox(roof));
+                        if (fallen.test(tile.coords())) {
+                            nextDown.add(tile.coords());
+                            continue;
+                        }
+                    }
                     Plane plane = new Plane(tile.elevation() + label.elevation(), label.elevation() > 0);
                     float headroom = headroom(tile, label);
                     Coords cell = new Coords(tile.coords().getX() / GpuTerrain.CHUNK_SIZE,
@@ -204,10 +231,6 @@ final class GpuHexText implements Disposable {
                     GlyphLayout layout = new GlyphLayout(font, label.text());
                     float x = centerX;
                     float baseline = centerY + BoardGeometry.height() / 2 - label.baseline() * BoardGeometry.hexScale();
-                    BoundingBox roof = label.elevation() > 0 ? roofBounds.apply(tile.coords()) : null;
-                    if (label.elevation() > 0) {
-                        nextRoofs.put(tile.coords(), roof == null ? null : new BoundingBox(roof));
-                    }
                     if (roof != null) {
                         float fit = Math.min(1, Math.max(8, roof.getWidth() - 4 * BoardGeometry.hexScale()) / layout.width);
                         font.getData().setScale(font.getData().scaleX * fit);
@@ -247,6 +270,8 @@ final class GpuHexText implements Disposable {
         pages.addAll(uploaded);
         roofs.clear();
         roofs.putAll(nextRoofs);
+        down.clear();
+        down.addAll(nextDown);
         tiles = scene.tiles();
         this.font = font;
         this.outline = outline;

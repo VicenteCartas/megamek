@@ -2050,23 +2050,17 @@ class GpuBattleView extends ApplicationAdapter {
      * change waits for the terrain to build the ground its moving parts start from (GpuTerrain#ready).
      */
     boolean preparePlaybackCamera(UnitPlayback state, BoardScene scene) {
-        if (!state.reviewing() && (state.movement() != null || state.attack() != null || state.detonation() != null)) {
-            boardCamera.beginPlayback();
-        }
+        if (!state.reviewing() && (state.movement() != null || state.attack() != null)) { boardCamera.beginPlayback(); }
         if (state.movement() != null) {
             boardCamera.frameMovement(state.movement(), motions.get(state.activeEntityId()), state.present(scene), playbackCameraWidth());
         } else if (state.attack() != null && state.attack().shot()) {
             boardCamera.frameAttacks(state.attacks(), playbackCameraWidth());
-        } else if (state.detonation() != null) {
-            var strike = state.detonation().result();
-            boardCamera.frameLocation(BoardGeometry.center(strike.coords(), strike.elevation()), playbackCameraWidth());
-            // An explosion goes off at once, the camera easing over as it does: a chain waits on no camera move.
-            if (strike.kind() == megamek.common.NuclearDetonation.Kind.EXPLOSION) { return true; }
         } else if (state.transition() != null) {
             // A structure comes down, or an elevator moves, where it is: the camera stays where the player has it. The
             // clock waits for the terrain to take what falls (GpuTerrain#ready).
             return terrain.ready(state.transition());
         } else {
+            // A strike, a bombardment or an explosion goes off where it is: the camera is the player's throughout.
             return true;
         }
         return !boardCamera.isFraming();
@@ -2149,19 +2143,13 @@ class GpuBattleView extends ApplicationAdapter {
         // Keep the last idle selection until the entire playback, including its completion hold, ends; a reviewed
         // attack is framed as a live one.
         if (playback.busy() || playback.reviewing()) {
-            // A structure coming down, or an elevator moving, leaves the camera where the player has it: no framing,
-            // and nothing to fly back to.
-            if (playback.transition() != null) {
+            // A structure coming down, an elevator moving, a strike, a bombardment or an explosion leaves the camera
+            // where the player has it: no framing, and nothing to fly back to.
+            if (playback.transition() != null || playback.detonation() != null) {
                 cameraFollowingPlayback = false;
                 return;
             }
             if (!playback.reviewing()) { boardCamera.beginPlayback(); }
-            if (playback.detonation() != null) {
-                var strike = playback.detonation().result();
-                cameraFollowingPlayback = true;
-                boardCamera.frameLocation(BoardGeometry.center(strike.coords(), strike.elevation()), playbackCameraWidth());
-                return;
-            }
             if (playback.movement() != null) {
                 // The complete route is already framed. Do not chase the unit or recenter it on arrival.
                 cameraFollowingPlayback = false;
@@ -2212,9 +2200,9 @@ class GpuBattleView extends ApplicationAdapter {
             boardCamera.frameSelection(selection, cameraWidth());
         } else if (instantAction instanceof BoardScene.Combat combat && combat.result().kind() == ResolvedAttack.Kind.SHOT) {
             boardCamera.frameAttacks(List.of(new UnitAttack(combat)), playbackCameraWidth());
-        } else if (instantAction instanceof BoardScene.Detonation detonation) {
-            var strike = detonation.result();
-            boardCamera.frameLocation(BoardGeometry.center(strike.coords(), strike.elevation()), playbackCameraWidth());
+        } else if (instantAction instanceof BoardScene.Detonation) {
+            // As when it plays: the camera stays.
+            boardCamera.viewableArea(0, cameraWidth());
         } else if (instantAction != null) {
             scene.units().stream().filter(unit -> unit.id() == instantAction.entityId()).findFirst()
                   .filter(unit -> onMap(scene, unit))
@@ -2779,7 +2767,7 @@ class GpuBattleView extends ApplicationAdapter {
         var overlays = source.uiPreferences().overlays();
         hexText.update(scene, theme.skin.getFont("default-font"), theme.skin.getFont(GpuBoardSkin.OUTLINE_FONT),
               terrain::roofBounds, boardCamera.tactical(), overlays.hexTypes(),
-              overlays.hexLabelOutline() || wireframeView);
+              overlays.hexLabelOutline() || wireframeView, terrain::fallTaken, terrain.fallsRevision());
         hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(), 0,
               atmosphere, wireframeView);
     }

@@ -10,6 +10,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -43,6 +44,21 @@ public final class BuildingVolumes {
 
     /** Survives collapse: the placement belongs to its anchor even after that hex loses its building terrain. */
     public record Reference(String id, Coords anchor) implements Serializable { }
+
+    /**
+     * The ids of the building models the board's hexes ({@code hexes}: each by its place) belong to: saved membership,
+     * including collapsed hexes, never inferred from current artwork.
+     */
+    public static Set<String> referenceIds(Board board, Function<Coords, Hex> hexes) {
+        Set<String> result = new HashSet<>();
+        for (int x = 0; x < board.getWidth(); x++) {
+            for (int y = 0; y < board.getHeight(); y++) {
+                Hex hex = hexes.apply(new Coords(x, y));
+                if (hex != null && hex.getBuildingReference() != null) { result.add(hex.getBuildingReference().id()); }
+            }
+        }
+        return result;
+    }
     public record Point(double x, double y, double z) { }
     public record Triangle(Point a, Point b, Point c) { }
     public record Solid(String role, List<Triangle> triangles) { }

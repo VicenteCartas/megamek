@@ -773,8 +773,10 @@ final class GpuBoardSource implements BoardSource {
     }
 
     /**
-     * The trees the rules took down between two checkpoints of one board, in the hexes {@code near}: each hex's tree
-     * features of {@code before} that stand nowhere in {@code after}, where a blast or an attack took its woods down.
+     * The woods cover the rules took down between two checkpoints of one board, in the hexes {@code near}: each hex's
+     * cover features ({@link BoardFeatures#cover}) of {@code before} that stand nowhere in {@code after}, where a blast
+     * or an attack took its woods down. A tree stands on where one of any species does; a skin's row, where the same row
+     * does.
      */
     private static List<BoardScene.Detonation.Felled> felled(BoardScene before, BoardScene after,
           java.util.function.Predicate<Coords> near) {
@@ -783,9 +785,10 @@ final class GpuBoardSource implements BoardSource {
             if (!near.test(tile.coords())) { continue; }
             var next = after.tile(tile.coords());
             List<BoardScene.Feature> felled = tile.features().stream()
-                  .filter(tree -> tree.kind() == BoardScene.FeatureKind.TREE && (next == null || next.features().stream()
-                        .noneMatch(kept -> kept.kind() == BoardScene.FeatureKind.TREE && Math.abs(kept.x() - tree.x()) < 1e-3f
-                              && Math.abs(kept.y() - tree.y()) < 1e-3f)))
+                  .filter(cover -> BoardFeatures.cover(cover) && (next == null || next.features().stream()
+                        .noneMatch(kept -> BoardFeatures.cover(kept) && kept.kind() == cover.kind()
+                              && (cover.kind() == BoardScene.FeatureKind.TREE || kept.asset().equals(cover.asset()))
+                              && Math.abs(kept.x() - cover.x()) < 1e-3f && Math.abs(kept.y() - cover.y()) < 1e-3f)))
                   .toList();
             if (!felled.isEmpty()) { result.add(new BoardScene.Detonation.Felled(tile.coords(), felled)); }
         }

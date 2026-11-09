@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.model.Node;
+import com.badlogic.gdx.math.Interpolation;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Quaternion;
@@ -70,6 +71,8 @@ final class MeepleDebris {
     private static final float HARD_LANDING = 70;
     /** The height field's spacing, and how far above the meeple's ground its pieces look for what they land on. */
     static final float CELL = 2;
+    /** The ground's height where the board gives none, past its edge: nothing to land on. */
+    private static final float NOWHERE = -1e6f;
     /**
      * A rise across one cell steeper than this, 45 degrees, is a step, not a slope: interpolated, the crest of a steeper
      * slope would cut its corner, and pieces resting there would sink into it.
@@ -115,6 +118,8 @@ final class MeepleDebris {
         /** Seconds before it starts to move: the moment the structure under it gives way. */
         float release;
         float still;
+        /** Seconds it has fallen below its structure's floor past the board's edge, shrinking away. */
+        float gone;
         boolean asleep, touching;
 
         Body(Node node, BoundingBox bounds, Vector3[] points) {
@@ -133,7 +138,7 @@ final class MeepleDebris {
     private final ModelInstance instance;
     private final Matrix4 frame, inverse;
     private final List<Body> bodies = new ArrayList<>();
-    /** The ground the pieces stood on, where the board gives none. */
+    /** The ground the pieces stood on: past the board's edge they shrink away below it. */
     private final float floor;
     /**
      * The pieces' own ground, out to {@code reach} from their {@code middle}, and the height just above the ground they
@@ -313,6 +318,12 @@ final class MeepleDebris {
             if (angle > 0) {
                 body.orientation.mulLeft(new Quaternion(new Vector3(body.spin).nor(), angle * MathUtils.radiansToDegrees)).nor();
             }
+            // Past the board's edge nothing holds a piece: below its floor it shrinks to nothing, and is down.
+            if (body.position.z < floor && height(body.position.x, body.position.y, ground) <= NOWHERE) {
+                body.gone += STEP;
+                body.asleep = body.gone >= GpuDestruction.EDGE_SECONDS;
+                continue;
+            }
             boolean contact = collide(body, ground);
             if (contact) {
                 body.velocity.scl(1 - GROUND_DRAG * STEP);
@@ -393,7 +404,7 @@ final class MeepleDebris {
         if (cached != null) { return cached; }
         float x = column * spacing, y = row * spacing;
         float height = ground.height(x, y, from, Vector3.dst2(x, y, 0, middle.x, middle.y, 0) < reach * reach);
-        height = Float.isFinite(height) ? height : floor;
+        height = Float.isFinite(height) ? height : NOWHERE;
         cache.put(key, height);
         return height;
     }
@@ -430,8 +441,10 @@ final class MeepleDebris {
     void pose() {
         var motion = new Matrix4();
         for (Body body : bodies) {
+            // Never quite to nothing: a singular transform has no normal matrix.
+            float size = Math.max(1e-3f, 1 - Interpolation.smooth.apply(Math.min(1, body.gone / GpuDestruction.EDGE_SECONDS)));
             motion.setToTranslation(body.position.x, body.position.y, body.position.z - sunk * 2 * body.radius).rotate(body.orientation)
-                  .translate(-body.rest.x, -body.rest.y, -body.rest.z);
+                  .scale(size, size, size).translate(-body.rest.x, -body.rest.y, -body.rest.z);
             body.node.localTransform.set(inverse).mul(motion).mul(frame);
         }
         instance.calculateTransforms();

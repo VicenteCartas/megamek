@@ -36,7 +36,8 @@ import org.junit.jupiter.api.Test;
  * collapse and the terrain's swap): a medium, a heavy, a light kit building and a fuel tank fall where they stood on
  * the GPU (GpuDestruction), a river bridge's span and an authored building in both its hexes break into cut pieces and
  * drop; the heavy one, hit by an AC/20 from the west, falls away east. Heavy woods an attack from the west clears break
- * into their pieces, thrown east (GpuTerrain#breakTrees). Frames go to build/gpu-board-review/building-collapse.
+ * into their pieces, thrown east (GpuTerrain#breakTrees), as do woods drawn as a container yard and as crystals. Frames go
+ * to build/gpu-board-review/building-collapse.
  */
 @Tag("on-demand")
 class GpuBuildingCollapseSmokeTest {
@@ -62,6 +63,8 @@ class GpuBuildingCollapseSmokeTest {
           new Scenario("fuel-tank", new Coords(3, 12), false),
           new Scenario("bridge", new Coords(6, 8), false),
           new Scenario("woods", new Coords(13, 8), true, true),
+          new Scenario("woods-yard", new Coords(5, 0), true, true),
+          new Scenario("woods-crystal", new Coords(13, 0), true, true),
           new Scenario("authored", new Coords(10, 8), false, new Coords(10, 7)));
     /** Those named in megamek.gpu.collapseScenarios (comma-separated), else all of them. */
     private static final List<Scenario> SCENARIOS = ALL.stream().filter(scenario ->
@@ -89,7 +92,7 @@ class GpuBuildingCollapseSmokeTest {
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
                 private final long deadline = System.nanoTime() + 600_000_000_000L;
                 private Graphics fixedGraphics;
-                private int scenario, stage, frames, swapFrame = -1;
+                private int scenario, stage, frames, swapFrame = -1, linksBefore;
                 private Vector3 standing;
 
                 @Override
@@ -134,9 +137,10 @@ class GpuBuildingCollapseSmokeTest {
                         // As an attack's checkpoint arrives ahead of its hit: the trees' models split meanwhile.
                         var shown = (BoardScene) field(this, "scene");
                         terrain.prepareBreak(List.of(new BoardScene.Detonation.Felled(current.at(), shown.tile(current.at())
-                              .features().stream().filter(feature -> feature.kind() == BoardScene.FeatureKind.TREE).toList())));
+                              .features().stream().filter(BoardFeatures::cover).toList())));
                     } else if (stage == 1 && frames >= (current.woods() ? 60 : 20) && !terrain.fragmentsPending()) {
                         capture(output, current.name() + "-0-before");
+                        linksBefore = GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading();
                         SwingUtilities.invokeLater(() -> {
                             if (current.woods()) {
                                 // As an attack from the west clearing them: its hit, then the woods gone (GpuBoardSource).
@@ -205,6 +209,8 @@ class GpuBuildingCollapseSmokeTest {
                             return;
                         }
                         capture(output, current.name() + "-9-after");
+                        report.add(current.name() + ": " + (GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading()
+                              - linksBefore) + " programs linked from its fall on");
                         assertTrue(!fixture.game.getBoard().getHex(current.at()).containsTerrain(Terrains.BUILDING)
                               && !fixture.game.getBoard().getHex(current.at()).containsTerrain(Terrains.WOODS));
                         scenario++;
@@ -237,7 +243,9 @@ class GpuBuildingCollapseSmokeTest {
               "1204", "bldg_elev:4;building:3:0;bldg_cf:90",
               "1213", "bldg_elev:2;building:1:0;bldg_cf:15",
               "0413", "fuel_tank_cf:45;fuel_tank_elev:2;fuel_tank_magn:80;fuel_tank:3:0",
-              "1409", "woods:2;foliage_elev:2");
+              "1409", "woods:2;foliage_elev:2",
+              "0601", "woods:2;foliage_elev:2",
+              "1401", "woods:2;foliage_elev:2");
         List<String> edited = new ArrayList<>();
         for (String line : lines) {
             String hex = line.startsWith("hex ") ? line.substring(4, 8) : null;
@@ -255,6 +263,11 @@ class GpuBuildingCollapseSmokeTest {
         editor.command(new Command(Action.ASSET, AUTHORED), null);
         editor.pointer(ALL.getLast().at(), 0, 0, false);
         editor.finishStroke();
+        // Woods drawn as a container yard and as crystals.
+        for (var look : Map.of(new Coords(5, 0), "woods/container-yard/rows", new Coords(13, 0), "woods/crystal").entrySet()) {
+            editor.command(new Command(Action.SELECT_AT, look.getKey().getX() + "," + look.getKey().getY(), ""), null);
+            editor.command(new Command(Action.VARIANT, "vegetation", look.getValue()), null);
+        }
         var saved = output.toPath().resolve("collapse-grassland.board2");
         editor.save(saved);
         return BoardFile.read(saved);

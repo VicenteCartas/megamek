@@ -1277,6 +1277,13 @@ final class BoardFeatures {
     /** The id infix of a skin's rows ({@link #decorations}). */
     private static final String SKIN_ROW = ":skin#";
 
+    /** Whether the feature is cover that goes with its hex's woods: a tree or crystal, or a row of the woods' skin. */
+    static boolean cover(BoardScene.Feature feature) {
+        var object = feature.decoration();
+        return feature.kind() == BoardScene.FeatureKind.TREE
+              || object != null && terrainOwned(object) && object.id().contains(SKIN_ROW);
+    }
+
     /** Whether a placed tree of this species turns to its {@code -snow} form on snow. */
     static boolean hasSnowForm(String asset) { return SNOW_FORMS.contains(asset); }
 

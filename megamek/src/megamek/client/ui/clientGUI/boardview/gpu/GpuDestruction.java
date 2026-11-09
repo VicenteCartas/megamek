@@ -67,6 +67,11 @@ final class GpuDestruction implements Disposable {
      * RISE_LEAD before its pile has settled (#settles): not before its pieces are down (user, 2026-11-09).
      */
     static final float RISE_SECONDS = .4f, RISE_LEAD = .3f;
+    /**
+     * A piece thrown past the board's edge shrinks to nothing this long after passing its floor's height: here, and the
+     * cut pieces of MeepleDebris.
+     */
+    static final float EDGE_SECONDS = .6f;
     /** A time that never comes: standing, or not sinking. */
     private static final float NEVER = 1e9f;
     /** The longest a piece falls before its pile rests, as at zero gravity, where it would drift on. */
@@ -94,7 +99,8 @@ final class GpuDestruction implements Disposable {
               + "\n#define FALL_GROUND_DRAG " + GROUND_DRAG + "\n#define FALL_GROUND_SPIN_DRAG " + GROUND_SPIN_DRAG
               + "\n#define FALL_SINK " + SINK_SECONDS + "\n#define FALL_RELEASE_SPAN " + RELEASE_SPAN
               + "\n#define FALL_SECONDS " + FALL_SECONDS + "\n#define FALL_PILE_LEVELS " + PILE_LEVELS
-              + "\n#define FALL_RISE " + RISE_SECONDS + "\n#define FALL_RISE_LEAD " + (REST_SECONDS + RISE_LEAD) + "\n";
+              + "\n#define FALL_RISE " + RISE_SECONDS + "\n#define FALL_RISE_LEAD " + (REST_SECONDS + RISE_LEAD)
+              + "\n#define FALL_EDGE " + EDGE_SECONDS + "\n";
     }
 
     /** A felled tree: its species, where it stands and its size (GpuTreeInstances.Stand#add). */
@@ -160,6 +166,8 @@ final class GpuDestruction implements Disposable {
     /** Counts the changes of which hexes are taken: a chunk snapshot of another count may draw them wrongly. */
     private int revision;
     private float clock, gravity = GRAVITY;
+    /** The board's size in hexes: past its edge nothing lands (tree-instances.glsl). */
+    private int columns, rows;
 
     /** {@code trees}: loads a tree model at a level by asset name, as the terrain's stands do. */
     GpuDestruction(GpuLavaLighting lights, BiFunction<String, Integer, Model> trees) {
@@ -263,13 +271,13 @@ final class GpuDestruction implements Disposable {
     }
 
     /**
-     * Breaks these trees of the hex, which an attack took down, into {@code pieces} where they stood ({@code stood}, their
-     * stands' transforms; {@code features}, their scene tile's): they leave their chunks' stands and burst at once, thrown
-     * out from the hex's middle and along {@code push}, away from the hit, then scatter and sink as its checkpoint shows
-     * them gone (#committed). {@code bounds} holds them standing.
+     * Breaks this woods cover of the hex, which an attack or a blast took down, into {@code pieces} where it stood
+     * ({@code stood}, its transforms; {@code features}, its scene tile's): it leaves its chunk and bursts {@code delay}
+     * playback seconds from now, thrown out from the hex's middle and along {@code push}, away from the hit, then scatters
+     * and sinks as its checkpoint shows it gone (#committed). {@code bounds} holds it standing.
      */
     void breakTrees(Coords at, Array<Renderable> pieces, List<Matrix4> stood, Set<BoardScene.Feature> features,
-          BoundingBox bounds, float middleX, float middleY, Vector2 push) {
+          BoundingBox bounds, float middleX, float middleY, Vector2 push, float delay) {
         Fall fall = new Fall(at, freeSlot(), pieces, Set.of(), List.of(), Set.copyOf(features), new BoundingBox(bounds));
         Set<Long> spots = new HashSet<>();
         for (Matrix4 transform : stood) { spots.add(spot(transform)); }
@@ -279,7 +287,7 @@ final class GpuDestruction implements Disposable {
         // Its chunk restands without them before the next publish (GpuTerrain#breakTrees).
         felled.addAll(spots);
         revision++;
-        start(fall, 0);
+        start(fall, delay);
         changed = true;
     }
 
@@ -411,9 +419,11 @@ final class GpuDestruction implements Disposable {
      * Runs the falls' clock on by {@code seconds} of playback under {@code gravity} standard gravities and retires the
      * piles that have sunk.
      */
-    void advance(float seconds, float gravity) {
+    void advance(float seconds, float gravity, int columns, int rows) {
         clock += Math.max(0, seconds);
         this.gravity = GRAVITY * gravity;
+        this.columns = columns;
+        this.rows = rows;
         if (falls.values().removeIf(fall -> clock >= fall.sinks + SINK_SECONDS)
               | groves.values().removeIf(fall -> clock >= fall.sinks + SINK_SECONDS)
               | shattered.removeIf(fall -> clock >= fall.sinks + SINK_SECONDS)) {
@@ -607,7 +617,7 @@ final class GpuDestruction implements Disposable {
             placements = pieces.isEmpty() ? null : batches.placements(pieces, owners);
             changed = false;
         }
-        lights.setFallClock(clock, gravity, !isEmpty());
+        lights.setFallClock(clock, gravity, columns, rows, !isEmpty());
     }
 
     @Override
