@@ -37,11 +37,12 @@ final class BayKit {
      * detail (the last for any further). Facade thickness belongs to the authored panels, including their recesses.
      * Convex corners round to {@code cornerRadius} in {@code cornerSegments} facets (0: square). With {@code fittings}
      * every roof module comes once per layout of the footprint's fittings, and the kit is not turned (its pieces stand
-     * in all six corners, as the fittings stand in the hex's middle).
+     * in all six corners, as the fittings stand in the hex's middle). With {@code varyBays} a wall may hold a bay fewer
+     * or more than the nearest count, by its place ({@link #scale}).
      */
     record Spec(String name, String style, String pieces, List<double[]> lone, double bandEnd, Slab roof, Slab floors,
                 Sidewalk sidewalk, Map<String, List<Run>> modules, double cornerRadius, int cornerSegments,
-                HabitatKit.Fittings fittings) { }
+                HabitatKit.Fittings fittings, boolean varyBays) { }
 
     /**
      * A flat surface over the piece: a board material, {@code repeat} units a repeat on the board's axes, at a height per
@@ -253,7 +254,7 @@ final class BayKit {
                   : new KitOutline.Wall[] { partner(spec, piece.direction(), wall, true, fitting == null),
                         partner(spec, piece.direction(), wall, false, fitting == null) };
             double[] goesOn = facade(result, run, wall, keeps, modelled, lod, top ? ROOF_INSET : 0, ground, outlineScale,
-                  facet(spec, wall), joints, cap, chamfer, cut, sides, partners);
+                  facet(spec, wall), joints, cap, chamfer, cut, sides, partners, spec.varyBays());
             if (ground && spec.sidewalk() != null) { sidewalk(result, spec.sidewalk(), wall, keeps, goesOn[0], goesOn[1]); }
         }
         // Closed modules: a module parted from the next at its joints has its own side along each, behind the grooves,
@@ -342,7 +343,7 @@ final class BayKit {
     private static double[] facade(GeneratedMesh result, Run run, KitOutline.Wall wall, List<GeneratedMesh.Keep> wallKeeps,
           List<ModelData> modelled, int lod, double inset, boolean ground, double outlineScale, boolean facet,
           List<KitOutline.Wall> joints, boolean cap, double chamfer, List<GeneratedMesh.Keep> cut, List<KitOutline.Wall> walls,
-          KitOutline.Wall[] partners) {
+          KitOutline.Wall[] partners, boolean vary) {
         double length = wall.length();
         double[] p = wall.p(), u = KitOutline.direction(wall);
         List<GeneratedMesh.Keep> keeps = new ArrayList<>(wallKeeps);
@@ -385,7 +386,7 @@ final class BayKit {
         List<Placed> beyond = new ArrayList<>();
         List<Placed> placements = new ArrayList<>(facet && run.round() != null
               ? List.of(new Placed(-before, run.round().piece(), (length + before + after) / run.round().length()))
-              : layout(run, wall, length, before, after, ground, outlineScale, pads[0], pads[1], laps, beyond, partners));
+              : layout(run, wall, length, before, after, ground, outlineScale, pads[0], pads[1], laps, beyond, partners, vary));
         if (!cap && pads[0] > 0) { placements.add(new Placed(0, run.joints().start(), 1)); }
         if (!cap && pads[1] > 0) { placements.add(new Placed(length - pads[1], run.joints().end(), 1)); }
         var laid = new GeneratedMesh();
@@ -686,7 +687,7 @@ final class BayKit {
      */
     private static List<Placed> layout(Run run, KitOutline.Wall wall, double length, double before, double after,
           boolean ground, double outlineScale, double startPad, double endPad, double[] laps, List<Placed> beyond,
-          KitOutline.Wall[] partners) {
+          KitOutline.Wall[] partners, boolean vary) {
         List<Placed> result = new ArrayList<>();
         if (run.under() != null && length + before + after > 1e-6) {
             result.add(new Placed(-before, run.under().piece(), (length + before + after) / run.under().length()));
@@ -698,7 +699,7 @@ final class BayKit {
         double usable = length - 2 * run.margin() - startPad - endPad;
         // A wall no longer than its margins holds no bay.
         if (run.bays() == null || run.bays().isEmpty() || usable <= 1e-6) { return result; }
-        double scale = scale(run, length, startPad, endPad, outlineScale);
+        double scale = scale(run, wall, length, startPad, endPad, outlineScale, vary);
         int count = count(run, usable, scale);
         for (int index = 0; index < count; index++) {
             double start = run.margin() + startPad + index * run.bay() * scale, width = run.bay() * scale;
@@ -709,7 +710,7 @@ final class BayKit {
         if (run.margin() == 0) {
             // Past a cut the next piece lays the wall's own bays on; beyond a slanted cut each piece shows a part of them.
             if (before > 0 && partners[0] != null) {
-                double other = scale(run, partners[0].length(), 0, 0, 1);
+                double other = scale(run, partners[0], partners[0].length(), 0, 0, 1, vary);
                 int last = count(run, partners[0].length(), other);
                 beyond.add(new Placed(startPad - run.bay() * other, bay(run, partners[0], last - 1, last, ground), other));
             } else if (before > 0) {
@@ -717,7 +718,7 @@ final class BayKit {
                       : bay(run, wall, -1, count, ground), scale));
             }
             if (after > 0 && partners[1] != null) {
-                double other = scale(run, partners[1].length(), 0, 0, 1);
+                double other = scale(run, partners[1], partners[1].length(), 0, 0, 1, vary);
                 beyond.add(new Placed(length - endPad, bay(run, partners[1], 0, count(run, partners[1].length(), other), ground),
                       other));
             } else if (after > 0 && wall.end() == KitOutline.End.NOTCH) {
@@ -731,10 +732,22 @@ final class BayKit {
         return result;
     }
 
-    /** How much {@code run}'s bays stretch to fill a wall: padding changes the room, keeping the unpadded proportions. */
-    private static double scale(Run run, double length, double startPad, double endPad, double outlineScale) {
-        double nominal = (length - startPad - endPad) / outlineScale - 2 * run.margin();
-        return nominal / (Math.max(1, (int) Math.rint(nominal / run.bay())) * run.bay());
+    /** The least and most a bay stretches where a wall may hold one bay fewer or more ({@link #scale}). */
+    private static final double SQUASHED = .7, STRETCHED = 1.5;
+
+    /**
+     * How much {@code run}'s bays stretch to fill {@code wall}: padding changes the room, keeping the unpadded
+     * proportions. The nearest count of whole bays; where the kit {@code vary}s them and one bay fewer and one more both
+     * stretch between {@link #SQUASHED} and {@link #STRETCHED}, the wall's place picks between them, as it picks its bays.
+     */
+    private static double scale(Run run, KitOutline.Wall wall, double length, double startPad, double endPad,
+          double outlineScale, boolean vary) {
+        double nominal = (length - startPad - endPad) / outlineScale - 2 * run.margin(), bays = nominal / run.bay();
+        int count = Math.max(1, (int) Math.rint(bays)), fewer = (int) Math.floor(bays), more = fewer + 1;
+        if (vary && fewer >= 1 && bays / fewer <= STRETCHED && bays / more >= SQUASHED) {
+            count = seed(wall, 11, 17) % 2 == 0 ? fewer : more;
+        }
+        return nominal / (count * run.bay());
     }
 
     /** How many of {@code run}'s bays, stretched by {@code scale}, fill {@code usable}. */
@@ -745,10 +758,13 @@ final class BayKit {
     /** {@code run}'s bay {@code index} of {@code count} along {@code wall}: a door, or chosen by where the wall stands. */
     private static String bay(Run run, KitOutline.Wall wall, int index, int count, boolean ground) {
         if (ground && run.door() != null && doors(wall, count).contains(index)) { return run.door(); }
-        // The same in every piece that holds the wall.
+        return run.bays().get((int) Math.floorMod(seed(wall, 7, 13) + index * 5L, (long) run.bays().size()));
+    }
+
+    /** A number fixed by where {@code wall} stands (its middle, weighted {@code x} and {@code y}): alike in every piece. */
+    private static long seed(KitOutline.Wall wall, int x, int y) {
         double[] p = wall.p(), q = wall.q();
-        long seed = Math.floorMod((long) Math.rint((p[0] + q[0]) / 2 * 7 + (p[1] + q[1]) / 2 * 13), 997);
-        return run.bays().get((int) Math.floorMod(seed + index * 5L, (long) run.bays().size()));
+        return Math.floorMod((long) Math.rint((p[0] + q[0]) / 2 * x + (p[1] + q[1]) / 2 * y), 997);
     }
 
     /**
