@@ -72,9 +72,7 @@ import megamek.client.ui.gdx.UiOptionBar;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.UIUtil;
-import megamek.common.Configuration;
 import megamek.common.preference.PreferenceManager;
-import megamek.common.util.TipOfTheDay;
 import megamek.logging.MMLogger;
 
 /**
@@ -86,7 +84,6 @@ import megamek.logging.MMLogger;
  */
 final class GpuStartScreen extends ApplicationAdapter {
     static final MMLogger LOGGER = MMLogger.create(GpuStartScreen.class);
-    private static final String TIPS = "megamek.client.TipOfTheDay";
     private static final double TIP_SECONDS = 10;
     private static final int EMBERS = 140;
     private static final float TIP_WIDTH = 360;
@@ -114,6 +111,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     enum Page { MAIN, HELP, HOST, CONNECT, LOAD, RESUME, SCENARIOS, BRIEFING }
 
     final GpuStartWindow window;
+    private final StartScreenContent content;
     private final GUIPreferences preferences;
     private final DesignTokens tokens = DesignTokens.shipped();
     private final java.awt.Color base = awtColor("surface.base");
@@ -190,10 +188,12 @@ final class GpuStartScreen extends ApplicationAdapter {
     GpuStartScreen(GpuStartWindow window, boolean greet, GUIPreferences preferences) {
         this.window = window;
         this.preferences = preferences;
+        content = window.content();
         motion = !preferences.getReduceMotion();
         skipped = !greet || !motion;
-        tips = TipOfTheDay.plainTips(TIPS);
-        probe = takeProbe();
+        tips = content.tips();
+        // The developer switch opens MegaMek's own pages
+        probe = content.gamePages() ? takeProbe() : null;
         if (probe != null && probe.page() != null) {
             skipped = true;
         }
@@ -244,10 +244,11 @@ final class GpuStartScreen extends ApplicationAdapter {
         Gdx.input.setInputProcessor(inputBlocked ? null : stage);
         batch = new SpriteBatch();
         shapes = new ShapeRenderer();
-        art = readImage(new File(Configuration.miscImagesDir(), "mm-background.jpg"));
-        BufferedImage logoImage = readImage(new File(Configuration.miscImagesDir(), "mm-logo.png"));
+        File artFile = content.art();
+        art = artFile == null ? null : readImage(artFile);
+        BufferedImage logoImage = content.logo();
         if (logoImage != null) {
-            logoTexture = texture(SplashArt.logoWithTag(logoImage), true);
+            logoTexture = texture(logoImage, true);
             logoTexture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
             logo = new Image(logoTexture);
             stage.addActor(logo);
@@ -313,7 +314,7 @@ final class GpuStartScreen extends ApplicationAdapter {
 
             @Override
             public void quit() {
-                window.dispatch(Action.QUIT);
+                window.quit();
             }
 
             @Override
@@ -402,7 +403,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             LOGGER.info("Start screen shot saved to {}", probe.shot().getAbsoluteFile());
         }
         if (probe.quit()) {
-            window.dispatch(Action.QUIT);
+            window.quit();
         }
     }
 
@@ -470,7 +471,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             briefingPage.showBriefing();
         } else {
             List<Actor> items = new ArrayList<>();
-            if (shown == Page.MAIN) {
+            if (shown == Page.MAIN && content.gamePages()) {
                 // The latest save, when there is one, is the way back in and takes the accent from New game
                 List<File> saves = StartSaves.list(new File(MMConstants.SAVEGAME_DIR));
                 if (!saves.isEmpty()) {
@@ -490,14 +491,11 @@ final class GpuStartScreen extends ApplicationAdapter {
                 items.add(item("button-quiet", "StartScreen.unitBrowser", Action.UNIT_BROWSER, null));
                 items.add(item("button-quiet", "StartScreen.randomArmy", Action.RANDOM_ARMY, null));
                 items.add(item("button-quiet", "StartScreen.skinEditor", Action.SKIN_EDITOR, null));
+            } else if (shown == Page.MAIN) {
+                content.menu().forEach(entry -> items.add(menuItem(entry)));
             } else {
                 items.add(overline("StartScreen.help"));
-                items.add(item("button-quiet", "StartScreen.helpContents", Action.HELP_CONTENTS, null));
-                items.add(item("button-quiet", "StartScreen.helpSkinning", Action.HELP_SKINNING, null));
-                items.add(item("button-quiet", "StartScreen.reportBug", Action.REPORT_BUG, null));
-                items.add(item("button-quiet", "StartScreen.copySystemData", Action.COPY_SYSTEM_DATA, null));
-                items.add(item("button-quiet", "StartScreen.resetPrompts", Action.RESET_PROMPTS, null));
-                items.add(item("button-quiet", "StartScreen.about", Action.ABOUT, null));
+                content.help().forEach(entry -> items.add(menuItem(entry)));
                 items.add(backButton());
             }
             setColumn(items);
@@ -566,6 +564,34 @@ final class GpuStartScreen extends ApplicationAdapter {
         leftAligned(button);
         UiKit.onChange(button, () -> (controlHeld() ? withControl : action).run());
         return button;
+    }
+
+    /** One of the content's entries: a heading, or a button whose action runs on the Swing thread. */
+    private Actor menuItem(StartMenuItem entry) {
+        return switch (entry) {
+            case StartMenuItem.Heading heading -> kit.roleTypeLabel("overline", heading.label(), "text.muted");
+            case StartMenuItem.Button item -> {
+                String style = switch (item.emphasis()) {
+                    case PRIMARY -> "button-primary";
+                    case SECONDARY -> "button-secondary";
+                    case QUIET -> "button-quiet";
+                };
+                UiButton button = kit.button(style, null, item.label(), item.detail());
+                leftAligned(button);
+                UiKit.onChange(button, () -> window.run(item.action()));
+                yield button;
+            }
+        };
+    }
+
+    /** GPU thread: shows the main menu again, where it shows, without sliding it in again. */
+    void menuChanged() {
+        if (stage == null || disposed || page != Page.MAIN) {
+            return;
+        }
+        double shownAt = pageShownAt;
+        showPage(Page.MAIN);
+        pageShownAt = shownAt;
     }
 
     /** Continue: the latest save, named with how long ago it was made, loaded as a click on it in the list loads it. */
@@ -704,13 +730,15 @@ final class GpuStartScreen extends ApplicationAdapter {
         row.defaults().padRight(6);
         UiButton settings = kit.button("button-quiet-compact", "settings",
               Messages.getString("StartScreen.settings"), null);
-        UiKit.onChange(settings, () -> window.dispatch(Action.SETTINGS));
+        UiKit.onChange(settings, window::settings);
         UiButton help = kit.button("button-quiet-compact", "help", Messages.getString("StartScreen.help"), null);
         UiKit.onChange(help, () -> showPage(page == Page.HELP ? Page.MAIN : Page.HELP));
         UiButton quit = kit.button("button-quiet-compact", "close", Messages.getString("StartScreen.quit"), null);
-        UiKit.onChange(quit, () -> window.dispatch(Action.QUIT));
+        UiKit.onChange(quit, window::quit);
         row.add(settings);
-        row.add(help);
+        if (!content.help().isEmpty()) {
+            row.add(help);
+        }
         row.add(quit);
         row.pack();
         return row;
@@ -721,8 +749,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         Table table = new Table();
         table.left().top();
         table.defaults().left();
-        table.add(kit.typeLabel(Messages.getString("MegaMek.Version", MMConstants.VERSION), "small",
-              "text.muted")).row();
+        table.add(kit.typeLabel(content.version(), "small", "text.muted")).row();
         if (Version.hasBuildNotes()) {
             Label notes = kit.typeLabel(Version.getBuildNotes(), "small", "text.primary");
             Label.LabelStyle style = new Label.LabelStyle(notes.getStyle());
@@ -963,7 +990,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         boolean settled = t >= StartTimeline.MENU_START;
         corner.setPosition(32, h - corner.getHeight() - 28);
         corner.setVisible(settled);
-        tipCard.setPosition(32, 32);
+        tipCard.setPosition(32, content.tipAtTop() ? corner.getY() - 20 - tipCard.getHeight() : 32);
         tipCard.setVisible(settled && !tips.isEmpty());
         if (settled && clock() - tipShownAt > TIP_SECONDS) {
             showTip(tipIndex + 1);
@@ -1098,8 +1125,8 @@ final class GpuStartScreen extends ApplicationAdapter {
         Font overline = TokenFonts.font("overline", true, true)
               .deriveFont(TokenFonts.font("overline").getSize2D() * 1.4f * scale);
         Font display = TokenFonts.font("display", true, true).deriveFont((float) Math.max(34, h * 0.055) * scale);
-        String first = Messages.getString("StartScreen.link", MMConstants.VERSION);
-        String second = Messages.getString("StartScreen.welcome");
+        String first = content.greetingOverline();
+        String second = content.greeting();
         if (line1 != null) {
             line1.dispose();
             line2.dispose();

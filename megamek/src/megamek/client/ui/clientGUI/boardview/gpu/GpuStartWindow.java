@@ -50,6 +50,9 @@ import megamek.logging.MMLogger;
  * natively so they stay above it. A board, the map editor or the UI library takes the window's place when it opens
  * and the start screen comes back, without the greeting, when they close; so does the game lobby, from hosting or
  * joining a game until leaving it. There is no Swing fallback: if OpenGL cannot start, MegaMek says so and exits.
+ *
+ * <p>Other programs of the suite show their own start screen the same way: they {@link #install(JFrame,
+ * StartScreenContent) install} what it shows and {@link #uninstall} it once their own windows take over.</p>
  */
 public final class GpuStartWindow {
     private static final MMLogger LOGGER = MMLogger.create(GpuStartWindow.class);
@@ -143,6 +146,8 @@ public final class GpuStartWindow {
 
     private static GpuStartWindow open;
     private static JFrame anchor;
+    /** What the screen shows: MegaMek's own, or another program's that installed its own. */
+    private static StartScreenContent installed;
     private static Consumer<Action> actions;
     private static Consumer<HostRequest> hosts;
     private static Consumer<ConnectRequest> connects;
@@ -155,6 +160,7 @@ public final class GpuStartWindow {
     private static final AtomicReference<String[]> NOTICE = new AtomicReference<>();
 
     private final boolean greet;
+    private final StartScreenContent content;
     private final Set<Dialog> modalDialogs = new LinkedHashSet<>();
     private final Map<Dialog, Boolean> dialogOnTop = new HashMap<>();
     private final AWTEventListener dialogListener = this::dialogEvent;
@@ -191,7 +197,7 @@ public final class GpuStartWindow {
 
         @Override
         public String title() {
-            return Messages.getString("StartScreen.title");
+            return content.title();
         }
 
         @Override
@@ -221,8 +227,9 @@ public final class GpuStartWindow {
         }
     };
 
-    private GpuStartWindow(boolean greet) {
+    private GpuStartWindow(boolean greet, StartScreenContent content) {
         this.greet = greet;
+        this.content = content;
     }
 
     /**
@@ -233,16 +240,62 @@ public final class GpuStartWindow {
     public static void install(JFrame owner, Consumer<Action> handler, Consumer<HostRequest> hostHandler,
           Consumer<ConnectRequest> connectHandler, Consumer<LoadRequest> loadHandler,
           Consumer<ScenarioRequest> scenarioHandler) {
-        anchor = owner;
+        install(owner, new MegaMekStartContent(handler));
         actions = handler;
         hosts = hostHandler;
         connects = connectHandler;
         loads = loadHandler;
         scenarios = scenarioHandler;
-        // MegaMek's own window lives from the greeting to Quit; scenes come and go in it, and the start screen shows
-        // whenever none does
+    }
+
+    /**
+     * EDT: sets up another program's start screen: the hidden frame that owns the forms its menu opens, and what it
+     * shows. Call before {@link #open}. The window then stays open from the greeting until {@link #uninstall}, and the
+     * start screen comes back, without the greeting, whenever no other scene holds it.
+     */
+    public static void install(JFrame owner, StartScreenContent content) {
+        anchor = Objects.requireNonNull(owner);
+        installed = Objects.requireNonNull(content);
+        actions = null;
+        hosts = null;
+        connects = null;
+        loads = null;
+        scenarios = null;
+        // The window lives from the greeting to Quit; scenes come and go in it, and the start screen shows whenever
+        // none does
         GpuHost.keepOpen(true);
         GpuHost.whenIdle(GpuStartWindow::reopen);
+    }
+
+    /**
+     * EDT: ends the start screen for good, as when another program's own windows take over from it, and runs
+     * {@code then} on the EDT once it is gone. The native window closes when no other scene holds it, and later scenes
+     * open and close it by themselves. {@link #install} sets the screen up again.
+     */
+    public static void uninstall(Runnable then) {
+        anchor = null;
+        installed = null;
+        actions = null;
+        hosts = null;
+        connects = null;
+        loads = null;
+        scenarios = null;
+        NOTICE.set(null);
+        GpuHost.keepOpen(false);
+        GpuHost.whenIdle(null);
+        if (!closeThen(then)) {
+            then.run();
+        }
+    }
+
+    /** Any thread: shows the open screen's main menu again, as after what {@link StartScreenContent#menu} lists changed. */
+    public static void menuChanged() {
+        SwingUtilities.invokeLater(() -> {
+            GpuStartWindow window = open;
+            if (window != null) {
+                window.post(() -> window.screen.menuChanged());
+            }
+        });
     }
 
     /** EDT: opens the start window, with the greeting when {@code greet}, or brings the open one to the front. */
@@ -267,7 +320,7 @@ public final class GpuStartWindow {
             }
             return;
         }
-        GpuStartWindow window = new GpuStartWindow(greet);
+        GpuStartWindow window = new GpuStartWindow(greet, installed);
         open = window;
         Toolkit.getDefaultToolkit().addAWTEventListener(window.dialogListener,
               AWTEvent.COMPONENT_EVENT_MASK | AWTEvent.WINDOW_EVENT_MASK);
@@ -345,7 +398,7 @@ public final class GpuStartWindow {
         } else if (launched != null) {
             frontLaunched();
         } else {
-            dispatch(Action.QUIT);
+            quit();
         }
     }
 
@@ -497,10 +550,11 @@ public final class GpuStartWindow {
         }
         if (failure != null && !closeRequested) {
             LOGGER.error(failure, "The start screen's native window failed");
-            String title = Messages.getString("StartScreen.title");
+            String title = content.title();
             if (!GpuHost.everOpened()) {
-                JOptionPane.showMessageDialog(null, Messages.getString("StartScreen.glFailure", String.valueOf(failure)),
-                      title, JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(null,
+                      Messages.getString("StartScreen.glFailure", String.valueOf(failure), title), title,
+                      JOptionPane.ERROR_MESSAGE);
                 System.exit(1);
             }
             // It ran before, so a fresh window may well work
@@ -537,6 +591,26 @@ public final class GpuStartWindow {
     /** Any thread: runs a menu action on the Swing thread. */
     void dispatch(Action action) {
         request(actions, action);
+    }
+
+    /** Any thread: runs {@code action}, such as a menu entry's, on the Swing thread, unless the screen is suspended. */
+    void run(Runnable action) {
+        request(Runnable::run, action);
+    }
+
+    /** Any thread: Settings, on the Swing thread. */
+    void settings() {
+        run(content::settings);
+    }
+
+    /** Any thread: Quit, on the Swing thread. */
+    void quit() {
+        run(content::quit);
+    }
+
+    /** What the screen shows. */
+    StartScreenContent content() {
+        return content;
     }
 
     /** Any thread: asks MegaMek, on the Swing thread, to host the game the Host page describes. */
