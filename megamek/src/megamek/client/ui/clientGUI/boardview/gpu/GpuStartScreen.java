@@ -8,6 +8,7 @@ import java.awt.Graphics2D;
 import java.awt.LinearGradientPaint;
 import java.awt.RadialGradientPaint;
 import java.awt.RenderingHints;
+import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
@@ -76,16 +77,21 @@ import megamek.common.preference.PreferenceManager;
 import megamek.logging.MMLogger;
 
 /**
- * The start screen: a greeting typed over a dark field, the art revealed over it by hexes popping open, then the main
- * menu sliding in at the right with the version at the top left and a tip at the bottom left. Pages such as Host and
+ * The start screen: a greeting typed over a dark field, the art revealed over it tile by tile, then the main menu
+ * sliding in at the right with the version at the top left and a tip at the bottom left. Pages such as Host and
  * Connect replace the menu in the same column; Esc goes back. The art and its overlays are drawn once with Java2D and
- * uploaded; the GPU only animates on top of them. Once the intro has played, only slow embers move, at 30 frames a
- * second.
+ * uploaded; the GPU only animates on top of them. The content's {@link StartScreenContent.Ambience} picks the reveal,
+ * the grid and the ambience: hexes and rising embers for a battle; for a command post, a departures board of tiles
+ * flipping over in perspective, then light shafts, live screens and drifting dust ({@link StartCommandEffects}). Once
+ * the intro has played, only the slow ambience moves, at 30 frames a second.
  */
 final class GpuStartScreen extends ApplicationAdapter {
     static final MMLogger LOGGER = MMLogger.create(GpuStartScreen.class);
     private static final double TIP_SECONDS = 10;
     private static final int EMBERS = 140;
+    private static final int DUST = 110;
+    /** A command post's light and screens come up over this many seconds once the art is in. */
+    private static final double AMBIENCE_RAMP = 1.5;
     private static final float TIP_WIDTH = 360;
     private static final float NOTES_WIDTH = 320;
     /** The narrowest the column gets on the pages that list or describe something. */
@@ -95,7 +101,8 @@ final class GpuStartScreen extends ApplicationAdapter {
     static final float ROLE_WIDTH = 130;
     private static boolean probed;
 
-    private record Hex(double x, double y, double at) { }
+    /** A tile of the reveal: its centre and when, as a fraction of the reveal, it opens. */
+    record Tile(double x, double y, double at) { }
 
     /** A rendered line of greeting text, the pixel width of each prefix, its ascent and an M's width. */
     private record TextLine(Texture texture, int[] widths, int ascent, int charWidth) {
@@ -112,6 +119,10 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     final GpuStartWindow window;
     private final StartScreenContent content;
+    /** Whether the ambience is a command post's rather than a battle's. */
+    private final boolean command;
+    /** A command post's flipboard, light and screens; null for a battle or when its shaders failed. */
+    private StartCommandEffects effects;
     private final GUIPreferences preferences;
     private final DesignTokens tokens = DesignTokens.shipped();
     private final java.awt.Color base = awtColor("surface.base");
@@ -160,8 +171,9 @@ final class GpuStartScreen extends ApplicationAdapter {
     private Texture backdrop;
     private TextLine line1;
     private TextLine line2;
-    private List<Hex> hexes = new ArrayList<>();
-    private double hexR;
+    private List<Tile> tiles = new ArrayList<>();
+    /** A hex's radius, or half a square tile's side. */
+    private double tileR;
     private Image logo;
     private Texture logoTexture;
     private Table bottomRow;
@@ -189,6 +201,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         this.window = window;
         this.preferences = preferences;
         content = window.content();
+        command = content.ambience() == StartScreenContent.Ambience.COMMAND;
         motion = !preferences.getReduceMotion();
         skipped = !greet || !motion;
         tips = content.tips();
@@ -253,8 +266,15 @@ final class GpuStartScreen extends ApplicationAdapter {
             logo = new Image(logoTexture);
             stage.addActor(logo);
         }
-        for (int i = 0; i < EMBERS; i++) {
+        for (int i = 0; i < (command ? DUST : EMBERS); i++) {
             particles.add(newParticle(true));
+        }
+        if (command) {
+            effects = new StartCommandEffects(mint, base);
+            if (!effects.ready()) {
+                effects.dispose();
+                effects = null;
+            }
         }
         bottomRow = bottomRow();
         stage.addActor(bottomRow);
@@ -1043,7 +1063,10 @@ final class GpuStartScreen extends ApplicationAdapter {
         w = bw / scale;
         h = bh / scale;
         pixels.setToOrtho2D(0, 0, bw, bh);
-        layoutHexes();
+        if (effects != null) {
+            effects.resize(bw, bh);
+        }
+        layoutTiles();
         rebuildBackdrop();
         rebuildGreeting();
     }
@@ -1053,47 +1076,50 @@ final class GpuStartScreen extends ApplicationAdapter {
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
     }
 
-    private void layoutHexes() {
-        hexR = Math.max(28, h / 16.0);
-        hexes = new ArrayList<>();
+    private void layoutTiles() {
+        tiles = new ArrayList<>();
         Random scatter = new Random(11);
-        double rowHeight = Math.sqrt(3) * hexR;
+        if (command) {
+            // A departures board's flaps, turning over from the top left
+            double side = Math.max(40, h / 12.0);
+            tileR = side / 2;
+            for (double cy = tileR; cy < h + tileR; cy += side) {
+                for (double cx = tileR; cx < w + tileR; cx += side) {
+                    double diagonal = (cx / w + cy / h) / 2;
+                    tiles.add(new Tile(cx, cy, (diagonal * 0.75 + scatter.nextDouble() * 0.25) * 0.58));
+                }
+            }
+            return;
+        }
+        tileR = Math.max(28, h / 16.0);
+        double rowHeight = Math.sqrt(3) * tileR;
         int col = 0;
-        for (double cx = 0; cx < w + hexR * 2; cx += hexR * 1.5, col++) {
+        for (double cx = 0; cx < w + tileR * 2; cx += tileR * 1.5, col++) {
             double offset = (col % 2) * rowHeight / 2;
             for (double cy = -rowHeight / 2 + offset; cy < h + rowHeight; cy += rowHeight) {
-                double at = (cx / (w + hexR)) * 0.78 + scatter.nextDouble() * 0.22;
-                hexes.add(new Hex(cx, cy, at));
+                double at = (cx / (w + tileR)) * 0.78 + scatter.nextDouble() * 0.22;
+                tiles.add(new Tile(cx, cy, at));
             }
         }
     }
 
-    /** The art, its shading, the faint hex grid, scanlines and corner ticks, drawn once at the window's size. */
+    /** The art, its shading, the faint grid, scanlines and corner ticks, drawn once at the window's size. */
     private void rebuildBackdrop() {
         BufferedImage image = new BufferedImage(bw, bh, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = image.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
         g.scale(scale, scale);
-        g.setColor(base);
-        g.fillRect(0, 0, (int) w + 1, (int) h + 1);
-        if (art != null) {
-            double cover = Math.max(w / art.getWidth(), h / art.getHeight()) * 1.04;
-            double drawnWidth = art.getWidth() * cover;
-            double drawnHeight = art.getHeight() * cover;
-            g.drawImage(art, (int) ((w - drawnWidth) / 2), (int) ((h - drawnHeight) / 2), (int) drawnWidth,
-                  (int) drawnHeight, null);
-        }
-        g.setPaint(new LinearGradientPaint(w, 0, w * 0.45f, 0, new float[] { 0f, 0.45f, 1f },
-              new java.awt.Color[] { alpha(base, 0.94f), alpha(base, 0.72f), alpha(base, 0f) }));
-        g.fillRect(0, 0, (int) w + 1, (int) h + 1);
-        g.setPaint(new RadialGradientPaint(new Point2D.Double(w * 0.4, h * 0.45), Math.max(w, h) * 0.75f,
-              new float[] { 0.55f, 1f }, new java.awt.Color[] { alpha(base, 0f), alpha(base, 0.75f) }));
-        g.fillRect(0, 0, (int) w + 1, (int) h + 1);
+        drawCoverArt(g);
+        drawShading(g);
         g.setStroke(new BasicStroke(1f));
-        g.setColor(alpha(text, 0.045f));
-        for (Hex hex : hexes) {
-            g.draw(hexPath(hex.x, hex.y, hexR));
+        if (command) {
+            drawPlottingGrid(g);
+        } else {
+            g.setColor(alpha(text, 0.045f));
+            for (Tile tile : tiles) {
+                g.draw(hexPath(tile.x, tile.y, tileR));
+            }
         }
         g.setColor(alpha(java.awt.Color.BLACK, 0.10f));
         for (int y = 0; y < h; y += 3) {
@@ -1105,6 +1131,75 @@ final class GpuStartScreen extends ApplicationAdapter {
             backdrop.dispose();
         }
         backdrop = texture(image, false);
+        if (effects != null) {
+            findLights();
+        }
+    }
+
+    /** The art over the dark field, covering the window, in logical units. */
+    private void drawCoverArt(Graphics2D g) {
+        g.setColor(base);
+        g.fillRect(0, 0, (int) w + 1, (int) h + 1);
+        if (art != null) {
+            double cover = Math.max(w / art.getWidth(), h / art.getHeight()) * 1.04;
+            double drawnWidth = art.getWidth() * cover;
+            double drawnHeight = art.getHeight() * cover;
+            g.drawImage(art, (int) ((w - drawnWidth) / 2), (int) ((h - drawnHeight) / 2), (int) drawnWidth,
+                  (int) drawnHeight, null);
+        }
+    }
+
+    /** Darkens the art towards the menu at the right and around the edges, in logical units. */
+    private void drawShading(Graphics2D g) {
+        g.setPaint(new LinearGradientPaint(w, 0, w * 0.45f, 0, new float[] { 0f, 0.45f, 1f },
+              new java.awt.Color[] { alpha(base, 0.94f), alpha(base, 0.72f), alpha(base, 0f) }));
+        g.fillRect(0, 0, (int) w + 1, (int) h + 1);
+        g.setPaint(new RadialGradientPaint(new Point2D.Double(w * 0.4, h * 0.45), Math.max(w, h) * 0.75f,
+              new float[] { 0.55f, 1f }, new java.awt.Color[] { alpha(base, 0f), alpha(base, 0.75f) }));
+        g.fillRect(0, 0, (int) w + 1, (int) h + 1);
+    }
+
+    /** A command post's light and screens, found in the art as it shows, at a smaller size. */
+    private void findLights() {
+        int maskWidth = StartCommandEffects.maskSize(bw);
+        int maskHeight = StartCommandEffects.maskSize(bh);
+        BufferedImage shownArt = new BufferedImage(maskWidth, maskHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = shownArt.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.scale(maskWidth / w, maskHeight / h);
+        drawCoverArt(g);
+        g.dispose();
+        BufferedImage shading = new BufferedImage(maskWidth, maskHeight, BufferedImage.TYPE_INT_RGB);
+        g = shading.createGraphics();
+        g.scale(maskWidth / w, maskHeight / h);
+        g.setColor(java.awt.Color.WHITE);
+        g.fillRect(0, 0, (int) w + 1, (int) h + 1);
+        drawShading(g);
+        g.dispose();
+        effects.findLights(shownArt, shading);
+    }
+
+    /** A command post's square plotting grid: faint lines on the tiles' edges, stronger ones and marks every fourth. */
+    private void drawPlottingGrid(Graphics2D g) {
+        double side = tileR * 2;
+        int index = 0;
+        for (double x = 0; x < w + 1; x += side, index++) {
+            g.setColor(alpha(text, index % 4 == 0 ? 0.06f : 0.025f));
+            g.draw(new Line2D.Double(x, 0, x, h));
+        }
+        index = 0;
+        for (double y = 0; y < h + 1; y += side, index++) {
+            g.setColor(alpha(text, index % 4 == 0 ? 0.06f : 0.025f));
+            g.draw(new Line2D.Double(0, y, w, y));
+        }
+        double mark = 4;
+        g.setColor(alpha(mint, 0.16f));
+        for (double x = 0; x < w + 1; x += side * 4) {
+            for (double y = 0; y < h + 1; y += side * 4) {
+                g.draw(new Line2D.Double(x - mark, y, x + mark, y));
+                g.draw(new Line2D.Double(x, y - mark, x, y + mark));
+            }
+        }
     }
 
     private void drawCornerTicks(Graphics2D g) {
@@ -1232,7 +1327,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             briefingPage.probeDialog(probe);
         }
         if (!settledRate && t >= StartTimeline.INTRO_END) {
-            // The settled screen has only slow embers: 30 frames a second is plenty
+            // The settled screen has only slow motes: 30 frames a second is plenty
             settledRate = true;
             Gdx.graphics.setForegroundFPS(30);
             window.settled();
@@ -1245,7 +1340,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         batch.setProjectionMatrix(pixels);
         shapes.setProjectionMatrix(pixels);
         drawGreeting(t);
-        drawHexReveal(t);
+        drawReveal(t);
     }
 
     private void drawArt() {
@@ -1253,12 +1348,25 @@ final class GpuStartScreen extends ApplicationAdapter {
         batch.setColor(1, 1, 1, 1);
         batch.draw(backdrop, 0, 0, bw, bh);
         batch.end();
-        drawEmbers();
+        if (effects != null) {
+            double t = introTime();
+            float strength = (float) StartTimeline.ease((t - StartTimeline.REVEAL_END) / AMBIENCE_RAMP);
+            effects.drawAmbience(batch, motion ? (float) clock() : 0, strength, scale);
+        }
+        drawMotes();
     }
 
-    private void drawHexReveal(double t) {
+    private void drawReveal(double t) {
         double rs = StartTimeline.REVEAL_START;
         double re = StartTimeline.REVEAL_END;
+        if (command) {
+            if (t >= re || (effects == null && t >= rs)) {
+                drawArt();
+            } else if (t >= rs) {
+                effects.drawBoard(backdrop, tiles, scale, tileR, StartTimeline.revealProgress(t));
+            }
+            return;
+        }
         if (t >= rs) {
             boolean masked = t < re;
             if (masked) {
@@ -1268,10 +1376,10 @@ final class GpuStartScreen extends ApplicationAdapter {
                 Gdx.gl.glStencilOp(GL20.GL_KEEP, GL20.GL_KEEP, GL20.GL_REPLACE);
                 Gdx.gl.glColorMask(false, false, false, false);
                 shapes.begin(ShapeRenderer.ShapeType.Filled);
-                for (Hex hex : hexes) {
-                    double pop = StartTimeline.clamp((rp - hex.at) / StartTimeline.HEX_SPAN);
+                for (Tile tile : tiles) {
+                    double pop = StartTimeline.clamp((rp - tile.at) / StartTimeline.HEX_SPAN);
                     if (pop > 0) {
-                        fillHex(hex.x, hex.y, hexR * (0.35 + 0.67 * StartTimeline.ease(pop)));
+                        fillTile(tile.x, tile.y, tileR * (0.35 + 0.67 * StartTimeline.ease(pop)));
                     }
                 }
                 shapes.end();
@@ -1287,13 +1395,13 @@ final class GpuStartScreen extends ApplicationAdapter {
         if (t >= rs - 0.3 && t < re + 0.5) {
             double rpRaw = (t - rs) / (re - rs);
             shapes.begin(ShapeRenderer.ShapeType.Filled);
-            for (Hex hex : hexes) {
-                double since = rpRaw - hex.at;
+            for (Tile tile : tiles) {
+                double since = rpRaw - tile.at;
                 float a = since < 0 ? (float) (0.22 * StartTimeline.clamp(1 + since / 0.12))
                       : (float) (0.85 * (1 - StartTimeline.clamp((since - StartTimeline.HEX_SPAN) / 0.25)));
                 if (a > 0.01f) {
                     shapes.setColor(rgba(mint, a));
-                    outlineHex(hex.x, hex.y, hexR - 1, 1.5f * scale);
+                    outlineTile(tile.x, tile.y, tileR - 1, 1.5f * scale);
                 }
             }
             shapes.end();
@@ -1342,15 +1450,21 @@ final class GpuStartScreen extends ApplicationAdapter {
         shapes.end();
     }
 
-    private void drawEmbers() {
+    /** The embers rising from a battle, or the dust drifting in a command post's light. */
+    private void drawMotes() {
         if (!motion) {
             return;
         }
         shapes.begin(ShapeRenderer.ShapeType.Filled);
         for (float[] p : particles) {
             float life = p[4] / p[5];
-            float a = Math.min(1, Math.min(life * 3, (1 - life) * 4)) * 0.8f;
-            shapes.setColor(1f, (150 + life * 80) / 255f, 60 / 255f, Math.max(0, a));
+            if (command) {
+                float a = Math.min(1, Math.min(life * 2, (1 - life) * 2)) * 0.4f;
+                shapes.setColor(1f, 0.93f, 0.8f, Math.max(0, a));
+            } else {
+                float a = Math.min(1, Math.min(life * 3, (1 - life) * 4)) * 0.8f;
+                shapes.setColor(1f, (150 + life * 80) / 255f, 60 / 255f, Math.max(0, a));
+            }
             float size = p[6] * scale;
             shapes.circle(p[0] * bw + size / 2, bh - (p[1] * bh + size / 2), size / 2, 8);
         }
@@ -1360,17 +1474,29 @@ final class GpuStartScreen extends ApplicationAdapter {
     private void stepParticles(float dt) {
         for (int i = 0; i < particles.size(); i++) {
             float[] p = particles.get(i);
-            p[0] += p[2] * dt;
+            // Dust sways as it drifts
+            float sway = command ? 0.004f * (float) Math.sin(p[4] * 1.3f + p[5] * 7) : 0;
+            p[0] += (p[2] + sway) * dt;
             p[1] += p[3] * dt;
             p[4] -= dt;
-            if (p[4] <= 0 || p[1] < -0.05) {
+            if (p[4] <= 0 || p[1] < -0.05 || p[1] > 1.05) {
                 particles.set(i, newParticle(false));
             }
         }
     }
 
-    /** An ember: x, y (fractions of the window), their speeds, life left, its whole life and its size. */
+    /**
+     * An ember rising from the bottom, or a mote of dust appearing anywhere and slowly settling: x, y (fractions of the
+     * window), their speeds, life left, its whole life and its size.
+     */
     private float[] newParticle(boolean anywhere) {
+        if (command) {
+            float life = 6 + random.nextFloat() * 8;
+            return new float[] {
+                  random.nextFloat(), random.nextFloat(),
+                  (random.nextFloat() - 0.5f) * 0.012f, 0.003f + random.nextFloat() * 0.008f,
+                  anywhere ? random.nextFloat() * life : life, life, 0.8f + random.nextFloat() * 1.6f };
+        }
         float life = 3 + random.nextFloat() * 5;
         return new float[] {
               0.2f + random.nextFloat() * 0.8f, anywhere ? random.nextFloat() : 1.02f,
@@ -1378,7 +1504,7 @@ final class GpuStartScreen extends ApplicationAdapter {
               anywhere ? random.nextFloat() * life : life, life, 1.2f + random.nextFloat() * 2.2f };
     }
 
-    private void fillHex(double cx, double cy, double r) {
+    private void fillTile(double cx, double cy, double r) {
         float x = (float) (cx * scale);
         float y = (float) (bh - cy * scale);
         float rr = (float) (r * scale);
@@ -1390,7 +1516,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         }
     }
 
-    private void outlineHex(double cx, double cy, double r, float width) {
+    private void outlineTile(double cx, double cy, double r, float width) {
         float x = (float) (cx * scale);
         float y = (float) (bh - cy * scale);
         float rr = (float) (r * scale);
@@ -1415,7 +1541,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         if (dialogs != null) {
             dialogs.dispose();
         }
-        for (Object disposable : new Object[] { stage, batch, shapes, backdrop, logoTexture }) {
+        for (Object disposable : new Object[] { stage, batch, shapes, backdrop, logoTexture, effects }) {
             if (disposable instanceof com.badlogic.gdx.utils.Disposable resource) {
                 resource.dispose();
             }

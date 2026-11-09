@@ -8,14 +8,26 @@ import java.util.List;
 import jakarta.annotation.Nullable;
 
 /**
- * What a program's start screen shows in the native window ({@link GpuStartWindow}): its art, greeting, tips, version
- * and menu. The screen itself (the greeting typed over the dark field, the art revealed by hexes, the embers and the
- * menu sliding in at the right) is the same for every program of the suite.
+ * What a program's start screen shows in the native window ({@link GpuStartWindow}): its art, greeting, tips, version,
+ * menu and ambience. The screen itself (the greeting typed over the dark field, the art revealed, the drifting motes
+ * and the menu sliding in at the right) is the same for every program of the suite.
  *
  * <p>The screen reads everything but {@link #settings} and {@link #quit} on its GPU thread, as it shows; those two
  * run on the Swing thread.</p>
  */
 public abstract class StartScreenContent {
+    /** How the screen reveals the art, the grid it lays over it and what drifts across it, to suit the art. */
+    public enum Ambience {
+        /** A battle: hexes pop open over a faint hex map and embers rise from the fighting. */
+        BATTLE,
+        /**
+         * A command post: the art arrives as a departures board, its tiles flipping over in perspective, over a square
+         * plotting grid; then light shafts stream from the art's warm light, its screens flicker with data and dust
+         * drifts.
+         */
+        COMMAND
+    }
+
     /** The window's title. */
     public abstract String title();
 
@@ -54,6 +66,11 @@ public abstract class StartScreenContent {
     /** Whether the tip sits under the version at the top left rather than at the bottom left, clear of the art's. */
     public boolean tipAtTop() {
         return false;
+    }
+
+    /** The screen's ambience; a battle unless the art suits another. */
+    public Ambience ambience() {
+        return Ambience.BATTLE;
     }
 
     /** Whether the screen has MegaMek's own pages, such as Host and Connect, rather than {@link #menu}. */
