@@ -34,12 +34,12 @@ import megamek.common.units.Entity;
 /**
  * The aimed shot dialog (H36, R4): a modal over the board for one weapon of the acting unit and the unit it aims at
  * ({@link GpuHudState#aiming}), which the aim toggles of the weapons panel and the target cards and the weapon menu
- * open. Its title names the unit ("Aimed shot to ..."), the line under it the weapon, and it shows the unit's paperdoll
- * enlarged with each location's armor and, under it, the weapon's roll aimed there, as the panels colour a roll,
- * outlined in the wireframe view's green; a location the rules leave out keeps its number in the doll's empty look,
- * outlined faintly, and takes no click. Where the shot strikes a Mek's rear, the record sheet's rear armor doll stands
- * beside the front one and takes the torsos, whose front armor the shot misses. A unit without a paperdoll lists its
- * locations instead. Picking a location aims the weapon there and closes; "No aimed shot", which shows the roll
+ * open. Its title names the unit ("Aimed shot to ..."), its sub-line the weapon ("with ..."), and it shows the unit's
+ * paperdoll enlarged with each location's armor and, under it, the weapon's roll aimed there, as the panels colour a
+ * roll, outlined in the wireframe view's green; a location the rules leave out keeps its number in the doll's empty
+ * look, outlined faintly, and takes no click. Where the shot strikes a Mek's rear, the record sheet's rear armor doll
+ * stands beside the front one and takes the torsos, whose front armor the shot misses. A unit without a paperdoll lists
+ * its locations instead. Picking a location aims the weapon there and closes; "No aimed shot", which shows the roll
  * without an aim, removes its aim and closes; Dismiss, Esc and a click beside the dialog close it unchanged. Every
  * change goes through the fire orders, whose choice ({@link GpuFireOrders.Snapshot#aimChoice}) the dialog shows.
  */
@@ -196,8 +196,8 @@ final class GpuAimDialog implements GpuHud.Component {
     }
 
     /**
-     * The dialog for the choice: the header naming the unit, the weapon line, the doll in a box the window's height
-     * allows (or the location buttons) and the buttons.
+     * The dialog for the choice: the header naming the unit with the weapon on its muted sub-line, the doll in a box
+     * the window's height allows (or the location buttons) and the buttons.
      */
     private void build(AimChoice choice, float windowHeight) {
         shown = choice;
@@ -207,15 +207,17 @@ final class GpuAimDialog implements GpuHud.Component {
         Table dialog = ui.panel();
         dialog.setName("aim-dialog");
         dialog.setTouchable(Touchable.enabled);
-        dialog.add(ui.header(text("GpuBoard.hud.aim.title", choice.unit()), null)).growX().row();
+        Table header = ui.header(text("GpuBoard.hud.aim.title", choice.unit()), null);
+        header.row();
+        Label weapon = ui.label(text("GpuBoard.hud.aim.weapon", choice.weapon()), "hud-small", 11.5f, UiTheme.MUTED);
+        weapon.setName("aim-weapon");
+        weapon.setWrap(true);
+        header.add(weapon).colspan(header.getColumns()).growX().minWidth(0).left();
+        dialog.add(header).growX().row();
         dialog.add(new Image(ui.skin.getDrawable("rule"))).growX().height(1).row();
         Table body = new Table();
         body.pad(10, 16, 10, 16);
         body.defaults().left();
-        Label weapon = ui.label(choice.weapon(), "hud-small", 11.5f, UiTheme.MUTED);
-        weapon.setName("aim-weapon");
-        weapon.setWrap(true);
-        body.add(weapon).growX().minWidth(0).row();
         GpuPaperdolls.Doll front = GpuUnitCard.doll(paperdolls, choice.record(), GpuPaperdolls.ARMOR);
         GpuPaperdolls.Doll rear = front == null || !choice.rear() ? null
               : GpuUnitCard.doll(paperdolls, choice.record(), GpuPaperdolls.REAR);

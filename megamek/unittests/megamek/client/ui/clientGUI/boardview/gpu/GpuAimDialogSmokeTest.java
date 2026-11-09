@@ -76,8 +76,9 @@ class GpuAimDialogSmokeTest {
             verify(fire).showAim(AIM);
             assertTrue(layer.isVisible());
             List<String> shown = texts(layer);
-            assertTrue(shown.contains("AIMED SHOT TO KING CRAB") && !shown.contains("KING CRAB"),
-                  "The title names the unit, once");
+            assertTrue(shown.containsAll(List.of("AIMED SHOT TO KING CRAB", "with AC/20"))
+                  && !shown.contains("KING CRAB") && !shown.contains("AC/20"),
+                  "The title names the unit, once, and its sub-line the weapon");
             assertEquals("8+", ((Label) layer.findActor("aim-none-roll")).getText().toString(),
                   "No aimed shot shows the roll without an aim");
             GpuPaperdoll doll = layer.findActor("aim-doll");
