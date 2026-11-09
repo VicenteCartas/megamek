@@ -2048,6 +2048,8 @@ class GpuBattleView extends ApplicationAdapter {
         } else if (state.detonation() != null) {
             var strike = state.detonation().result();
             boardCamera.frameLocation(BoardGeometry.center(strike.coords(), strike.elevation()), playbackCameraWidth());
+            // An explosion goes off at once, the camera easing over as it does: a chain waits on no camera move.
+            if (strike.kind() == megamek.common.NuclearDetonation.Kind.EXPLOSION) { return true; }
         } else if (state.transition() != null) {
             // A structure comes down, or an elevator moves, where it is: the camera stays where the player has it. The
             // clock waits for the terrain to take what falls (GpuTerrain#ready).

@@ -7836,6 +7836,11 @@ final class GpuTerrain implements Disposable {
                 taken.add(chunk);
                 destruction.blastFrom(collapse.coords(), groundZero.x, groundZero.y,
                       GpuArtilleryBlast.shockSlowness(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK);
+                // A fuel tank an explosion names is the one that went off in it (AttackAnimationCapture): it bursts.
+                if (result.kind() == megamek.common.NuclearDetonation.Kind.EXPLOSION
+                      && collapse.before().cover().structure() == BoardScene.Cover.FUEL_TANK) {
+                    destruction.burst(collapse.coords());
+                }
                 destruction.start(collapse.coords(),
                       GpuArtilleryBlast.shockArrival(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK);
             }

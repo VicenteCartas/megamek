@@ -68,6 +68,35 @@ class UnitPlaybackTest {
         assertTrue(playback.takeDetonations().isEmpty());
     }
 
+    /**
+     * A chain of fuel tanks: the explosion a tank two hexes off set off goes off as the first one's front reaches it
+     * (GpuArtilleryBlast#shockArrival), long before the first one's falls are down.
+     */
+    @Test
+    void aChainedExplosionGoesOffAsTheFrontReachesIt() {
+        var first = megamek.common.NuclearDetonation.explosion(UUID.randomUUID(), 0, new Coords(2, 2), 0, 80, 8);
+        var chained = megamek.common.NuclearDetonation.explosion(UUID.randomUUID(), 0, new Coords(2, 4), 0, 50, 5);
+        var unchanged = UnitPlaybackFixture.scene();
+        var playback = new UnitPlayback();
+        playback.accept(List.of(new BoardScene.SceneUpdate(unchanged), new BoardScene.Detonation(first),
+              new BoardScene.SceneUpdate(unchanged), new BoardScene.Detonation(chained), new BoardScene.SceneUpdate(unchanged)),
+              unchanged, ignored -> false);
+        double step = 1 / 480.0, clock = 0;
+        java.util.Map<megamek.common.NuclearDetonation, Double> wentOff = new java.util.HashMap<>();
+        while (wentOff.size() < 2 && clock < 10) {
+            playback.advance(step / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
+            clock += step;
+            for (var detonation : playback.takeDetonations()) { wentOff.put(detonation.result(), clock); }
+        }
+        var from = BoardGeometry.center(first.coords(), 0);
+        var to = BoardGeometry.center(chained.coords(), 0);
+        float radius = GpuArtilleryBlast.nuclearRadius(first.stats());
+        double arrival = GpuArtilleryBlast.shockArrival(com.badlogic.gdx.math.Vector2.dst(from.x, from.y, to.x, to.y), radius)
+              / GpuArtilleryBlast.SECONDS_PER_PLAYBACK;
+        assertEquals(arrival, wentOff.get(chained) - wentOff.get(first), 2 * step, "It goes off as the front reaches it");
+        assertTrue(arrival < UnitPlayback.duration(first) / 2, "Long before the first one's falls are down");
+    }
+
     @Test
     void movementPresentationRetainsTheCapturedHeat() {
         var start = UnitPlaybackFixture.unit(1, 0);

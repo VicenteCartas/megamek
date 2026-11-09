@@ -40,6 +40,8 @@ final class GpuDestruction implements Disposable {
     static final int LOADED = 1;
     /** A slot's flag: a blast's front brings it down, piece by piece as it passes (#blastFrom). */
     static final int BLAST = 2;
+    /** A slot's flag: it bursts, a fuel tank in its own explosion (#burst). */
+    static final int BURST = 4;
     /** A falling part breaks into at most this many fragments (KitFragments), its batch's table in the shader. */
     static final int FRAGMENTS = 16;
     /**
@@ -48,6 +50,8 @@ final class GpuDestruction implements Disposable {
      * away from it; a unit's weight drives them down.
      */
     static final float CRUSH = 30, SPILL = 16, TUMBLE = 4, TOPPLE_OUT = 2.5f, PUSH = 40, TOPPLE = 4, LOAD_DROP = 40;
+    /** A burst's fastest launch, in world units per playback second (#burst). */
+    static final float BURST_SPEED = 200;
     /**
      * As fast as a mek's death (MeepleCasualties): the top gives way at most this long after the foot, and every piece
      * comes down within FALL_SECONDS whatever the structure's height (gravity grows with the drop); a pile is at most
@@ -82,6 +86,7 @@ final class GpuDestruction implements Disposable {
     /** The fall's numbers as GLSL constants, so that the shader and {@link #settles} agree. */
     static String defines() {
         return "#define FALL_TEXELS " + TEXELS + "\n#define FALL_LOADED " + LOADED + "\n#define FALL_BLAST " + BLAST
+              + "\n#define FALL_BURST " + BURST + "\n#define FALL_BURST_SPEED " + BURST_SPEED
               + "\n#define FALL_FRAGMENTS " + FRAGMENTS
               + "\n#define FALL_CRUSH " + CRUSH
               + "\n#define FALL_SPILL " + SPILL + "\n#define FALL_TUMBLE " + TUMBLE + "\n#define FALL_TOPPLE_OUT " + TOPPLE_OUT
@@ -266,6 +271,17 @@ final class GpuDestruction implements Disposable {
     }
 
     /**
+     * The hex's structure bursts, a fuel tank in its own explosion: every piece goes at once, thrown up and out from its
+     * middle, and scatters instead of piling up (tree-instances.glsl).
+     */
+    void burst(Coords at) {
+        Fall fall = falls.get(at);
+        if (fall == null) { return; }
+        fall.texels[1] = (int) fall.texels[1] | BURST;
+        write(fall);
+    }
+
+    /**
      * The rubble the rules left where the hex's structure fell, scenery its chunk does not draw while the hex is taken:
      * out of sight under the ground until the pieces are down, then risen into place as they settle, before they sink
      * into it (tree-instances.glsl). A hex the old path breaks (GpuCollapse) has no fall here: its rubble waits for
@@ -347,7 +363,11 @@ final class GpuDestruction implements Disposable {
         // The shader's gravity: at least what brings the top down within FALL_SECONDS.
         float pull = Math.max(gravity, 2 * height / (FALL_SECONDS * FALL_SECONDS));
         float drop = pull > 0 ? (float) Math.sqrt(2 * height / pull) : LONGEST_FALL;
-        return fall.start + fall.spread + RELEASE_SPAN * 1.2f + Math.min(LONGEST_FALL, drop) + .3f;
+        // A burst's pieces go at once, none faster than BURST_SPEED (#burst): bounded by the highest thrown straight up.
+        float flight = ((int) fall.texels[1] & BURST) != 0
+              ? (BURST_SPEED + (float) Math.sqrt(BURST_SPEED * BURST_SPEED + 2 * pull * height)) / pull
+              : RELEASE_SPAN * 1.2f + drop;
+        return fall.start + fall.spread + Math.min(LONGEST_FALL, flight) + .3f;
     }
 
     /**

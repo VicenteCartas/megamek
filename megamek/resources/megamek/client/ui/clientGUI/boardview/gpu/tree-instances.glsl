@@ -181,6 +181,9 @@ void fallBegin() {
     float strength = length(fall.zw);
     vec2 pushed = strength > 1e-4 ? fall.zw / strength : vec2(0.0);
     bool loaded = (int(fall.y + 0.5) & FALL_LOADED) != 0;
+    // A fuel tank bursts in its own explosion (GpuDestruction#burst): every piece at once, scattering, not piling up.
+    bool burst = (int(fall.y + 0.5) & FALL_BURST) != 0;
+    float pile = burst ? 0.0 : 1.0;
     // A blast's front takes each piece as it reaches it and throws it out from ground zero: the slot starts when the front
     // would have taken a piece at ground zero, so that a city falls in one wave, not hex by hex.
     float begins = fall.x;
@@ -190,7 +193,7 @@ void fallBegin() {
         if (dot(fromBlast, fromBlast) > 1e-4) { pushed = normalize(fromBlast); }
     }
     // The foot first, the top last, within FALL_RELEASE_SPAN, as fast as a mek's death whatever the height.
-    float release = FALL_RELEASE_SPAN * share * (0.8 + 0.4 * fallNoise(seed, 7u))
+    float release = burst ? 0.0 : FALL_RELEASE_SPAN * share * (0.8 + 0.4 * fallNoise(seed, 7u))
           * (1.0 - 0.5 * min(strength, 1.0)) * (loaded ? 0.3 : 1.0);
     float t = clock - begins - release;
     if (t <= 0.0) { return; }
@@ -207,8 +210,16 @@ void fallBegin() {
           * FALL_TUMBLE * share * (0.3 + 0.7 * fallNoise(seed, 5u))
           + vec3(-away.y, away.x, 0.0) * FALL_TOPPLE_OUT * (0.5 + foot) * (0.5 + fallNoise(seed, 8u))
           + vec3(-pushed.y, pushed.x, 0.0) * FALL_TOPPLE * strength * (0.5 + share);
+    if (burst) {
+        // Thrown up and out from its middle at 31 to 56 degrees, at most FALL_BURST_SPEED (GpuDestruction#settles),
+        // tumbling.
+        velocity = normalize(vec3(away, 0.6 + 0.9 * fallNoise(seed, 9u))) * FALL_BURST_SPEED
+              * (0.5 + 0.5 * fallNoise(seed, 1u));
+        spin = (dot(tumble, tumble) > 1e-6 ? normalize(tumble) : vec3(0.0, 0.0, 1.0)) * FALL_TUMBLE
+              * (0.3 + 0.7 * fallNoise(seed, 5u));
+    }
     // It comes to rest on the floor, or on the wreck of the storeys below it, higher in the middle.
-    float ground = site.z + min(.12 * height, FALL_PILE_LEVELS * level) * share
+    float ground = site.z + min(.12 * height, FALL_PILE_LEVELS * level) * share * pile
           * max(0.0, 1.0 - offset * offset / (reach * reach));
     vec3 extent = abs(size * instanceScale());
     // Gravity grows with the drop: every piece is down within FALL_SECONDS (GpuDestruction#settles agrees).
@@ -231,7 +242,7 @@ void fallBegin() {
     // It rests on its lowest corner where it lies, not where it stood: a slab that toppled does not hover at its standing
     // half height, nor a piece thrown off the pile at the pile's height. Landed, it settles there as it skids.
     vec2 lies = position.xy - site.xy;
-    float rest = site.z + below + min(.12 * height, FALL_PILE_LEVELS * level) * share
+    float rest = site.z + below + min(.12 * height, FALL_PILE_LEVELS * level) * share * pile
           * max(0.0, 1.0 - dot(lies, lies) / (reach * reach));
     position.z = max(slide > 0.0 ? mix(position.z, rest, 1.0 - exp(-FALL_GROUND_DRAG * slide)) : position.z, rest);
     float sinking = clamp((clock - sinks) / FALL_SINK, 0.0, 1.0);

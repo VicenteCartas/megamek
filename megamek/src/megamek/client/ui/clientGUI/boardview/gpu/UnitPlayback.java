@@ -214,7 +214,13 @@ final class UnitPlayback {
                     combatSeconds = 0;
                     combatContact = DETONATION_CONTACT_SECONDS;
                     combatTerrainRelease = combatContact;
-                    combatDuration = duration(detonation.result());
+                    BoardScene.Detonation following = null;
+                    for (var next : pending) {
+                        if (next instanceof BoardScene.SceneUpdate) { continue; }
+                        if (next instanceof BoardScene.Detonation chained) { following = chained; }
+                        break;
+                    }
+                    combatDuration = duration(detonation.result(), following == null ? null : following.result());
                     detonationStarted = false;
                 } else if (active instanceof BoardScene.Conversion change) {
                     conversion = new UnitConversion(change);
@@ -638,6 +644,26 @@ final class UnitPlayback {
         if (result.kind() != megamek.common.NuclearDetonation.Kind.EXPLOSION) { return GpuArtilleryBlast.SHOCK_SECONDS; }
         return DETONATION_CONTACT_SECONDS + GpuArtilleryBlast.shockSeconds(GpuArtilleryBlast.nuclearRadius(result.stats()))
               / GpuArtilleryBlast.SECONDS_PER_PLAYBACK + BoardScene.TileTransition.COLLAPSE_SECONDS;
+    }
+
+    /**
+     * As {@link #duration(megamek.common.NuclearDetonation)}, but an explosion followed by {@code next}, an explosion
+     * within its reach that it set off (a chain of fuel tanks), plays only until its front reaches it: the next goes off
+     * there, as the falls around it go on.
+     */
+    static double duration(megamek.common.NuclearDetonation result, megamek.common.NuclearDetonation next) {
+        double whole = duration(result);
+        if (next == null || result.kind() != megamek.common.NuclearDetonation.Kind.EXPLOSION
+              || next.kind() != megamek.common.NuclearDetonation.Kind.EXPLOSION || next.boardId() != result.boardId()) {
+            return whole;
+        }
+        float radius = GpuArtilleryBlast.nuclearRadius(result.stats());
+        var from = BoardGeometry.center(result.coords(), 0);
+        var to = BoardGeometry.center(next.coords(), 0);
+        float distance = com.badlogic.gdx.math.Vector2.dst(from.x, from.y, to.x, to.y);
+        if (distance > radius) { return whole; }
+        // Its front leaves at its contact, as the next one's flash comes at its own.
+        return Math.min(whole, GpuArtilleryBlast.shockArrival(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK);
     }
 
     boolean paused() { return paused; }

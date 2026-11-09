@@ -53,6 +53,9 @@ import org.junit.jupiter.params.provider.ValueSource;
  * stood (GpuDestruction), each as the front reaches it (GpuArtilleryBlast#shockArrival), near ones first. Prints the
  * frame that took the city, the frame times through the wave (synchronized with glFinish, so CPU and GPU together) and
  * how closely the falls kept to the front; frames go to build/gpu-board-review/nuclear-collapse.
+ * <p>
+ * The same for a fuel tank's explosion and the chain it sets off: each explosion plays after the one that set it off,
+ * its tank bursting and what it brought down falling with its own front.
  */
 @Tag("on-demand")
 class GpuNuclearCollapseSmokeTest {
@@ -67,19 +70,20 @@ class GpuNuclearCollapseSmokeTest {
     private static final float PLAYBACK_FRAME = (float) (FRAME * UnitMotion.Speed.NORMAL.rate);
 
     /**
-     * An Alamo, or a Game Master's orbital bombardment of 1,000,000 damage over 10 hexes; megamek.gpu.strikes
-     * (comma-separated: nuclear, orbital) picks them, else both.
+     * An Alamo, a Game Master's orbital bombardment of 1,000,000 damage over 10 hexes, or the explosion of the fuel tank
+     * that can bring down the most around it, burst by a hit; megamek.gpu.strikes (comma-separated: nuclear, orbital,
+     * explosion) picks them, else all.
      */
     @ParameterizedTest
-    @ValueSource(strings = { "nuclear", "orbital" })
+    @ValueSource(strings = { "nuclear", "orbital", "explosion" })
     void aStrikeOnACityFallsWithItsFront(String kind) throws Exception {
         String chosen = System.getProperty("megamek.gpu.strikes", "");
         Assumptions.assumeTrue(chosen.isBlank() || List.of(chosen.split(",")).contains(kind));
-        boolean orbital = kind.equals("orbital");
+        boolean orbital = kind.equals("orbital"), explosion = kind.equals("explosion");
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), kind + "-collapse");
         Files.createDirectories(output.toPath());
         Board before = board();
-        Coords groundZero = densest(before);
+        Coords groundZero = explosion ? mostDestructiveTank(before) : densest(before);
         var server = new ResolutionServer();
         server.getGame().setBoard(board());
         server.getGame().addPlayer(0, new Player(0, "Nuclear review"));
@@ -87,7 +91,7 @@ class GpuNuclearCollapseSmokeTest {
         if (orbital) {
             server.addScheduledOrbitalBombardment(new megamek.server.props.OrbitalBombardment.Builder()
                   .x(groundZero.getX()).y(groundZero.getY()).radius(10).damage(1_000_000).build());
-        } else {
+        } else if (!explosion) {
             server.addScheduledNuke(new int[] { groundZero.getX(), groundZero.getY(), 2 });
         }
         Map<BoardLocation, megamek.common.Hex> strike, phaseEnd;
@@ -101,20 +105,31 @@ class GpuNuclearCollapseSmokeTest {
         });
         try (var servers = mockStatic(Server.class)) {
             servers.when(Server::getServerInstance).thenReturn(transport);
-            call(server, orbital ? "resolveScheduledOrbitalBombardments" : "resolveScheduledNukes");
+            if (explosion) {
+                // A hit bursts the tank, outside any attack: its explosion is a capture of its own.
+                server.damageBuilding(server.getGame().getBoard().getBuildingAt(groundZero), 10_000, groundZero);
+            } else {
+                call(server, orbital ? "resolveScheduledOrbitalBombardments" : "resolveScheduledNukes");
+            }
             strike = server.updates();
             call(server, "applyBuildingDamage");
             phaseEnd = server.updates();
         }
         assertFalse(server.collapsed.isEmpty(), "The strike's blast brings buildings down as the phase ends");
-        assertFalse(server.completion.collapses().isEmpty(), "The strike's completion names what it brought down");
-        // Every building it brings down, in its crater or as the phase ends: the city's kit buildings.
+        var completions = server.boundaries.stream().filter(Boundary::completes).map(Boundary::detonation).toList();
+        assertFalse(completions.getLast().collapses().isEmpty(), "The strike's completion names what it brought down");
+        // Every building it brings down, in its crater or as the phase ends: the city's kit buildings, and its tanks.
         Set<Coords> falls = new HashSet<>(server.collapsed);
         strike.forEach((at, hex) -> {
             if (structure(before.getHex(at.coords())) && !structure(hex)) { falls.add(at.coords()); }
         });
-        falls.removeIf(at -> !before.getHex(at).containsTerrain(Terrains.BUILDING));
-        float radius = GpuArtilleryBlast.nuclearRadius(server.completion.stats());
+        falls.removeIf(at -> !before.getHex(at).containsTerrain(Terrains.BUILDING)
+              && !(explosion && before.getHex(at).containsTerrain(Terrains.FUEL_TANK)));
+        // What brought each down: the detonation naming it, else a strike (its crater). What no explosion names falls as
+        // the phase ends.
+        Map<Coords, NuclearDetonation> cause = new HashMap<>();
+        completions.forEach(completion -> completion.collapses().forEach(at -> cause.putIfAbsent(at.coords(), completion)));
+        if (!explosion) { falls.forEach(at -> cause.putIfAbsent(at, completions.getLast())); }
         var failure = new AtomicReference<Throwable>();
         List<String> report = new ArrayList<>();
         try (var fixture = GpuBoardFixture.create(before)) {
@@ -127,8 +142,9 @@ class GpuNuclearCollapseSmokeTest {
             configuration.setWindowedMode(1280, 800);
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
                 private final long deadline = System.nanoTime() + 600_000_000_000L;
-                /** The frame each building began to give way. */
+                /** The frame each building began to give way, and the frame each detonation took its first. */
                 private final Map<Coords, Integer> starts = new HashMap<>();
+                private final Map<java.util.UUID, Integer> takes = new java.util.LinkedHashMap<>();
                 private final List<Double> waveMs = new ArrayList<>();
                 private Graphics fixedGraphics;
                 private int stage, frames, contact = -1;
@@ -195,14 +211,23 @@ class GpuNuclearCollapseSmokeTest {
                     frames++;
                     if (stage == 0) {
                         boardCamera.center(BoardGeometry.center(groundZero, before.getHex(groundZero).getLevel()));
+                        // An explosion's hexes up close.
+                        if (explosion) { boardCamera.zoom(.3f); }
                         frames = 0;
                         stage = 1;
                     } else if (stage == 1 && frames >= 60 && !terrain.fragmentsPending()) {
                         capture(output, "0-before");
                         SwingUtilities.invokeLater(() -> {
-                            fixture.game.processGameEvent(new GameNuclearDetonationEvent(fixture.game, server.detonation, false));
-                            fixture.game.getBoard().setHexes(strike);
-                            fixture.game.processGameEvent(new GameNuclearDetonationEvent(fixture.game, server.completion, true));
+                            // In the server's order; its checkpoint shows before the first completion.
+                            boolean shown = false;
+                            for (var boundary : server.boundaries) {
+                                if (boundary.completes() && !shown) {
+                                    fixture.game.getBoard().setHexes(strike);
+                                    shown = true;
+                                }
+                                fixture.game.processGameEvent(new GameNuclearDetonationEvent(fixture.game,
+                                      boundary.detonation(), boundary.completes()));
+                            }
                             fixture.game.getBoard().collapseBuilding(new Vector<>(server.collapsed));
                             fixture.game.getBoard().setHexes(phaseEnd);
                             fixture.source.refresh();
@@ -237,6 +262,7 @@ class GpuNuclearCollapseSmokeTest {
                         }
                         for (Coords at : falls) {
                             if (!starts.containsKey(at) && terrain.fallStarted(at)) { starts.put(at, frames); }
+                            if (terrain.fallTaken(at) && cause.containsKey(at)) { takes.putIfAbsent(cause.get(at).id(), frames); }
                         }
                         felledHexes = Math.max(felledHexes, terrain.felledHexes());
                         if (contact >= 0 && frames > contact && frames - contact <= CAPTURES[CAPTURES.length - 1]) {
@@ -266,16 +292,24 @@ class GpuNuclearCollapseSmokeTest {
                 private void summarize() {
                     assertTrue(starts.size() >= falls.size() * 9 / 10,
                           "The buildings it brings down fall: " + starts.size() + " of " + falls.size());
-                    // Each as the front reaches it: its arrival in blast seconds, the playback's half.
-                    var centre = BoardGeometry.center(groundZero, 0);
+                    // Each as its detonation's front reaches it: its arrival in blast seconds, the playback's half.
                     List<Double> lateness = new ArrayList<>();
                     float near = 0, far = 0;
                     int nearCount = 0, farCount = 0;
                     for (var entry : starts.entrySet()) {
+                        var blast = cause.get(entry.getKey());
+                        if (blast == null) {
+                            var hex = before.getHex(entry.getKey());
+                            report.add("unnamed, fell on frame " + (entry.getValue() - contact) + ": "
+                                  + entry.getKey().getBoardNum() + " " + hex.toString());
+                            continue;
+                        }
+                        var centre = BoardGeometry.center(blast.coords(), 0);
                         var middle = BoardGeometry.center(entry.getKey(), 0);
                         float distance = com.badlogic.gdx.math.Vector2.dst(middle.x, middle.y, centre.x, centre.y);
-                        float arrival = GpuArtilleryBlast.shockArrival(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK;
-                        lateness.add((double) Math.abs(entry.getValue() - contact - arrival / PLAYBACK_FRAME));
+                        float arrival = GpuArtilleryBlast.shockArrival(distance, GpuArtilleryBlast.nuclearRadius(blast.stats()))
+                              / GpuArtilleryBlast.SECONDS_PER_PLAYBACK;
+                        lateness.add((double) Math.abs(entry.getValue() - takes.get(blast.id()) - arrival / PLAYBACK_FRAME));
                         int hexes = groundZero.distance(entry.getKey());
                         if (hexes <= 4) { near += entry.getValue(); nearCount++; }
                         if (hexes >= 12) { far += entry.getValue(); farCount++; }
@@ -288,7 +322,19 @@ class GpuNuclearCollapseSmokeTest {
                     sorted.sort(null);
                     report.add("ground zero " + groundZero.getBoardNum() + "; buildings the crater took: " + taken(before, strike)
                           + ", brought down as the phase ended: " + server.collapsed.size() + "; listed on the completion: "
-                          + server.completion.collapses().size() + "; falling: " + starts.size() + " of " + falls.size());
+                          + completions.getLast().collapses().size() + "; falling: " + starts.size() + " of " + falls.size());
+                    // A chain's next explosion goes off as the last one's front reaches it (UnitPlayback#duration).
+                    var played = completions.stream().filter(blast -> takes.containsKey(blast.id()))
+                          .sorted(java.util.Comparator.comparing(blast -> takes.get(blast.id()))).toList();
+                    for (int index = 0; index < played.size(); index++) {
+                        var blast = played.get(index);
+                        report.add(blast.kind() + " at " + blast.coords().getBoardNum() + ": took its first on frame "
+                              + (takes.get(blast.id()) - contact) + " after the flash, named " + blast.collapses().size()
+                              + (index + 1 < played.size() ? ", the next " + (takes.get(played.get(index + 1).id())
+                                    - takes.get(blast.id())) + " frames on (played for "
+                                    + Math.round(UnitPlayback.duration(blast, played.get(index + 1)) / PLAYBACK_FRAME)
+                                    + ")" : ""));
+                    }
                     report.add("frames off the front: median " + percentile(lateness, .5) + ", p95 " + percentile(lateness, .95)
                           + ", max " + percentile(lateness, 1));
                     report.add("frame ms through the wave: median " + percentile(sorted, .5) + ", p95 " + percentile(sorted, .95)
@@ -332,6 +378,36 @@ class GpuNuclearCollapseSmokeTest {
         return board;
     }
 
+    /**
+     * The fuel tank whose explosion (its magnitude at its hex, 10 less a hex out: TWGameManager#damageBuilding) can bring
+     * down the most structure hexes around it by their construction factors.
+     */
+    private static Coords mostDestructiveTank(Board board) {
+        Coords best = null;
+        int most = -1;
+        for (int x = 0; x < board.getWidth(); x++) {
+            for (int y = 0; y < board.getHeight(); y++) {
+                var at = new Coords(x, y);
+                if (!board.getHex(at).containsTerrain(Terrains.FUEL_TANK)) { continue; }
+                int magnitude = board.getHex(at).terrainLevel(Terrains.FUEL_TANK_MAGN), count = 0;
+                for (int range = 1; range < magnitude / 10; range++) {
+                    for (Coords near : at.allAtDistance(range)) {
+                        var hex = board.getHex(near);
+                        int cf = hex == null ? Integer.MAX_VALUE : hex.containsTerrain(Terrains.BUILDING)
+                              ? hex.terrainLevel(Terrains.BLDG_CF) : hex.containsTerrain(Terrains.FUEL_TANK)
+                              ? hex.terrainLevel(Terrains.FUEL_TANK_CF) : Integer.MAX_VALUE;
+                        if (cf <= magnitude - 10 * range) { count++; }
+                    }
+                }
+                if (count > most) {
+                    most = count;
+                    best = at;
+                }
+            }
+        }
+        return best;
+    }
+
     /** The hex with the most building hexes within four hexes of it. */
     private static Coords densest(Board board) {
         Coords best = null;
@@ -361,12 +437,15 @@ class GpuNuclearCollapseSmokeTest {
         declared.invoke(manager);
     }
 
+    /** A detonation's start or completion packet. */
+    private record Boundary(NuclearDetonation detonation, boolean completes) { }
+
     /** The real rules resolution; only its transport is replaced, recording what it sends. */
     private static final class ResolutionServer extends TWGameManager {
         private final Set<Coords> changed = new HashSet<>();
         final List<Coords> collapsed = new ArrayList<>();
-        /** The strike as it starts, and as it completes with what it brought down. */
-        NuclearDetonation detonation, completion;
+        /** Each detonation as it starts, and as it completes with what it brought down, in the order sent. */
+        final List<Boundary> boundaries = new ArrayList<>();
 
         @Override
         public void sendChangedHex(Coords coords, int boardId) { changed.add(coords); }
@@ -374,8 +453,7 @@ class GpuNuclearCollapseSmokeTest {
         @SuppressWarnings("unchecked")
         void sent(Packet packet) {
             if (packet.command() == PacketCommand.NUCLEAR_DETONATION) {
-                var strike = (NuclearDetonation) packet.getObject(0);
-                if (Boolean.TRUE.equals(packet.getObject(1))) { completion = strike; } else { detonation = strike; }
+                boundaries.add(new Boundary((NuclearDetonation) packet.getObject(0), Boolean.TRUE.equals(packet.getObject(1))));
             }
             if (packet.command() == PacketCommand.BLDG_COLLAPSE) { collapsed.addAll((Vector<Coords>) packet.getObject(0)); }
         }
