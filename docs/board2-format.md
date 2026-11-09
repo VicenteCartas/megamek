@@ -138,7 +138,15 @@ the building has connections, keeping joined hexes continuous. Rotation and padd
 together. A held building paint stroke stores explicit connections only across the borders followed by that stroke.
 
 Other components keep their existing appearance fields (`variant`, `asset`, `uid`, `material`, `strength`, `colours`,
-`rotation`, `tracks`, `beside`, `trafficControl`) subject to owner validation. The internal `footprint` and `kitVariant`
+`rotation`, `tracks`, `beside`, `trafficControl`, `lanes`, `inbound`) subject to owner validation. Only the ground `road`
+appearance holds `lanes`: `1` is a single, one-way lane, and two lanes, the default, are stored as none (a saved `2` reads
+as none). Its `inbound` lists the sides traffic enters the hex by, by name (`"inbound": ["nw"]`), and needs a single lane;
+without it, every hex of a run derives one direction: as its stored hexes say, else from its end with the least
+coordinates (`SingleLane.inbound`). On a two-lane road that single-lane exits leave, `exitFrom` lists, by
+each exit's side, the sides whose traffic may take it (`"exitFrom": {"se": ["n"]}`: only traffic arriving from the north
+may take the exit leaving south-east); an exit not listed, or no `exitFrom`, may be taken from every side
+(`SingleLane.feeds`), and a single lane stores none. A board flip reflects both with the road's exits. Both are
+cosmetic: rules and the 2D views ignore them. The internal `footprint` and `kitVariant`
 appearance owners are folded into the building's appearance when saving.
 
 ## Other components

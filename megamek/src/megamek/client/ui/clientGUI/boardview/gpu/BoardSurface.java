@@ -21,8 +21,10 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.ConcreteFit;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.board.HexTile;
 import megamek.common.board.RailRoute;
+import megamek.common.board.SingleLane;
 
 /** The actual topography of one hex. Rendering, road continuity, banks and picking share it. */
 final class BoardSurface {
@@ -91,7 +93,8 @@ final class BoardSurface {
           BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps,
           List<ConcreteFit.Shift> coast, BoardRoad.Kind road, BoardScene.Biome biome, int cliffTopExits, boolean bare,
           boolean barren, BoardSurfaceBlend.Cover groundCover, boolean ultraSublevel, boolean naturalBridge,
-          RailRoute.Corridor corridor, RailRoute.Corridor deckCorridor, BoardBackdrop backdrop, int pavementSides) { }
+          RailRoute.Corridor corridor, RailRoute.Corridor deckCorridor, BoardBackdrop backdrop, int pavementSides,
+          boolean singleLane, int laneInbound, Long laneExitFrom) { }
 
     /** What of a hex further out can reach a hex's shape: through the water's shore, its level, liquid and ground. */
     record Shape(int elevation, int waterDepth, boolean frozen, BoardLiquid liquid, boolean detailedGround, BoardScene.Surface surface,
@@ -161,7 +164,11 @@ final class BoardSurface {
               BoardConcrete.of(scene).corners(tile.coords()), tile.road(), tile.biome(), tile.cliffTopExits(), tile.bare(),
               tile.barren(), tile.groundCover(), tile.ultraSublevel(),
               BoardBridge.feature(tile) != null && BoardBridge.family(tile) == BoardBridge.Family.NATURAL,
-              tile.corridor(), tile.deckCorridor(), tile.backdrop(), tile.pavementSides());
+              tile.corridor(), tile.deckCorridor(), tile.backdrop(), tile.pavementSides(), BoardRoad.singleLane(tile),
+              // A two-lane road reserves its turns into an exit by the exit's way, as derived from the roads beyond it, and by
+              // the approaches it lets take it.
+              BoardRoad.singleLane(tile) ? SingleLane.inbound(BoardRoad.lanes(scene), tile.coords()) : 0,
+              HexAppearance.exitFrom(tile.appearance(), SingleLane.OWNER));
     }
 
     /** The edges this hex's carriageway ramps down to (see {@link BoardRoadGrade#ramps}). */

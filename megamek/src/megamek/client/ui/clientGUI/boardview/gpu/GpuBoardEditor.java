@@ -1312,6 +1312,10 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         if (brush.sampledHex() == null && definition.id().equals("road")) {
             controls.add(trafficControlChoice(brush.appearance(), "road", 0,
                   chosen -> send(Action.BRUSH_VALUE, "trafficControl", chosen)));
+            var surface = brush.property("road");
+            if (surface != null && pavedRoad(surface.value())) {
+                controls.add(lanesChoice(brush.appearance(), chosen -> send(Action.BRUSH_VALUE, "lanes", chosen)));
+            }
         }
         var zone = zoneBrush(brush);
         if (zone != null) { controls.add(zoneNumber(zone)); }
@@ -1937,12 +1941,25 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
 
     private Table trafficControlChoice(Map<String, megamek.common.board.HexAppearance> appearance, String owner, int exits,
           Consumer<String> choose) {
-        var current = megamek.common.board.HexAppearance.trafficControl(appearance, owner, exits);
-        List<Option> options = List.of(new Option(UiKit.text("BoardEditor.trafficStops"), "stops"),
+        return trafficControlChoice(appearance, owner, exits, 0, 0, null, choose);
+    }
+
+    /**
+     * As above, where single-lane ramps join the ground road across {@code ramps}: the default counts neither them nor its
+     * {@code aprons} as roads, and is the {@code junction}'s own (SingleLane#control), as on the 3D board. Where no road
+     * keeps priority there, stops are no signs at all: priority to the right.
+     */
+    private Table trafficControlChoice(Map<String, megamek.common.board.HexAppearance> appearance, String owner, int exits,
+          int ramps, int aprons, megamek.common.board.LaneJunction junction, Consumer<String> choose) {
+        var current = ramps == 0 ? megamek.common.board.HexAppearance.trafficControl(appearance, owner, exits)
+              : megamek.common.board.SingleLane.control(appearance, exits, ramps, aprons, junction);
+        String stops = junction != null && junction.state() == megamek.common.board.LaneJunction.State.PRIORITY_RIGHT
+              ? "BoardEditor.trafficPriorityRight" : "BoardEditor.trafficStops";
+        List<Option> options = List.of(new Option(UiKit.text(stops), "stops"),
               new Option(UiKit.text("BoardEditor.trafficSignals"), "signals"),
               new Option(UiKit.text("BoardEditor.trafficGantry"), "gantry"));
         String label = switch (current) {
-            case STOPS -> "BoardEditor.trafficStops";
+            case STOPS -> stops;
             case SIGNALS -> "BoardEditor.trafficSignals";
             case GANTRY -> "BoardEditor.trafficGantry";
         };
@@ -1956,8 +1973,105 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         int exits = way == null ? 0 : way.exits();
         var bridge = snapshot.property("bridge");
         if (owner.equals("bridgeRoad") && bridge != null) { exits &= bridge.exits(); }
-        detail.add(trafficControlChoice(snapshot.appearance(), owner, exits,
-              chosen -> send(Action.TRAFFIC_CONTROL, owner, chosen))).growX().row();
+        boolean ground = owner.equals("road") && way != null && pavedRoad(way.value());
+        // The junction single lanes form here, its aprons (roadless concrete it runs into) no roads of it, as on the 3D board.
+        var junction = ground ? snapshot.junction() : null;
+        if (junction != null && (!junction.controlled() || junction.hub())) {
+            // Nothing here needs controls, or only single lanes meet, which are never signalled: no choice changes what
+            // is drawn. A stored choice is kept for when that changes.
+            boolean merge = junction.controlled() && junction.waiting() != 0;
+            String text = merge ? "BoardEditor.trafficMerge" : junction.controlled() ? "BoardEditor.trafficPriorityRight"
+                  : "BoardEditor.trafficNone";
+            Table row = new Table();
+            row.add(ui.label(UiKit.text("BoardEditor.trafficControl"), "hud-small", 12, UiTheme.MUTED)).left().padRight(8);
+            Label none = ui.label(UiKit.text(text), "hud-small", 12, UiTheme.MUTED);
+            none.setWrap(true);
+            row.add(none).growX().minWidth(0);
+            row.setName("editor-traffic-control-" + owner);
+            ui.tip(row).getActor().setText(UiKit.text(merge ? "BoardEditor.trafficMerge.tooltip"
+                  : junction.controlled() ? "BoardEditor.trafficPriorityRight.tooltip" : "BoardEditor.trafficNone.tooltip"));
+            detail.add(row).growX().row();
+        } else {
+            int ramps = junction == null || junction.hub() ? 0 : exits & ~junction.twoWay() & ~snapshot.apronSides() & 63;
+            detail.add(trafficControlChoice(snapshot.appearance(), owner, exits, ramps, ground ? snapshot.apronSides() : 0,
+                  junction, chosen -> send(Action.TRAFFIC_CONTROL, owner, chosen))).growX().row();
+        }
+        if (owner.equals("road") && way != null && pavedRoad(way.value())) { lanes(); }
+    }
+
+    /** Paved roads (not an alley, dirt or gravel) may be narrowed to a single, one-way lane (SingleLane#paved). */
+    private static boolean pavedRoad(int level) {
+        return level != 2 && level != megamek.common.units.Terrains.ROAD_LVL_DIRT
+              && level != megamek.common.units.Terrains.ROAD_LVL_GRAVEL;
+    }
+
+    private Table lanesChoice(Map<String, megamek.common.board.HexAppearance> appearance, Consumer<String> choose) {
+        boolean single = megamek.common.board.HexAppearance.singleLane(appearance, "road");
+        List<Option> options = List.of(new Option(UiKit.text("BoardEditor.lanesTwo"), "two"),
+              new Option(UiKit.text("BoardEditor.lanesSingle"), "single"));
+        Table row = choice(UiKit.text("BoardEditor.lanes"), UiKit.text(single ? "BoardEditor.lanesSingle" : "BoardEditor.lanesTwo"),
+              options, choose);
+        row.setName("editor-lanes-road");
+        ui.tip(row).getActor().setText(UiKit.text("BoardEditor.lanes.tooltip"));
+        return row;
+    }
+
+    /**
+     * The inspected paved road's lanes; on a single-lane run, a button reversing its direction of travel; on a two-lane
+     * road, per side a single-lane road joins it, whether that road is its entrance (an on-ramp) or its exit (off-ramp).
+     */
+    private void lanes() {
+        detail.add(lanesChoice(snapshot.appearance(), chosen -> send(Action.LANES, "road", chosen))).growX().row();
+        if (snapshot.laneRun()) {
+            var reverse = button(UiKit.text("BoardEditor.laneReverse"), () -> send(Action.LANE_DIRECTION, "road", "reverse"));
+            reverse.setName("editor-lane-reverse");
+            ui.tip(reverse).getActor().setText(UiKit.text("BoardEditor.laneReverse.tooltip"));
+            detail.add(reverse).row();
+        }
+        if (snapshot.rampSides() == 0) { return; }
+        heading(UiKit.text("BoardEditor.ramps"));
+        List<Option> options = List.of(new Option(UiKit.text("BoardEditor.rampEntrance"), "entrance"),
+              new Option(UiKit.text("BoardEditor.rampExit"), "exit"));
+        for (int side = 0; side < 6; side++) {
+            if ((snapshot.rampSides() & 1 << side) == 0) { continue; }
+            int d = side;
+            boolean entrance = (snapshot.entranceSides() & 1 << side) != 0;
+            Table row = choice(UiKit.text("BoardEditor.ramp", UiKit.text("BoardEditor.sides").split(",")[side]),
+                  UiKit.text(entrance ? "BoardEditor.rampEntrance" : "BoardEditor.rampExit"), options,
+                  chosen -> send(Action.RAMP, "road:" + d, chosen));
+            row.setName("editor-ramp-" + side);
+            ui.tip(row).getActor().setText(UiKit.text("BoardEditor.ramp.tooltip"));
+            detail.add(row).growX().row();
+            if (!entrance) { exitFrom(side); }
+        }
+    }
+
+    /**
+     * Under an exit (off-ramp) leaving the inspected two-lane road across {@code side}, which of the road's approaches may
+     * take it: each on its own, or all of them (both, for a road through).
+     */
+    private void exitFrom(int side) {
+        var road = snapshot.property("road");
+        int approaches = road == null ? 0 : road.exits() & 63 & ~snapshot.rampSides();
+        int fed = snapshot.exitFrom().get(side);
+        if (Integer.bitCount(approaches) < 2 || fed == 0) { return; }
+        String[] sides = UiKit.text("BoardEditor.sides").split(",");
+        String all = UiKit.text(Integer.bitCount(approaches) == 2 ? "BoardEditor.rampFromBoth" : "BoardEditor.rampFromAll");
+        List<Option> options = new ArrayList<>(List.of(new Option(all, "all")));
+        for (int from = 0; from < 6; from++) {
+            if ((approaches & 1 << from) != 0) {
+                options.add(new Option(UiKit.text("BoardEditor.rampFromSide", sides[from]), Integer.toString(from)));
+            }
+        }
+        String current = (fed & approaches) == approaches ? all : Integer.bitCount(fed) == 1
+              ? UiKit.text("BoardEditor.rampFromSide", sides[Integer.numberOfTrailingZeros(fed)])
+              : String.join(", ", java.util.stream.IntStream.range(0, 6).filter(from -> (fed & 1 << from) != 0)
+                    .mapToObj(from -> UiKit.text("BoardEditor.rampFromSide", sides[from])).toList());
+        Table row = choice(UiKit.text("BoardEditor.rampFrom"), current, options,
+              chosen -> send(Action.RAMP_FROM, "road:" + side, chosen));
+        row.setName("editor-ramp-from-" + side);
+        ui.tip(row).getActor().setText(UiKit.text("BoardEditor.rampFrom.tooltip"));
+        detail.add(row).growX().row();
     }
 
     private void wayRow(String terrain, boolean deck) {

@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -46,7 +47,9 @@ import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexIssue;
 import megamek.common.board.HexTile;
+import megamek.common.board.LaneJunction;
 import megamek.common.board.RailRoute;
+import megamek.common.board.SingleLane;
 import megamek.common.board.TilesetScenery;
 import megamek.common.enums.BuildingType;
 import megamek.common.enums.GamePhase;
@@ -150,7 +153,26 @@ public final class BoardEditorSession {
          */
         EDGES, WAY_LAYER, WAY_TRACKS, CORRIDOR,
         /** Sets a road layer's cosmetic junction controls (target "road" or "bridgeRoad", value "stops", "signals" or "gantry"). */
-        TRAFFIC_CONTROL
+        TRAFFIC_CONTROL,
+        /**
+         * Narrows the inspected hex's paved ground road to a single, one-way lane or widens it back to two (target "road",
+         * value "single" or "two"); a new single lane runs the way its single-lane neighbours do. One undo step.
+         */
+        LANES,
+        /**
+         * Makes the single-lane road joining the inspected hex across a side (target "road:" and the side, 0 to 5) its
+         * entrance, an on-ramp whose traffic merges and gives way (value "entrance"), or its exit, an off-ramp traffic leaves
+         * by (value "exit"): the whole single-lane run turns to match, its far end too ({@link SingleLane}). One undo step.
+         */
+        RAMP,
+        /** Reverses the direction of travel of the inspected hex's whole single-lane run (target "road"). One undo step. */
+        LANE_DIRECTION,
+        /**
+         * Which of the inspected two-lane road's approaches may take the exit (off-ramp) leaving it across a side (target
+         * "road:" and the side): value "all", or one approach's side, 0 to 5, stored on that road
+         * ({@link HexAppearance#exitFrom}). One undo step.
+         */
+        RAMP_FROM
     }
     /** Text values are parsed and validated here, never by a view that also owns game state. */
     public record Command(Action action, String target, String value) {
@@ -212,6 +234,15 @@ public final class BoardEditorSession {
      * list reports, which {@link Action#REMOVE_COPIES} removes. {@code kitVariants}: the variants of the selected
      * building's generated kit ({@link TilesetScenery#kitVariants}), empty where it has none. {@code joinedSides}: for
      * the selected hex's water and pavement, the sides that join the same terrain beside it, by terrain name.
+     * {@code rampSides}: the sides
+     * of the selected two-lane road where a single-lane road joins it ({@link SingleLane#joined}), of which
+     * {@code entranceSides} are its entrances (on-ramps) and the rest its exits (off-ramps); {@code laneRun}: the selected
+     * hex is on a single-lane run whose direction {@link Action#LANE_DIRECTION} reverses; {@code exitFrom}, side by side,
+     * the selected two-lane road's approaches that may take the exit leaving it there ({@link SingleLane#feeds}), 0 where
+     * no exit leaves; {@code apronSides}, the sides where its ground road runs into roadless concrete, no roads of its
+     * junction ({@link SingleLane#aprons}). The ramp sides leave out a neighbour's bridge deck, as the 3D board does
+     * ({@link SingleLane#arms}). {@code junction}: the junction the selected hex's ground road forms with the single lanes
+     * joining it, or as a single lane's hub ({@link SingleLane#junction}); null for none.
      */
     public record Snapshot(long revision, String title, boolean dirty, boolean canUndo, boolean canRedo,
           Tool tool, String component, String asset, int brush, Coords selected, int elevation, String theme,
@@ -220,7 +251,8 @@ public final class BoardEditorSession {
           List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<HexIssue> issues,
           List<Level> levels, List<String> tags, List<String> boardComponents, boolean drawsRoutes,
           int copies, List<String> kitVariants, boolean buildingConnected, BuildingVolumes.Reference buildingReference, int buildingInteriors,
-          boolean buildingProfileAvailable, Map<String, Integer> joinedSides) {
+          boolean buildingProfileAvailable, Map<String, Integer> joinedSides, int rampSides, int entranceSides, boolean laneRun,
+          List<Integer> exitFrom, int apronSides, LaneJunction junction) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
         public boolean arena() { return tags.contains(BoardClassifier.ARENA_TAG); }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
@@ -476,7 +508,36 @@ public final class BoardEditorSession {
               copies.values().stream().mapToInt(Integer::intValue).sum(), hex == null ? List.of() : kitVariants(hex),
               TilesetScenery.buildingConnected(hex, selected, board()::getHex), hex == null ? null : hex.getBuildingReference(),
               building == null ? 0 : BuildingInteriors.choice(building).ordinal(),
-              TilesetScenery.buildingProfileAvailable(hex, selected, board()::getHex), joinedSides());
+              TilesetScenery.buildingProfileAvailable(hex, selected, board()::getHex), joinedSides(),
+              hex == null || SingleLane.single(hex) ? 0
+                    : SingleLane.joined(hex, selected, this::hexAt) & SingleLane.arms(hex, selected, this::hexAt, roadExits(hex)),
+              hex == null ? 0 : entrances(hex), hex != null && SingleLane.run(this::hexAt, selected, -1) != null,
+              exitFrom(hex), hex == null ? 0 : SingleLane.aprons(hex, selected, this::hexAt, roadExits(hex)),
+              hex == null ? null : SingleLane.junction(hex, selected, this::hexAt));
+    }
+
+    /** The sides a hex's ground road leaves by; 0 without one. */
+    private static int roadExits(Hex hex) {
+        return hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63 : 0;
+    }
+
+    /** Side by side, the selected hex's approaches that may take the exit leaving it there; 0 where none leaves. */
+    private List<Integer> exitFrom(Hex hex) {
+        List<Integer> result = new ArrayList<>();
+        for (int side = 0; side < 6; side++) { result.add(hex == null ? 0 : SingleLane.feeds(hex, selected, side, this::hexAt)); }
+        return List.copyOf(result);
+    }
+
+    /** The hex at {@code at}, or null off the board, as the single-lane runs read the board. */
+    private Hex hexAt(Coords at) { return board().contains(at) ? board().getHex(at) : null; }
+
+    /** The selected hex's sides where a joining single-lane road is its entrance, an on-ramp ({@link SingleLane#entrance}). */
+    private int entrances(Hex hex) {
+        int result = 0;
+        for (int side = 0; side < 6; side++) {
+            if (SingleLane.entrance(hex, selected, side, this::hexAt)) { result |= 1 << side; }
+        }
+        return result;
     }
 
     /**
@@ -798,6 +859,10 @@ public final class BoardEditorSession {
                       TilesetScenery.buildingConnected(hex, hex.getCoords(), board()::getHex)));
                 case EDGES -> edit(hex -> setEdges(hex, command.value()));
                 case TRAFFIC_CONTROL -> edit(hex -> setTrafficControl(hex, command.target(), command.value()));
+                case LANES -> edit(hex -> setLanes(hex, command.target(), command.value()));
+                case RAMP -> ramp(command.target(), command.value());
+                case LANE_DIRECTION -> reverseLane(command.target());
+                case RAMP_FROM -> rampFrom(command.target(), command.value());
                 case ASSET -> {
                     var design = blueprint.asset(command.value()); require(design != null, "Unknown object design");
                     paintTemplate = new Hex(0); sampledHex = null;
@@ -1520,10 +1585,14 @@ public final class BoardEditorSession {
                   : blueprint.component(brushComponent.equals("road") || bridge ? "bridge" : "ways").defaults();
             boolean pillars = wayPillars || continued != null && HexAppearance.pillars(continued.getAppearance());
             int exits = brushComponent.equals("road") && !layer.deck() ? sides | landings(at) : sides;
+            // The way traffic on a new single lane runs: from the hex painted before it; a stroke's own ends keep the lanes
+            // of a road already there, so a ramp drawn from a two-lane road leaves that road two lanes.
+            int back = i > 0 && (sides & 1 << at.direction(path.get(i - 1))) != 0 ? at.direction(path.get(i - 1)) : -1;
+            boolean end = path.size() > 1 && (i == 0 || i == path.size() - 1);
             change(at, h -> {
                 if (bridge) { paintBridge(h, layer.level(), exits, pillars); }
                 else {
-                    paintWay(h, layer.deck(), exits);
+                    paintWay(h, layer.deck(), exits, back, end);
                     if (layer.deck()) {
                         BridgeSpan.carry(h, layer.level() - h.getLevel(), defaults);
                         if (pillars && HexAppearance.implicit(h.getAppearance())) { appearance(h, "bridge", HexAppearance.IMPLICIT_PILLARS); }
@@ -1574,14 +1643,25 @@ public final class BoardEditorSession {
     }
 
     /** The drawn path supplies explicit connections, retaining branches already drawn, as {@link #paintBuildings} does. */
-    private void paintWay(Hex hex, boolean deck, int sides) {
+    private void paintWay(Hex hex, boolean deck, int sides, int back, boolean end) {
         boolean road = brushComponent.equals("road");
         int type = road ? deck ? Terrains.BRIDGE_ROAD : Terrains.ROAD : deck ? Terrains.BRIDGE_RAIL : Terrains.RAIL;
         Terrain old = hex.getTerrain(type);
         int exits = sides | (old == null ? 0 : old.getExits());
         if (road) {
+            HexAppearance was = hex.getAppearance().get("road");
             hex.addTerrain(new Terrain(type, paintTemplate.terrainLevel(Terrains.ROAD), true, exits));
             HexAppearance look = colonyFinish(hex, paintTemplate.getAppearance().get("road"));
+            if (!deck) {
+                // A road already there keeps its lanes at the stroke's ends, and a single lane its way anywhere: Reverse
+                // direction and the ramp choice turn it, not painting over it again.
+                boolean single = was != null && was.lanes() != null && old != null;
+                if (end && old != null || single && look != null && look.lanes() != null) { look = HexAppearance.keepLanes(look, was); }
+                else if (look != null && look.lanes() != null) { look = SingleLane.directed(look, back < 0 ? 0 : 1 << back); }
+                // A two-lane road painted on keeps which of its approaches may take its exits.
+                else if (old != null && was != null && was.exitFrom() != null) { look = HexAppearance.withExitFrom(look, was.exitFrom()); }
+                look = roadLanes(hex, "road", look, look);
+            }
             // Shape selectors belong to the ground; a deck keeps the chosen surface and junction controls.
             appearance(hex, deck ? "bridgeRoad" : "road", deck ? roadSurface(look) : look);
         } else {
@@ -2791,6 +2871,7 @@ public final class BoardEditorSession {
                 found.add(new HexIssue(at, "", Messages.getString("BoardEditor.issueRoadBridge", issue.message(), issue.fix())));
             }
             Hex hex = board().getHex(at);
+            laneIssues(hex, at).forEach(text -> found.add(new HexIssue(at, "", text)));
             for (BoardDecoration object : hex.getDecorations()) {
                 if (!assetExists(object)) { found.add(new HexIssue(at, object.id(), Messages.getString("BoardEditor.issueArtMissing", object.asset()))); }
                 var receiver = object.placement().receiver();
@@ -2814,6 +2895,84 @@ public final class BoardEditorSession {
         issueList = java.util.stream.Stream.concat(issues.values().stream().flatMap(List::stream), imported)
               .sorted(Comparator.comparingInt((HexIssue issue) -> issue.coords().getX()).thenComparingInt(issue -> issue.coords().getY()))
               .toList();
+    }
+
+    /**
+     * {@code cells} and the hexes just beyond both ends of every single-lane run through them: the junctions a run's
+     * direction decides, however far along it they lie; and across every single-lane fork or merge among them or at
+     * those ends.
+     */
+    private java.util.Collection<Coords> withRunEnds(java.util.Collection<Coords> cells) {
+        java.util.Set<Coords> result = new java.util.LinkedHashSet<>(cells);
+        List<SingleLane.Run> runs = new ArrayList<>();
+        for (Coords at : cells) {
+            Hex hex = hexAt(at);
+            if (hex == null || !SingleLane.single(hex)) { continue; }
+            // A fork or merge the edit reached: its open sides follow which of its neighbours are single lanes.
+            addRunEnd(result, at);
+            if (runs.stream().anyMatch(run -> run.contains(at))) { continue; }
+            SingleLane.Run run = SingleLane.run(this::hexAt, at, -1);
+            if (run == null || run.loop()) { continue; }
+            runs.add(run);
+            var first = run.steps().getFirst();
+            var last = run.steps().getLast();
+            if (first.back() >= 0) { addRunEnd(result, first.at().translated(first.back())); }
+            if (last.ahead() >= 0) { addRunEnd(result, last.at().translated(last.ahead())); }
+        }
+        return result;
+    }
+
+    /**
+     * The hex beyond a run's end, and where it is a single-lane fork or merge, which stores no direction, its neighbours:
+     * its arms towards them run as this run does, so the junctions across them change with it.
+     */
+    private void addRunEnd(java.util.Set<Coords> result, Coords end) {
+        result.add(end);
+        Hex hex = hexAt(end);
+        if (hex == null || !SingleLane.single(hex)) { return; }
+        int exits = roadExits(hex);
+        if (Integer.bitCount(exits) <= 2) { return; }
+        for (int d = 0; d < 6; d++) {
+            if ((exits & 1 << d) != 0) { result.add(end.translated(d)); }
+        }
+    }
+
+    /**
+     * The single-lane layouts at {@code at} that no road authority would build or that strand traffic (LaneJunction#issues),
+     * and a one-way lane ending, or starting, in a dead end. Each with its fix; the editor never refuses them. Beside
+     * roadless concrete (an apron, a car park), whose traffic may come and go by any of the junction's lanes, only lanes
+     * running on the left are reported.
+     */
+    private List<String> laneIssues(Hex hex, Coords at) {
+        if (!hex.containsTerrain(Terrains.ROAD)) { return List.of(); }
+        boolean narrow = SingleLane.single(hex);
+        int exits = roadExits(hex);
+        List<String> result = new ArrayList<>();
+        if (narrow && Integer.bitCount(exits) == 1) {
+            String kind = (SingleLane.inbound(hex, at, this::hexAt) & exits) != 0 ? "DEAD_END" : "FROM_NOWHERE";
+            result.add(laneIssue(kind));
+        }
+        if (narrow ? Integer.bitCount(exits) < 3 : SingleLane.joined(hex, at, this::hexAt) == 0) { return result; }
+        LaneJunction junction = SingleLane.junction(hex, at, this::hexAt);
+        if (junction == null || Integer.bitCount(junction.arms()) < 2) { return result; }
+        String[] sides = Messages.getString("BoardEditor.sides").split(",");
+        boolean aprons = SingleLane.aprons(hex, at, this::hexAt, exits) != 0;
+        for (var issue : junction.issues()) {
+            var kind = issue.kind();
+            if (aprons && kind != LaneJunction.Kind.REVERSED_SPLIT && kind != LaneJunction.Kind.REVERSED_PAIR) { continue; }
+            // At a hub no two-lane road's directions choose an exit (Taken by).
+            String fix = kind == LaneJunction.Kind.UNFED_EXIT && junction.hub() ? "UNFED_EXIT.hub" : kind.name();
+            result.add(laneIssue(kind.name(), fix, issue.side() < 0 ? "" : sides[issue.side()],
+                  issue.other() < 0 ? "" : sides[issue.other()]));
+        }
+        return result;
+    }
+
+    private static String laneIssue(String kind) { return laneIssue(kind, kind); }
+
+    private static String laneIssue(String kind, String fix, Object... sides) {
+        return Messages.getString("BoardEditor.issueLane", Messages.getString("BoardEditor.issueLane." + kind, sides),
+              Messages.getString("BoardEditor.issueLane." + fix + ".fix"));
     }
 
     /**
@@ -2982,6 +3141,7 @@ public final class BoardEditorSession {
                 retained = HexAppearance.withRotation(retained, stored.rotation());
             }
             if (owner.equals("building") && stored != null) { retained = HexAppearance.withColours(retained, stored.colours()); }
+            retained = roadLanes(hex, owner, retained, stored);
             if (retained == null) { styles.remove(owner); } else { styles.put(owner, retained); }
         }
         else {
@@ -3000,15 +3160,16 @@ public final class BoardEditorSession {
                         setTerrain(hex, field.terrain(), compatible.getFirst().value());
                     }
                 }
-                styles.put(owner, HexAppearance.withTrafficControl(new HexAppearance(current == null ? null : current.variant(),
-                      null, variant.material(), null), control));
+                styles.put(owner, roadLanes(hex, owner, HexAppearance.withTrafficControl(new HexAppearance(
+                      current == null ? null : current.variant(), null, variant.material(), null), control), current));
             } else {
                 // A building's pivot and a skin's heading survive a change of design.
                 var was = current == null || current.variant() == null ? null : blueprint.variant(current.variant());
                 boolean skins = variant.skin() != null && was != null && was.skin() != null;
-                styles.put(owner, HexAppearance.withTrafficControl(new HexAppearance(variant.id(), null, current == null ? null : current.material(),
-                      variant.blend() ? .5 : null, owner.equals("building") && current != null ? current.colours() : BoardDecoration.Colours.NONE,
-                      (skins || owner.equals("building")) && current != null ? current.rotation() : null), control));
+                styles.put(owner, roadLanes(hex, owner, HexAppearance.withTrafficControl(new HexAppearance(variant.id(), null,
+                      current == null ? null : current.material(), variant.blend() ? .5 : null,
+                      owner.equals("building") && current != null ? current.colours() : BoardDecoration.Colours.NONE,
+                      (skins || owner.equals("building")) && current != null ? current.rotation() : null), control), current));
             }
         }
         if (owner.equals("building") && stored != null && stored.padding() != null) {
@@ -3075,6 +3236,134 @@ public final class BoardEditorSession {
         appearance(hex, owner, HexAppearance.withTrafficControl(hex.getAppearance().get(owner), control));
     }
 
+    /** Narrows a paved ground road to a single lane (value "single") or widens it to the two-lane default ("two"). */
+    private static void setLanes(Hex hex, String owner, String value) {
+        require(owner.equals(SingleLane.OWNER), "Only a ground road has a single-lane choice.");
+        require(value.equals("single") || value.equals("two"), "Choose a single lane or two lanes.");
+        require(hex.containsTerrain(Terrains.ROAD), Messages.getString("BoardEditor.addTerrainFirst"));
+        boolean single = value.equals("single");
+        require(!single || SingleLane.paved(hex), Messages.getString("BoardEditor.lanesPaved"));
+        require(!single || RailRoute.groundSides(hex) == 0, Messages.getString("BoardEditor.lanesRail"));
+        var current = hex.getAppearance().get(owner);
+        if (single == HexAppearance.singleLane(hex.getAppearance(), owner)) { return; }
+        // A new single lane takes its direction from its neighbours when its stroke completes (#singleLaneRuns).
+        appearance(hex, owner, HexAppearance.withLanes(current, single, null));
+    }
+
+    /**
+     * The look a road edit leaves on {@code hex}'s {@code owner}: {@code look}, keeping the lanes, direction and exit
+     * approaches of {@code from} on a paved ground road; any other road, and every other owner, has none.
+     */
+    private static HexAppearance roadLanes(Hex hex, String owner, HexAppearance look, HexAppearance from) {
+        if (owner.equals(SingleLane.OWNER) && SingleLane.paved(hex)) { return HexAppearance.keepLanes(look, from); }
+        return look == null || look.lanes() == null && look.exitFrom() == null ? look : HexAppearance.withLanes(look, false, null, null);
+    }
+
+    /** One run, one edit: the single-lane road across {@code target}'s side becomes the selected hex's entrance or exit. */
+    private void ramp(String target, String value) {
+        require(selected != null, Messages.getString("BoardEditor.selectHexFirst"));
+        require(target.startsWith(SingleLane.OWNER + ":"), "Choose a ground road's side.");
+        int side = Integer.parseInt(target.substring(SingleLane.OWNER.length() + 1));
+        require(side >= 0 && side < 6, "A hex has six sides.");
+        require(value.equals("entrance") || value.equals("exit"), "Choose an entrance or an exit.");
+        require((SingleLane.joined(board().getHex(selected), selected, this::hexAt) & 1 << side) != 0,
+              Messages.getString("BoardEditor.rampNone"));
+        var run = SingleLane.run(this::hexAt, selected.translated(side), (side + 3) % 6);
+        require(run != null, Messages.getString("BoardEditor.rampFork"));
+        // The run starts across the shared border: traffic running along it leaves the selected hex, an exit.
+        direct(run, value.equals("exit"));
+        if (!continuousEdit) { finishStroke(); }
+    }
+
+    /**
+     * One edit: which of the selected two-lane road's approaches may take the exit leaving it across {@code target}'s side
+     * ("all", or one approach's side), stored on that road, which drops what it stored for sides no ramp joins any longer.
+     */
+    private void rampFrom(String target, String value) {
+        require(selected != null, Messages.getString("BoardEditor.selectHexFirst"));
+        require(target.startsWith(SingleLane.OWNER + ":"), "Choose a ground road's side.");
+        int side = Integer.parseInt(target.substring(SingleLane.OWNER.length() + 1));
+        require(side >= 0 && side < 6, "A hex has six sides.");
+        Hex hex = board().getHex(selected);
+        require(SingleLane.feeds(hex, selected, side, this::hexAt) != 0, Messages.getString("BoardEditor.rampFromNone"));
+        int approaches = hex.getTerrain(Terrains.ROAD).getExits() & 63 & ~SingleLane.joined(hex, selected, this::hexAt);
+        int chosen = 0;
+        if (!value.equals("all")) {
+            int from = Integer.parseInt(value);
+            require(from >= 0 && from < 6 && (approaches & 1 << from) != 0, Messages.getString("BoardEditor.rampFromApproach"));
+            chosen = 1 << from;
+        }
+        // A ramp still joining keeps its choice, even while it is an entrance; a side no ramp joins any longer drops it.
+        Long stored = HexAppearance.exitFrom(hex.getAppearance(), SingleLane.OWNER);
+        int ramps = SingleLane.joined(hex, selected, this::hexAt);
+        long kept = 0;
+        for (int exit = 0; exit < 6; exit++) {
+            if (exit != side && stored != null && (ramps & 1 << exit) != 0) { kept |= stored & 63L << 6 * exit; }
+        }
+        long result = kept | (long) chosen << 6 * side;
+        change(selected, junction -> appearance(junction, SingleLane.OWNER,
+              HexAppearance.withExitFrom(junction.getAppearance().get(SingleLane.OWNER), result)));
+        if (!continuousEdit) { finishStroke(); }
+    }
+
+    /** One run, one edit: the selected hex's single-lane run reverses its direction of travel. */
+    private void reverseLane(String owner) {
+        require(selected != null, Messages.getString("BoardEditor.selectHexFirst"));
+        require(owner.equals(SingleLane.OWNER), "Only a ground road has a single-lane choice.");
+        var run = SingleLane.run(this::hexAt, selected, -1);
+        require(run != null, Messages.getString("BoardEditor.laneRunNone"));
+        direct(run, !SingleLane.forward(this::hexAt, run, at -> true));
+        if (!continuousEdit) { finishStroke(); }
+    }
+
+    /** Stores one direction of travel along every hex of {@code run}: from its start to its end, or the other way. */
+    private void direct(SingleLane.Run run, boolean forward) {
+        for (var step : run.steps()) {
+            change(step.at(), hex -> {
+                if (SingleLane.single(hex)) {
+                    appearance(hex, SingleLane.OWNER, SingleLane.directed(hex.getAppearance().get(SingleLane.OWNER),
+                          step.inbound(forward)));
+                }
+            });
+        }
+    }
+
+    /**
+     * Every single-lane run a stroke reached runs one way along its whole length ({@link SingleLane#forward}): as the
+     * hexes it already had run, else as the stroke drew it. A single-lane fork or merge stores no direction of its own:
+     * each of its arms runs as the run beyond it does ({@link SingleLane#inbound}).
+     */
+    private void singleLaneRuns() {
+        // A hex's vote is weighty where it was a single lane before the stroke and keeps the way it ran: an extension
+        // joined to a run does not outvote it, even where the run's end gains an exit.
+        Set<Coords> fresh = new HashSet<>();
+        boolean touched = false;
+        for (var entry : stroke.entrySet()) {
+            Hex before = entry.getValue(), after = board().getHex(entry.getKey());
+            touched |= !java.util.Objects.equals(before.getAppearance().get(SingleLane.OWNER),
+                  after.getAppearance().get(SingleLane.OWNER)) || before.containsTerrain(Terrains.ROAD) != after.containsTerrain(Terrains.ROAD)
+                  || after.containsTerrain(Terrains.ROAD)
+                        && before.getTerrain(Terrains.ROAD).getExits() != after.getTerrain(Terrains.ROAD).getExits();
+            if (!SingleLane.single(before) || !java.util.Objects.equals(HexAppearance.inbound(before.getAppearance(), SingleLane.OWNER),
+                  HexAppearance.inbound(after.getAppearance(), SingleLane.OWNER))) {
+                fresh.add(entry.getKey());
+            }
+        }
+        if (!touched) { return; }
+        List<SingleLane.Run> runs = new ArrayList<>();
+        for (Coords at : List.copyOf(stroke.keySet())) {
+            Hex hex = board().getHex(at);
+            if (SingleLane.single(hex) && Integer.bitCount(hex.getTerrain(Terrains.ROAD).getExits() & 63) > 2
+                  && HexAppearance.inbound(hex.getAppearance(), SingleLane.OWNER) != null) {
+                change(at, h -> appearance(h, SingleLane.OWNER, HexAppearance.withLanes(h.getAppearance().get(SingleLane.OWNER), true, null)));
+            }
+            for (var run : SingleLane.runsAround(this::hexAt, at)) {
+                if (runs.stream().noneMatch(existing -> existing.contains(run.steps().getFirst().at()))) { runs.add(run); }
+            }
+        }
+        for (var run : runs) { direct(run, SingleLane.forward(this::hexAt, run, at -> !fresh.contains(at))); }
+    }
+
     /** Arms a card: {@code owner}'s preset or design {@code key}, or for owner "theme" the Theme card of theme {@code key}. */
     private void chooseBrush(String owner, String key) {
         if (owner.equals("theme")) {
@@ -3113,6 +3402,7 @@ public final class BoardEditorSession {
         }
         else if (target.equals("edges")) { setEdges(next, value); }
         else if (target.equals("trafficControl")) { setTrafficControl(next, "road", value); }
+        else if (target.equals("lanes")) { setLanes(next, "road", value); }
         else if (target.startsWith("object:")) {
             require(!next.getDecorations().isEmpty(), Messages.getString("BoardEditor.chooseObjectBrush"));
             next.setDecorations(List.of(objectValue(next.getDecorations().getFirst(), target.substring(7), value)));
@@ -3423,8 +3713,9 @@ public final class BoardEditorSession {
             // step on Valencia (24,576 hexes) take 2.2 s instead of 0.26 s (one Flood, measured in the unit test JVM).
             undo.push(new Edit(java.util.Collections.unmodifiableMap(new LinkedHashMap<>(stroke)),
                   java.util.Collections.unmodifiableMap(after), currentId, id));
-            // The stroke holds every changed hex and its neighbours: exactly the hexes whose checks can change.
-            validate(stroke.keySet());
+            // The stroke holds every changed hex and its neighbours: the hexes whose checks can change, but for the
+            // junctions at the far ends of the single-lane runs it reaches, whose direction it may turn.
+            validate(withRunEnds(stroke.keySet()));
             currentId = id; redo.clear(); stroke.clear();
             // Bound retained stroke history, not the number of cells a legitimate stroke can edit.
             while (undo.size() > 200) { undo.removeLast(); }
@@ -3457,6 +3748,7 @@ public final class BoardEditorSession {
         }
         joinBuildingLooks();
         connectedBuildingLooks();
+        singleLaneRuns();
     }
 
     /** Placement or ground edits rebake coverage; appearance edits and collapse keep the saved gameplay state. */
@@ -3783,7 +4075,7 @@ public final class BoardEditorSession {
         (forward ? edit.after() : edit.before()).forEach((at, hex) -> restored.put(
               megamek.common.board.BoardLocation.of(at, board().getBoardId()), hex.duplicate()));
         board().setHexes(restored);
-        validate(edit.before().keySet());
+        validate(withRunEnds(edit.before().keySet()));
         currentId = forward ? edit.afterId() : edit.beforeId(); to.push(edit);
         selection.clear();
         Hex selectedHex = selected == null ? null : board().getHex(selected);
@@ -3852,8 +4144,8 @@ public final class BoardEditorSession {
     private HexAppearance colonyFinish(Hex hex, HexAppearance look) {
         var chosen = blueprint.variant(brushKey);
         if (look == null || chosen != null && !chosen.material().isEmpty()) { return look; }
-        return new HexAppearance(look.variant(), look.asset(), BoardSceneryLayouts.roadFinish(hex, look.material()),
-              look.strength(), look.colours(), look.rotation(), look.tracks(), look.beside(), look.trafficControl());
+        return HexAppearance.keepLanes(new HexAppearance(look.variant(), look.asset(), BoardSceneryLayouts.roadFinish(hex, look.material()),
+              look.strength(), look.colours(), look.rotation(), look.tracks(), look.beside(), look.trafficControl()), look);
     }
 
     /**
@@ -3873,8 +4165,9 @@ public final class BoardEditorSession {
                       && choice.material().equals("asphalt");
                 String material = slabs ? old.material() : colony && fresh && (key.equals("road") || key.equals("bridgeRoad"))
                       ? BoardSceneryLayouts.roadFinish(hex, choice.material()) : choice.material();
-                styles.put(key, HexAppearance.withTrafficControl(new HexAppearance(old == null ? null : old.variant(), old == null ? null : old.asset(),
-                      material, old == null ? null : old.strength()), old == null ? null : old.trafficControl()));
+                styles.put(key, roadLanes(hex, key, HexAppearance.withTrafficControl(new HexAppearance(old == null ? null : old.variant(),
+                      old == null ? null : old.asset(), material, old == null ? null : old.strength()),
+                      old == null ? null : old.trafficControl()), old));
                 hex.setAppearance(styles);
             }
         }

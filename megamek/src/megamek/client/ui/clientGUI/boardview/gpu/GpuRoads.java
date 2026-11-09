@@ -40,6 +40,7 @@ import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexTile;
+import megamek.common.board.SingleLane;
 
 /** Road material masks on terrain or bridge decks; the supporting surfaces own their physical shape. */
 final class GpuRoads {
@@ -373,8 +374,12 @@ final class GpuRoads {
     }
 
     static List<Patch> patches(BoardScene.Tile tile, BoardRoad road) {
-        return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false, slabs(tile, false),
-              HexAppearance.trafficControl(tile.appearance(), "road", tile.roadExits()), road.crossing(tile, false));
+        // A junction where nothing needs controls has none whatever is chosen, and a hub never has lights (BoardRoad#trafficControl).
+        int exits = tile.roadExits();
+        var control = road.trafficControl(exits, SingleLane.control(tile.appearance(), exits, road.single(), road.aprons(),
+              road.junction(exits)));
+        return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false, slabs(tile, false), control,
+              road.crossing(tile, false));
     }
 
     /**
@@ -709,6 +714,8 @@ final class GpuRoads {
             patches.add(divider);
             Area stops = road.stopLines(approaches);
             stops.add(road.flowMarkings());
+            stops.add(road.arrows(exits));
+            stops.add(road.approachArrows(exits));
             stops.subtract(crossing.clearance());
             if (!stops.isEmpty()) {
                 patches.add(new Patch(stops, "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, PAINT_LIFT, null));

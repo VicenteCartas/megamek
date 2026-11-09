@@ -16,14 +16,32 @@ import java.util.Set;
  * corridor and its physical side at each border ({@link #beside(Map, String)}); the middle corridor stores none.
  * {@code trafficControl} chooses cosmetic junction controls for {@code "road"} or {@code "bridgeRoad"}; an absent
  * choice uses stop signs at three-arm junctions and gantries at larger junctions.
+ * {@code lanes} narrows a ground paved road ({@code "road"}) to a single, one-way lane ({@link #SINGLE_LANE}); absent is
+ * the default two-lane carriageway. {@code inbound} is that single lane's direction of travel: the sides through which
+ * traffic enters the hex (a mask of the six sides), the others being where it leaves; absent, a default is derived
+ * ({@link SingleLane#inbound}). {@code exitFrom}, on a two-lane road that single-lane exits (off-ramps) leave, lists for
+ * each exit the sides whose traffic may take it, as bit {@code 6 * exit + side}; an exit with none listed, or none
+ * stored, may be taken from every side ({@link SingleLane#feeds}). All three are cosmetic, like the junction controls:
+ * rules and the 2D views ignore them.
  */
 public record HexAppearance(String variant, String asset, String material, Double strength,
       BoardDecoration.Colours colours, Integer rotation, Integer tracks, Integer beside,
-      TrafficControl trafficControl, String uid, Double padding, Integer separated) implements Serializable {
-    /** An appearance with no separated sides. */
+      TrafficControl trafficControl, String uid, Double padding, Integer separated, Integer lanes, Integer inbound,
+      Long exitFrom) implements Serializable {
+    /** The one stored lane count: a single, one-way lane. Two lanes, the default, are stored as none. */
+    public static final int SINGLE_LANE = 1;
+
+    /** An appearance with no separated sides, of a two-lane road or none. */
     public HexAppearance(String variant, String asset, String material, Double strength, BoardDecoration.Colours colours,
           Integer rotation, Integer tracks, Integer beside, TrafficControl trafficControl, String uid, Double padding) {
         this(variant, asset, material, strength, colours, rotation, tracks, beside, trafficControl, uid, padding, null);
+    }
+    /** An appearance with {@code separated} sides, of a two-lane road or none. */
+    public HexAppearance(String variant, String asset, String material, Double strength, BoardDecoration.Colours colours,
+          Integer rotation, Integer tracks, Integer beside, TrafficControl trafficControl, String uid, Double padding,
+          Integer separated) {
+        this(variant, asset, material, strength, colours, rotation, tracks, beside, trafficControl, uid, padding, separated,
+              null, null, null);
     }
     /** An appearance with no extra inset from the hex border. */
     public HexAppearance(String variant, String asset, String material, Double strength, BoardDecoration.Colours colours,
@@ -38,7 +56,8 @@ public record HexAppearance(String variant, String asset, String material, Doubl
 
     /** Retains an asset pack's identity even while the pack is absent from the installed catalog. */
     public HexAppearance withUid(String uid) {
-        return new HexAppearance(variant, asset, material, strength, colours, rotation, tracks, beside, trafficControl, uid, padding);
+        return new HexAppearance(variant, asset, material, strength, colours, rotation, tracks, beside, trafficControl, uid, padding,
+              separated, lanes, inbound, exitFrom);
     }
     public static final Set<String> OWNERS = Set.of("ground", "road", "building", "pavement", "fuelTank",
           "vegetation", "rough", "bridge", "bridgeRoad", "rail", "bridgeRail", "scorch", "footprint", "kitVariant", "buildingProfile",
@@ -91,8 +110,19 @@ public record HexAppearance(String variant, String asset, String material, Doubl
 
     /** Priority three-arm junctions use stop signs; larger junctions use signals unless explicitly overridden. */
     public static TrafficControl trafficControl(Map<String, HexAppearance> appearance, String owner, int exits) {
+        return trafficControl(appearance, owner, exits, 0);
+    }
+
+    /**
+     * As {@link #trafficControl(Map, String, int)}, where single-lane ramps join the road across {@code ramps}: they are no
+     * roads of their own, so stop signs serve the junction until four two-lane roads meet there.
+     */
+    public static TrafficControl trafficControl(Map<String, HexAppearance> appearance, String owner, int exits, int ramps) {
         HexAppearance stored = appearance.get(owner);
         if (stored != null && stored.trafficControl() != null) { return stored.trafficControl(); }
+        if ((exits & ramps & 63) != 0) {
+            return Integer.bitCount(exits & ~ramps & 63) >= 4 ? TrafficControl.GANTRY : TrafficControl.STOPS;
+        }
         return Integer.bitCount(exits & 63) == 3 ? TrafficControl.STOPS : TrafficControl.GANTRY;
     }
 
@@ -103,11 +133,84 @@ public record HexAppearance(String variant, String asset, String material, Doubl
                   BoardDecoration.Colours.NONE, null, null, null, control);
         }
         if (control == null && current.variant() == null && current.asset() == null && current.material() == null
-              && current.rotation() == null && current.padding() == null && current.colours().slots().isEmpty()) {
+              && current.rotation() == null && current.padding() == null && current.colours().slots().isEmpty()
+              && current.lanes() == null && current.exitFrom() == null && current.separated() == null) {
             return null;
         }
         return new HexAppearance(current.variant(), current.asset(), current.material(), current.strength(),
-              current.colours(), current.rotation(), current.tracks(), current.beside(), control, current.uid(), current.padding());
+              current.colours(), current.rotation(), current.tracks(), current.beside(), control, current.uid(), current.padding(),
+              current.separated(), current.lanes(), current.inbound(), current.exitFrom());
+    }
+
+    /**
+     * Whether a hex's appearance for {@code owner} narrows its road to a single, one-way lane ({@link #SINGLE_LANE}). Only
+     * a paved road ({@link SingleLane#paved}) is drawn so; the 3D board reads it with the road's level.
+     */
+    public static boolean singleLane(Map<String, HexAppearance> appearance, String owner) {
+        HexAppearance stored = appearance.get(owner);
+        return stored != null && stored.lanes() != null && stored.lanes() == SINGLE_LANE;
+    }
+
+    /** The single lane's stored direction for {@code owner}: the sides traffic enters by; null when none is stored. */
+    public static Integer inbound(Map<String, HexAppearance> appearance, String owner) {
+        HexAppearance stored = appearance.get(owner);
+        return stored == null || stored.lanes() == null ? null : stored.inbound();
+    }
+
+    /**
+     * For each exit (off-ramp) leaving a two-lane road, the sides whose traffic may take it, as stored for {@code owner}:
+     * bit {@code 6 * exit + side}; null when none are stored, so every side may take every exit.
+     */
+    public static Long exitFrom(Map<String, HexAppearance> appearance, String owner) {
+        HexAppearance stored = appearance.get(owner);
+        return stored == null || stored.lanes() != null ? null : stored.exitFrom();
+    }
+
+    /**
+     * Changes only the road's lanes: {@code single} narrows it to one one-way lane entered through {@code inbound} (a side
+     * mask, or null for the derived default), dropping any exit approaches, which only a two-lane road keeps; otherwise
+     * the two-lane default, which stores no lanes or direction and keeps its exit approaches.
+     */
+    public static HexAppearance withLanes(HexAppearance current, boolean single, Integer inbound) {
+        return withLanes(current, single, inbound, single || current == null ? null : current.exitFrom());
+    }
+
+    /** As {@link #withLanes(HexAppearance, boolean, Integer)}, with a two-lane road's exit approaches ({@link #exitFrom}). */
+    public static HexAppearance withLanes(HexAppearance current, boolean single, Integer inbound, Long exitFrom) {
+        Integer lanes = single ? SINGLE_LANE : null;
+        Integer flow = single ? inbound : null;
+        Long from = single || exitFrom == null || exitFrom == 0 ? null : exitFrom;
+        if (current == null) {
+            return lanes == null && from == null ? null : new HexAppearance(null, null, null, null, BoardDecoration.Colours.NONE,
+                  null, null, null, null, null, null, null, lanes, flow, from);
+        }
+        if (lanes == null && from == null && current.variant() == null && current.asset() == null && current.material() == null
+              && current.rotation() == null && current.padding() == null && current.colours().slots().isEmpty()
+              && current.trafficControl() == null && current.separated() == null) {
+            return null;
+        }
+        return new HexAppearance(current.variant(), current.asset(), current.material(), current.strength(),
+              current.colours(), current.rotation(), current.tracks(), current.beside(), current.trafficControl(), current.uid(),
+              current.padding(), current.separated(), lanes, flow, from);
+    }
+
+    /** A two-lane road's appearance with its exit approaches ({@link #exitFrom}) changed to {@code exitFrom}; 0 or null for none. */
+    public static HexAppearance withExitFrom(HexAppearance current, Long exitFrom) {
+        return withLanes(current, false, null, exitFrom);
+    }
+
+    /**
+     * {@code look} with the lanes, direction and exit approaches of {@code from} (either may be null), as a road's other
+     * edits keep them.
+     */
+    public static HexAppearance keepLanes(HexAppearance look, HexAppearance from) {
+        Integer lanes = from == null ? null : from.lanes(), inbound = from == null ? null : from.inbound();
+        Long exits = from == null ? null : from.exitFrom();
+        if (look == null ? lanes == null && exits == null : java.util.Objects.equals(look.lanes(), lanes)
+              && java.util.Objects.equals(look.inbound(), inbound) && java.util.Objects.equals(look.exitFrom(), exits)) {
+            return look;
+        }
+        return withLanes(look, lanes != null, inbound, exits);
     }
 
     /** Changes only the design's rotation; zero removes it, including an otherwise empty appearance. */
@@ -116,9 +219,11 @@ public record HexAppearance(String variant, String asset, String material, Doubl
             return rotation == 0 ? null : new HexAppearance(null, null, null, null, BoardDecoration.Colours.NONE, rotation);
         }
         if (rotation == 0 && current.variant() == null && current.asset() == null && current.material() == null
-              && current.trafficControl() == null && current.padding() == null && current.colours().slots().isEmpty()) { return null; }
+              && current.trafficControl() == null && current.padding() == null && current.colours().slots().isEmpty()
+              && current.lanes() == null && current.exitFrom() == null && current.separated() == null) { return null; }
         return new HexAppearance(current.variant(), current.asset(), current.material(), current.strength(),
-              current.colours(), rotation, current.tracks(), current.beside(), current.trafficControl(), current.uid(), current.padding());
+              current.colours(), rotation, current.tracks(), current.beside(), current.trafficControl(), current.uid(), current.padding(),
+              current.separated(), current.lanes(), current.inbound(), current.exitFrom());
     }
 
     /** Changes only colour overrides, keeping the design, rotation and any unavailable asset's identity. */
@@ -127,9 +232,11 @@ public record HexAppearance(String variant, String asset, String material, Doubl
             return colours.slots().isEmpty() ? null : new HexAppearance(null, null, null, null, colours);
         }
         if (colours.slots().isEmpty() && current.variant() == null && current.asset() == null && current.material() == null
-              && current.rotation() == null && current.trafficControl() == null && current.padding() == null) { return null; }
+              && current.rotation() == null && current.trafficControl() == null && current.padding() == null
+              && current.lanes() == null && current.exitFrom() == null && current.separated() == null) { return null; }
         return new HexAppearance(current.variant(), current.asset(), current.material(), current.strength(),
-              colours, current.rotation(), current.tracks(), current.beside(), current.trafficControl(), current.uid(), current.padding());
+              colours, current.rotation(), current.tracks(), current.beside(), current.trafficControl(), current.uid(), current.padding(),
+              current.separated(), current.lanes(), current.inbound(), current.exitFrom());
     }
 
     /** Extra horizontal inset, as a percentage of the isolated footprint; connected hexes keep their joining reach. */
@@ -145,9 +252,11 @@ public record HexAppearance(String variant, String asset, String material, Doubl
             return value == null ? null : new HexAppearance(null, null, null, null, null, null, null, null, null, null, value);
         }
         if (value == null && current.variant() == null && current.asset() == null && current.material() == null
-              && current.rotation() == null && current.trafficControl() == null && current.colours().slots().isEmpty()) { return null; }
+              && current.rotation() == null && current.trafficControl() == null && current.colours().slots().isEmpty()
+              && current.lanes() == null && current.exitFrom() == null && current.separated() == null) { return null; }
         return new HexAppearance(current.variant(), current.asset(), current.material(), current.strength(), current.colours(),
-              current.rotation(), current.tracks(), current.beside(), current.trafficControl(), current.uid(), value);
+              current.rotation(), current.tracks(), current.beside(), current.trafficControl(), current.uid(), value,
+              current.separated(), current.lanes(), current.inbound(), current.exitFrom());
     }
 
     /**
@@ -188,7 +297,8 @@ public record HexAppearance(String variant, String asset, String material, Doubl
         }
         if (value == null && current.variant() == null) { return null; }
         return new HexAppearance(current.variant(), current.asset(), current.material(), current.strength(), current.colours(),
-              current.rotation(), current.tracks(), current.beside(), current.trafficControl(), current.uid(), current.padding(), value);
+              current.rotation(), current.tracks(), current.beside(), current.trafficControl(), current.uid(), current.padding(), value,
+              current.lanes(), current.inbound(), current.exitFrom());
     }
 
     /**
@@ -352,8 +462,18 @@ public record HexAppearance(String variant, String asset, String material, Doubl
             throw new IllegalArgumentException("Separated sides are a mask of the six directions");
         }
         if (variant == null && asset == null && material == null && trafficControl == null && rotation == null && padding == null
-              && separated == null && colours.slots().isEmpty()) {
-            throw new IllegalArgumentException("An appearance needs a variant, asset, material, rotation or traffic controls");
+              && separated == null && colours.slots().isEmpty() && lanes == null && exitFrom == null) {
+            throw new IllegalArgumentException(
+                  "An appearance needs a variant, asset, material, rotation, traffic controls, lanes or exit approaches");
+        }
+        if (lanes != null && lanes != SINGLE_LANE) {
+            throw new IllegalArgumentException("A road stores a single lane only; two lanes, the default, are stored as none");
+        }
+        if (exitFrom != null && (lanes != null || exitFrom <= 0 || exitFrom >= 1L << 36)) {
+            throw new IllegalArgumentException("A two-lane road's exit approaches are a non-empty mask of side pairs");
+        }
+        if (inbound != null && (lanes == null || inbound < 0 || inbound > 63)) {
+            throw new IllegalArgumentException("A single lane's direction is a mask of the sides traffic enters by");
         }
         for (String key : new String[] { variant, asset, material }) {
             if (key != null && (key.isBlank() || key.contains("..") || key.startsWith("/") || key.contains("\\") || key.contains(":"))) {
@@ -386,6 +506,7 @@ public record HexAppearance(String variant, String asset, String material, Doubl
               || rotation != null && !owner.equals("building")
                     && (!owner.equals("vegetation") || variant == null || rotation % 30 != 0)
               || trafficControl != null && !owner.equals("road") && !owner.equals("bridgeRoad")
+              || (lanes != null || exitFrom != null) && !owner.equals("road")
               || (tracks != null || beside != null) && !owner.equals("rail") && !owner.equals("bridgeRail")
               || separated != null && !owner.equals("water") && !owner.equals("pavement")) {
             throw new IllegalArgumentException("Appearance fields do not belong to " + owner);
