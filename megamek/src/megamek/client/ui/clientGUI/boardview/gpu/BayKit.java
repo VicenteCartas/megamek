@@ -244,14 +244,16 @@ final class BayKit {
         double chamfer = seamed ? spec.roof().inset() : run.joints() != null ? run.joints().length() : 0;
         var result = new GeneratedMesh();
         List<GeneratedMesh.Keep> cut = piece.direction() != null ? KitOutline.sector(piece.direction()) : List.of();
-        for (var wall : piece.walls()) {
+        // Each side laid whole, so its bays repeat along it unbroken.
+        List<KitOutline.Wall> sides = KitOutline.sides(piece.walls());
+        for (var wall : sides) {
             double outlineScale = piece.direction() == null && !piece.tags().contains("-link-") ? footprintScale : 1;
-            List<GeneratedMesh.Keep> keeps = keeps(wall, piece.walls());
+            List<GeneratedMesh.Keep> keeps = keeps(wall, sides);
             KitOutline.Wall[] partners = square || piece.direction() == null ? new KitOutline.Wall[2]
                   : new KitOutline.Wall[] { partner(spec, piece.direction(), wall, true, fitting == null),
                         partner(spec, piece.direction(), wall, false, fitting == null) };
             double[] goesOn = facade(result, run, wall, keeps, modelled, lod, top ? ROOF_INSET : 0, ground, outlineScale,
-                  facet(spec, wall), joints, cap, chamfer, cut, piece.walls(), partners);
+                  facet(spec, wall), joints, cap, chamfer, cut, sides, partners);
             if (ground && spec.sidewalk() != null) { sidewalk(result, spec.sidewalk(), wall, keeps, goesOn[0], goesOn[1]); }
         }
         // Closed modules: a module parted from the next at its joints has its own side along each, behind the grooves,
@@ -788,7 +790,8 @@ final class BayKit {
 
     /** A ground storey's door bays: a whole hex's front, next to its middle; a hub face (cut at both ends), its first. */
     private static Set<Integer> doors(KitOutline.Wall wall, int count) {
-        if (wall.front()) { return Set.of(wall.end() == KitOutline.End.JOINT ? count - 1 : 0); }
+        // A whole hex's front: the bay or two at its middle.
+        if (wall.front()) { return count % 2 == 0 ? Set.of(count / 2 - 1, count / 2) : Set.of(count / 2); }
         return wall.start() == KitOutline.End.CUT && wall.end() == KitOutline.End.CUT ? Set.of(0) : Set.of();
     }
 

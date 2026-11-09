@@ -395,6 +395,30 @@ final class KitOutline {
     }
 
     /**
+     * {@code walls} with each outline edge whole again ({@link #outlineWalls} cuts one at the cut lines, JOINT ends): a
+     * facade laid along the parts separately would stretch its bays to each part and break its pattern there.
+     */
+    static List<Wall> sides(List<Wall> walls) {
+        List<Wall> result = new ArrayList<>();
+        for (Wall wall : walls) {
+            // A later part of an edge: its first part joins it on.
+            if (wall.start() == End.JOINT
+                  && walls.stream().anyMatch(other -> other.end() == End.JOINT && close(other.q(), wall.p()))) {
+                continue;
+            }
+            Wall last = wall;
+            List<GeneratedMesh.Keep> keeps = new ArrayList<>(wall.keeps());
+            for (Wall next = following(wall, walls); last.end() == End.JOINT && next != null && next.start() == End.JOINT;
+                  next = following(next, walls)) {
+                keeps.addAll(next.keeps());
+                last = next;
+            }
+            result.add(last == wall ? wall : new Wall(wall.p(), last.q(), wall.start(), last.end(), keeps, wall.front()));
+        }
+        return result;
+    }
+
+    /**
      * The walls round a convex outline (counter-clockwise) but on its open edges (edge i runs from point i): joints on
      * the cut lines, mitred at its corners.
      */
