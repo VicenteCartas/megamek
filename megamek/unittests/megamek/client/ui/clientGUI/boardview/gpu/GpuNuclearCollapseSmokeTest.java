@@ -323,18 +323,34 @@ class GpuNuclearCollapseSmokeTest {
                     report.add("ground zero " + groundZero.getBoardNum() + "; buildings the crater took: " + taken(before, strike)
                           + ", brought down as the phase ended: " + server.collapsed.size() + "; listed on the completion: "
                           + completions.getLast().collapses().size() + "; falling: " + starts.size() + " of " + falls.size());
-                    // A chain's next explosion goes off as the last one's front reaches it (UnitPlayback#duration).
+                    // A chain's next explosion goes off as its cause's front reaches it (UnitPlayback#chained).
                     var played = completions.stream().filter(blast -> takes.containsKey(blast.id()))
                           .sorted(java.util.Comparator.comparing(blast -> takes.get(blast.id()))).toList();
-                    for (int index = 0; index < played.size(); index++) {
-                        var blast = played.get(index);
+                    // What set each explosion off: the one the server nested it in.
+                    Map<java.util.UUID, NuclearDetonation> causes = new HashMap<>();
+                    var open = new java.util.ArrayDeque<NuclearDetonation>();
+                    for (var boundary : server.boundaries) {
+                        if (boundary.completes()) { open.pop(); continue; }
+                        if (!open.isEmpty()) { causes.put(boundary.detonation().id(), open.peek()); }
+                        open.push(boundary.detonation());
+                    }
+                    List<Double> offFront = new ArrayList<>();
+                    for (var blast : played) {
+                        var cause = causes.get(blast.id());
+                        String timing = "";
+                        if (cause != null && takes.containsKey(cause.id())) {
+                            int after = takes.get(blast.id()) - takes.get(cause.id());
+                            double front = UnitPlayback.arrival(cause, blast) / PLAYBACK_FRAME;
+                            offFront.add(Math.abs(after - front));
+                            timing = ", " + after + " frames after " + cause.coords().getBoardNum() + " (its front: "
+                                  + Math.round(front) + ")";
+                        }
                         report.add(blast.kind() + " at " + blast.coords().getBoardNum() + ": took its first on frame "
                               + (takes.get(blast.id()) - contact) + " after the flash, named " + blast.collapses().size()
-                              + (index + 1 < played.size() ? ", the next " + (takes.get(played.get(index + 1).id())
-                                    - takes.get(blast.id())) + " frames on (played for "
-                                    + Math.round(UnitPlayback.duration(blast, played.get(index + 1)) / PLAYBACK_FRAME)
-                                    + ")" : ""));
+                              + timing);
                     }
+                    assertTrue(offFront.stream().allMatch(frames -> frames <= 2),
+                          "Each chained explosion goes off as its cause's front reaches it: " + offFront);
                     report.add("frames off the front: median " + percentile(lateness, .5) + ", p95 " + percentile(lateness, .95)
                           + ", max " + percentile(lateness, 1));
                     report.add("frame ms through the wave: median " + percentile(sorted, .5) + ", p95 " + percentile(sorted, .95)

@@ -33,6 +33,9 @@ final class UnitPlayback {
     /** GL-owned visual preview; NaN keeps each event's captured game gravity. Read only when a jump starts. */
     float gravityOverride = Float.NaN;
     private final ArrayDeque<BoardScene.Animation> pending = new ArrayDeque<>();
+    /** The chain of explosions playing: when each went off after the first started, and when the next starts (#chained). */
+    private final Map<UUID, Double> chainFlashes = new HashMap<>();
+    private double chainAt;
     private final Map<Integer, BoardScene.Waypoint> observed = new HashMap<>();
     private BoardScene.Animation active;
     private UnitAttack attack;
@@ -212,15 +215,11 @@ final class UnitPlayback {
                     collectVolley();
                 } else if (active instanceof BoardScene.Detonation detonation) {
                     combatSeconds = 0;
-                    combatContact = DETONATION_CONTACT_SECONDS;
+                    // One of a chain goes off as it starts, on its cause's front (#chained); any other after a moment.
+                    boolean chain = detonation.cause() != null && chainFlashes.containsKey(detonation.cause().id());
+                    combatContact = chain ? 0 : DETONATION_CONTACT_SECONDS;
                     combatTerrainRelease = combatContact;
-                    BoardScene.Detonation following = null;
-                    for (var next : pending) {
-                        if (next instanceof BoardScene.SceneUpdate) { continue; }
-                        if (next instanceof BoardScene.Detonation chained) { following = chained; }
-                        break;
-                    }
-                    combatDuration = duration(detonation.result(), following == null ? null : following.result());
+                    combatDuration = chained(detonation, chain);
                     detonationStarted = false;
                 } else if (active instanceof BoardScene.Conversion change) {
                     conversion = new UnitConversion(change);
@@ -647,23 +646,43 @@ final class UnitPlayback {
     }
 
     /**
-     * As {@link #duration(megamek.common.NuclearDetonation)}, but an explosion followed by {@code next}, an explosion
-     * within its reach that it set off (a chain of fuel tanks), plays only until its front reaches it: the next goes off
-     * there, as the falls around it go on.
+     * How long {@code detonation} plays (#duration), starting now and going off after {@link #combatContact}: in a
+     * {@code chain} of explosions (Detonation#cause), only until the next one goes off, as its own cause's front reaches
+     * it, or at once if that came sooner (a sibling after a nephew, in the server's order). Remembers when each of the
+     * chain went off.
      */
-    static double duration(megamek.common.NuclearDetonation result, megamek.common.NuclearDetonation next) {
-        double whole = duration(result);
-        if (next == null || result.kind() != megamek.common.NuclearDetonation.Kind.EXPLOSION
-              || next.kind() != megamek.common.NuclearDetonation.Kind.EXPLOSION || next.boardId() != result.boardId()) {
-            return whole;
+    private double chained(BoardScene.Detonation detonation, boolean chain) {
+        if (!chain) {
+            chainFlashes.clear();
+            chainAt = 0;
         }
-        float radius = GpuArtilleryBlast.nuclearRadius(result.stats());
-        var from = BoardGeometry.center(result.coords(), 0);
+        double at = chainAt;
+        chainFlashes.put(detonation.result().id(), at + combatContact);
+        double whole = duration(detonation.result()) - (DETONATION_CONTACT_SECONDS - combatContact);
+        BoardScene.Detonation next = null;
+        for (var queued : pending) {
+            if (queued instanceof BoardScene.SceneUpdate) { continue; }
+            if (queued instanceof BoardScene.Detonation following) { next = following; }
+            break;
+        }
+        Double causeFlash = next == null || next.cause() == null ? null : chainFlashes.get(next.cause().id());
+        double played = causeFlash == null ? whole
+              : Math.max(combatContact, Math.min(whole, causeFlash + arrival(next.cause(), next.result()) - at));
+        chainAt = at + played;
+        return played;
+    }
+
+    /**
+     * Playback seconds from {@code cause}'s flash until its front reaches {@code next}'s ground zero, which goes off then
+     * (GpuArtilleryBlast#shockArrival); a ground zero beyond its reach, as it ends.
+     */
+    static double arrival(megamek.common.NuclearDetonation cause, megamek.common.NuclearDetonation next) {
+        float radius = GpuArtilleryBlast.nuclearRadius(cause.stats());
+        var from = BoardGeometry.center(cause.coords(), 0);
         var to = BoardGeometry.center(next.coords(), 0);
         float distance = com.badlogic.gdx.math.Vector2.dst(from.x, from.y, to.x, to.y);
-        if (distance > radius) { return whole; }
-        // Its front leaves at its contact, as the next one's flash comes at its own.
-        return Math.min(whole, GpuArtilleryBlast.shockArrival(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK);
+        return distance > radius ? duration(cause)
+              : GpuArtilleryBlast.shockArrival(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK;
     }
 
     boolean paused() { return paused; }

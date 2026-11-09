@@ -1194,12 +1194,13 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
     /** A scheduled strike has a location and resolved blast parameters, but no attacking unit. */
     /**
-     * A scheduled nuclear strike, with everything it brings down ({@code collapses}): what its own checkpoint shows gone
+     * A strike or an explosion, with everything it brings down ({@code collapses}): what its own checkpoint shows gone
      * and what the rules bring down at the phase's end; and the trees it fells ({@code felled}). Each falls as its front
-     * reaches it.
+     * reaches it. An explosion another set off (a chain of fuel tanks, nested inside it on the server) names that one as
+     * its {@code cause}, null for any other.
      */
-    record Detonation(megamek.common.NuclearDetonation result, List<TileTransition.Collapse> collapses, List<Felled> felled)
-          implements Animation {
+    record Detonation(megamek.common.NuclearDetonation result, List<TileTransition.Collapse> collapses, List<Felled> felled,
+          megamek.common.NuclearDetonation cause) implements Animation {
         /** A hex's trees a strike fells: its scene's tree features that stand nowhere in the strike's checkpoint. */
         record Felled(Coords coords, List<Feature> trees) {
             Felled {
@@ -1213,10 +1214,10 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         }
 
         Detonation(megamek.common.NuclearDetonation result, List<TileTransition.Collapse> collapses) {
-            this(result, collapses, List.of());
+            this(result, collapses, List.of(), null);
         }
 
-        Detonation(megamek.common.NuclearDetonation result) { this(result, List.of(), List.of()); }
+        Detonation(megamek.common.NuclearDetonation result) { this(result, List.of(), List.of(), null); }
 
         @Override
         public int entityId() { return -1; }

@@ -179,8 +179,9 @@ final class GpuBoardSource implements BoardSource {
     private long dialogSequence;
     private Frame frame;
     /** Packet-bounded presentation capture only; the game continues to apply its authoritative strike updates. */
+    /** A detonation being captured; {@code cause}, the explosion it is nested in, that set it off. */
     private record NuclearCapture(megamek.common.NuclearDetonation strike, Frame before,
-          List<BoardScene.Animation> consequences) { }
+          List<BoardScene.Animation> consequences, megamek.common.NuclearDetonation cause) { }
     /**
      * The detonations being captured, innermost first: an explosion inside another blast (a fuel tank a strike set off)
      * plays after the blast that holds it.
@@ -315,9 +316,11 @@ final class GpuBoardSource implements BoardSource {
                                   .map(BoardScene.Animation::entityId).collect(Collectors.toSet());
                             consequences.stream().filter(BoardScene.Concealed.class::isInstance)
                                   .forEach(GpuBoardSource.this::queueAnimation);
-                            queueAnimation(new BoardScene.Detonation(result, falls, felled));
+                            queueAnimation(new BoardScene.Detonation(result, falls, felled, capture.cause()));
                             queueAnimation(new BoardScene.SceneUpdate(next.scene()));
+                            // Its checkpoint is the newest: those its consequences took (an explosion it set off) are older.
                             consequences.stream().filter(action -> !(action instanceof BoardScene.Concealed)
+                                  && !(action instanceof BoardScene.SceneUpdate)
                                   && !concealed.contains(action.entityId())
                                   && !(action instanceof BoardScene.Combat combat && combat.target() != null
                                         && concealed.contains(combat.target().id()))
@@ -326,7 +329,8 @@ final class GpuBoardSource implements BoardSource {
                                   .forEach(GpuBoardSource.this::queueAnimation);
                         } else {
                             publishScene(next, true);
-                            captures.push(new NuclearCapture(result, next, new ArrayList<>()));
+                            captures.push(new NuclearCapture(result, next, new ArrayList<>(),
+                                  captures.isEmpty() ? null : captures.peek().strike()));
                             if (receivedAttacks.size() > 2048) { receivedAttacks.removeFirst(); }
                         }
                     }

@@ -69,32 +69,42 @@ class UnitPlaybackTest {
     }
 
     /**
-     * A chain of fuel tanks: the explosion a tank two hexes off set off goes off as the first one's front reaches it
-     * (GpuArtilleryBlast#shockArrival), long before the first one's falls are down.
+     * A chain of fuel tanks as the server nests it: the first sets off a tank two hexes north, which sets off one beyond
+     * it, and a tank five hexes south. Each goes off as its own cause's front reaches it (GpuArtilleryBlast
+     * #shockArrival), the southern one timed from the first tank although it plays after the northern pair, and all of
+     * them long before the first one's falls are down; an explosion of its own after them goes off as the chain ends.
      */
     @Test
-    void aChainedExplosionGoesOffAsTheFrontReachesIt() {
-        var first = megamek.common.NuclearDetonation.explosion(UUID.randomUUID(), 0, new Coords(2, 2), 0, 80, 8);
-        var chained = megamek.common.NuclearDetonation.explosion(UUID.randomUUID(), 0, new Coords(2, 4), 0, 50, 5);
+    void eachTankOfAChainGoesOffAsItsCausesFrontReachesIt() {
+        var first = megamek.common.NuclearDetonation.explosion(UUID.randomUUID(), 0, new Coords(4, 6), 0, 80, 8);
+        var north = megamek.common.NuclearDetonation.explosion(UUID.randomUUID(), 0, new Coords(4, 4), 0, 50, 5);
+        var beyond = megamek.common.NuclearDetonation.explosion(UUID.randomUUID(), 0, new Coords(4, 2), 0, 50, 5);
+        var south = megamek.common.NuclearDetonation.explosion(UUID.randomUUID(), 0, new Coords(4, 11), 0, 50, 5);
+        var alone = megamek.common.NuclearDetonation.explosion(UUID.randomUUID(), 0, new Coords(4, 7), 0, 50, 5);
         var unchanged = UnitPlaybackFixture.scene();
         var playback = new UnitPlayback();
-        playback.accept(List.of(new BoardScene.SceneUpdate(unchanged), new BoardScene.Detonation(first),
-              new BoardScene.SceneUpdate(unchanged), new BoardScene.Detonation(chained), new BoardScene.SceneUpdate(unchanged)),
-              unchanged, ignored -> false);
+        playback.accept(List.of(new BoardScene.SceneUpdate(unchanged), detonation(first, null),
+              new BoardScene.SceneUpdate(unchanged), detonation(north, first), new BoardScene.SceneUpdate(unchanged),
+              detonation(beyond, north), detonation(south, first), detonation(alone, null)), unchanged, ignored -> false);
         double step = 1 / 480.0, clock = 0;
         java.util.Map<megamek.common.NuclearDetonation, Double> wentOff = new java.util.HashMap<>();
-        while (wentOff.size() < 2 && clock < 10) {
+        while (wentOff.size() < 5 && clock < 20) {
             playback.advance(step / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
             clock += step;
             for (var detonation : playback.takeDetonations()) { wentOff.put(detonation.result(), clock); }
         }
-        var from = BoardGeometry.center(first.coords(), 0);
-        var to = BoardGeometry.center(chained.coords(), 0);
-        float radius = GpuArtilleryBlast.nuclearRadius(first.stats());
-        double arrival = GpuArtilleryBlast.shockArrival(com.badlogic.gdx.math.Vector2.dst(from.x, from.y, to.x, to.y), radius)
-              / GpuArtilleryBlast.SECONDS_PER_PLAYBACK;
-        assertEquals(arrival, wentOff.get(chained) - wentOff.get(first), 2 * step, "It goes off as the front reaches it");
-        assertTrue(arrival < UnitPlayback.duration(first) / 2, "Long before the first one's falls are down");
+        assertEquals(UnitPlayback.arrival(first, north), wentOff.get(north) - wentOff.get(first), 2 * step);
+        assertEquals(UnitPlayback.arrival(north, beyond), wentOff.get(beyond) - wentOff.get(north), 2 * step);
+        assertEquals(UnitPlayback.arrival(first, south), wentOff.get(south) - wentOff.get(first), 2 * step,
+              "Timed from its own cause, not from the tank before it");
+        assertTrue(wentOff.get(south) - wentOff.get(first) < UnitPlayback.duration(first) / 2);
+        assertEquals(UnitPlayback.duration(south), wentOff.get(alone) - wentOff.get(south), 2 * step,
+              "One of its own waits for the chain's last");
+    }
+
+    private static BoardScene.Detonation detonation(megamek.common.NuclearDetonation result,
+          megamek.common.NuclearDetonation cause) {
+        return new BoardScene.Detonation(result, List.of(), List.of(), cause);
     }
 
     @Test
