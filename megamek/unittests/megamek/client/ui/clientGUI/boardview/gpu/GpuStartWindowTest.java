@@ -3,14 +3,18 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 import java.awt.Rectangle;
 import java.awt.Window;
+import java.awt.image.BufferedImage;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 
 import org.junit.jupiter.api.AfterEach;
@@ -94,5 +98,108 @@ class GpuStartWindowTest {
         SwingUtilities.invokeAndWait(() -> assertThrows(IllegalStateException.class,
               () -> GpuStartWindow.launchClosed(launched)));
         assertFalse(GpuStartWindow.isSuspended());
+    }
+
+    @Test
+    void anotherProgramsScreenKeepsTheWindowOpenUntilItIsUninstalled() throws Exception {
+        List<String> ran = new ArrayList<>();
+        try {
+            SwingUtilities.invokeAndWait(() -> GpuStartWindow.install(mock(JFrame.class), new PlainContent()));
+            assertTrue(GpuHost.keepsOpen());
+            assertTrue(GpuStartWindow.notice("Title", "Text"));
+
+            SwingUtilities.invokeAndWait(() -> GpuStartWindow.uninstall(() -> ran.add("then")));
+            assertFalse(GpuHost.keepsOpen());
+            assertEquals(List.of("then"), ran);
+            // Nothing shows a start screen any more, so the alert goes elsewhere
+            SwingUtilities.invokeAndWait(() -> assertFalse(GpuStartWindow.notice("Title", "Text")));
+            assertNull(GpuStartWindow.takeNotice());
+        } finally {
+            GpuStartWindow.takeNotice();
+            GpuHost.keepOpen(false);
+        }
+    }
+
+    @Test
+    void openingWithoutAnInstalledScreenFails() throws Exception {
+        SwingUtilities.invokeAndWait(() -> GpuStartWindow.uninstall(() -> { }));
+        GpuHost.keepOpen(false);
+        SwingUtilities.invokeAndWait(() -> assertThrows(IllegalStateException.class,
+              () -> GpuStartWindow.open(false)));
+    }
+
+    @Test
+    void megaMeksHelpAndBottomRowRunItsActions() {
+        List<GpuStartWindow.Action> actions = new ArrayList<>();
+        MegaMekStartContent content = new MegaMekStartContent(actions::add);
+        content.help().forEach(item -> ((StartMenuItem.Button) item).action().run());
+        content.settings();
+        content.quit();
+        assertEquals(List.of(GpuStartWindow.Action.HELP_CONTENTS, GpuStartWindow.Action.HELP_SKINNING,
+              GpuStartWindow.Action.REPORT_BUG, GpuStartWindow.Action.COPY_SYSTEM_DATA,
+              GpuStartWindow.Action.RESET_PROMPTS, GpuStartWindow.Action.ABOUT, GpuStartWindow.Action.SETTINGS,
+              GpuStartWindow.Action.QUIT), actions);
+        assertTrue(content.gamePages());
+        assertFalse(new PlainContent().gamePages());
+    }
+
+    @Test
+    void aMenuButtonNeedsALabelAndAnAction() {
+        assertThrows(NullPointerException.class,
+              () -> new StartMenuItem.Button(null, StartMenuItem.Emphasis.PRIMARY, () -> { }));
+        assertThrows(NullPointerException.class,
+              () -> new StartMenuItem.Button("New", StartMenuItem.Emphasis.PRIMARY, null));
+        assertNull(new StartMenuItem.Button("New", StartMenuItem.Emphasis.PRIMARY, () -> { }).detail());
+    }
+
+    /** Another program's screen: a menu and nothing else. */
+    private static final class PlainContent extends StartScreenContent {
+        @Override
+        public String title() {
+            return "Other";
+        }
+
+        @Override
+        public File art() {
+            return null;
+        }
+
+        @Override
+        public BufferedImage logo() {
+            return null;
+        }
+
+        @Override
+        public String greetingOverline() {
+            return "Other 1.0";
+        }
+
+        @Override
+        public String greeting() {
+            return "Hello";
+        }
+
+        @Override
+        public List<String> tips() {
+            return List.of();
+        }
+
+        @Override
+        public String version() {
+            return "Other 1.0";
+        }
+
+        @Override
+        public List<StartMenuItem> menu() {
+            return List.of(new StartMenuItem.Button("Start", StartMenuItem.Emphasis.PRIMARY, () -> { }));
+        }
+
+        @Override
+        public void settings() {
+        }
+
+        @Override
+        public void quit() {
+        }
     }
 }

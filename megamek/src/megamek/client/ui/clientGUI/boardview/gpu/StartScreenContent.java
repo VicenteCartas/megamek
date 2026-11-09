@@ -1,0 +1,110 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.util.List;
+
+import jakarta.annotation.Nullable;
+
+/**
+ * What a program's start screen shows in the native window ({@link GpuStartWindow}): its art, greeting, tips, version,
+ * menu and ambience. The screen itself (the greeting typed over the dark field, the art revealed, the drifting motes
+ * and the menu sliding in at the right) is the same for every program of the suite.
+ *
+ * <p>The screen reads everything but {@link #settings} and {@link #quit} on its GPU thread, as it shows; those two
+ * run on the Swing thread.</p>
+ */
+public abstract class StartScreenContent {
+    /** How the screen reveals the art, the grid it lays over it and what drifts across it, to suit the art. */
+    public enum Ambience {
+        /** A battle: hexes pop open over a faint hex map and embers rise from the fighting. */
+        BATTLE,
+        /**
+         * A command post: the art arrives as a departures board, its tiles flipping over in perspective, over a square
+         * plotting grid; then soft light shafts stream from the art's warm light, a faint scan line and the odd blip
+         * pass over its screens, and dust drifts.
+         */
+        COMMAND
+    }
+
+    /** The window's title. */
+    public abstract String title();
+
+    /** The art behind the screen, scaled to cover it; null for none. */
+    public abstract @Nullable File art();
+
+    /** The logo at the top of the menu column, or null for none, as when the art has its own. */
+    public abstract @Nullable BufferedImage logo();
+
+    /** The greeting's first, small line, such as the program and its version. */
+    public abstract String greetingOverline();
+
+    /** The greeting's large second line. */
+    public abstract String greeting();
+
+    /** The tips the screen cycles through; a tip's last line starting with "-" is its author. Empty for none. */
+    public abstract List<String> tips();
+
+    /** The version line in the top left corner. */
+    public abstract String version();
+
+    /** The main menu, read each time it shows; {@link GpuStartWindow#menuChanged} shows it again. */
+    public abstract List<StartMenuItem> menu();
+
+    /** The Help page's entries; empty leaves Help out of the bottom row. */
+    public List<StartMenuItem> help() {
+        return List.of();
+    }
+
+    /** Swing thread: the bottom row's Settings. */
+    public abstract void settings();
+
+    /** Swing thread: the bottom row's Quit, and the window's close button. */
+    public abstract void quit();
+
+    /** Whether the tip sits under the version at the top left rather than at the bottom left, clear of the art's. */
+    public boolean tipAtTop() {
+        return false;
+    }
+
+    /** The screen's ambience; a battle unless the art suits another. */
+    public Ambience ambience() {
+        return Ambience.BATTLE;
+    }
+
+    /**
+     * The prefix of the program's {@code <name>-icon-<size>x<size>.png} files in the misc images directory, which the
+     * native window shows on its title bar and taskbar button, such as "mekhq".
+     */
+    public String icons() {
+        return "megamek";
+    }
+
+    /** A star system on a {@link StarChart}: where it is, in light years from Terra (coreward up), and its owner's colour. */
+    public record Star(double x, double y, java.awt.Color color) { }
+
+    /** The stars a command post's star map shows, and the one the view dives to, in light years from Terra. */
+    public record StarChart(List<Star> stars, double focusX, double focusY) { }
+
+    /**
+     * The real star map a command post's intro draws and dives through, or null for an invented one. Called once, on a
+     * thread of its own, so it may read files; the intro invents a map when this is not back in time.
+     */
+    public @Nullable StarChart starChart() {
+        return null;
+    }
+
+    /** Whether the screen has MegaMek's own pages, such as Host and Connect, rather than {@link #menu}. */
+    boolean gamePages() {
+        return false;
+    }
+
+    /**
+     * How long ago {@code epochMillis} was, as the start screen words it for a save: "just now", minutes, hours,
+     * yesterday, days, and the date beyond a week.
+     */
+    public static String ago(long epochMillis) {
+        return StartSaves.ago(epochMillis, System.currentTimeMillis());
+    }
+}

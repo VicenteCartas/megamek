@@ -119,6 +119,7 @@ import megamek.logging.MMLogger;
  * <preference name="RevealAllArtilleryRounds" value="true"/>          reveal BOTH teams' in-flight artillery target hexes
  * <preference name="AdvancedShowBotArtilleryHeatMap" value="true"/>   draw Princess's predicted/firing artillery heat map
  * <preference name="AdvancedRevealObscuredArtillery" value="true"/>   reveal otherwise-obscured artillery hex markers
+ * <preference name="StartScreenReplayKey" value="true"/>              key 1 plays the start screen's intro again
  * }</pre>
  * Each defaults to {@code false}; remove the line (or set {@code false}) to disable.
  */
