@@ -1958,7 +1958,7 @@ final class GpuTerrain implements Disposable {
      */
     static final boolean VISIBLE_BUILDING_INTERIORS = true;
     /** Whether hovering a building opens the pointed storey; only with {@link #VISIBLE_BUILDING_INTERIORS}. */
-    static final boolean VISIBLE_BUILDING_INTERIORS_ON_HOVER = true;
+    static final boolean VISIBLE_BUILDING_INTERIORS_ON_HOVER = false;
 
     /**
      * Each surface family's floor, by ordinal: what gathers in its hollows, in place of its ground from level -1 down
@@ -5388,6 +5388,10 @@ final class GpuTerrain implements Disposable {
                         copy.decorationFeature = prop.decorationFeature;
                         copy.decorationAnchorZ = prop.decorationAnchorZ;
                         copy.receiver = prop.receiver;
+                        // Its paint, which every level it draws is tinted with (level), and its lights at night.
+                        copy.buildingColours = prop.buildingColours;
+                        copy.nightLights = prop.nightLights;
+                        copy.drawnLights = prop.drawnLights;
                         // The copy draws the level the original drew, and still picks the near level.
                         copy.pickingModel = prop.pickingModel;
                         copy.pickingTriangles = prop.pickingTriangles;
@@ -7997,61 +8001,6 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * The material {@code drawn}, a chunk layer's parts, draws {@code range} with: the chunk's own copy, as it finished
-     * it. Null when none draws it.
-     */
-    private static Material drawnMaterial(Array<Renderable> drawn, TileRange range) {
-        for (Renderable part : drawn) {
-            var mesh = part.meshPart;
-            if (mesh.mesh == range.mesh() && mesh.offset <= range.offset() && range.offset() < mesh.offset + mesh.size) {
-                return part.material;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * A road coat the span carries, as a source of its cut, null for none: its triangles that {@code carried} takes,
-     * copied out of the chunk's overlay mesh into a
-     * mesh of their own ({@code owned}, the caller's to dispose once the cut has read it), their mask moved into
-     * {@code masks}, which outlive the chunk's, and the material the chunk draws it with ({@code drawn}) on those masks,
-     * one for each such material and page ({@code materials}). It still blends over the deck: the pieces draw it after
-     * themselves (GpuCollapse#renderOverlays).
-     */
-    private static MeepleShatter.Source coatSource(TileRange range, Material drawn, GpuTextures<BoardScene.Pixels> masks,
-          Matrix4 frame, Map<List<Object>, Material> materials, List<Mesh> owned, Predicate<Vector3[]> carried) {
-        var mask = range.material().get(GpuRoads.Mask.class, GpuRoads.Mask.TYPE);
-        var region = masks.region(mask.data.pixels());
-        var points = new com.badlogic.gdx.utils.FloatArray();
-        var indices = kept(points, copied(range, points), range.mesh().getVertexAttributes(), carried);
-        if (indices.isEmpty()) { return null; }
-        float[] vertices = points.toArray();
-        var attributes = range.mesh().getVertexAttributes();
-        GpuRoads.relocate(vertices, new GpuRoads.Mask(region, mask.data), attributes);
-        var copy = new Mesh(Mesh.VertexDataType.VertexArray, false, vertices.length / (attributes.vertexSize / Float.BYTES),
-              indices.size, attributes);
-        copy.setVertices(vertices);
-        copy.setIndices(indices.toArray());
-        owned.add(copy);
-        Texture page = region.getTexture();
-        Texture chunkPage = mask.textureDescription.texture;
-        Material material = materials.computeIfAbsent(List.of(drawn, page), key -> {
-            var moved = new Material(drawn);
-            // The chunk's mask page also stands in as a merged coat's diffuse texture, which gives it its coordinates.
-            for (Attribute attribute : drawn) {
-                if (attribute instanceof TextureAttribute texture && texture.textureDescription.texture == chunkPage) {
-                    var onPage = (TextureAttribute) texture.copy();
-                    onPage.textureDescription.texture = page;
-                    moved.set(onPage);
-                }
-            }
-            return moved;
-        });
-        return new MeepleShatter.Source(new com.badlogic.gdx.graphics.g3d.model.MeshPart("coat", copy, 0, indices.size,
-              GL20.GL_TRIANGLES), material, frame, 0);
-    }
-
-    /**
      * What stands of a built bridge once its span falls (BoardBridgeFooting#ruin): its {@code triangles}
      * ({@link #triangleKey}), and in plan its {@code tops}, which keep the road's paint that lies on them.
      */
@@ -8140,6 +8089,61 @@ final class GpuTerrain implements Disposable {
         copy.setIndices(kept.toArray());
         owned.add(copy);
         return new com.badlogic.gdx.graphics.g3d.model.MeshPart("bridge", copy, 0, kept.size, GL20.GL_TRIANGLES);
+    }
+
+    /**
+     * The material {@code drawn}, a chunk layer's parts, draws {@code range} with: the chunk's own copy, as it finished
+     * it. Null when none draws it.
+     */
+    private static Material drawnMaterial(Array<Renderable> drawn, TileRange range) {
+        for (Renderable part : drawn) {
+            var mesh = part.meshPart;
+            if (mesh.mesh == range.mesh() && mesh.offset <= range.offset() && range.offset() < mesh.offset + mesh.size) {
+                return part.material;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A road coat the span carries, as a source of its cut, null for none: its triangles that {@code carried} takes,
+     * copied out of the chunk's overlay mesh into a
+     * mesh of their own ({@code owned}, the caller's to dispose once the cut has read it), their mask moved into
+     * {@code masks}, which outlive the chunk's, and the material the chunk draws it with ({@code drawn}) on those masks,
+     * one for each such material and page ({@code materials}). It still blends over the deck: the pieces draw it after
+     * themselves (GpuCollapse#renderOverlays).
+     */
+    private static MeepleShatter.Source coatSource(TileRange range, Material drawn, GpuTextures<BoardScene.Pixels> masks,
+          Matrix4 frame, Map<List<Object>, Material> materials, List<Mesh> owned, Predicate<Vector3[]> carried) {
+        var mask = range.material().get(GpuRoads.Mask.class, GpuRoads.Mask.TYPE);
+        var region = masks.region(mask.data.pixels());
+        var points = new com.badlogic.gdx.utils.FloatArray();
+        var indices = kept(points, copied(range, points), range.mesh().getVertexAttributes(), carried);
+        if (indices.isEmpty()) { return null; }
+        float[] vertices = points.toArray();
+        var attributes = range.mesh().getVertexAttributes();
+        GpuRoads.relocate(vertices, new GpuRoads.Mask(region, mask.data), attributes);
+        var copy = new Mesh(Mesh.VertexDataType.VertexArray, false, vertices.length / (attributes.vertexSize / Float.BYTES),
+              indices.size, attributes);
+        copy.setVertices(vertices);
+        copy.setIndices(indices.toArray());
+        owned.add(copy);
+        Texture page = region.getTexture();
+        Texture chunkPage = mask.textureDescription.texture;
+        Material material = materials.computeIfAbsent(List.of(drawn, page), key -> {
+            var moved = new Material(drawn);
+            // The chunk's mask page also stands in as a merged coat's diffuse texture, which gives it its coordinates.
+            for (Attribute attribute : drawn) {
+                if (attribute instanceof TextureAttribute texture && texture.textureDescription.texture == chunkPage) {
+                    var onPage = (TextureAttribute) texture.copy();
+                    onPage.textureDescription.texture = page;
+                    moved.set(onPage);
+                }
+            }
+            return moved;
+        });
+        return new MeepleShatter.Source(new com.badlogic.gdx.graphics.g3d.model.MeshPart("coat", copy, 0, indices.size,
+              GL20.GL_TRIANGLES), material, frame, 0);
     }
 
     /**
