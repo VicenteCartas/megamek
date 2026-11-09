@@ -14,19 +14,25 @@ import megamek.common.units.UnitType;
  * year), the columns that help to choose (movement, armor, role, rules level), the Battle Value and the Point Value. It
  * keeps the unit's summary, which the view hands back to add the unit or show its dossier.
  *
- * @param unit    the unit's summary in the unit cache
- * @param name    chassis and model
- * @param details tonnage · type · tech base · year
- * @param bv      the Battle Value as the unit file has it, for the default skills
- * @param pv      the Alpha Strike Point Value
- * @param tons    the weight in tons
- * @param move    walk, run and jump points, as "4/6/3", or "4/6" without jump
- * @param armor   the armor points, or empty when the unit has none
- * @param role    the unit's role, or empty when it has none
- * @param level   the rules level, or empty
+ * @param unit      the unit's summary in the unit cache
+ * @param name      chassis and model
+ * @param details   tonnage · type · tech base · year
+ * @param bv        the Battle Value as the unit file has it, for the default skills
+ * @param pv        the Alpha Strike Point Value
+ * @param tons      the weight in tons
+ * @param move      walk, run and jump points, as "4/6/3", or "4/6" without jump
+ * @param armor     the armor points, or empty when the unit has none
+ * @param role      the unit's role, or empty when it has none
+ * @param level     the rules level, or empty
+ * @param sortName  the name the results sort by ({@link RequisitionCatalog#sortKey})
+ * @param type      the unit's type as players name it ({@link #typeName})
+ * @param levelRank the rules level's rank, Introductory first and Unofficial last, or {@link #NO_LEVEL} without one
  */
 public record RequisitionRow(MekSummary unit, String name, String details, int bv, int pv, double tons, String move,
-      String armor, String role, String level) {
+      String armor, String role, String level, String sortName, String type, int levelRank) {
+
+    /** The {@link #levelRank} of a unit without a rules level. */
+    public static final int NO_LEVEL = -1;
 
     /** The row's columns between the name and the value, in their order; the last hide first when room runs out. */
     public enum Column {
@@ -47,14 +53,16 @@ public record RequisitionRow(MekSummary unit, String name, String details, int b
         }
     }
 
-    /** The row of {@code unit}. */
+    /** The row of {@code unit}, with the keys it sorts by worked out once. */
     public static RequisitionRow of(MekSummary unit) {
         UnitRole role = RequisitionCatalog.roleOf(unit);
-        String level = unit.getTechLevel();
-        return new RequisitionRow(unit, unit.getName(), details(unit), unit.getBV(), unit.getPointValue(),
+        String level = (unit.getTechLevel() == null) ? "" : unit.getTechLevel().strip();
+        String type = typeName(unit);
+        return new RequisitionRow(unit, unit.getName(), details(unit, type), unit.getBV(), unit.getPointValue(),
               unit.getTons(), move(unit.getWalkMp(), unit.getRunMp(), unit.getJumpMp()),
               unit.getTotalArmor() > 0 ? NumberFormat.getIntegerInstance().format(unit.getTotalArmor()) : "",
-              role.hasRole() ? role.toString() : "", (level == null) ? "" : level.strip());
+              role.hasRole() ? role.toString() : "", level, RequisitionCatalog.sortKey(unit.getName()), type,
+              level.isBlank() ? NO_LEVEL : unit.getTechLevelCode());
     }
 
     /** "4/6/3", or "4/6" without jump: the columns' short movement. */
@@ -64,7 +72,11 @@ public record RequisitionRow(MekSummary unit, String name, String details, int b
 
     /** "70 t · BattleMek · IS · 3025": the tonnage, type, tech base and year of introduction. */
     public static String details(MekSummary unit) {
-        return Messages.getString("Lobby.requisition.details", tons(unit.getTons()), typeName(unit),
+        return details(unit, typeName(unit));
+    }
+
+    private static String details(MekSummary unit, String type) {
+        return Messages.getString("Lobby.requisition.details", tons(unit.getTons()), type,
               Messages.getString(RequisitionCatalog.TechBase.of(unit.getTechBase()).messageKey()),
               Integer.toString(unit.getYear()));
     }

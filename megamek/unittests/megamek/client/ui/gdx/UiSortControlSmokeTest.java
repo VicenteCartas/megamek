@@ -4,6 +4,7 @@ package megamek.client.ui.gdx;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -18,7 +19,8 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.Align;
-import megamek.client.ui.gdx.TableSort.Direction;
+import megamek.client.ui.TableSort;
+import megamek.client.ui.TableSort.Direction;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -99,6 +101,41 @@ class UiSortControlSmokeTest {
             assertEquals(0, changes.get());
             assertThrows(IllegalArgumentException.class, () -> control.sort(TableSort.of(Key.VALUE)),
                   "a key it does not offer");
+        });
+    }
+
+    @Test
+    void offeringKeysWithoutTheShownOrderChangesNothing() {
+        UiTestStage.run(ui -> {
+            UiSortControl<Key> control = control(ui, List.of(Key.NAME, Key.VALUE));
+            UiSelect select = control.select();
+
+            assertThrows(IllegalArgumentException.class,
+                  () -> control.keys(List.of(Key.NAME, Key.YEAR), TableSort.of(Key.VALUE)));
+            assertEquals(List.of(Key.NAME, Key.VALUE), control.keys(), "the keys it offered stay");
+            assertSame(select, control.select());
+            assertEquals(TableSort.of(Key.NAME), control.sort());
+        });
+    }
+
+    @Test
+    void relabelingRenamesTheKeysInPlace() {
+        UiTestStage.run(ui -> {
+            String[] valueName = { "bv" };
+            UiSortControl<Key> control = ui.kit.sortControl("Sort", "Ascending", "Descending",
+                  List.of(Key.NAME, Key.VALUE), key -> (key == Key.VALUE) ? valueName[0] : "name",
+                  new TableSort<>(Key.VALUE, Direction.ASCENDING));
+            place(ui, control);
+            AtomicInteger changes = count(control);
+            UiSelect select = control.select();
+
+            valueName[0] = "pv";
+            control.relabel();
+            assertSame(select, control.select(), "the select stays");
+            assertEquals("pv", select.getSelected());
+            assertEquals("pv", select.popup().label(1).getText().toString());
+            assertEquals(new TableSort<>(Key.VALUE, Direction.ASCENDING), control.sort());
+            assertEquals(0, changes.get());
         });
     }
 
