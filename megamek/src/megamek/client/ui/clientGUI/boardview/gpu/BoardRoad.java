@@ -2830,7 +2830,8 @@ final class BoardRoad {
     Area stopLines(List<StopApproach> approaches) {
         Area result = new Area();
         for (var approach : approaches) {
-            result.add(approach.yields() ? giveWay(approach) : stopBar(approach));
+            // A single-lane hub's branch is one short lane: its line and arrow fill it, leaving no room for a triangle.
+            result.add(approach.yields() ? giveWay(approach, !narrow) : stopBar(approach));
         }
         result.intersect(footprint(-.4f));
         result.subtract(medianAxis(MEDIAN_HALF + .1f));
@@ -2845,26 +2846,27 @@ final class BoardRoad {
     }
 
     /**
-     * Give-way markings across an approach: a broken transverse line over its incoming lane, and upstream of it an
-     * outlined triangle with its point facing approaching traffic. A roundabout's entries and an entrance ramp's mouth
-     * share them.
+     * Give-way markings across an approach: a broken transverse line over its incoming lane, and upstream of it, if
+     * {@code triangle}, an outlined triangle with its point facing approaching traffic. A roundabout's entries and an
+     * entrance ramp's mouth share them; the triangle only supplements the line and its sign, as European markings allow.
      */
-    private static Area giveWay(StopApproach frame) {
+    private static Area giveWay(StopApproach frame, boolean triangle) {
         Area result = new Area();
         Path2D.Float bar = new Path2D.Float();
         bar.moveTo(frame.x - frame.ny * frame.inner, frame.y + frame.nx * frame.inner);
         bar.lineTo(frame.x - frame.ny * frame.outer, frame.y + frame.nx * frame.outer);
         result.add(new Area(new BasicStroke(1.1f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
               10, new float[] { 1.6f, 1.2f }, 0).createStrokedShape(bar)));
+        if (!triangle) { return result; }
         float middle = (frame.inner + frame.outer) / 2;
         float cx = frame.x - frame.ny * middle, cy = frame.y + frame.nx * middle;
-        Path2D.Float triangle = new Path2D.Float();
-        triangle.moveTo(cx + frame.nx * 8, cy + frame.ny * 8);
-        triangle.lineTo(cx + frame.nx * 2 - frame.ny * 2.5f, cy + frame.ny * 2 + frame.nx * 2.5f);
-        triangle.lineTo(cx + frame.nx * 2 + frame.ny * 2.5f, cy + frame.ny * 2 - frame.nx * 2.5f);
-        triangle.closePath();
+        Path2D.Float mark = new Path2D.Float();
+        mark.moveTo(cx + frame.nx * 8, cy + frame.ny * 8);
+        mark.lineTo(cx + frame.nx * 2 - frame.ny * 2.5f, cy + frame.ny * 2 + frame.nx * 2.5f);
+        mark.lineTo(cx + frame.nx * 2 + frame.ny * 2.5f, cy + frame.ny * 2 - frame.nx * 2.5f);
+        mark.closePath();
         result.add(new Area(new BasicStroke(.7f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER)
-              .createStrokedShape(triangle)));
+              .createStrokedShape(mark)));
         return result;
     }
 
@@ -3229,7 +3231,7 @@ final class BoardRoad {
             if (frame == null) { continue; }
             // A straight transverse give-way line stops the whole incoming lane before the circulating road; the
             // triangle sits upstream of the line, with its point facing approaching traffic.
-            result.add(giveWay(frame));
+            result.add(giveWay(frame, true));
         }
         result.intersect(footprint(-.4f));
         return result;

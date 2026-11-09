@@ -19,6 +19,7 @@ import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
+import megamek.common.board.HexTile;
 import megamek.common.board.RailRoute;
 import megamek.common.board.SingleLane;
 import megamek.common.units.Terrains;
@@ -928,6 +929,126 @@ class BoardRoadSingleLaneTest {
               "Never signalled");
         assertTrue(of(scene(hub(1 | 2 | 8, 8)), J).stopApproaches(1 | 2 | 8).isEmpty(), "A fork: nothing waits");
     }
+    /**
+     * Every single-lane hub, once for each shape: each arm keeps its direction arrow inside the hex, at least 1.5 pixels
+     * clear of any line and upstream of the line it waits at. A branch that gives way has its broken line without the
+     * triangle, which would leave its short lane no room for the arrow; a ramp entering a two-lane road keeps it.
+     */
+    @Test
+    void aHubsBranchKeepsItsArrowClearOfTheLineItWaitsAt() {
+        Set<Long> shapes = new java.util.HashSet<>();
+        int layouts = 0, waiting = 0;
+        for (int exits = 1; exits < 64; exits++) {
+            if (Integer.bitCount(exits) < 3) { continue; }
+            for (int entrances = exits - 1 & exits; entrances > 0; entrances = entrances - 1 & exits) {
+                long shape = Long.MAX_VALUE;
+                for (int by = 0; by < 6; by++) {
+                    shape = Math.min(shape, (long) rotate(exits, by) << 6 | rotate(entrances, by));
+                }
+                if (!shapes.add(shape)) { continue; }
+                layouts++;
+                String layout = "hub " + exits + ", entrances " + entrances;
+                var road = of(scene(hub(exits, entrances)), J);
+                var approaches = road.stopApproaches(exits);
+                var arrows = road.arrows(exits);
+                var lines = road.stopLines(approaches);
+                var near = new java.awt.geom.Area(new java.awt.BasicStroke(3f, java.awt.BasicStroke.CAP_ROUND,
+                      java.awt.BasicStroke.JOIN_ROUND).createStrokedShape(lines));
+                near.add(lines);
+                near.intersect(arrows);
+                assertTrue(near.isEmpty(), layout + ": an arrow within 1.5 pixels of a line, at " + near.getBounds2D());
+                assertEquals(0, outsideHex(arrows), layout + ": an arrow leaves the hex");
+                for (int d = 0; d < 6; d++) {
+                    if ((exits & 1 << d) != 0) {
+                        assertTrue(alongArm(arrows, d) > 0, layout + ": arm " + d + " keeps its arrow");
+                    }
+                }
+                for (var approach : approaches) {
+                    waiting++;
+                    assertTrue(nearestUpstream(arrows, approach) >= 0,
+                          layout + ": arm " + approach.direction() + "'s arrow lies past the line it waits at");
+                    if (approach.yields()) {
+                        assertFalse(paintedNear(lines, triangleTip(approach)), layout + ": a triangle on a hub's branch");
+                    }
+                }
+            }
+        }
+        assertTrue(layouts > 20 && waiting > 0, layouts + " shapes, " + waiting + " waiting arms");
+        // North and south two-lane, an entrance from the south-west: its ramp keeps the triangle.
+        var ramp = of(scene(ramps(1 | 8, 0, 16, null)), J);
+        var entrance = ramp.stopApproaches(1 | 8 | 16);
+        assertTrue(entrance.size() == 1 && entrance.getFirst().yields());
+        assertTrue(paintedNear(ramp.stopLines(entrance), triangleTip(entrance.getFirst())), "The ramp's triangle");
+    }
+
+    /** Where a give-way triangle's point lies, 8 pixels upstream of {@code approach}'s line in the middle of its lane. */
+    private static float[] triangleTip(BoardRoad.StopApproach approach) {
+        float middle = (approach.inner() + approach.outer()) / 2;
+        return new float[] { approach.x() - approach.ny() * middle + approach.nx() * 8,
+              approach.y() + approach.nx() * middle + approach.ny() * 8 };
+    }
+
+    /** Whether {@code area} covers any point within 0.3 pixels of {@code at}. */
+    private static boolean paintedNear(java.awt.geom.Area area, float[] at) {
+        for (float dx = -.3f; dx <= .3f; dx += .1f) {
+            for (float dy = -.3f; dy <= .3f; dy += .1f) {
+                if (area.contains(at[0] + dx, at[1] + dy)) { return true; }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * How far upstream of {@code approach}'s stop plane, along its arm, the nearest of {@code area}'s samples within 25
+     * degrees of that arm lies; negative past the plane, towards the hub.
+     */
+    private static float nearestUpstream(java.awt.geom.Area area, BoardRoad.StopApproach approach) {
+        float[] side = RailRoute.border(approach.direction());
+        double out = Math.atan2(side[1], side[0]);
+        float result = Float.MAX_VALUE;
+        for (float x = -40; x <= 40; x += .25f) {
+            for (float y = -40; y <= 40; y += .25f) {
+                double off = Math.abs(Math.IEEEremainder(Math.atan2(y, x) - out, 2 * Math.PI));
+                if (off < Math.toRadians(25) && area.contains(x, y)) {
+                    result = Math.min(result, (x - approach.x()) * approach.nx() + (y - approach.y()) * approach.ny());
+                }
+            }
+        }
+        return result;
+    }
+
+    /** The samples of {@code area} half a pixel apart that lie outside J's hex. */
+    private static int outsideHex(java.awt.geom.Area area) {
+        var hex = new java.awt.geom.Path2D.Float();
+        for (int corner = 0; corner < 6; corner++) {
+            float x = HexTile.cornerOffsetX(corner, BoardGeometry.TILE_WIDTH);
+            float y = HexTile.cornerOffsetY(corner, BoardGeometry.TILE_HEIGHT);
+            if (corner == 0) { hex.moveTo(x, y); } else { hex.lineTo(x, y); }
+        }
+        hex.closePath();
+        int result = 0;
+        for (float x = -50; x <= 50; x += .5f) {
+            for (float y = -50; y <= 50; y += .5f) {
+                if (area.contains(x, y) && !hex.contains(x, y)) { result++; }
+            }
+        }
+        return result;
+    }
+
+    /** The samples of {@code area} half a pixel apart within 15 degrees of the line from J's centre out to side {@code d}. */
+    private static int alongArm(java.awt.geom.Area area, int d) {
+        float[] side = RailRoute.border(d);
+        double out = Math.atan2(side[1], side[0]), reach = Math.hypot(side[0], side[1]);
+        int result = 0;
+        for (float x = -40; x <= 40; x += .5f) {
+            for (float y = -40; y <= 40; y += .5f) {
+                double off = Math.abs(Math.IEEEremainder(Math.atan2(y, x) - out, 2 * Math.PI));
+                if (off < Math.toRadians(15) && Math.hypot(x, y) <= reach && area.contains(x, y)) { result++; }
+            }
+        }
+        return result;
+    }
+
     @Test
     void aCarParkBesideAJunctionNeitherOpensNorClosesItsLanes() {
         // A Y split (north two-lane, entrance south-east, exit south-west) beside a car park's pavement north-east: the

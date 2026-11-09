@@ -276,12 +276,13 @@ running on the left there.
   the junction past them, and a bend entrances join whose own traffic conflicts in a way only signs on the bend could
   settle, with nothing else to sign.
 - **Who waits.** Under Stops, an arm off the priority road whose traffic conflicts with the priority road's waits: an
-  entrance, or a hub's branch, gives way (a broken line across its whole lane, the triangle upstream, and
-  `give-way-sign.glb` on its right); a two-way arm stops, as at a T of two-lane roads. Without a priority road,
-  entrances give way and two-way arms keep priority to the right, with no signs; at a hub of two equal branches, the one
-  with the other on its right gives way. Never every arm, so no all-way stop. Under traffic lights every arriving arm
-  has a bar and lights, a single lane's on a pole beside it, never under overhead lights. Exits and arms that bring no
-  traffic wait for nothing.
+  entrance, or a hub's branch, gives way (a broken line across its whole lane and `give-way-sign.glb` on its right,
+  with the triangle upstream, but not at a single-lane hub, whose branch is one short lane that needs the room for its
+  direction arrow; the triangle only supplements line and sign); a two-way arm stops, as at a T of two-lane roads.
+  Without a priority road, entrances give way and two-way arms keep priority to the right, with no signs; at a hub of
+  two equal branches, the one with the other on its right gives way. Never every arm, so no all-way stop. Under traffic
+  lights every arriving arm has a bar and lights, a single lane's on a pole beside it, never under overhead lights.
+  Exits and arms that bring no traffic wait for nothing.
 - **Nothing to control** (`LaneJunction.State.NONE`): where no conflict is left that the road's own course does not
   settle (turning traffic gives way to oncoming traffic): lane drops, forks, a two-way road with only exits off it,
   straight, bent or in a hairpin, a road dividing into two carriageways the right way round. It gets no bars, signs, lights or
