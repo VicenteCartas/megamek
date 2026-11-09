@@ -207,6 +207,25 @@ public class TWGameManager extends AbstractGameManager {
         if (capture != null) { capture.hit(target, hit, damage); }
     }
 
+    /**
+     * For the animation alone: the structure hex {@code coords} of {@code building} lost its last construction factor
+     * to the attack being resolved, if any, which its collapse then plays as that attack's doing.
+     */
+    void noteCollapse(IBuilding building, Coords coords) {
+        var capture = attackAnimationCapture.get();
+        if (capture != null) { capture.collapse(BoardLocation.of(coords, building.getBoardId())); }
+    }
+
+    /** Runs {@code consequence} (a fuel tank's explosion) without crediting what it brings down to the attack. */
+    private void uncredited(Runnable consequence) {
+        var capture = attackAnimationCapture.get();
+        if (capture == null) {
+            consequence.run();
+        } else {
+            capture.uncredited(consequence);
+        }
+    }
+
     private final Vector<Report> mainPhaseReport = new Vector<>();
 
     private final SpecialReportDispatcher specialReportDispatcher = new SpecialReportDispatcher(this);
@@ -29177,6 +29196,7 @@ public class TWGameManager extends AbstractGameManager {
 
                 // If the CF is zero, the building should fall.
                 if ((curCF == 0) && (startingCF != 0)) {
+                    noteCollapse(bldg, coords);
                     if (bldg instanceof FuelTank) {
                         // If this is a fuel tank, we'll give it its own
                         // message.
@@ -29190,7 +29210,8 @@ public class TWGameManager extends AbstractGameManager {
                         r.newlines = 1;
                         vPhaseReport.add(r);
                         Vector<Report> vRep = new Vector<>();
-                        doExplosion(((FuelTank) bldg).getMagnitude(),
+                        // What the tank's explosion brings down is its doing, not the attack's (animation only).
+                        uncredited(() -> doExplosion(((FuelTank) bldg).getMagnitude(),
                               10,
                               false,
                               bldg.getCoords().nextElement(),
@@ -29199,7 +29220,7 @@ public class TWGameManager extends AbstractGameManager {
                               vRep,
                               null,
                               -1,
-                              false);
+                              false));
                         Report.indentAll(vRep, 2);
                         vPhaseReport.addAll(vRep);
                         return vPhaseReport;
@@ -29367,8 +29388,10 @@ public class TWGameManager extends AbstractGameManager {
 
             r.add(boom);
             int curCF = bldg.getCurrentCF(coords);
+            boolean standing = curCF > 0;
             curCF -= Math.min(curCF, boom);
             bldg.setCurrentCF(curCF, coords);
+            if (standing && curCF == 0) { noteCollapse(bldg, coords); }
             r.add(bldg.getCurrentCF(coords));
             vDesc.add(r);
             // If the CF is zero, the building should fall.

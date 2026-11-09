@@ -145,11 +145,14 @@ final class GpuBoardSource implements BoardSource {
      */
     private final List<BoardScene.Combat> deaths = new ArrayList<>();
     /**
-     * EDT: the strongest hit on each building, fuel tank or bridge hex in round structureHitsRound, which its collapse
-     * falls away from when the server brings it down that round (structureHit, BoardScene.TileTransition.Hit).
+     * EDT: the hexes whose structure the last attack shown brought down, with its hit, which their collapse falls away
+     * from when it follows that attack's animation (recordStructureHit, BoardScene.TileTransition.Hit). The next attack
+     * ends it, and so does the first capture published in a later phase than {@link #structureHitsPhase} of round
+     * {@link #structureHitsRound}: the rules bring a structure down as the phase ends.
      */
     private final Map<Coords, BoardScene.TileTransition.Hit> structureHits = new HashMap<>();
     private int structureHitsRound = -1;
+    private GamePhase structureHitsPhase;
     /**
      * When the capture that first showed a structure brought down in the movement phase was held back, 0 for none: the
      * server sends that collapse, and its mover's fall, before the path that walked onto it (captureMovement).
@@ -282,14 +285,23 @@ final class GpuBoardSource implements BoardSource {
                     synchronized (GpuBoardSource.this) {
                         if (event.completed()) {
                             if (nuclearCapture == null || !nuclearCapture.strike().id().equals(result.id())) { return; }
+                            var before = nuclearCapture.before();
                             publishScene(next, true);
                             var consequences = nuclearCapture.consequences();
                             nuclearCapture = null;
+                            recordBlast(result, before.scene());
+                            // The crater's structures come down in the strike's own checkpoint, after its flash.
+                            var crater = before.boardGeneration() == next.boardGeneration()
+                                  ? BoardScene.TileTransition.of(before.scene(), next.scene(), structureHits::get) : null;
                             Set<Integer> concealed = consequences.stream().filter(BoardScene.Concealed.class::isInstance)
                                   .map(BoardScene.Animation::entityId).collect(Collectors.toSet());
                             consequences.stream().filter(BoardScene.Concealed.class::isInstance)
                                   .forEach(GpuBoardSource.this::queueAnimation);
                             queueAnimation(new BoardScene.Detonation(result));
+                            if (crater != null && !crater.collapses().isEmpty()) {
+                                queueAnimation(new BoardScene.TileTransition(crater.boardId(), List.of(), crater.collapses()));
+                                crater.collapses().forEach(collapse -> structureHits.remove(collapse.coords()));
+                            }
                             queueAnimation(new BoardScene.SceneUpdate(next.scene()));
                             consequences.stream().filter(action -> !(action instanceof BoardScene.Concealed)
                                   && !concealed.contains(action.entityId())
@@ -589,7 +601,6 @@ final class GpuBoardSource implements BoardSource {
             receivedAttacks.removeFirst();
         }
         reports.combat(result, attacker, event.target(), view.game.getRoundCount(), view.game.getPhase());
-        recordStructureHit(result, attacker);
         if (result.kind() == megamek.common.ResolvedAttack.Kind.DEATH && frame != null
               && frame.scene().units().stream().anyMatch(unit -> unit.id() == attacker.getId() && unit.attachment() != null)) {
             return; // Exterior casualties remain on their carrier until its resolved release, rather than collapsing in midair.
@@ -633,6 +644,8 @@ final class GpuBoardSource implements BoardSource {
         Frame before = capture();
         synchronized (this) {
             publishScene(before, true);
+            // After that checkpoint: a collapse it shows still takes the preceding attack's hit.
+            recordStructureHit(result, attacker);
             // No death plays after an attack resolved after it.
             queueDeaths(true);
             var combat = new BoardScene.Combat(result, firing, receiving, destination,
@@ -643,52 +656,59 @@ final class GpuBoardSource implements BoardSource {
     }
 
     /**
-     * Remembers a strong hit that landed on a building, fuel tank or bridge hex, or on a unit standing in one, for the
-     * structure's collapse to fall away from (structureHits): a weapon's by its damage per hit, a physical attack's by
-     * the damage the rules give it, a death from above's from above the hex, a shell's from where it landed, in the hex
-     * it landed in and, at half its strength, beside it. Only very strong hits count: an AC/20 (20 a hit) at full
-     * strength, a Gauss rifle (15) at half; a PPC (10), a machine gun or a missile does not push a building over.
+     * Remembers the hit of an attack whose damage brought structures down (the server's ResolvedAttack#collapses), for
+     * each one's collapse to fall away from if it follows this attack's animation (structureHits); any attack ends the
+     * last one's. A weapon's strength is its damage per hit, a physical attack's the damage the rules give it; a death
+     * from above comes from above the hex, a shell from where it landed, at half its strength beside it. Only very strong
+     * hits push: an AC/20 (20 a hit) at full strength, a Gauss rifle (15) at half; a PPC (10), a machine gun or a missile
+     * brings a building straight down.
      */
     private void recordStructureHit(megamek.common.ResolvedAttack result, Entity attacker) {
-        if (!result.hit() || result.kind() == megamek.common.ResolvedAttack.Kind.DEATH || board == null) { return; }
-        if (view.game.getRoundCount() != structureHitsRound) {
-            structureHits.clear();
-            structureHitsRound = view.game.getRoundCount();
-        }
+        if (result.kind() == megamek.common.ResolvedAttack.Kind.DEATH) { return; }
+        structureHits.clear();
+        // The server names them only for a hit, or a shell that landed, even scattered.
+        if (result.collapses().isEmpty()) { return; }
+        structureHitsRound = view.game.getRoundCount();
+        structureHitsPhase = view.game.getPhase();
         var shot = result.shot();
         float damage = shot != null ? (float) shot.damagePerHit() : physicalDamage(result, attacker);
         float strength = Math.min(1, (damage - 10) / 10);
         if (strength <= 0) { return; }
-        if (shot != null && shot.artillery() && shot.impact() != null) {
-            Coords landing = shot.impact().coords();
-            var from = waypoint(landing, 0, 0);
-            recordStructureHit(landing, strength, from);
-            for (int direction = 0; direction < 6; direction++) {
-                recordStructureHit(landing.translated(direction), strength * .5f, from);
-            }
-            return;
-        }
+        Coords landing = shot != null && shot.artillery() && shot.impact() != null ? shot.impact().coords() : null;
         Coords at = result.target().coords();
-        var from = result.kind() == megamek.common.ResolvedAttack.Kind.DFA
-              ? waypoint(at, result.target().elevation() + DFA_HEIGHT, 0)
-              : waypoint(result.attacker().coords(), result.attacker().elevation(), result.attacker().facing());
-        recordStructureHit(at, strength, from);
-    }
-
-    /** The strongest hit on the structure at {@code at} this round, null for none. */
-    private BoardScene.TileTransition.Hit structureHit(Coords at) {
-        return structureHitsRound == view.game.getRoundCount() ? structureHits.get(at) : null;
+        var from = landing != null ? waypoint(landing, 0, 0)
+              : result.kind() == megamek.common.ResolvedAttack.Kind.DFA
+                    ? waypoint(at, result.target().elevation() + DFA_HEIGHT, 0)
+                    : waypoint(result.attacker().coords(), result.attacker().elevation(), result.attacker().facing());
+        for (var hex : result.collapses()) {
+            if (hex.boardId() != view.getBoardId()) { continue; }
+            structureHits.put(hex.coords(), new BoardScene.TileTransition.Hit(
+                  landing == null || landing.equals(hex.coords()) ? strength : strength * .5f, from));
+        }
     }
 
     /** Levels above its target a death from above comes down from, which crushes a structure rather than tip it over. */
     private static final int DFA_HEIGHT = 12;
 
-    private void recordStructureHit(Coords at, float strength, BoardScene.Waypoint from) {
-        Hex hex = board.getHex(at);
-        if (hex == null || !hex.containsTerrain(Terrains.BUILDING) && !hex.containsTerrain(Terrains.BRIDGE)
-              && !hex.containsTerrain(Terrains.FUEL_TANK)) { return; }
-        structureHits.merge(at, new BoardScene.TileTransition.Hit(strength, from),
-              (earlier, later) -> later.strength() >= earlier.strength() ? later : earlier);
+    /**
+     * A nuclear strike as the hit on every structure of {@code before} in its reach (structureHits), which it pushes away
+     * from ground zero: what its crater takes at full strength, what its blast reaches at the strength its damage there
+     * gives, as an attack's damage per hit does (recordStructureHit). The rules' blast loses its degradation each hex out
+     * (TWGameManager#doExplosion); its crater reaches twice its depth.
+     */
+    private void recordBlast(megamek.common.NuclearDetonation strike, BoardScene before) {
+        structureHits.clear();
+        structureHitsRound = view.game.getRoundCount();
+        structureHitsPhase = view.game.getPhase();
+        var from = new BoardScene.Waypoint(strike.coords(), strike.elevation(), 0);
+        int crater = 2 * strike.craterDepth();
+        for (var tile : before.tiles()) {
+            if (!BoardScene.TileTransition.structure(tile)) { continue; }
+            int distance = strike.coords().distance(tile.coords());
+            float damage = strike.degradation() < 1 ? 0 : strike.baseDamage() - distance * strike.degradation();
+            float strength = distance < crater ? 1 : Math.min(1, (damage - 10) / 10);
+            if (strength > 0) { structureHits.put(tile.coords(), new BoardScene.TileTransition.Hit(strength, from)); }
+        }
     }
 
     /** The damage the rules give a physical attack, 0 for one that deals none to a structure or cannot be read. */
@@ -761,9 +781,9 @@ final class GpuBoardSource implements BoardSource {
     private synchronized void publishScene(Frame next, boolean detectGear) {
         if (next.scene() == null) { pendingEvents.clear(); deaths.clear(); frame = next; return; }
         if (frame != null && frame.scene() == null) { frame = null; }
-        // A nuclear strike's crater takes the buildings in it with the strike's own checkpoint: no collapse plays there.
+        // A nuclear strike's captures leave what it brings down to its completion, which plays it right after its flash.
         var lifts = frame != null && frame.boardGeneration() == next.boardGeneration()
-              ? BoardScene.TileTransition.of(frame.scene(), next.scene(), nuclearCapture == null ? this::structureHit : null)
+              ? BoardScene.TileTransition.of(frame.scene(), next.scene(), nuclearCapture == null ? structureHits::get : null)
               : null;
         boolean collapses = lifts != null && !lifts.collapses().isEmpty();
         if (collapses && holdCollapse(detectGear)) { return; }
@@ -771,6 +791,10 @@ final class GpuBoardSource implements BoardSource {
         boolean moving = view.game.getPhase().isMovement() || collapseHeldSince != 0;
         collapseHeldSince = 0;
         if (collapses) { lifts.collapses().forEach(collapse -> structureHits.remove(collapse.coords())); }
+        // This capture took the hits of its phase's last attack or strike; one of a later phase finds none left.
+        if (view.game.getRoundCount() != structureHitsRound || view.game.getPhase() != structureHitsPhase) {
+            structureHits.clear();
+        }
         // The units that stood on a structure coming down fall with it, after it starts to give way; one whose weight
         // brings it down steps onto it first.
         List<BoardScene.Movement> falls = new ArrayList<>();

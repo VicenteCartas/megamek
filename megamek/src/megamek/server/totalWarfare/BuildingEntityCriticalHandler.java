@@ -203,8 +203,10 @@ class BuildingEntityCriticalHandler extends AbstractTWRuleHandler {
             return;
         }
         int currentCF = building.getCurrentCF(coords);
+        boolean standing = currentCF > 0;
         currentCF -= Math.min(currentCF, explosionDamage);
         building.setCurrentCF(currentCF, coords);
+        if (standing && currentCF == 0) { gameManager.noteCollapse(building, coords); }
         Report report = publicReport(3830, 1);
         report.add(building.getShortName());
         report.add(explosionDamage);

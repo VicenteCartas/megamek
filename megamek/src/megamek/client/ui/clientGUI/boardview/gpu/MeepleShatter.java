@@ -17,6 +17,7 @@ import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
+import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.model.MeshPart;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
@@ -81,15 +82,21 @@ final class MeepleShatter {
      */
     record Caps(Material material, VertexAttributes attributes, float repeat) { }
 
-    /** One material in one vertex layout: the source parts that share both are cut as one. */
+    /**
+     * One material in one vertex layout: the source parts that share both are cut as one. A {@code skin} blends over
+     * the solid it lies on, as a road's coats on a deck: it is cut with it, but no section of it is closed.
+     */
     private static final class Channel {
         final Material material;
         final VertexAttributes attributes;
+        final boolean skin;
         final int stride, position, normal, packed, unpacked, texture, tangent, binormal;
 
         Channel(Material material, VertexAttributes attributes) {
             this.material = material;
             this.attributes = attributes;
+            var blend = material.get(BlendingAttribute.class, BlendingAttribute.Type);
+            skin = blend != null && blend.blended;
             stride = attributes.vertexSize / Float.BYTES;
             position = offset(VertexAttributes.Usage.Position);
             normal = offset(VertexAttributes.Usage.Normal);
@@ -454,7 +461,7 @@ final class MeepleShatter {
                         crossing.add(cross(channel, corners[corner], distance[corner], corners[other], distance[other]));
                     }
                 }
-                if (crossing.size() == 2) {
+                if (crossing.size() == 2 && !channel.skin) {
                     channel.position(crossing.get(0), a);
                     channel.position(crossing.get(1), b);
                     // Its face points out of the solid: the section runs along the plane's normal across it.

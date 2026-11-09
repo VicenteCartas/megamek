@@ -2020,7 +2020,7 @@ class GpuBattleView extends ApplicationAdapter {
             boardCamera.frameLocation(BoardGeometry.center(strike.coords(), strike.elevation()), playbackCameraWidth());
         } else if (collapse != null) {
             // A structure comes down where the camera looks, once its pieces have taken its place.
-            boardCamera.frameLocation(collapseCenter(collapse), playbackCameraWidth());
+            boardCamera.frameLocation(GpuCollapse.middle(collapse), playbackCameraWidth());
             return terrain.ready(collapse) && !boardCamera.isFraming();
         } else if (state.transition() != null) {
             return terrain.ready(state.transition());
@@ -2028,15 +2028,6 @@ class GpuBattleView extends ApplicationAdapter {
             return true;
         }
         return !boardCamera.isFraming();
-    }
-
-    /** The middle of the structures a transition brings down, at their ground. */
-    private static Vector3 collapseCenter(BoardScene.TileTransition transition) {
-        var center = new Vector3();
-        for (var collapse : transition.collapses()) {
-            center.add(BoardGeometry.center(collapse.coords(), collapse.before().elevation()));
-        }
-        return center.scl(1f / transition.collapses().size());
     }
 
     private float cameraWidth() { return boardCamera.camera.viewportWidth; }
@@ -2126,7 +2117,7 @@ class GpuBattleView extends ApplicationAdapter {
             var transition = playback.transition();
             if (transition != null && !transition.collapses().isEmpty()) {
                 cameraFollowingPlayback = true;
-                boardCamera.frameLocation(collapseCenter(transition), playbackCameraWidth());
+                boardCamera.frameLocation(GpuCollapse.middle(transition), playbackCameraWidth());
                 return;
             }
             if (playback.movement() != null) {

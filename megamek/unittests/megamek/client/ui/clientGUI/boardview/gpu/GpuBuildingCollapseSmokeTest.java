@@ -46,13 +46,17 @@ class GpuBuildingCollapseSmokeTest {
     /** A structure brought down at {@code at} and, in the same capture, at {@code more}. */
     private record Scenario(String name, Coords at, boolean ac20, Coords... more) { }
 
-    private static final List<Scenario> SCENARIOS = List.of(
+    private static final List<Scenario> ALL = List.of(
           new Scenario("medium", new Coords(2, 2), false),
           new Scenario("heavy-ac20", new Coords(11, 3), true),
           new Scenario("light", new Coords(11, 12), false),
           new Scenario("fuel-tank", new Coords(3, 12), false),
           new Scenario("bridge", new Coords(6, 8), false),
           new Scenario("authored", new Coords(10, 8), false, new Coords(10, 7)));
+    /** Those named in megamek.gpu.collapseScenarios (comma-separated), else all of them. */
+    private static final List<Scenario> SCENARIOS = ALL.stream().filter(scenario ->
+          System.getProperty("megamek.gpu.collapseScenarios", "").isBlank()
+                || List.of(System.getProperty("megamek.gpu.collapseScenarios").split(",")).contains(scenario.name())).toList();
     /** The authored building, placed on level grass at the last scenario's hex, standing in its two hexes. */
     private static final String AUTHORED = "buildings/authored/classic-church";
 
@@ -208,7 +212,7 @@ class GpuBuildingCollapseSmokeTest {
         var editor = new BoardEditorSession();
         editor.open(file.toPath());
         editor.command(new Command(Action.ASSET, AUTHORED), null);
-        editor.pointer(SCENARIOS.getLast().at(), 0, 0, false);
+        editor.pointer(ALL.getLast().at(), 0, 0, false);
         editor.finishStroke();
         var saved = output.toPath().resolve("collapse-grassland.board2");
         editor.save(saved);

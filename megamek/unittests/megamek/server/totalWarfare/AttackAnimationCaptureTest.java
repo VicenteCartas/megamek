@@ -10,10 +10,12 @@ import java.util.UUID;
 
 import megamek.common.HitData;
 import megamek.common.ResolvedAttack;
+import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.net.enums.PacketCommand;
 import megamek.common.net.packets.Packet;
 import megamek.common.units.BipedMek;
+import megamek.common.units.Entity;
 import megamek.common.units.Mek;
 import megamek.common.units.Targetable;
 import megamek.common.units.UnitLocation;
@@ -75,5 +77,50 @@ class AttackAnimationCaptureTest {
         var sent = new ArrayList<Packet>();
         capture.flush(sent::add, (recipient, packet) -> sent.add(packet));
         assertTrue(sent.stream().map(packet -> (ResolvedAttack) packet.getObject(0)).allMatch(attack -> attack.impacts().isEmpty()));
+    }
+
+    /** A structure hex brought down goes to the attack being resolved: past the deaths it caused, never to a miss. */
+    @Test
+    void aCollapseGoesToTheHitBeingResolved() {
+        var capture = new AttackAnimationCapture();
+        var attacker = new UnitLocation(1, new Coords(1, 2), 0, 0, 0);
+        var building = new UnitLocation(Entity.NONE, new Coords(1, 1), 0, 0, 0);
+        capture.attack(new ResolvedAttack(new UUID(1, 1), ResolvedAttack.Kind.SHOT, attacker, building,
+              Targetable.TYPE_BUILDING, 0, "AC20", Entity.LOC_NONE, true), List.of(7));
+        capture.attack(new ResolvedAttack(new UUID(1, 2), ResolvedAttack.Kind.DEATH, attacker, attacker,
+              Targetable.TYPE_ENTITY, -1, "", Entity.LOC_NONE, true), List.of(7));
+        capture.collapse(BoardLocation.of(new Coords(1, 1), 0));
+        capture.attack(new ResolvedAttack(new UUID(1, 3), ResolvedAttack.Kind.SHOT, attacker, building,
+              Targetable.TYPE_BUILDING, 1, "Laser", Entity.LOC_NONE, false), List.of(7));
+        capture.collapse(BoardLocation.of(new Coords(2, 2), 0));
+        var sent = new ArrayList<Packet>();
+        capture.flush(sent::add, (recipient, packet) -> sent.add(packet));
+        var collapses = sent.stream().map(packet -> ((ResolvedAttack) packet.getObject(0)).collapses()).toList();
+        assertEquals(List.of(List.of(BoardLocation.of(new Coords(1, 1), 0)), List.of(), List.of()), collapses);
+    }
+
+    /**
+     * A shell that missed but landed and went off, scattered, takes what it brings down; a dud does not, nor does what a
+     * consequence of the attack, a fuel tank's explosion, brings down.
+     */
+    @Test
+    void aShellThatLandedTakesWhatItBringsDownButNotWhatItsConsequencesDo() {
+        var capture = new AttackAnimationCapture();
+        var launcher = new UnitLocation(1, new Coords(1, 2), 0, 0, 0);
+        var landing = new UnitLocation(Entity.NONE, new Coords(5, 5), 0, 0, 0);
+        UUID[] ids = { new UUID(2, 1), new UUID(2, 2) };
+        for (int index = 0; index < 2; index++) {
+            var shell = new ResolvedAttack.Shot("", java.util.Set.of(), true, false, 1, 0, true, null, launcher, landing,
+                  false, 25, false, false, false, null, index == 0 ? 25 : 0);
+            capture.attack(new ResolvedAttack(ids[index], ResolvedAttack.Kind.SHOT, launcher, landing,
+                  Targetable.TYPE_HEX_ARTILLERY, 0, "Long Tom", Entity.LOC_NONE, false, null, shell), List.of(7));
+            capture.collapse(BoardLocation.of(new Coords(5, 5), 0));
+            capture.uncredited(() -> capture.collapse(BoardLocation.of(new Coords(5, 6), 0)));
+        }
+        var sent = new ArrayList<Packet>();
+        capture.flush(sent::add, (recipient, packet) -> sent.add(packet));
+        var collapses = sent.stream().map(packet -> ((ResolvedAttack) packet.getObject(0)).collapses()).toList();
+        assertEquals(List.of(List.of(BoardLocation.of(new Coords(5, 5), 0)), List.of()), collapses,
+              "The scattered shell takes its own hex; the dud and the tank's explosion take nothing");
     }
 }

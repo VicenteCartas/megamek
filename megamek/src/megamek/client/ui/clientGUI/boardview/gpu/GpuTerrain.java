@@ -7441,27 +7441,41 @@ final class GpuTerrain implements Disposable {
         }
         if (transition == null || transition.collapses().isEmpty() || coverScene == null
               || collapsing.stream().anyMatch(fall -> fall.transition() == transition)) { return; }
+        // A transition that brings dozens down at once, as a nuclear blast does, breaks those nearest its middle, where the
+        // camera frames it; the rest make way for what replaces them as the terrain installs it, as before pieces fell.
+        var middle = GpuCollapse.middle(transition);
+        var broken = transition.collapses().stream().sorted(Comparator.comparingDouble(collapse ->
+              BoardGeometry.center(collapse.coords(), collapse.before().elevation()).dst2(middle))).limit(MAX_COLLAPSES).toList();
         installedSettings.run(() -> {
-            for (var collapse : transition.collapses()) {
-                var fall = collapse(collapse);
+            for (var collapse : broken) {
+                var fall = collapse(collapse, broken.size());
                 if (fall != null) { collapsing.add(new Collapsing(transition, collapse.coords(), fall, System.nanoTime())); }
             }
         });
     }
 
-    /** At most this many triangles of one hex's structure are cut: a finer level beyond it gives way to a coarser one. */
+    /** At most this many hexes of one transition break into pieces. */
+    private static final int MAX_COLLAPSES = 24;
+
+    /**
+     * At most this many triangles of the structures one transition brings down are cut, shared among their hexes: a finer
+     * level beyond a hex's share gives way to a coarser one.
+     */
     private static final int COLLAPSE_TRIANGLES = 30_000;
     /** The pieces times the materials one hex breaks into, each a draw in the colour and shadow passes. */
     private static final int COLLAPSE_DRAWS = 360;
+    /** The draws the hexes one transition brings down share (a nuclear blast's dozens), each at most COLLAPSE_DRAWS. */
+    private static final int SHARED_COLLAPSE_DRAWS = 720;
 
     /**
      * The installed structure at the collapse's hex, read where its chunk draws it and starting to break: a building's,
-     * fuel tank's or multi-hex share's shell, or a bridge span's deck, piers, footing and the rails it carries, cut at
-     * their finest level within {@link #COLLAPSE_TRIANGLES} in solid copies of their materials (no fade, no hover cut,
-     * no glass, which shatters to nothing), closed in the building's own material or the bridge's concrete. Null when
-     * nothing is drawn there.
+     * fuel tank's or multi-hex share's shell, or a bridge span's deck, piers, footing and the rails and road it carries,
+     * cut at their finest level within their share of {@link #COLLAPSE_TRIANGLES} in solid copies of their materials
+     * (no fade, no hover cut, no glass, which shatters to nothing; a road's coats still blend over the deck), closed in
+     * the building's own material or the bridge's concrete. It shares the budgets with the other {@code together - 1}
+     * hexes its transition brings down. Null when nothing is drawn there.
      */
-    private GpuCollapse collapse(BoardScene.TileTransition.Collapse change) {
+    private GpuCollapse collapse(BoardScene.TileTransition.Collapse change, int together) {
         Coords at = change.coords();
         BoardScene.Tile tile = coverScene.tile(at);
         if (tile == null) { return null; }
@@ -7475,27 +7489,121 @@ final class GpuTerrain implements Disposable {
         Map<Material, Material> copies = new IdentityHashMap<>();
         boolean bridge = mesh.bridgeShape != null && BoardScene.TileTransition.structure(change.before())
               && change.before().cover().structure() == 0;
-        // A rail or maglev beam the span carries, not one on the ground under it.
+        // A rail, maglev beam or road the span carries, not one on the ground under it.
         float deck = BoardGeometry.surfaceZ(tile) + BoardGeometry.level() * .5f;
         for (Prop prop : mesh.props) {
             boolean structure = prop.building != null || bridge && prop.route() && prop.bounds().min.z > deck
                   || Float.isNaN(prop.floorZ) && ("building".equals(prop.receiver) || "fuelTank".equals(prop.receiver));
             if (!structure || isFlag(prop)) { continue; }
-            ModelInstance drawn = finest(prop);
+            ModelInstance drawn = finest(prop, COLLAPSE_TRIANGLES / together);
             for (Node node : drawn.nodes) { addSources(node, drawn, frame, copies, sources); }
         }
+        // A road's coats on the deck, in the chunk's overlay layer, sample masks that go with the chunk: the collapse
+        // keeps copies of them (coatSource) and their meshes until the cut has read them.
+        GpuTextures<BoardScene.Pixels> masks = null;
+        List<Mesh> coatMeshes = new ArrayList<>();
         if (bridge) {
-            Map<Mesh, Material> drawnMaterials = new IdentityHashMap<>();
-            for (Renderable part : GpuTerrainDepth.snapshot(chunk.opaque)) { drawnMaterials.putIfAbsent(part.meshPart.mesh, part.material); }
+            Array<Renderable> solid = GpuTerrainDepth.snapshot(chunk.opaque), overlays = GpuTerrainDepth.snapshot(chunk.overlays);
+            Map<TileRange, Material> coats = new LinkedHashMap<>();
             for (TileRange range : mesh.ranges) {
-                Material material = drawnMaterials.get(range.mesh());
-                if (range.layer() != 0 || !range.route() || material == null) { continue; }
-                sources.add(new MeepleShatter.Source(new com.badlogic.gdx.graphics.g3d.model.MeshPart("bridge", range.mesh(),
-                      range.offset(), range.count(),
-                      GL20.GL_TRIANGLES), copies.computeIfAbsent(material, GpuTerrain::pieceMaterial), frame, 0));
+                if (!range.route() || range.layer() != 0 && range.layer() != 2) { continue; }
+                Material material = drawnMaterial(range.layer() == 0 ? solid : overlays, range);
+                if (material == null) { continue; }
+                if (range.layer() == 0) {
+                    sources.add(new MeepleShatter.Source(new com.badlogic.gdx.graphics.g3d.model.MeshPart("bridge",
+                          range.mesh(), range.offset(), range.count(), GL20.GL_TRIANGLES),
+                          copies.computeIfAbsent(material, GpuTerrain::pieceMaterial), frame, 0));
+                } else if (range.material().has(GpuRoads.Mask.TYPE)
+                      && range.mesh().calculateBoundingBox(new BoundingBox(), range.offset(), range.count()).min.z > deck) {
+                    coats.put(range, material);
+                }
+            }
+            if (!coats.isEmpty()) {
+                masks = new GpuTextures<>();
+                Map<BoardScene.Pixels, BoardScene.Pixels> pixels = new HashMap<>();
+                for (TileRange range : coats.keySet()) {
+                    var data = range.material().get(GpuRoads.Mask.class, GpuRoads.Mask.TYPE).data.pixels();
+                    pixels.put(data, data);
+                }
+                masks.update(pixels);
+                Map<List<Object>, Material> coatMaterials = new HashMap<>();
+                for (var coat : coats.entrySet()) {
+                    sources.add(coatSource(coat.getKey(), coat.getValue(), masks, frame, coatMaterials, coatMeshes));
+                }
             }
         }
-        if (sources.isEmpty()) { return null; }
+        GpuCollapse collapse = null;
+        try {
+            collapse = sources.isEmpty() ? null : collapse(change, sources, origin, bridge, masks,
+                  Math.min(COLLAPSE_DRAWS, SHARED_COLLAPSE_DRAWS / together));
+            return collapse;
+        } finally {
+            // The cut has read them; the masks are the collapse's, if there is one.
+            coatMeshes.forEach(Mesh::dispose);
+            if (collapse == null && masks != null) { masks.dispose(); }
+        }
+    }
+
+    /**
+     * The material {@code drawn}, a chunk layer's parts, draws {@code range} with: the chunk's own copy, as it finished
+     * it. Null when none draws it.
+     */
+    private static Material drawnMaterial(Array<Renderable> drawn, TileRange range) {
+        for (Renderable part : drawn) {
+            var mesh = part.meshPart;
+            if (mesh.mesh == range.mesh() && mesh.offset <= range.offset() && range.offset() < mesh.offset + mesh.size) {
+                return part.material;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A road coat the span carries, as a source of its cut: its vertices copied out of the chunk's overlay mesh into a
+     * mesh of their own ({@code owned}, the caller's to dispose once the cut has read it), their mask moved into
+     * {@code masks}, which outlive the chunk's, and the material the chunk draws it with ({@code drawn}) on those masks,
+     * one for each such material and page ({@code materials}). It still blends over the deck: the pieces draw it after
+     * themselves (GpuCollapse#renderOverlays).
+     */
+    private static MeepleShatter.Source coatSource(TileRange range, Material drawn, GpuTextures<BoardScene.Pixels> masks,
+          Matrix4 frame, Map<List<Object>, Material> materials, List<Mesh> owned) {
+        var mask = range.material().get(GpuRoads.Mask.class, GpuRoads.Mask.TYPE);
+        var region = masks.region(mask.data.pixels());
+        var points = new com.badlogic.gdx.utils.FloatArray();
+        var indices = new com.badlogic.gdx.utils.ShortArray();
+        GpuPropBatch.copyVertices(range.mesh(), range.offset(), range.count(), points, indices);
+        float[] vertices = points.toArray();
+        var attributes = range.mesh().getVertexAttributes();
+        GpuRoads.relocate(vertices, new GpuRoads.Mask(region, mask.data), attributes);
+        var copy = new Mesh(Mesh.VertexDataType.VertexArray, false, vertices.length / (attributes.vertexSize / Float.BYTES),
+              indices.size, attributes);
+        copy.setVertices(vertices);
+        copy.setIndices(indices.toArray());
+        owned.add(copy);
+        Texture page = region.getTexture();
+        Texture chunkPage = mask.textureDescription.texture;
+        Material material = materials.computeIfAbsent(List.of(drawn, page), key -> {
+            var moved = new Material(drawn);
+            // The chunk's mask page also stands in as a merged coat's diffuse texture, which gives it its coordinates.
+            for (Attribute attribute : drawn) {
+                if (attribute instanceof TextureAttribute texture && texture.textureDescription.texture == chunkPage) {
+                    var onPage = (TextureAttribute) texture.copy();
+                    onPage.textureDescription.texture = page;
+                    moved.set(onPage);
+                }
+            }
+            return moved;
+        });
+        return new MeepleShatter.Source(new com.badlogic.gdx.graphics.g3d.model.MeshPart("coat", copy, 0, indices.size,
+              GL20.GL_TRIANGLES), material, frame, 0);
+    }
+
+    /**
+     * The collapse of {@code change}'s structure, read as {@code sources}, in about {@code draws} draws; it owns
+     * {@code masks}, which may be null.
+     */
+    private GpuCollapse collapse(BoardScene.TileTransition.Collapse change, List<MeepleShatter.Source> sources,
+          Vector3 origin, boolean bridge, GpuTextures<BoardScene.Pixels> masks, int draws) {
         MeepleShatter.Caps caps = bridge ? new MeepleShatter.Caps(material(assets.material("terrain/surfaces/concrete-ground"), false),
               MeshBatch.STANDARD, BoardGeometry.width() / 5 * assets.coverage("terrain/surfaces/concrete-ground"))
               : buildingCaps(sources);
@@ -7512,7 +7620,7 @@ final class GpuTerrain implements Disposable {
         float storey = BoardGeometry.level();
         int levels = bridge ? 0 : MathUtils.clamp(Math.round(bounds.getDepth() / storey) - 1, 0, 3);
         int channels = (int) sources.stream().map(MeepleShatter.Source::material).distinct().count() + 1;
-        int pieces = MathUtils.clamp(COLLAPSE_DRAWS / channels, 10, bridge ? 20 : 48);
+        int pieces = MathUtils.clamp(draws / channels, draws < COLLAPSE_DRAWS ? 4 : 10, bridge ? 20 : 48);
         // Steep breaks per storey band: s of them cross a band into about 1 + s + s^2 / 4 pieces.
         int steep = MathUtils.clamp(MathUtils.ceil(2 * ((float) Math.sqrt((float) pieces / (levels + 1)) - 1)), 2, 7);
         var base = bridge ? bounds.getCenter(new Vector3()) : new Vector3(origin.x, origin.y, bounds.min.z);
@@ -7521,14 +7629,15 @@ final class GpuTerrain implements Disposable {
         var fall = new MeepleDebris.Collapse(base, storey, bridge, from, change.strength(), loads);
         boolean water = change.before().liquid().present() && !change.before().frozen();
         return new GpuCollapse(sources, origin, MeepleShatter.Planes.crumble(levels, steep), caps, fall,
-              Math.max(bounds.getWidth(), bounds.getHeight()) * .5f, bounds.getDepth(), water, at.hashCode());
+              Math.max(bounds.getWidth(), bounds.getHeight()) * .5f, bounds.getDepth(), water, change.coords().hashCode(),
+              masks);
     }
 
-    /** The prop's model at its finest level within {@link #COLLAPSE_TRIANGLES}. */
-    private static ModelInstance finest(Prop prop) {
+    /** The prop's model at its finest level within {@code triangles}, else its coarsest. */
+    private static ModelInstance finest(Prop prop, int triangles) {
         int count = prop.building != null ? prop.building.lodCount() : prop.levels == null ? 1 : prop.levels.size();
         ModelInstance level = prop.near();
-        for (int lod = 1; lod < count && triangles(level) > COLLAPSE_TRIANGLES; lod++) { level = prop.level(lod, prop.instance()); }
+        for (int lod = 1; lod < count && triangles(level) > triangles; lod++) { level = prop.level(lod, prop.instance()); }
         return level;
     }
 
@@ -7596,7 +7705,10 @@ final class GpuTerrain implements Disposable {
         }
     }
 
-    /** The falling pieces, drawn with the terrain's programs as the structures they were. */
+    /**
+     * The falling pieces, drawn with the terrain's programs as the structures they were; a road's coats on them draw
+     * later, over them (GpuCollapse#renderOverlays).
+     */
     private void renderCollapses(ModelBatch target, Environment lighting) {
         for (Collapsing fall : collapsing) {
             var instance = fall.collapse().instance();
@@ -8844,6 +8956,7 @@ final class GpuTerrain implements Disposable {
             if (visible && paint != null) { renderRetained(paint, batch, environment); }
         }
         if (lifts != null) { lifts.renderOverlays(batch, environment); }
+        for (Collapsing fall : collapsing) { fall.collapse().renderOverlays(batch, environment); }
         paintPages.render(batch, environment, pageDeadline);
         batch.end();
     }

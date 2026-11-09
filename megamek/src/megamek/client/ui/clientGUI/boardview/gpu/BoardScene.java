@@ -1075,9 +1075,10 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         record Change(Coords coords, Tile before, Tile after) { }
 
         /**
-         * A building, fuel tank or bridge span coming down at {@code coords}, as its tile stood {@code before}: from
-         * the strongest hit on it, of {@code strength} 0 to 1 coming {@code from} where it was fired (null, 0: its own
-         * weight brings it down), with the units that stood on it as {@code loads}.
+         * A building, fuel tank or bridge span coming down at {@code coords}, as its tile stood {@code before}: pushed
+         * by the hit that brought it down, if it follows that attack's animation, of {@code strength} 0 to 1 coming
+         * {@code from} where it was fired (null, 0: it comes straight down under its own weight), with the units that
+         * stood on it as {@code loads}.
          */
         record Collapse(Coords coords, Tile before, float strength, Waypoint from, List<Waypoint> loads) {
             Collapse {
@@ -1085,7 +1086,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             }
         }
 
-        /** The strongest hit on a structure this round, which its collapse falls away from. */
+        /** The hit that brought a structure down, which its collapse falls away from when it follows that hit. */
         record Hit(float strength, Waypoint from) { }
 
         TileTransition {
@@ -1110,7 +1111,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
         /**
          * The elevators the server moved and, unless {@code hits} is null, the structures it brought down between two
-         * scenes of one board, each with the strongest of {@code hits} on its hex; null when nothing moved or fell.
+         * scenes of one board, each with its hex's hit in {@code hits}; null when nothing moved or fell.
          */
         static TileTransition of(BoardScene before, BoardScene after, java.util.function.Function<Coords, Hit> hits) {
             if (before.tiles() == after.tiles() || before.width() != after.width() || before.height() != after.height()) {

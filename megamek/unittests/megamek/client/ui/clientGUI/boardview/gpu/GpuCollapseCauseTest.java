@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
@@ -29,18 +30,23 @@ import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.common.MMRandom;
 import megamek.common.Player;
 import megamek.common.Report;
+import megamek.common.actions.WeaponAttackAction;
 import megamek.common.board.Board;
+import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.enums.GamePhase;
+import megamek.common.equipment.EquipmentType;
 import megamek.common.enums.MoveStepType;
 import megamek.common.game.Game;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.moves.MovePath;
 import megamek.common.net.packets.Packet;
 import megamek.common.options.OptionsConstants;
+import megamek.common.units.BuildingTarget;
 import megamek.common.units.Entity;
 import megamek.common.units.ProneCause;
+import megamek.common.units.Targetable;
 import megamek.server.Server;
 import megamek.server.totalWarfare.TWGameManager;
 import org.junit.jupiter.api.Test;
@@ -49,14 +55,18 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Answers;
 
 /**
- * A unit whose weight brings a structure down, as a real game plays it: MegaMek's TWGameManager moves a unit onto it,
+ * What brings a structure down, as a real game plays it: MegaMek's TWGameManager moves a unit or resolves its fire,
  * every packet for its player reaches a Client serialized, as over the network, and a GpuBoardSource captures its game.
- * A walker's path stops before the step that broke the span (CF 90 under a 100-ton Atlas) and the server sends only
- * where it fell; a jumper's path lands on the roof (a light building, CF 15, under a 55-ton Dervish) and the fall comes
- * after it. Either way the playback puts the unit on the structure, brings the structure down under it and drops it
- * with the structure.
+ * <p>
+ * A unit's weight: a walker's path stops before the step that broke the span (CF 90 under a 100-ton Atlas) and the
+ * server sends only where it fell; a jumper's path lands on the roof (a light building, CF 15, under a 55-ton Dervish)
+ * and the fall comes after it. Either way the playback puts the unit on the structure, brings the structure down under
+ * it and drops it with the structure.
+ * <p>
+ * An attack: the server names the structures an attack's damage brought down, which the rules bring down at the phase's
+ * end. A strong hit pushes the structure only when its collapse follows that hit's animation.
  */
-class GpuWeightCollapseTest {
+class GpuCollapseCauseTest {
     private static final int LOCAL = 0, OPPONENT = 1;
     private static final int MOVER = 1;
     /** The 16x17 Grassland's span beside the dry ground at 1008, its deck a level up. */
@@ -103,6 +113,98 @@ class GpuWeightCollapseTest {
         }, Map.of("1209", "bldg_elev:2;building:1:0;bldg_cf:15"));
         var jump = comesDownUnder(frames, ROOF, 2);
         assertEquals(new Coords(13, 8), jump.path().getFirst().coords(), "The jump the server sent ends on the roof");
+    }
+
+    /**
+     * An Atlas two hexes south of a light building (CF 10) brings it down with its AC/20 (20 a hit): the server names
+     * the building on that shot. As the phase's last shot it pushes the building away from the Atlas; a medium laser
+     * fired after it, whose animation comes between them, leaves the building coming straight down.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void aStrongHitPushesWhatItBringsDownOnlyRightBeforeItComesDown(boolean laserAfter) throws Exception {
+        var atlas = new Coords(11, 10);
+        var frames = play("Atlas AS7-D.mtf", atlas, 0, Map.of("1209", "bldg_elev:2;building:1:0;bldg_cf:10"),
+              GamePhase.FIRING, (manager, game, attacker) -> {
+                  int building = new BuildingTarget(ROOF, game.getBoard(), false).getId();
+                  for (String weapon : laserAfter ? List.of("ISAC20", "ISMediumLaser") : List.of("ISAC20")) {
+                      int mount = attacker.getWeaponList().stream()
+                            .filter(gun -> gun.getType() == EquipmentType.get(weapon) && !gun.isRearMounted())
+                            .findFirst().map(attacker::getEquipmentNum).orElseThrow();
+                      game.addAction(new WeaponAttackAction(MOVER, Targetable.TYPE_BUILDING, building, mount));
+                  }
+                  call(manager, "resolveOnlyWeaponAttacks");
+                  manager.assignAMS();
+                  call(manager, "handleAttacks");
+                  call(manager, "applyBuildingDamage");
+              });
+        var events = frames.moved().timeline();
+        var collapse = events.stream().filter(event -> event instanceof BoardScene.TileTransition transition
+              && transition.collapses(ROOF)).map(BoardScene.TileTransition.class::cast).findFirst().orElseThrow(
+              () -> new AssertionError("The building comes down: " + events));
+        var shots = events.subList(0, events.indexOf(collapse)).stream()
+              .filter(BoardScene.Combat.class::isInstance).map(BoardScene.Combat.class::cast).toList();
+        assertEquals(laserAfter ? 2 : 1, shots.size(), "Its shots play before it comes down: " + events);
+        assertEquals(List.of(BoardLocation.of(ROOF, 0)), shots.getFirst().result().collapses(),
+              "The server names what the AC/20 brought down");
+        var fall = collapse.collapses().getFirst();
+        if (laserAfter) {
+            assertEquals(List.of(), shots.getLast().result().collapses());
+            assertEquals(0, fall.strength(), "The laser's animation comes between: it comes straight down");
+            assertNull(fall.from());
+        } else {
+            assertEquals(1, fall.strength(), .01f, "An AC/20 pushes at full strength");
+            assertEquals(atlas, fall.from().coords(), "It falls away from the Atlas");
+        }
+    }
+
+    /**
+     * An Alamo strike at 1209: its crater (a hex's ring) takes the building at 1210 and its blast brings down the
+     * building at 1211, two hexes out, and the board's bridges. What its own checkpoint shows gone comes down right after
+     * its flash, the crater's building among them; the rest as the phase ends (TWGameManager#applyBuildingDamage). All of
+     * it falls away from ground zero at full strength.
+     */
+    @Test
+    void aNuclearStrikePushesWhatItBringsDownAwayFromGroundZero() throws Exception {
+        var groundZero = ROOF;
+        var crater = new Coords(11, 9);
+        var blast = new Coords(11, 10);
+        var frames = play("Atlas AS7-D.mtf", new Coords(4, 4), 0,
+              Map.of("1210", "bldg_elev:2;building:1:0;bldg_cf:40", "1211", "bldg_elev:2;building:1:0;bldg_cf:40"),
+              GamePhase.FIRING, (manager, game, unit) -> {
+                  manager.addScheduledNuke(new int[] { groundZero.getX(), groundZero.getY(), 2 });
+                  call(manager, "resolveScheduledNukes");
+                  call(manager, "applyBuildingDamage");
+              });
+        var events = frames.moved().timeline();
+        int flash = -1;
+        for (int index = 0; index < events.size(); index++) {
+            if (events.get(index) instanceof BoardScene.Detonation) { flash = index; }
+        }
+        assertTrue(flash >= 0, "The strike plays: " + brief(events));
+        assertTrue(events.get(flash + 1) instanceof BoardScene.TileTransition craterFall && craterFall.collapses(crater),
+              "The crater's building comes down right after the flash: " + brief(events));
+        var falls = events.subList(flash + 1, events.size()).stream().filter(BoardScene.TileTransition.class::isInstance)
+              .flatMap(transition -> ((BoardScene.TileTransition) transition).collapses().stream()).toList();
+        assertTrue(falls.stream().anyMatch(fall -> fall.coords().equals(blast)),
+              "The blast's building comes down too: " + brief(events));
+        for (var fall : falls) {
+            assertEquals(1, fall.strength(), .01f, fall.coords() + " comes down at full strength");
+            assertEquals(groundZero, fall.from().coords(), fall.coords() + " falls away from ground zero");
+        }
+    }
+
+    /** The timeline in short: each event's kind and, for a scene change, the hexes it brings down. */
+    private static String brief(List<BoardScene.Animation> events) {
+        return events.stream().map(event -> event instanceof BoardScene.TileTransition transition
+              ? "TileTransition" + transition.collapses().stream().map(fall -> fall.coords().getBoardNum()).toList()
+              : event.getClass().getSimpleName()).toList().toString();
+    }
+
+    private static void call(TWGameManager manager, String method) throws ReflectiveOperationException {
+        Method declared = TWGameManager.class.getDeclaredMethod(method);
+        declared.setAccessible(true);
+        declared.invoke(manager);
     }
 
     /**
@@ -161,6 +263,33 @@ class GpuWeightCollapseTest {
      */
     private static Frames move(String unit, Coords start, int facing, java.util.function.Consumer<MovePath> steps,
           Map<String, String> structures) throws Exception {
+        return play(unit, start, facing, structures, GamePhase.MOVEMENT, (manager, game, mover) -> {
+            var path = new MovePath(game, mover);
+            steps.accept(path);
+            // As TWGameManager.receiveMovement handles the owner's packet, without its turn checks.
+            var handler = Class.forName("megamek.server.totalWarfare.MovePathHandler")
+                  .getDeclaredConstructor(TWGameManager.class, Entity.class, MovePath.class, Map.class);
+            handler.setAccessible(true);
+            Object moving = handler.newInstance(manager, mover, path, null);
+            Method process = moving.getClass().getDeclaredMethod("processMovement");
+            process.setAccessible(true);
+            process.invoke(moving);
+            call(manager, "applyAffectedBuildings");
+        });
+    }
+
+    /** The server's part of a phase, given its manager, its game and the unit. */
+    private interface ServerWork {
+        void run(TWGameManager manager, Game game, Entity unit) throws Exception;
+    }
+
+    /**
+     * Plays {@code work}, the server's part of a {@code phase}, with {@code unit} at {@code start} facing {@code facing},
+     * on the 16x17 Grassland with {@code structures} (hex number to terrain) added: the frames before it and after it,
+     * up to the first scene change it brought.
+     */
+    private static Frames play(String unit, Coords start, int facing, Map<String, String> structures, GamePhase phase,
+          ServerWork work) throws Exception {
         Compute.setRNG(new MMRandom() {
             private final java.util.Random others = new java.util.Random(7);
             @Override public int randomInt(int maxValue) { return maxValue == 6 ? 4 : others.nextInt(maxValue); }
@@ -192,11 +321,12 @@ class GpuWeightCollapseTest {
         Entity mover = add(game, unit, start);
         mover.setFacing(facing);
         mover.setSecondaryFacing(facing);
+        mover.loadAllWeapons();
         game.setupTeams();
         game.createVictoryConditions();
         game.setCurrentRound(1);
         game.addReports(new ArrayList<>(List.of(new Report(2000))));
-        game.setPhase(GamePhase.MOVEMENT);
+        game.setPhase(phase);
         Method handle = AbstractClient.class.getDeclaredMethod("handlePacket", Packet.class);
         handle.setAccessible(true);
         Server server = mock(Server.class, invocation -> {
@@ -224,24 +354,17 @@ class GpuWeightCollapseTest {
             SwingUtilities.invokeAndWait(created);
             source = created.get();
             var initial = source.takeFrame();
-            var path = new MovePath(game, mover);
-            steps.accept(path);
-            // As TWGameManager.receiveMovement handles the owner's packet, without its turn checks.
-            var handler = Class.forName("megamek.server.totalWarfare.MovePathHandler")
-                  .getDeclaredConstructor(TWGameManager.class, Entity.class, MovePath.class, Map.class);
-            handler.setAccessible(true);
-            Object moving = handler.newInstance(manager, mover, path, null);
-            Method process = moving.getClass().getDeclaredMethod("processMovement");
-            process.setAccessible(true);
-            process.invoke(moving);
-            Method buildings = TWGameManager.class.getDeclaredMethod("applyAffectedBuildings");
-            buildings.setAccessible(true);
-            buildings.invoke(manager);
-            // A collapse no path follows waits out the source's hold; its timer then captures it.
+            work.run(manager, game, mover);
+            // A collapse no path follows waits out the source's hold; its timer then captures it. Each added structure
+            // that comes down does so in a scene change of its own.
+            List<Coords> added = structures.keySet().stream().map(hex ->
+                  new Coords(Integer.parseInt(hex.substring(0, 2)) - 1, Integer.parseInt(hex.substring(2)) - 1)).toList();
             List<BoardScene.Animation> timeline = new ArrayList<>();
             GpuBoardSource.Frame moved = null;
-            for (long deadline = System.nanoTime() + 5_000_000_000L;
-                  timeline.stream().noneMatch(BoardScene.TileTransition.class::isInstance) && System.nanoTime() < deadline; ) {
+            for (long deadline = System.nanoTime() + 5_000_000_000L; System.nanoTime() < deadline
+                  && (timeline.stream().noneMatch(BoardScene.TileTransition.class::isInstance)
+                        || !added.stream().allMatch(at -> timeline.stream().anyMatch(event ->
+                              event instanceof BoardScene.TileTransition transition && transition.collapses(at)))); ) {
                 Thread.sleep(50);
                 SwingUtilities.invokeAndWait(() -> { });
                 moved = source.takeFrame();

@@ -7,8 +7,14 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.Model;
+import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.Renderable;
+import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
+import com.badlogic.gdx.graphics.g3d.model.Node;
+import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
@@ -18,7 +24,7 @@ import megamek.logging.MMLogger;
  * One hex's structure coming down: a building, a fuel tank or a bridge span, read where the terrain drew it, cut into
  * closed pieces ({@link MeepleShatter}) on another thread, then dropped where they stood ({@link MeepleDebris#collapse})
  * in a cloud of dust, until they have settled and sink into the rubble the hex shows now. Owns its pieces' meshes and
- * borrows their materials. The render thread drives it, the cut aside.
+ * the masks its road coats sample, and borrows their other materials. The render thread drives it, the cut aside.
  */
 final class GpuCollapse implements Disposable {
     private static final MMLogger LOGGER = MMLogger.create(GpuCollapse.class);
@@ -43,7 +49,13 @@ final class GpuCollapse implements Disposable {
 
     private record Puff(Vector3 at, float size, float born, int seed) { }
 
+    /** A part of a piece that blends over the rest, with the renderable it is drawn through. */
+    private record Overlay(Node piece, NodePart part, Renderable renderable) { }
+
     private final CompletableFuture<MeepleShatter.Cut> cut;
+    /** The masks its road coats sample, null for none. */
+    private final Disposable masks;
+    private final List<Overlay> overlays = new ArrayList<>();
     private final MeepleDebris.Collapse fall;
     /** The middle of the structure's foot, its horizontal reach from there and its height. */
     private final Vector3 base;
@@ -66,9 +78,11 @@ final class GpuCollapse implements Disposable {
      * @param reach  the structure's horizontal reach from its foot's middle ({@code fall.base()})
      * @param height its height above its foot
      * @param water  whether its pieces fall into water
+     * @param masks  the masks its road coats sample, which it disposes with itself; null for none
      */
     GpuCollapse(List<MeepleShatter.Source> sources, Vector3 origin, MeepleShatter.Planes planes, MeepleShatter.Caps caps,
-          MeepleDebris.Collapse fall, float reach, float height, boolean water, int seed) {
+          MeepleDebris.Collapse fall, float reach, float height, boolean water, int seed, Disposable masks) {
+        this.masks = masks;
         cut = CompletableFuture.supplyAsync(MeepleShatter.cutter(sources, origin, Vector3.Z, planes, seed, caps), CUTTER);
         this.fall = fall;
         base = new Vector3(fall.base());
@@ -76,6 +90,15 @@ final class GpuCollapse implements Disposable {
         this.height = Math.max(height, 1);
         this.water = water;
         this.seed = seed;
+    }
+
+    /** The middle of the structures {@code transition} brings down, at their ground: where the camera frames them. */
+    static Vector3 middle(BoardScene.TileTransition transition) {
+        var center = new Vector3();
+        for (var collapse : transition.collapses()) {
+            center.add(BoardGeometry.center(collapse.coords(), collapse.before().elevation()));
+        }
+        return center.scl(1f / transition.collapses().size());
     }
 
     /** Whether its pieces are cut, or the cut failed: it can take the structure's place. */
@@ -99,6 +122,17 @@ final class GpuCollapse implements Disposable {
             }
             model = MeepleShatter.model("collapse", pieces);
             instance = new ModelInstance(model);
+            // What blends over the pieces, a road's coats on a span's deck, writes no depth and casts no shadow: the
+            // solid passes leave it out, and it draws after them (renderOverlays), as the deck's coats did.
+            for (Node piece : instance.nodes.first().getChildren()) {
+                for (NodePart part : piece.parts) {
+                    var blend = part.material.get(BlendingAttribute.class, BlendingAttribute.Type);
+                    if (blend != null && blend.blended) {
+                        part.enabled = false;
+                        overlays.add(new Overlay(piece, part, new Renderable()));
+                    }
+                }
+            }
             debris = MeepleDebris.collapse(instance, instance.nodes.first(), pieces.supports(), fall, seed);
             debris.pose();
             return true;
@@ -111,6 +145,17 @@ final class GpuCollapse implements Disposable {
 
     /** Its pieces, or null before they take the structure's place. */
     ModelInstance instance() { return debris == null ? null : instance; }
+
+    /** Draws what blends over its pieces (start), in the pass that draws the terrain's coats after its solids. */
+    void renderOverlays(ModelBatch batch, Environment lighting) {
+        if (instance() == null) { return; }
+        for (Overlay overlay : overlays) {
+            Renderable renderable = instance.getRenderable(overlay.renderable(), overlay.piece(), overlay.part());
+            renderable.environment = lighting;
+            renderable.shader = null;
+            batch.render(renderable);
+        }
+    }
 
     /** Lets its pieces fall: until then they stand where the structure stood. */
     void release() { released = true; }
@@ -195,6 +240,8 @@ final class GpuCollapse implements Disposable {
         model = null;
         instance = null;
         debris = null;
+        overlays.clear();
+        if (masks != null) { masks.dispose(); }
         // A cut still running is dropped with it.
         cut.cancel(false);
     }
