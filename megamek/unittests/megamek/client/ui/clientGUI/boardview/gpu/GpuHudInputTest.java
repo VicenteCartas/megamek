@@ -185,15 +185,33 @@ class GpuHudInputTest {
         update(moving, GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
         assertTrue(escape());
         assertEquals(Entity.NONE, hud.state.inspected);
-        assertFalse(escape(), "the last Esc of the movement phase goes to the phase display as CANCEL");
+        assertTrue(escape(), "with nothing left to close, Esc opens the Menu instead of reaching the phase display");
+        assertEquals(GpuHudState.Dialog.MENU, hud.state.dialog);
+        assertTrue(escape());
+        assertEquals(GpuHudState.Dialog.NONE, hud.state.dialog, "Esc closes the Menu again");
 
         // OFFBOARD runs the targeting display, whose CANCEL clears the declared attacks as well.
         for (GamePhase phase : List.of(GamePhase.FIRING, GamePhase.TARGETING, GamePhase.OFFBOARD,
               GamePhase.PHYSICAL)) {
             update(GpuHudFixtures.status(3, phase, true, GpuHudFixtures.FIRST, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)), GpuHudData.EMPTY, null);
             assertTrue(escape(), "CANCEL would clear declared attacks, so " + phase + " never forwards it");
+            assertEquals(GpuHudState.Dialog.MENU, hud.state.dialog, phase + ": the last Esc opens the Menu");
+            hud.state.dialog = GpuHudState.Dialog.NONE;
         }
         verify(moves, times(1)).clearRoute();
+    }
+
+    @Test
+    void theGameMenuKeyTogglesTheMenuOverOtherDialogs() {
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0,
+              GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true)));
+        assertTrue(press(Input.Keys.F10, KeyEvent.VK_F10, 0), "F10 is the HUD's");
+        assertEquals(GpuHudState.Dialog.MENU, hud.state.dialog);
+        assertTrue(press(Input.Keys.F10, KeyEvent.VK_F10, 0));
+        assertEquals(GpuHudState.Dialog.NONE, hud.state.dialog, "F10 closes the Menu again");
+        hud.state.dialog = GpuHudState.Dialog.HELP;
+        assertTrue(press(Input.Keys.F10, KeyEvent.VK_F10, 0));
+        assertEquals(GpuHudState.Dialog.MENU, hud.state.dialog, "F10 over Help switches to the Menu");
     }
 
     @Test
@@ -285,6 +303,11 @@ class GpuHudInputTest {
               new Key(Input.Keys.ESCAPE, KeyEvent.VK_ESCAPE, 0))) {
             assertFalse(press(key.gdx(), key.awt(), key.modifiers()), "key " + key + " was consumed");
         }
+        // Without a path (a hex pick, or nothing yet) Esc still reaches MegaMek rather than opening the Menu.
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)),
+              GpuHudFixtures.panels(GpuHudFixtures.move(false, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        assertFalse(escape(), "Esc was consumed");
+        assertEquals(GpuHudState.Dialog.NONE, hud.state.dialog);
         verifyNoInteractions(moves);
     }
 
