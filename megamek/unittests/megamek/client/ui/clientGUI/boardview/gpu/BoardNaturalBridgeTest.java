@@ -621,8 +621,8 @@ class BoardNaturalBridgeTest {
             BoardSceneryLayouts.convert(edited);
             edited.collapseBuilding(gone);
         });
-        assertTrue(BoardBridge.feature(broken.tile(gone)) == null && BoardBridge.feature(broken.tile(keep)) != null,
-              "The game's own collapse takes the one hex");
+        assertTrue(BoardBridge.standing(broken.tile(gone)) == null && BoardBridge.feature(broken.tile(gone)).ruined()
+              && BoardBridge.standing(broken.tile(keep)) != null, "The game's own collapse takes the one hex, its ruin left");
         assertFalse(BoardNaturalBridge.overhang(broken, broken.tile(keep)), "No overhang: " + kept);
     }
 

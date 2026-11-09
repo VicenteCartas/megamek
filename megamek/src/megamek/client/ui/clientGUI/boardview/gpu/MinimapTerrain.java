@@ -74,7 +74,7 @@ record MinimapTerrain(int elevation, int waterDepth, boolean frozen, BoardScene.
         for (BoardScene.Feature feature : features) {
             building |= feature.kind() == BoardScene.FeatureKind.BUILDING;
             rough |= feature.kind() == BoardScene.FeatureKind.ROUGH || feature.kind() == BoardScene.FeatureKind.BOULDER;
-            bridge |= feature.asset().equals("bridge");
+            bridge |= feature.asset().equals("bridge") && !feature.ruined();
         }
         BoardLiquid.Kind kind = liquid == null
               ? waterDepth >= 0 ? BoardLiquid.Kind.WATER : BoardLiquid.Kind.NONE : liquid.kind();

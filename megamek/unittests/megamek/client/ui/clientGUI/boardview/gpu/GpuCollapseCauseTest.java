@@ -68,6 +68,10 @@ import org.mockito.Answers;
  */
 class GpuCollapseCauseTest {
     private static final int LOCAL = 0, OPPONENT = 1;
+    /** Milliseconds the server takes after sending a collapse, as a live server's damage, reports and saves do. */
+    private static long collapsePause;
+    /** How long after the server's work the last play's first collapse was taken, in nanoseconds. */
+    private static long collapseTaken;
     private static final int MOVER = 1;
     /** The 16x17 Grassland's span beside the dry ground at 1008, its deck a level up. */
     private static final Coords SPAN = new Coords(8, 7);
@@ -99,6 +103,31 @@ class GpuCollapseCauseTest {
             assertEquals(((BoardScene.Movement) earlier.getFirst()).type(), step.type(), "The step keeps the walk's pace");
         } else {
             assertEquals(List.of(), earlier, "No other move shows the Atlas before the span gives way");
+        }
+    }
+
+    /**
+     * A live server sends the mover's path long after the collapse it caused; the playback still shows the walk onto the
+     * span, the span giving way under it and the fall, never the walk again from where it started.
+     */
+    @Test
+    void aSlowServerStillShowsTheWalkOntoTheSpanBeforeItGivesWay() throws Exception {
+        collapsePause = 1500;
+        try {
+            var frames = move("Atlas AS7-D.mtf", BESIDE, 5, path -> {
+                path.addStep(MoveStepType.FORWARDS);
+                path.addStep(MoveStepType.FORWARDS);
+            }, Map.of());
+            var step = comesDownUnder(frames, SPAN, 1);
+            assertEquals(BESIDE, step.path().getFirst().coords(), "It steps on from where it was last shown");
+            assertEquals(1, frames.moved().timeline().stream()
+                  .filter(event -> event instanceof BoardScene.Movement move && move.entityId() == MOVER
+                        && move.path().getLast().coords().equals(SPAN) && move.path().getLast().elevation() > 0).count(),
+                  "It walks onto the span once: " + brief(frames.moved().timeline()));
+            // The move's last update ends the wait (GpuBoardSource#endsHeldMove), long before the hold would run out.
+            assertTrue(collapseTaken < 1_000_000_000L, "Shown " + collapseTaken / 1_000_000 + " ms after the server's work");
+        } finally {
+            collapsePause = 0;
         }
     }
 
@@ -336,6 +365,7 @@ class GpuCollapseCauseTest {
                         throw new IllegalStateException(failure);
                     }
                 });
+                if (received.command() == megamek.common.net.enums.PacketCommand.BLDG_COLLAPSE) { Thread.sleep(collapsePause); }
             }
             return Answers.RETURNS_DEFAULTS.answer(invocation);
         });
@@ -352,6 +382,8 @@ class GpuCollapseCauseTest {
             source = created.get();
             var initial = source.takeFrame();
             work.run(manager, game, mover);
+            long done = System.nanoTime();
+            collapseTaken = Long.MAX_VALUE;
             // A collapse no path follows waits out the source's hold; its timer then captures it. Each added structure
             // that comes down does so in a scene change of its own.
             List<Coords> added = structures.keySet().stream().map(hex ->
@@ -366,6 +398,9 @@ class GpuCollapseCauseTest {
                 SwingUtilities.invokeAndWait(() -> { });
                 moved = source.takeFrame();
                 timeline.addAll(moved.timeline());
+                if (collapseTaken == Long.MAX_VALUE && moved.timeline().stream().anyMatch(BoardScene.TileTransition.class::isInstance)) {
+                    collapseTaken = System.nanoTime() - done;
+                }
             }
             return new Frames(initial, moved.withTimeline(timeline));
         } finally {

@@ -382,6 +382,15 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         return withPiers(scene, tile, deck, support, lod, surfaces, columns, easedExits);
     }
 
+    /**
+     * What stands of a built bridge whose span fell (BoardScene.Feature#ruined): these landings and the piers under its
+     * joints, as they stood under the deck ({@link #withDeck}), without the deck.
+     */
+    BoardBridge.Shape ruin(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck, TerrainLod lod,
+          Map<Coords, BoardSurface> surfaces, boolean columns) {
+        return withPiers(scene, tile, deck, shape, lod, surfaces, columns, easedExits);
+    }
+
     static BoardBridgeFooting build(BoardScene scene, BoardScene.Tile tile, TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
         return build(scene, tile, lod, surfaces, false);
     }

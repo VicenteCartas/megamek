@@ -1332,13 +1332,26 @@ final class BoardFeatures {
                     scale * (float) feature.stretch().z());
     }
 
-    /** The hex's bridge, at its height above the hex's level (BoardBridge.deckZ). */
+    /**
+     * The hex's bridge, at its height above the hex's level (BoardBridge.deckZ); or the ruin of one whose span fell
+     * (Hex#getRuins), whose landings and piers still stand at that height and where its roads still end. A fallen
+     * guideway (BoardBridge#guideway: an implicit span carrying only a maglev) leaves nothing, its columns falling with
+     * its beam.
+     */
     private static void addBridge(Hex hex, List<BoardScene.Feature> result) {
-        if (hex.containsTerrain(Terrains.BRIDGE)) {
-            int exits = hex.getTerrain(Terrains.BRIDGE).getExits() & 63;
-            result.add(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1,
-                  hex.terrainLevel(Terrains.BRIDGE_ELEV), BoardScene.FeatureKind.PROP, exits));
+        boolean ruined = !hex.containsTerrain(Terrains.BRIDGE);
+        var bridge = ruined ? hex.getRuin(Terrains.BRIDGE) : hex.getTerrain(Terrains.BRIDGE);
+        if (bridge == null) { return; }
+        var rail = hex.getRuin(Terrains.BRIDGE_RAIL);
+        if (ruined && HexAppearance.implicit(hex.getAppearance()) && hex.getRuin(Terrains.BRIDGE_ROAD) == null
+              && (rail != null && rail.getLevel() == 2 || hex.getDecorations().stream()
+                    .anyMatch(object -> RailRoute.kind(object) == RailRoute.Kind.MAGLEV && RailRoute.onDeck(object)))) {
+            return;
         }
+        var deck = ruined ? hex.getRuin(Terrains.BRIDGE_ELEV) : hex.getTerrain(Terrains.BRIDGE_ELEV);
+        result.add(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, deck == null ? 0 : deck.getLevel(),
+              BoardScene.FeatureKind.PROP, bridge.getExits() & 63, false, null, BoardDecoration.Stretch.NONE,
+              BoardDecoration.Colours.NONE, 0, ruined));
     }
 
     /**
@@ -1364,7 +1377,9 @@ final class BoardFeatures {
         int bridgeExits = hex.containsTerrain(Terrains.BRIDGE) ? hex.getTerrain(Terrains.BRIDGE).getExits() : 0;
         String owned = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":";
         List<megamek.common.board.BoardDecoration> objects = new ArrayList<>(RailRoute.derived(hex, owned));
-        objects.addAll(hex.getDecorations());
+        // What stood on a fallen span's deck fell with it (Hex#getRuins); it stands again with the span.
+        boolean fallen = !hex.containsTerrain(Terrains.BRIDGE) && hex.getRuin(Terrains.BRIDGE) != null;
+        hex.getDecorations().stream().filter(object -> !fallen || !RailRoute.onDeck(object)).forEach(objects::add);
         for (var object : objects) {
             if (BuildingVolumes.of(object.asset()).present()) {
                 // Saved references include collapsed members; only a placement with none is a visual prop.
@@ -1438,8 +1453,10 @@ final class BoardFeatures {
         boolean ultra = hex.terrainLevel(Terrains.ROUGH) == 2;
         int count = teeth ? (ultra ? 24 : 10) : felled ? (ultra ? 12 : 9) : ultra ? 18 : 9;
         List<BoardRoad> roads = nearbyWays(hex, coords, board);
-        int exits = hex.containsTerrain(Terrains.BRIDGE) ? hex.getTerrain(Terrains.BRIDGE).getExits() : 0;
-        BoardRoad bridge = hex.containsTerrain(Terrains.BRIDGE) ? BoardRoad.clearance(coords, exits) : null;
+        // A fallen span's landings and piers still stand where its deck ran (Hex#getRuins).
+        var span = hex.containsTerrain(Terrains.BRIDGE) ? hex.getTerrain(Terrains.BRIDGE) : hex.getRuin(Terrains.BRIDGE);
+        int exits = span == null ? 0 : span.getExits();
+        BoardRoad bridge = span == null ? null : BoardRoad.clearance(coords, exits);
         Predicate<BoardScene.Feature> clear = feature -> {
             float x = feature.x(), y = feature.y(), radius = roughRadius(feature);
             // Bridge decks follow the complete road footprint, including dead ends and solid roundabout islands, and

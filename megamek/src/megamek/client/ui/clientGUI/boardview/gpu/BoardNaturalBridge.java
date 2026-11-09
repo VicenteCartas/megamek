@@ -87,7 +87,7 @@ final class BoardNaturalBridge {
             }
             var next = scene.tile(tile.coords().translated(d));
             boolean bank = BoardBridge.abutment(tile, next, d);
-            boolean joined = BoardBridge.connected(tile, next, d);
+            boolean joined = spans(tile, next, d);
             // Only walkable landings need the extra flare; tall cliffs receive the full-width span itself.
             float width = mouthWidth(center.x + gate.x, center.y + gate.y, bank && BoardBridge.bank(tile, next, d));
             levelBanks[d] = bank && BoardRoadGrade.ground(next) == level;
@@ -201,8 +201,7 @@ final class BoardNaturalBridge {
             if (fullHex) {
                 // A Classic cap's edge continues into a joined cap at its own height; any other edge is walled.
                 var next = scene.tile(tile.coords().translated(a.exit()));
-                seam = BoardBridge.connected(tile, next, a.exit()) && natural(next) && deck(next) == level
-                      ? Seam.JOINT : Seam.END;
+                seam = spans(tile, next, a.exit()) && natural(next) && deck(next) == level ? Seam.JOINT : Seam.END;
             }
             int steps = seam == Seam.OPEN ? edgeSteps : 1;
             rim.add(a);
@@ -380,7 +379,7 @@ final class BoardNaturalBridge {
         float anchored = anchoring(scene, tile, point), room = space;
         for (int d = 0; d < 6; d++) {
             var next = scene.tile(tile.coords().translated(d));
-            if (!BoardBridge.connected(tile, next, d)) { continue; }
+            if (!spans(tile, next, d)) { continue; }
             float u = Math.clamp(BoardGeometry.share(tile.coords(), d, point.x, point.y), 0, 1);
             float join = Math.clamp(2 * u - 1, 0, 1);
             anchored = Math.max(anchored, anchoring(scene, next, point) * join);
@@ -470,7 +469,15 @@ final class BoardNaturalBridge {
 
     /** A joined natural span: the two rock shells continue into each other. */
     static boolean joined(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
-        return BoardBridge.connected(tile, next, direction) && natural(next);
+        return spans(tile, next, direction) && natural(next);
+    }
+
+    /**
+     * The decks join and the other one stands: a span beside one that fell ({@link BoardScene.Feature#ruined}) has its
+     * broken end there, walled, as it keeps its form ({@link #overhang}).
+     */
+    private static boolean spans(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
+        return BoardBridge.connected(tile, next, direction) && BoardBridge.standing(next) != null;
     }
 
     /** Both exits around the corner between directions d and d + 1 rest on ground or on a joined natural span. */
@@ -921,7 +928,8 @@ final class BoardNaturalBridge {
     /** The span in {@code direction} of {@code bank} that supports its rim, or null. */
     static BankJoin bankApproach(BoardScene scene, BoardScene.Tile bank, int direction) {
         var span = scene.tile(bank.coords().translated(direction));
-        if (!BoardBridge.bank(span, bank, (direction + 3) % 6)
+        // A fallen rock arch supports nothing.
+        if (BoardBridge.standing(span) == null || !BoardBridge.bank(span, bank, (direction + 3) % 6)
               || BoardBridge.family(span) != BoardBridge.Family.NATURAL
               || span.elevation() + BoardBridge.feature(span).elevation() != BoardRoadGrade.ground(bank)) { return null; }
         var center = BoardGeometry.center(bank.coords(), 0);

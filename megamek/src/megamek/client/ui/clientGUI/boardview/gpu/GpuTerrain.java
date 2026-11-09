@@ -4085,6 +4085,8 @@ final class GpuTerrain implements Disposable {
                 if (!feature.asset().equals("bridge")) { continue; }
                 var deck = BoardBridge.deck(scene, tile);
                 bridges.put(tile.coords(), deck);
+                // A fallen rock arch leaves nothing standing.
+                if (feature.ruined() && deck.natural()) { continue; }
                 // A rock arch has no piers. A built deck's piers join its shape: drawn, shadowed and picked with it in every view.
                 // A deck's road is painted on its own sides; a clean deck shows its top (builtBridge, a rock arch's rock).
                 if (deck.natural()) {
@@ -4103,7 +4105,8 @@ final class GpuTerrain implements Disposable {
                     continue;
                 }
                 var footing = BoardBridgeFooting.build(scene, tile, lod, surfaces, columns);
-                var shape = footing.withDeck(scene, tile, deck, lod, surfaces, columns);
+                // A fallen span's road stays painted on its landings, which still stand (builtShape).
+                var shape = builtShape(scene, tile, deck, footing, lod, surfaces, columns);
                 if (!shape.facets().isEmpty()) { bridgeShapes.put(tile.coords(), shape); }
                 if (deck.kind() == BoardRoad.Kind.NONE) { continue; }
                 var painted = footing.paint(deck);
@@ -4127,14 +4130,29 @@ final class GpuTerrain implements Disposable {
                     check.run();
                     bridgeShapes.computeIfAbsent(next.coords(), at -> {
                         var deck = BoardBridge.deck(scene, next);
-                        return deck.natural() ? BoardNaturalBridge.build(scene, next, deck, lod, surfaces, columns)
-                              : BoardBridgeFooting.build(scene, next, lod, surfaces, columns)
-                                    .withDeck(scene, next, deck, lod, surfaces, columns);
+                        // A fallen rock arch carries nothing; computeIfAbsent keeps no null.
+                        if (deck.natural()) {
+                            return BoardBridge.feature(next).ruined() ? null
+                                  : BoardNaturalBridge.build(scene, next, deck, lod, surfaces, columns);
+                        }
+                        var shape = builtShape(scene, next, deck, BoardBridgeFooting.build(scene, next, lod, surfaces, columns),
+                              lod, surfaces, columns);
+                        return shape.facets().isEmpty() ? null : shape;
                     });
                 }
             }
         }
         return new Infrastructure(roads, bridges, bridgeShapes, GpuAuthoredBuilding.prepare(scene, chunkTiles));
+    }
+
+    /**
+     * A built bridge's shape on its {@code footing}: its deck with its piers, or once its span fell what still stands of
+     * it, its landings and the piers under its joints ({@link BoardBridgeFooting#ruin}).
+     */
+    private static BoardBridge.Shape builtShape(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck,
+          BoardBridgeFooting footing, TerrainLod lod, Map<Coords, BoardSurface> surfaces, boolean columns) {
+        return BoardBridge.feature(tile).ruined() ? footing.ruin(scene, tile, deck, lod, surfaces, columns)
+              : footing.withDeck(scene, tile, deck, lod, surfaces, columns);
     }
 
     /** Natural walls are the completed surface mesh, shared with picking; legacy skirts still follow their sides. */
@@ -4610,13 +4628,16 @@ final class GpuTerrain implements Disposable {
                 solid.route = true;
                 var deck = prepared.bridges().get(tile.coords());
                 if (deck.natural()) {
-                    // A cap has art only where a bank of the span's surface abuts it; else the arch shows its rock.
-                    TextureRegion cap = chunk.columns && GpuTilesetTerrain.naturalBridgeArt(scene, tile, deck) != null
-                          ? this.ground.region(new GroundSlot(tile.coords(), true)) : null;
-                    naturalBridge(solid, bridgeShape, tile.deckMud(), cap != null,
-                          !chunk.columns && BoardNaturalBridge.overhang(scene, tile));
-                    if (cap != null) { GpuTilesetTerrain.naturalBridgeTop(tile, bridgeShape, cap, solid::add); }
-                } else { builtBridge(solid, bridgeShape, deck, scene, tile); }
+                    // A fallen rock arch leaves nothing.
+                    if (!feature.ruined()) {
+                        // A cap has art only where a bank of the span's surface abuts it; else the arch shows its rock.
+                        TextureRegion cap = chunk.columns && GpuTilesetTerrain.naturalBridgeArt(scene, tile, deck) != null
+                              ? this.ground.region(new GroundSlot(tile.coords(), true)) : null;
+                        naturalBridge(solid, bridgeShape, tile.deckMud(), cap != null,
+                              !chunk.columns && BoardNaturalBridge.overhang(scene, tile));
+                        if (cap != null) { GpuTilesetTerrain.naturalBridgeTop(tile, bridgeShape, cap, solid::add); }
+                    }
+                } else if (bridgeShape != null) { builtBridge(solid, bridgeShape, deck, scene, tile); }
                 solid.route = false;
                 continue;
             }
@@ -4811,12 +4832,14 @@ final class GpuTerrain implements Disposable {
                 instance.transform.val[Matrix4.M13] += py - placed.getCenterY();
                 instance.transform.val[Matrix4.M23] += base - placed.min.z + .12f * BoardGeometry.hexScale();
             } else if (feature.authoredPlacement()) {
-                // As import's receiver: on a bridge hex everything but trees stands on the deck. An earthwork stands on
-                // its hex's ground as it was before it was dug.
-                base = scenerySupport(BoardGroundCut.digs(feature.asset()) ? ground.undug() : ground, ground.deck(), supports,
+                // As import's receiver: on a bridge hex everything but trees stands on the deck; under a fallen span, as
+                // its rubble, on the floor its pieces fell to. An earthwork stands on its hex's ground as it was before it
+                // was dug.
+                boolean onDeck = BoardBridge.standing(tile) != null;
+                base = scenerySupport(BoardGroundCut.digs(feature.asset()) ? ground.undug() : ground,
+                      onDeck ? ground.deck() : null, supports,
                       BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()),
-                      feature.kind() != BoardScene.FeatureKind.TREE && BoardBridge.feature(tile) != null
-                            ? BoardBridge.deckZ(tile) : Float.NEGATIVE_INFINITY);
+                      feature.kind() != BoardScene.FeatureKind.TREE && onDeck ? BoardBridge.deckZ(tile) : Float.NEGATIVE_INFINITY);
                 placeAuthored(instance, px, py, base, BoardGroundCut.fitted(scene, tile, feature));
                 BoardGroundCut.showParts(instance, feature.parts());
             } else {
@@ -4974,7 +4997,7 @@ final class GpuTerrain implements Disposable {
                 height = supportHeight(receiver, ground, bridge, supports,
                       BoardGeometry.centerX(owner.coords()), BoardGeometry.centerY(owner.coords()));
             }
-            if (!Float.isFinite(height) && receiver.equals("bridge") && BoardBridge.feature(owner) != null) {
+            if (!Float.isFinite(height) && receiver.equals("bridge") && BoardBridge.standing(owner) != null) {
                 height = BoardBridge.deckZ(owner);
             }
             return (Float.isFinite(height) ? height : groundHeight) / level;
@@ -7861,10 +7884,12 @@ final class GpuTerrain implements Disposable {
         Map<Material, Material> copies = new IdentityHashMap<>();
         boolean bridge = mesh.bridgeShape != null && BoardScene.TileTransition.structure(change.before())
               && change.before().cover().structure() == 0;
-        // A rail, maglev beam or road the span carries, not one on the ground under it.
+        // A rail, maglev beam, road or object the span carries, not one on the ground under it.
         float deck = BoardGeometry.surfaceZ(tile) + BoardGeometry.level() * .5f;
         for (Prop prop : mesh.props) {
-            boolean structure = prop.building != null || bridge && prop.route() && prop.bounds().min.z > deck
+            var placed = prop.decorationFeature == null ? null : prop.decorationFeature.decoration();
+            boolean structure = prop.building != null || bridge && prop.bounds().min.z > deck
+                        && (prop.route() || placed != null && megamek.common.board.RailRoute.onDeck(placed))
                   || Float.isNaN(prop.floorZ) && ("building".equals(prop.receiver) || "fuelTank".equals(prop.receiver));
             if (!structure || isFlag(prop)) { continue; }
             ModelInstance drawn = finest(prop, COLLAPSE_TRIANGLES / together);
@@ -7877,16 +7902,19 @@ final class GpuTerrain implements Disposable {
         if (bridge) {
             Array<Renderable> solid = GpuTerrainDepth.snapshot(chunk.opaque), overlays = GpuTerrainDepth.snapshot(chunk.overlays);
             Map<TileRange, Material> coats = new LinkedHashMap<>();
+            // Its landings and piers stand on as its ruin (BoardBridgeFooting#ruin): only the span falls.
+            Standing standing = standing(tile, chunk.lod);
             for (TileRange range : mesh.ranges) {
                 if (!range.route() || range.layer() != 0 && range.layer() != 2) { continue; }
                 Material material = drawnMaterial(range.layer() == 0 ? solid : overlays, range);
                 if (material == null) { continue; }
                 if (range.layer() == 0) {
-                    sources.add(new MeepleShatter.Source(new com.badlogic.gdx.graphics.g3d.model.MeshPart("bridge",
-                          range.mesh(), range.offset(), range.count(), GL20.GL_TRIANGLES),
-                          copies.computeIfAbsent(material, GpuTerrain::pieceMaterial), frame, 0));
-                } else if (range.material().has(GpuRoads.Mask.TYPE)
-                      && range.mesh().calculateBoundingBox(new BoundingBox(), range.offset(), range.count()).min.z > deck) {
+                    var span = falling(range, standing.triangles(), coatMeshes);
+                    if (span != null) {
+                        sources.add(new MeepleShatter.Source(span, copies.computeIfAbsent(material, GpuTerrain::pieceMaterial),
+                              frame, 0));
+                    }
+                } else if (range.material().has(GpuRoads.Mask.TYPE)) {
                     coats.put(range, material);
                 }
             }
@@ -7899,8 +7927,18 @@ final class GpuTerrain implements Disposable {
                 }
                 masks.update(pixels);
                 Map<List<Object>, Material> coatMaterials = new HashMap<>();
+                // The paint the deck carried falls with it: none on the ground under it, on its standing landings and
+                // ramps, or on a bank its apron reaches.
+                Predicate<Vector3[]> carried = corners -> {
+                    float x = (corners[0].x + corners[1].x + corners[2].x) / 3;
+                    float y = (corners[0].y + corners[1].y + corners[2].y) / 3;
+                    var under = BoardGeometry.tile(coverScene, x, y);
+                    return (corners[0].z + corners[1].z + corners[2].z) / 3 > deck && under != null && under.coords().equals(at)
+                          && !standing.tops().contains(triangleKey(corners[0], corners[1], corners[2], false));
+                };
                 for (var coat : coats.entrySet()) {
-                    sources.add(coatSource(coat.getKey(), coat.getValue(), masks, frame, coatMaterials, coatMeshes));
+                    var source = coatSource(coat.getKey(), coat.getValue(), masks, frame, coatMaterials, coatMeshes, carried);
+                    if (source != null) { sources.add(source); }
                 }
             }
         }
@@ -7931,19 +7969,20 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * A road coat the span carries, as a source of its cut: its vertices copied out of the chunk's overlay mesh into a
+     * A road coat the span carries, as a source of its cut, null for none: its triangles that {@code carried} takes,
+     * copied out of the chunk's overlay mesh into a
      * mesh of their own ({@code owned}, the caller's to dispose once the cut has read it), their mask moved into
      * {@code masks}, which outlive the chunk's, and the material the chunk draws it with ({@code drawn}) on those masks,
      * one for each such material and page ({@code materials}). It still blends over the deck: the pieces draw it after
      * themselves (GpuCollapse#renderOverlays).
      */
     private static MeepleShatter.Source coatSource(TileRange range, Material drawn, GpuTextures<BoardScene.Pixels> masks,
-          Matrix4 frame, Map<List<Object>, Material> materials, List<Mesh> owned) {
+          Matrix4 frame, Map<List<Object>, Material> materials, List<Mesh> owned, Predicate<Vector3[]> carried) {
         var mask = range.material().get(GpuRoads.Mask.class, GpuRoads.Mask.TYPE);
         var region = masks.region(mask.data.pixels());
         var points = new com.badlogic.gdx.utils.FloatArray();
-        var indices = new com.badlogic.gdx.utils.ShortArray();
-        GpuPropBatch.copyVertices(range.mesh(), range.offset(), range.count(), points, indices);
+        var indices = kept(points, copied(range, points), range.mesh().getVertexAttributes(), carried);
+        if (indices.isEmpty()) { return null; }
         float[] vertices = points.toArray();
         var attributes = range.mesh().getVertexAttributes();
         GpuRoads.relocate(vertices, new GpuRoads.Mask(region, mask.data), attributes);
@@ -7968,6 +8007,97 @@ final class GpuTerrain implements Disposable {
         });
         return new MeepleShatter.Source(new com.badlogic.gdx.graphics.g3d.model.MeshPart("coat", copy, 0, indices.size,
               GL20.GL_TRIANGLES), material, frame, 0);
+    }
+
+    /**
+     * What stands of a built bridge once its span falls (BoardBridgeFooting#ruin): its {@code triangles}
+     * ({@link #triangleKey}), and in plan its {@code tops}, which keep the road's paint that lies on them.
+     */
+    private record Standing(Set<String> triangles, Set<String> tops) {
+        static final Standing NONE = new Standing(Set.of(), Set.of());
+    }
+
+    /** What stands of the tile's built bridge once its span falls; nothing of a rock arch or a guideway. */
+    private Standing standing(BoardScene.Tile tile, TerrainLod lod) {
+        var deck = BoardBridge.deck(coverScene, tile);
+        if (deck.natural() || BoardBridge.guideway(tile)) { return Standing.NONE; }
+        Map<Coords, BoardSurface> surfaces = new HashMap<>();
+        var ruin = BoardBridgeFooting.build(coverScene, tile, lod, surfaces, installedColumns)
+              .ruin(coverScene, tile, deck, lod, surfaces, installedColumns);
+        Set<String> triangles = new HashSet<>(), tops = new HashSet<>();
+        for (var facet : ruin.facets()) {
+            triangles.add(triangleKey(facet.a(), facet.b(), facet.c(), true));
+            if (facet.part() == BoardBridge.Part.TOP) { tops.add(triangleKey(facet.a(), facet.b(), facet.c(), false)); }
+        }
+        return new Standing(triangles, tops);
+    }
+
+    /** A triangle by its corners, in any order, to a hundredth of a world unit; in plan without its {@code height}. */
+    private static String triangleKey(Vector3 a, Vector3 b, Vector3 c, boolean height) {
+        String[] corners = { corner(a, height), corner(b, height), corner(c, height) };
+        Arrays.sort(corners);
+        return String.join("|", corners);
+    }
+
+    private static String corner(Vector3 p, boolean height) {
+        return Math.round(p.x * 100) + "," + Math.round(p.y * 100) + (height ? "," + Math.round(p.z * 100) : "");
+    }
+
+    /**
+     * A range's vertices and indices copied out of its mesh: {@code points} filled, the indices returned, local to them.
+     */
+    private static com.badlogic.gdx.utils.ShortArray copied(TileRange range, com.badlogic.gdx.utils.FloatArray points) {
+        var indices = new com.badlogic.gdx.utils.ShortArray();
+        GpuPropBatch.copyVertices(range.mesh(), range.offset(), range.count(), points, indices);
+        return indices;
+    }
+
+    /**
+     * The triangles of a range's copy ({@code points} and {@code indices}, laid out as {@code attributes}) that
+     * {@code keep} takes by their corners.
+     */
+    private static com.badlogic.gdx.utils.ShortArray kept(com.badlogic.gdx.utils.FloatArray points,
+          com.badlogic.gdx.utils.ShortArray indices, VertexAttributes attributes, Predicate<Vector3[]> keep) {
+        int stride = attributes.vertexSize / Float.BYTES, position = attributes.getOffset(VertexAttributes.Usage.Position);
+        var kept = new com.badlogic.gdx.utils.ShortArray();
+        Vector3[] corners = { new Vector3(), new Vector3(), new Vector3() };
+        for (int i = 0; i + 2 < indices.size; i += 3) {
+            for (int k = 0; k < 3; k++) {
+                int at = indices.get(i + k) * stride + position;
+                corners[k].set(points.get(at), points.get(at + 1), points.get(at + 2));
+            }
+            if (keep.test(corners)) { kept.add(indices.get(i), indices.get(i + 1), indices.get(i + 2)); }
+        }
+        return kept;
+    }
+
+    /**
+     * A bridge range's triangles but those {@code standing} after its span falls, as a mesh of their own ({@code owned},
+     * the caller's to dispose once the cut has read it); the range itself when nothing of it stands, null when all of it
+     * does.
+     */
+    private static com.badlogic.gdx.graphics.g3d.model.MeshPart falling(TileRange range, Set<String> standing,
+          List<Mesh> owned) {
+        if (standing.isEmpty()) {
+            return new com.badlogic.gdx.graphics.g3d.model.MeshPart("bridge", range.mesh(), range.offset(), range.count(),
+                  GL20.GL_TRIANGLES);
+        }
+        var points = new com.badlogic.gdx.utils.FloatArray();
+        var indices = copied(range, points);
+        var attributes = range.mesh().getVertexAttributes();
+        int stride = attributes.vertexSize / Float.BYTES;
+        var kept = kept(points, indices, attributes,
+              corners -> !standing.contains(triangleKey(corners[0], corners[1], corners[2], true)));
+        if (kept.isEmpty()) { return null; }
+        if (kept.size == indices.size) {
+            return new com.badlogic.gdx.graphics.g3d.model.MeshPart("bridge", range.mesh(), range.offset(), range.count(),
+                  GL20.GL_TRIANGLES);
+        }
+        var copy = new Mesh(Mesh.VertexDataType.VertexArray, false, points.size / stride, kept.size, attributes);
+        copy.setVertices(points.toArray());
+        copy.setIndices(kept.toArray());
+        owned.add(copy);
+        return new com.badlogic.gdx.graphics.g3d.model.MeshPart("bridge", copy, 0, kept.size, GL20.GL_TRIANGLES);
     }
 
     /**
@@ -8094,11 +8224,24 @@ final class GpuTerrain implements Disposable {
      */
     void advanceCollapses(float seconds, MeepleDebris.Ground ground, float gravity) {
         collapsing.removeIf(fall -> {
-            fall.collapse().advance(seconds, ground, gravity);
+            fall.collapse().advance(seconds, ownGround(fall.coords(), ground), gravity);
             boolean done = fall.collapse().done();
             if (done) { fall.collapse().dispose(); }
             return done;
         });
+    }
+
+    /**
+     * Where a collapse's pieces land: on {@code ground}, but in a bridge's own hex on its floor (its bed under water),
+     * past the landings and piers its ruin keeps standing, which the deck rested on and its pieces start inside.
+     */
+    private MeepleDebris.Ground ownGround(Coords at, MeepleDebris.Ground ground) {
+        return (x, y, from, own) -> {
+            var tile = coverScene == null ? null : BoardGeometry.tile(coverScene, x, y);
+            if (tile == null || !tile.coords().equals(at) || BoardBridge.feature(tile) == null) { return ground.height(x, y, from, own); }
+            boolean liquid = tile.liquid().present() && !tile.frozen();
+            return (liquid ? BoardGeometry.groundZ(tile) : BoardGeometry.surfaceZ(tile)) + .5f;
+        };
     }
 
     /** The collapses under way, cut pieces. */

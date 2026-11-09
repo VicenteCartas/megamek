@@ -26,6 +26,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.RailRoute;
@@ -883,6 +884,51 @@ class BoardBridgeFootingTest {
             assertTrue(patches.stream().anyMatch(p -> p.texture().equals(material) && p.shape().contains(0, north)
                   && GpuRoads.coverage(road, p, 0, north) == 1), "Attached roads retain full material coverage");
         }
+    }
+
+    /**
+     * A collapse keeps its span's landings and piers standing (GpuTerrain#standing, read from the scene before it); the
+     * ruin built from the scene after it must be the same triangles, its road and lanes kept, or they change as the
+     * ruin replaces them: Fire and Ice 2's paved 1308.
+     */
+    @Test
+    void aFallenSpanIsRebuiltAsItsLandingsStoodThroughTheFall() throws Exception {
+        String board = "unofficial/Drewbacca/16x17 Fire And Ice 2.board";
+        var span = new Coords(12, 7);
+        var before = BoardScenes.installedScene(board);
+        // A game converts its board when it loads it; the collapse comes later.
+        var after = BoardScenes.installedScene(board, edited -> {
+            BoardSceneryLayouts.convert(edited);
+            edited.collapseBuilding(span);
+        });
+        var stood = before.tile(span);
+        var ruin = after.tile(span);
+        assertTrue(BoardBridge.standing(ruin) == null && BoardBridge.feature(ruin).ruined(), "The span fell");
+        assertEquals(BoardRoad.Kind.PAVED, ruin.deckRoad(), "Its landings keep the road that ran onto them");
+        assertEquals(stood.deckRoadExits(), ruin.deckRoadExits());
+        assertEquals(stood.deckCorridor(), ruin.deckCorridor());
+        for (var lod : TerrainLod.values()) {
+            var kept = BoardBridgeFooting.build(before, stood, lod, new HashMap<>())
+                  .ruin(before, stood, BoardBridge.deck(before, stood), lod, new HashMap<>(), false);
+            var rebuilt = BoardBridgeFooting.build(after, ruin, lod, new HashMap<>())
+                  .ruin(after, ruin, BoardBridge.deck(after, ruin), lod, new HashMap<>(), false);
+            assertFalse(kept.facets().isEmpty(), "Its landings stand");
+            assertEquals(triangles(kept), triangles(rebuilt), lod + ": the ruin is what stood");
+        }
+    }
+
+    /** The shape's triangles as their corners, each to a hundredth of a world unit, with their part. */
+    private static Set<String> triangles(BoardBridge.Shape shape) {
+        Set<String> result = new java.util.TreeSet<>();
+        for (var facet : shape.facets()) {
+            var corners = new ArrayList<String>();
+            for (var p : List.of(facet.a(), facet.b(), facet.c())) {
+                corners.add(Math.round(p.x * 100) + "," + Math.round(p.y * 100) + "," + Math.round(p.z * 100));
+            }
+            corners.sort(null);
+            result.add(facet.part() + ":" + String.join("|", corners));
+        }
+        return result;
     }
 
     private static float height(BoardBridge.Shape shape, Vector3 point) {

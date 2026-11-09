@@ -82,6 +82,22 @@ public class Hex implements Serializable {
     private Map<String, HexAppearance> appearance;
     private List<BoardDecoration> decorations;
     private megamek.common.board.BuildingVolumes.Reference buildingReference;
+    /**
+     * A destroyed structure's terrains (Board#collapseBuilding, or an editor's Destroyed): the building, fuel tank or
+     * bridge that stood here as it stood, so that its ruin is drawn (a bridge's landings and piers, the roads ending at
+     * them) and an editor can restore it. Presentation only: the rules see the rubble that replaced it, never these. Null
+     * without a ruin, and in historical serialized games.
+     */
+    private Map<Integer, Terrain> ruins;
+
+    /**
+     * What makes up a structure that can be destroyed: a building's, a fuel tank's and a bridge's terrains with the way
+     * on its deck, exactly what a collapse takes from the hex (Board#collapseBuilding).
+     */
+    public static final int[] STRUCTURE_TERRAINS = { Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV,
+          Terrains.BLDG_BASEMENT_TYPE, Terrains.FUEL_TANK, Terrains.FUEL_TANK_CF, Terrains.FUEL_TANK_ELEV,
+          Terrains.FUEL_TANK_MAGN, Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED,
+          Terrains.BRIDGE_ROAD, Terrains.BRIDGE_RAIL, Terrains.BRIDGE_MUD };
 
     public megamek.common.board.BuildingVolumes.Reference getBuildingReference() { return buildingReference; }
 
@@ -217,6 +233,64 @@ public class Hex implements Serializable {
     }
 
     public boolean hasAppearance() { return buildingReference != null || !getAppearance().isEmpty() || !getDecorations().isEmpty(); }
+
+    /** The terrains of the structure destroyed here ({@link #ruinStructure}), by type; none without a ruin. */
+    public java.util.Collection<Terrain> getRuins() {
+        return ruins == null ? List.of() : java.util.Collections.unmodifiableCollection(ruins.values());
+    }
+
+    public boolean hasRuins() { return ruins != null && !ruins.isEmpty(); }
+
+    /** The destroyed structure's terrain of this type, or null. */
+    public @Nullable Terrain getRuin(int type) { return ruins == null ? null : ruins.get(type); }
+
+    /** Whether a terrain of this type belongs to a structure that can be destroyed ({@link #STRUCTURE_TERRAINS}). */
+    public static boolean structureTerrain(int type) { return Arrays.stream(STRUCTURE_TERRAINS).anyMatch(t -> t == type); }
+
+    /** Adds a terrain of the destroyed structure, as a board file holds it. */
+    public void addRuin(Terrain terrain) {
+        if (ruins == null) { ruins = new HashMap<>(); }
+        ruins.put(terrain.getType(), terrain);
+    }
+
+    /**
+     * The structure standing here is destroyed: its terrains ({@link #STRUCTURE_TERRAINS}) leave the hex for its ruin,
+     * which keeps them as they were. Nothing else changes: whoever destroys it adds the rubble.
+     */
+    public void ruinStructure() {
+        // A structure that stands again where one fell (a repaired span, one painted over its ruin) leaves a ruin of its
+        // own; with none standing the ruin stays as it is.
+        if (Arrays.stream(STRUCTURE_TERRAINS).noneMatch(terrains::containsKey)) { return; }
+        ruins = null;
+        for (int type : STRUCTURE_TERRAINS) {
+            Terrain terrain = terrains.remove(type);
+            if (terrain != null) { addRuin(terrain); }
+        }
+    }
+
+    /**
+     * Destroys the structure standing here, as a collapse does: it becomes its ruin ({@link #ruinStructure}) under rubble
+     * of {@code construction} (its building type's value), none for 0.
+     */
+    public void destroyStructure(int construction) {
+        ruinStructure();
+        if (construction > 0) { addTerrain(new Terrain(Terrains.RUBBLE, construction)); }
+    }
+
+    /** The destroyed structure is gone for good: its ruin, and the rubble that replaced it. */
+    public void removeRuins() {
+        if (ruins == null) { return; }
+        ruins = null;
+        terrains.remove(Terrains.RUBBLE);
+    }
+
+    /** The destroyed structure stands again as it stood, and the rubble that replaced it goes. */
+    public void restoreRuins() {
+        if (ruins == null) { return; }
+        terrains.putAll(ruins);
+        ruins = null;
+        terrains.remove(Terrains.RUBBLE);
+    }
 
     /** Use on paste/stamp/merge, not on snapshots for undo or movement. */
     public void duplicateDecorationIds() {
@@ -778,6 +852,7 @@ public class Hex implements Serializable {
         copy.appearance = appearance;
         copy.decorations = decorations;
         copy.buildingReference = buildingReference;
+        if (ruins != null) { ruins.values().forEach(ruin -> copy.addRuin(new Terrain(ruin))); }
         return copy;
     }
 
@@ -1018,8 +1093,9 @@ public class Hex implements Serializable {
             newErrors.add("Woods and Jungle Elevation terrain present without Woods or Jungle.");
         }
 
-        // Buildings must have at least BUILDING, BLDG_ELEV and BLDG_CF
-        if (containsAnyTerrainOf(Terrains.BUILDING, Terrains.BLDG_ELEV, Terrains.BLDG_CF, Terrains.BLDG_FLUFF,
+        // Buildings must have at least BUILDING, BLDG_ELEV and BLDG_CF; a destroyed one leaves its class, armour and art,
+        // as a collapse does (Board#collapseBuilding).
+        if (getRuin(Terrains.BUILDING) == null && containsAnyTerrainOf(Terrains.BUILDING, Terrains.BLDG_ELEV, Terrains.BLDG_CF, Terrains.BLDG_FLUFF,
               Terrains.BLDG_ARMOR, Terrains.BLDG_CLASS, Terrains.BLDG_BASE_COLLAPSED, Terrains.BLDG_BASEMENT_TYPE)
               && !containsAllTerrainsOf(Terrains.BUILDING, Terrains.BLDG_ELEV, Terrains.BLDG_CF)) {
             newErrors.add("Incomplete Building! A hex with any building terrain must at least contain "
@@ -1130,7 +1206,8 @@ public class Hex implements Serializable {
      * @return A string representation to use when copying a hex to the clipboard.
      */
     public String getClipboardString() {
-        if (hasAppearance()) { return BoardFile.clipboard(this); }
+        // Only the native clipboard carries looks and a destroyed structure's ruin.
+        if (hasAppearance() || hasRuins()) { return BoardFile.clipboard(this); }
         StringBuilder hexString = new StringBuilder("MegaMek Hex///");
         hexString.append("Level###").append(getLevel()).append("///");
         hexString.append("Theme###").append(getTheme()).append("///");

@@ -84,6 +84,13 @@ public final class BoardEditorSession {
          */
         PILLARS,
         /**
+         * Destroys the selected hex's building, fuel tank or bridge (value "true"), as a game leaves it: its ruin under
+         * the rubble of its construction ({@link Hex#destroyStructure}), whose look it keeps; or stands it again as it
+         * stood, its rubble gone (value "false"). Target "structure": the whole connected structure, standing or
+         * destroyed, in one undo step.
+         */
+        DESTROYED,
+        /**
          * Makes the selected bridge's whole {@link megamek.common.board.BridgeSpan} built or natural (value "built" or
          * "natural") in one undo step; a natural bridge has no piers, a built one keeps its Pillars toggle and design.
          */
@@ -256,8 +263,8 @@ public final class BoardEditorSession {
           List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<HexIssue> issues,
           List<Level> levels, List<String> tags, List<String> boardComponents, boolean drawsRoutes,
           int copies, List<String> kitVariants, boolean buildingConnected, BuildingVolumes.Reference buildingReference, int buildingInteriors,
-          boolean buildingProfileAvailable, Map<String, Integer> joinedSides, int rampSides, int entranceSides, boolean laneRun,
-          List<Integer> exitFrom, int apronSides, LaneJunction junction) {
+          boolean buildingProfileAvailable, Map<String, Integer> joinedSides, List<String> destroyed, int rampSides,
+          int entranceSides, boolean laneRun, List<Integer> exitFrom, int apronSides, LaneJunction junction) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
         public boolean arena() { return tags.contains(BoardClassifier.ARENA_TAG); }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
@@ -513,12 +520,24 @@ public final class BoardEditorSession {
               copies.values().stream().mapToInt(Integer::intValue).sum(), hex == null ? List.of() : kitVariants(hex),
               TilesetScenery.buildingConnected(hex, selected, board()::getHex), hex == null ? null : hex.getBuildingReference(),
               building == null ? 0 : BuildingInteriors.choice(building).ordinal(),
-              TilesetScenery.buildingProfileAvailable(hex, selected, board()::getHex), joinedSides(),
+              TilesetScenery.buildingProfileAvailable(hex, selected, board()::getHex), joinedSides(), destroyed(hex),
               hex == null || SingleLane.single(hex) ? 0
                     : SingleLane.joined(hex, selected, this::hexAt) & SingleLane.arms(hex, selected, this::hexAt, roadExits(hex)),
               hex == null ? 0 : entrances(hex), hex != null && SingleLane.run(this::hexAt, selected, -1) != null,
               exitFrom(hex), hex == null ? 0 : SingleLane.aprons(hex, selected, this::hexAt, roadExits(hex)),
               hex == null ? null : SingleLane.junction(hex, selected, this::hexAt));
+    }
+
+    /**
+     * The selected hex's destroyed structures ({@link Hex#getRuins}): the blueprint components whose own terrain is a
+     * ruin there. Its rubble is theirs: Layers shows them in its place.
+     */
+    private List<String> destroyed(Hex hex) {
+        if (hex == null || !hex.hasRuins()) { return List.of(); }
+        return blueprint.components().stream().filter(component -> !component.present().isEmpty()
+              && component.present().stream().map(Terrains::getType)
+                    .allMatch(type -> !hex.containsTerrain(type) && hex.getRuin(type) != null))
+              .map(BoardEditorBlueprint.Component::id).toList();
     }
 
     /** The sides a hex's ground road leaves by; 0 without one. */
@@ -779,6 +798,9 @@ public final class BoardEditorSession {
                 case TOOL -> tool = Tool.valueOf(command.value());
                 case COMPONENT -> {
                     blueprint.component(command.value()); component = command.value(); selectedObject = "";
+                    // A destroyed structure's rubble is its own: choosing it chooses the structure, Destroyed shown.
+                    var ruined = selected == null ? List.<String>of() : destroyed(board().getHex(selected));
+                    if (component.equals("rubble") && !ruined.isEmpty()) { component = ruined.getFirst(); }
                     selection.clear(); if (selected != null) { selection.add(new Selection(selected, "")); }
                 }
                 case BRUSH -> brush = Math.max(1, Math.min(20, Integer.parseInt(command.value())));
@@ -998,6 +1020,21 @@ public final class BoardEditorSession {
                           "Choose one of the building's variants.");
                     for (Coords cell : structure(selected, Terrains.BUILDING)) {
                         change(cell, hex -> kitVariant(hex, command.value()));
+                    }
+                    if (!continuousEdit) { finishStroke(); }
+                }
+                case DESTROYED -> {
+                    require(selected != null, Messages.getString("BoardEditor.selectHexFirst"));
+                    int type = structureKind(board().getHex(selected));
+                    require(type != 0, Messages.getString("BoardEditor.selectStructureFirst"));
+                    boolean destroy = Boolean.parseBoolean(command.value());
+                    var cells = command.target().equals("structure") ? connected(selected, type, hex -> standingOrRuin(hex, type))
+                          : List.of(selected);
+                    for (Coords cell : cells) {
+                        change(cell, hex -> {
+                            if (!destroy) { hex.restoreRuins(); }
+                            else if (hex.containsTerrain(type)) { hex.destroyStructure(construction(hex)); }
+                        });
                     }
                     if (!continuousEdit) { finishStroke(); }
                 }
@@ -1829,12 +1866,20 @@ public final class BoardEditorSession {
     private void wayDecks() {
         for (Coords at : List.copyOf(stroke.keySet())) {
             Hex current = board().getHex(at), before = stroke.get(at);
-            if (before.hasBridge() && !current.hasBridge()) { cutWayNeighbours(at, before, Terrains.BRIDGE); }
+            // A destroyed span keeps its exits in its ruin, as a game's collapse leaves its neighbours' exits: only a
+            // way removed for good cuts them.
+            if (before.hasBridge() && !current.hasBridge() && current.getRuin(Terrains.BRIDGE) == null) {
+                cutWayNeighbours(at, before, Terrains.BRIDGE);
+            }
             for (int way : new int[] { Terrains.ROAD, Terrains.RAIL, Terrains.BRIDGE_ROAD, Terrains.BRIDGE_RAIL }) {
-                if (before.containsTerrain(way) && !current.containsTerrain(way)) { cutWayNeighbours(at, before, way); }
+                if (before.containsTerrain(way) && !current.containsTerrain(way) && current.getRuin(way) == null) {
+                    cutWayNeighbours(at, before, way);
+                }
             }
             change(at, hex -> {
                 BridgeSpan.carry(hex, hex.hasBridge() ? hex.terrainLevel(Terrains.BRIDGE_ELEV) : 0, blueprint.component("bridge").defaults());
+                // A deck laid again over a fallen span replaces its ruin, with the rubble that is its own.
+                if (hex.hasBridge() && hex.getRuin(Terrains.BRIDGE) != null) { hex.removeRuins(); }
                 Terrain bridge = hex.getTerrain(Terrains.BRIDGE);
                 if (bridge != null && !bridge.hasExitsSpecified()) {
                     hex.addTerrain(new Terrain(Terrains.BRIDGE, bridge.getLevel(), true, bridge.getExits()));
@@ -2544,19 +2589,47 @@ public final class BoardEditorSession {
      */
     private List<Coords> structure(Coords start, int type) {
         if (type == Terrains.BRIDGE) { return megamek.common.board.BridgeSpan.of(board()::getHex, start); }
+        return connected(start, type, hex -> hex.getTerrain(type));
+    }
+
+    /**
+     * The hexes joined to {@code start} by {@code type}'s exits, as each hex's {@code terrain} of that type gives them:
+     * one structure.
+     */
+    private List<Coords> connected(Coords start, int type, java.util.function.Function<Hex, Terrain> terrain) {
         Set<Coords> found = new LinkedHashSet<>(List.of(start));
         ArrayDeque<Coords> open = new ArrayDeque<>(found);
         while (!open.isEmpty()) {
             Coords at = open.pop();
+            Terrain own = terrain.apply(board().getHex(at));
             for (int direction = 0; direction < 6; direction++) {
                 Coords next = at.translated(direction);
-                if (board().contains(next) && board().getHex(next).containsTerrain(type)
-                      && (board().getHex(at).containsTerrainExit(type, direction)
-                            || board().getHex(next).containsTerrainExit(type, (direction + 3) % 6))
-                      && found.add(next)) { open.add(next); }
+                Terrain other = board().contains(next) ? terrain.apply(board().getHex(next)) : null;
+                if (other != null && (own != null && (own.getExits() & (1 << direction)) != 0
+                      || (other.getExits() & (1 << ((direction + 3) % 6))) != 0) && found.add(next)) { open.add(next); }
             }
         }
         return List.copyOf(found);
+    }
+
+    /** The kind of structure standing or destroyed in the hex: BUILDING, FUEL_TANK or BRIDGE; 0 for none. */
+    private static int structureKind(Hex hex) {
+        for (int type : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.BRIDGE }) {
+            if (standingOrRuin(hex, type) != null) { return type; }
+        }
+        return 0;
+    }
+
+    /** The hex's terrain of this type, standing or the ruin of one destroyed; null for neither. */
+    private static Terrain standingOrRuin(Hex hex, int type) {
+        Terrain standing = hex.getTerrain(type);
+        return standing != null ? standing : hex.getRuin(type);
+    }
+
+    /** The construction of the structure standing in the hex, which its rubble takes (Board#collapseBuilding). */
+    private static int construction(Hex hex) {
+        return Math.max(hex.terrainLevel(Terrains.BUILDING), Math.max(hex.terrainLevel(Terrains.BRIDGE),
+              hex.terrainLevel(Terrains.FUEL_TANK)));
     }
 
     /** The layout of the chosen stamp brush, or null when the brush is not a stamp. */
@@ -2848,8 +2921,13 @@ public final class BoardEditorSession {
      */
     private boolean supports(Hex hex, String receiver) {
         if (receiver.equals("ice")) { return hex.containsTerrain(Terrains.ICE); }
-        return receiver.equals("ground") || blueprint.components().stream().filter(definition -> definition.receiver().equals(receiver))
-              .anyMatch(definition -> definition.isPresent(name -> hex.containsTerrain(Terrains.getType(name))));
+        return receiver.equals("ground") || offers(receiver, hex::containsTerrain);
+    }
+
+    /** Whether a component offering the {@code receiver} surface is in the hex, as {@code present} finds its terrains. */
+    private boolean offers(String receiver, java.util.function.IntPredicate present) {
+        return blueprint.components().stream().filter(definition -> definition.receiver().equals(receiver))
+              .anyMatch(definition -> definition.isPresent(name -> present.test(Terrains.getType(name))));
     }
 
     /** Re-validates every hex, as after loading or creating a document. */
@@ -2881,7 +2959,9 @@ public final class BoardEditorSession {
             for (BoardDecoration object : hex.getDecorations()) {
                 if (!assetExists(object)) { found.add(new HexIssue(at, object.id(), Messages.getString("BoardEditor.issueArtMissing", object.asset()))); }
                 var receiver = object.placement().receiver();
-                if (receiver != null && !supports(hex, receiver.terrain())) {
+                // What stood on a destroyed structure stands again with it.
+                if (receiver != null && !supports(hex, receiver.terrain())
+                      && !offers(receiver.terrain(), type -> hex.getRuin(type) != null)) {
                     String support = blueprint.components().stream().filter(definition -> definition.receiver().equals(receiver.terrain()))
                           .map(definition -> definition.label().toLowerCase(java.util.Locale.ROOT)).findFirst().orElse(receiver.terrain());
                     found.add(new HexIssue(at, object.id(), Messages.getString("BoardEditor.issueNoSupport", receiver.surface(), support)));
@@ -3542,12 +3622,15 @@ public final class BoardEditorSession {
         return everyHex(hex -> {
             if (hex.getLevel() >= surface) { return; }
             int depth = hex.containsTerrain(Terrains.WATER) ? hex.terrainLevel(Terrains.WATER) : 0;
-            Terrain height = hex.getTerrain(Terrains.BRIDGE_ELEV);
-            boolean bridge = hex.containsTerrain(Terrains.BRIDGE) && height != null;
+            // A destroyed bridge keeps its ruin over the same ground as a standing one keeps its deck, and its rubble.
+            Terrain height = standingOrRuin(hex, Terrains.BRIDGE_ELEV);
+            boolean bridge = standingOrRuin(hex, Terrains.BRIDGE) != null && height != null;
+            boolean ruined = bridge && !hex.containsTerrain(Terrains.BRIDGE);
             if (remove) {
                 Terrain zones = hex.getTerrain(Terrains.DEPLOYMENT_ZONE);
                 for (var component : blueprint.components()) {
-                    if (!component.id().equals("water") && !(bridge && (component.id().equals("bridge") || component.id().equals("ways")))) {
+                    if (!component.id().equals("water") && !(bridge && (component.id().equals("bridge") || component.id().equals("ways")
+                          || ruined && component.id().equals("rubble")))) {
                         removeComponent(hex, component);
                     }
                 }
@@ -3559,8 +3642,9 @@ public final class BoardEditorSession {
                       && object.placement().receiver().terrain().equals("bridge")).toList());
             }
             if (bridge) {
-                hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, hex.getLevel() + height.getLevel() - surface,
-                      height.hasExitsSpecified(), height.getExits()));
+                var rebased = new Terrain(Terrains.BRIDGE_ELEV, hex.getLevel() + height.getLevel() - surface,
+                      height.hasExitsSpecified(), height.getExits());
+                if (ruined) { hex.addRuin(rebased); } else { hex.addTerrain(rebased); }
             }
             hex.addTerrain(new Terrain(Terrains.WATER, surface - hex.getLevel() + depth));
             hex.setLevel(surface);
@@ -3575,6 +3659,8 @@ public final class BoardEditorSession {
      * (crust hides water too), and the Water component's Erase takes liquid magma with the depth; crust stays.
      */
     private void paintFields(Hex hex, Hex template, BoardEditorBlueprint.Component definition) {
+        // Paint or Erase of a destroyed structure replaces its ruin, with the rubble that is its own (Action#DESTROYED).
+        if (definition.present().stream().anyMatch(type -> hex.getRuin(Terrains.getType(type)) != null)) { hex.removeRuins(); }
         if (tool == Tool.ERASE && definition.id().equals("building")) {
             removeComponent(hex, definition);
             return;
@@ -3650,6 +3736,8 @@ public final class BoardEditorSession {
 
     /** Removes a component and its appearance; detaching an authored building removes its placement on commit. */
     private static void removeComponent(Hex hex, BoardEditorBlueprint.Component definition) {
+        // A destroyed structure goes with its ruin and the rubble that is its own (Action#DESTROYED).
+        if (definition.present().stream().anyMatch(type -> hex.getRuin(Terrains.getType(type)) != null)) { hex.removeRuins(); }
         if (definition.id().equals("bridge")) { removeDeck(hex); return; }
         definition.fields().forEach(field -> removeWay(hex, Terrains.getType(field.terrain())));
         var appearance = new LinkedHashMap<>(hex.getAppearance());
@@ -3834,6 +3922,8 @@ public final class BoardEditorSession {
                         : new Hex(0, "building:2;bldg_cf:60;bldg_elev:3;bldg_basement_type:1", null));
             for (Coords at : members.keySet()) {
                 change(at, hex -> {
+                    // A destroyed member keeps its ruin and rubble where it fell; only its reference goes.
+                    if (hex.getRuin(Terrains.BUILDING) != null) { hex.setBuildingReference(null); return; }
                     removeComponent(hex, definition);
                     hex.removeTerrain(Terrains.BLDG_INTERIORS);
                 });
@@ -4405,7 +4495,9 @@ public final class BoardEditorSession {
     }
 
     private static void copyInto(Hex source, Hex target) {
+        target.removeRuins();
         target.removeAllTerrains(); for (int type : source.getTerrainTypes()) { target.addTerrain(new Terrain(source.getTerrain(type))); }
+        source.getRuins().forEach(ruin -> target.addRuin(new Terrain(ruin)));
         target.setLevel(source.getLevel()); target.setTheme(source.getTheme()); target.setAppearance(source.getAppearance());
         target.setDecorations(BoardDecoration.copies(source.getDecorations()));
         target.setBuildingReference(null);

@@ -254,6 +254,18 @@ final class GpuBoardSource implements BoardSource {
         };
         gameListener = new GameListenerAdapter() {
             @Override
+            public void gameTurnChange(megamek.common.event.GameTurnChangeEvent event) {
+                // The server ends a turn after its move's last update: a collapse that move brought down shows now,
+                // whatever update never came to the client, as one of a mover it cannot see (holdCollapse).
+                onSwing(() -> {
+                    if (!closed && collapseHeldSince != 0) {
+                        releaseCollapse();
+                        refresh();
+                    }
+                });
+            }
+
+            @Override
             public void gameReport(megamek.common.event.GameReportEvent event) {
                 onSwing(() -> {
                     if (!closed) {
@@ -330,9 +342,13 @@ final class GpuBoardSource implements BoardSource {
                 int startAltitude = old == null ? 0 : old.getAltitude();
                 Entity takeoff = old == null ? event.getEntity() : old;
                 int jumpMP = type == EntityMovementType.MOVE_JUMP ? takeoff.getAnyTypeMaxJumpMP() : 0;
+                Coords at = event.getEntity().getPosition();
+                int elevation = event.getEntity().getElevation();
                 onSwing(() -> {
                     if (isCurrentView(eventView)) {
                         if (path.isEmpty()) {
+                            // The last update of the move that brought a held collapse down ends its wait at once.
+                            if (endsHeldMove(entityId, start, at, elevation)) { releaseCollapse(); }
                             refresh();
                         } else {
                             captureMovement(entityId, start, path, type, jumpMP, startAltitude, moveMP);
@@ -443,6 +459,8 @@ final class GpuBoardSource implements BoardSource {
         BoardClientState movingView = view;
         if (entity == null || !visible(entity) || sensorContact(entity)
               || path.stream().anyMatch(p -> p.boardId() != view.getBoardId() || p.coords() == null)) {
+            // The move's last update, with no walk to show: what it brought down shows now.
+            releaseCollapse();
             refresh();
             return;
         }
@@ -889,20 +907,45 @@ final class GpuBoardSource implements BoardSource {
         frame = next;
     }
 
-    /** Long enough for a mover's path to follow the collapse it caused in one burst of packets, too short to be seen. */
-    private static final long COLLAPSE_HOLD_NANOS = 300_000_000L;
+    /**
+     * The longest a collapse waits for the end of the move that brought it down, should it never come: a live server
+     * sends it after the unit's fall, its damage, reports and turn, often well over a few hundred milliseconds after the
+     * collapse.
+     */
+    private static final long COLLAPSE_HOLD_NANOS = 5_000_000_000L;
 
     /**
-     * Whether to hold back a capture that shows a structure brought down in the movement phase. The server sends a
-     * collapse under a unit's weight, and that unit's fall, before the path that walked it there (MovePathHandler): the
-     * path's capture publishes the collapse after the walk (captureMovement). Any other collapse in the phase, as one at
-     * its end, only waits the hold's length.
+     * Whether to hold back a capture that shows a structure brought down in the movement phase. Only the unit moving
+     * brings one down then, and the server sends the collapse under its weight, and its fall, before the move's last
+     * update, with the path that walked it there (MovePathHandler): the path's capture publishes the collapse after the
+     * walk (captureMovement), and an update without one, of a unit that stepped straight onto it, publishes it at once
+     * (endsHeldMove), however late either comes. The phase's end lets one go at once too.
      */
     private boolean holdCollapse(boolean detectGear) {
         if (!detectGear || !view.game.getPhase().isMovement()) { return false; }
         long now = System.nanoTime();
         if (collapseHeldSince == 0) { collapseHeldSince = now; }
         return now - collapseHeldSince < COLLAPSE_HOLD_NANOS;
+    }
+
+    /** Ends a held collapse's wait (holdCollapse): the next capture shows it. */
+    private void releaseCollapse() {
+        if (collapseHeldSince != 0) { collapseHeldSince = System.nanoTime() - COLLAPSE_HOLD_NANOS; }
+    }
+
+    /**
+     * Whether an update without a path ends the move that brought a held collapse down (holdCollapse): it leaves its unit
+     * where the update before it, its fall, put it, which the held capture alone shows; the published scene still has it
+     * where it stood before the move, beside the structure, which still stands there. Its fall moved it; a unit that
+     * stood on the structure is shown there already, and one the fall pushed aside lies where none stands.
+     */
+    private boolean endsHeldMove(int entityId, UnitLocation start, Coords at, int elevation) {
+        if (collapseHeldSince == 0 || start == null || at == null || !at.equals(start.coords()) || elevation != start.elevation()
+              || frame == null || frame.scene() == null) { return false; }
+        var held = frame.scene().tile(at);
+        if (held == null || !BoardScene.TileTransition.structure(held)) { return false; }
+        var shown = frame.scene().units().stream().filter(unit -> unit.id() == entityId).toList();
+        return !shown.isEmpty() && shown.stream().noneMatch(unit -> unit.location().coords().equals(at));
     }
 
     /**

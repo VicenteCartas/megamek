@@ -133,7 +133,7 @@ final class BoardGroundCut {
      */
     static List<Stand> dig(BoardScene scene, BoardScene.Tile tile, List<BoardSurface.Face> faces, BoardRelief relief,
           Predicate<BoardSurface.Face> ground) {
-        if (tile.frozen() || BoardBridge.feature(tile) != null) { return List.of(); }
+        if (tile.frozen() || BoardBridge.standing(tile) != null) { return List.of(); }
         float cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
         List<Stand> stands = new ArrayList<>();
         for (var feature : tile.features()) {
@@ -193,7 +193,7 @@ final class BoardGroundCut {
               ? model(feature.asset()).outline() : new float[0];
         if (outline.length == 0) { return feature; }
         boolean rubble = feature.asset().startsWith(RUBBLE);
-        if (rubble && (tile.frozen() || BoardBridge.feature(tile) != null)) { return feature; }
+        if (rubble && (tile.frozen() || BoardBridge.standing(tile) != null)) { return feature; }
         BoardRelief relief = new BoardRelief(scene, tile, BoardSurface.ramps(scene, tile));
         Vector3 anchor = new Vector3(feature.x(), feature.y(), 0).scl(BoardGeometry.hexScale());
         Matrix4 frame = BoardFeatures.authoredTransform(anchor.x, anchor.y, 0, feature);

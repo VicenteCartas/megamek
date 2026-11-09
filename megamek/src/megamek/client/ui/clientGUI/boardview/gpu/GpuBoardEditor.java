@@ -1617,10 +1617,14 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         List<UiTree.Node> rows = new ArrayList<>();
         for (var component : blueprint.components()) {
             if (!listed(component)) { continue; }
+            // A destroyed structure's rubble is its own: its row stands for both.
+            if (component.id().equals("rubble") && !snapshot.destroyed().isEmpty()) { continue; }
+            boolean destroyed = snapshot.destroyed().contains(component.id());
             String id = COMPONENT_ROW + component.id();
             layerCommands.put(id, () -> send(Action.COMPONENT, component.id()));
             var row = new UiTree.Node(id, component.label()).icon(layerIcon(component)).tooltip(codes(component))
-                  .detail(component.id().equals("ground") ? UiKit.text("GpuBoard.map.level", snapshot.elevation()) : null)
+                  .detail(component.id().equals("ground") ? UiKit.text("GpuBoard.map.level", snapshot.elevation())
+                        : destroyed ? UiKit.text("BoardEditor.destroyed") : null)
                   .children(objectRows(snapshot.objects().stream().filter(object -> !snapshot.grouped(object)
                         && object.placement().receiver() != null && component.receiver().equals(object.placement().receiver().terrain()))
                         .toList(), component.receiver()));
@@ -1631,9 +1635,10 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             }
             rows.add(row);
         }
+        // Objects on a destroyed structure stay under its row, as they stand again with it.
         var detached = snapshot.objects().stream().filter(object -> !snapshot.grouped(object) && (object.placement().receiver() == null
               || blueprint.components().stream().noneMatch(c -> c.receiver().equals(object.placement().receiver().terrain())
-                    && c.isPresent(name -> snapshot.property(name) != null)))).toList();
+                    && (c.isPresent(name -> snapshot.property(name) != null) || snapshot.destroyed().contains(c.id()))))).toList();
         detached.stream().map(d -> d.placement().receiver()).distinct().forEach(receiver -> rows.addAll(objectRows(detached.stream()
               .filter(d -> java.util.Objects.equals(receiver, d.placement().receiver())).toList(), String.valueOf(receiver))));
         // Grouped members stay out of the reorderable surface stacks: one row per group, all its members in the hex below it.
@@ -1671,7 +1676,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
      * additive row has no remove button: each field has its own in Edit.
      */
     private boolean listed(BoardEditorBlueprint.Component component) {
-        if (component.id().equals("ground")) { return true; }
+        if (component.id().equals("ground") || snapshot.destroyed().contains(component.id())) { return true; }
         if (!component.present().isEmpty()) { return component.isPresent(name -> snapshot.property(name) != null); }
         if (component.fields().isEmpty()) { return snapshot.appearance().containsKey(component.id()); }
         return component.palette() && component.fields().stream().anyMatch(field -> snapshot.property(field.terrain()) != null);
@@ -1736,6 +1741,13 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         // Edit only shows components that have a row in Layers; absent terrain has no inspector controls.
         if (!listed(definition)) { return; }
         heading(definition.label());
+        boolean destroyed = snapshot.destroyed().contains(definition.id());
+        if (destroyed || STRUCTURES.contains(definition.id()) && snapshot.property(definition.present().getFirst()) != null) {
+            destroyedRow(destroyed);
+        }
+        // A destroyed structure keeps its look and settings in its ruin, as a game leaves it: nothing to edit until it
+        // stands again.
+        if (destroyed) { return; }
         if (definition.id().equals("ground")) {
             number(UiKit.text("BoardEditor.groundLevelLabel"), snapshot.elevation(), -10, 30, 1, Action.ELEVATION, "");
         }
@@ -1875,6 +1887,27 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         if (!definition.present().isEmpty() || definition.fields().isEmpty()) {
             detail.add(removeButton(UiKit.text("BoardEditor.removeComponent"), () -> send(Action.REMOVE_COMPONENT, definition.id()))).row();
         }
+    }
+
+    /** The structures a hex can hold destroyed (BoardEditorSession.Action#DESTROYED). */
+    private static final java.util.Set<String> STRUCTURES = java.util.Set.of("building", "bridge", "fuelTank");
+
+    /**
+     * Destroyed: this hex's structure as a game leaves it, under the rubble of its construction, which works as rubble
+     * does in play; cleared, it stands again as it stood. Whole structure does the same to every hex it joins.
+     */
+    private void destroyedRow(boolean destroyed) {
+        Table row = new Table(); row.defaults().growX().uniformX().minWidth(0).pad(0, 2, 0, 2);
+        UiButton hex = button(UiKit.text("BoardEditor.destroyed"), () -> send(Action.DESTROYED, "", Boolean.toString(!destroyed)));
+        hex.setName("editor-structure-destroyed"); hex.pressed(destroyed);
+        ui.tip(hex).getActor().setText(UiKit.text("BoardEditor.destroyed.tooltip"));
+        row.add(hex);
+        UiButton whole = button(UiKit.text(destroyed ? "BoardEditor.restoreStructure" : "BoardEditor.destroyStructure"),
+              () -> send(Action.DESTROYED, "structure", Boolean.toString(!destroyed)));
+        whole.setName("editor-structure-destroyed-whole");
+        ui.tip(whole).getActor().setText(UiKit.text("BoardEditor.destroyStructure.tooltip"));
+        row.add(whole);
+        detail.add(row).growX().padTop(8).row();
     }
 
     /** A scorched hex's Severity (HexAppearance.Scorch): its named levels, the stored one shown. */

@@ -29,6 +29,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import megamek.common.Hex;
+import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import megamek.common.util.BoardUtilities;
 
@@ -478,6 +479,10 @@ public final class BoardFile {
               .mapToObj(t -> saveConnections ? hex.getTerrain(t).toBoardString() : hex.getTerrain(t).toString())
               .collect(Collectors.joining(";"));
         if (!terrain.isEmpty()) { node.put("terrain", terrain); }
+        // A destroyed structure's terrains (Hex#getRuins): the file writes them in their component, marked destroyed.
+        String ruins = hex.getRuins().stream().sorted(Comparator.comparingInt(Terrain::getType))
+              .map(ruin -> saveConnections ? ruin.toBoardString() : ruin.toString()).collect(Collectors.joining(";"));
+        if (!ruins.isEmpty()) { node.put("ruins", ruins); }
         if (hex.getTheme() != null && !hex.getTheme().isEmpty()) { node.put("theme", hex.getTheme()); }
         if (!hex.getAppearance().isEmpty()) {
             ObjectNode styles = node.putObject("appearance");
@@ -559,6 +564,8 @@ public final class BoardFile {
             requireObject(node);
             String terrain = string(node, "terrain", ""); validateTerrain(terrain);
             Hex hex = new Hex(integer(node, "elevation", 0), terrain, string(node, "theme", null));
+            String ruins = string(node, "ruins", ""); validateTerrain(ruins);
+            for (String ruin : ruins.split(";")) { if (!ruin.isEmpty()) { hex.addRuin(new Terrain(ruin)); } }
             readVisuals(node, hex); hex.duplicateDecorationIds();
             return hex;
         } catch (RuntimeException failure) { throw new IOException("Invalid clipboard hex", failure); }

@@ -111,6 +111,48 @@ class GpuMapSourceTest {
         });
     }
 
+    /**
+     * Destroyed brings its structure down as a game does: the frame that shows the ruin carries the game's collapse and
+     * its checkpoint, once. Any other change of the tiles, a restore, undo or redo, carries none and shows at once
+     * (GpuBattleView#renderFrame), as does a destroy restored before its frame was taken.
+     */
+    @Test
+    void destroyedPlaysTheGamesCollapseOnceAndAnyOtherChangeShowsAtOnce() throws Exception {
+        onEdt(() -> {
+            var editor = new BoardEditorSession();
+            Coords at = new Coords(0, 0);
+            Board board = new Board();
+            board.newData(1, 1, new Hex[] { new Hex(0, "bldg_elev:3;building:2:0;bldg_cf:40", "") }, null);
+            editor.game().setBoard(board);
+            try (var source = new GpuMapSource(editor.game(), null, editor)) {
+                long generation = source.takeFrame().boardGeneration();
+                source.editorCommand(new Command(Action.SELECT_AT, "0,0", ""), generation);
+                source.takeFrame();
+                source.editorCommand(new Command(Action.DESTROYED, "", "true"), generation);
+                var destroyed = source.takeFrame();
+                assertEquals(2, destroyed.timeline().size(), "The collapse and its checkpoint: " + destroyed.timeline());
+                var collapse = (BoardScene.TileTransition) destroyed.timeline().getFirst();
+                assertEquals(List.of(at), collapse.collapses().stream().map(BoardScene.TileTransition.Collapse::coords).toList());
+                assertTrue(BoardScene.TileTransition.structure(collapse.collapses().getFirst().before()));
+                assertFalse(BoardScene.TileTransition.structure(destroyed.scene().tile(at)), "The frame shows the ruin");
+                assertSame(destroyed.scene().tiles(), ((BoardScene.SceneUpdate) destroyed.timeline().get(1)).scene().tiles(),
+                      "Its checkpoint is the frame's own scene");
+                assertTrue(source.takeFrame().timeline().isEmpty(), "It plays once");
+                for (var other : List.of(new Command(Action.DESTROYED, "", "false"), new Command(Action.UNDO),
+                      new Command(Action.REDO))) {
+                    source.editorCommand(other, generation);
+                    assertTrue(source.takeFrame().timeline().isEmpty(), other.action() + " shows at once");
+                }
+                source.editorCommand(new Command(Action.DESTROYED, "", "true"), generation);
+                source.editorCommand(new Command(Action.DESTROYED, "", "false"), generation);
+                var restored = source.takeFrame();
+                assertTrue(BoardScene.TileTransition.structure(restored.scene().tile(at)), "It stands again");
+                assertTrue(restored.timeline().isEmpty(), "A destroy restored before it was shown plays nothing");
+            }
+            return null;
+        });
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     void printCapturesEveryLabelWithoutChangingTheViewOrDocument(boolean editing) throws Exception {

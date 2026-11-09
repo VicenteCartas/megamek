@@ -122,6 +122,8 @@ class GpuBattleView extends ApplicationAdapter {
     /** A frame slower than this is logged with what it drew, so a playtest log shows what a stutter came from. */
     private static final long SLOW_FRAME_MILLIS = 40;
     private List<BoardScene.Tile> lastFrameTiles;
+    /** The editor's tiles in the frame last taken: a change of them that brings no events shows at once (renderFrame). */
+    private List<BoardScene.Tile> editorTiles;
     private boolean tilesChangedThisFrame;
     private final GpuStarShells starShells = new GpuStarShells();
     private final GpuTerrainEffects terrainEffects = new GpuTerrainEffects();
@@ -764,6 +766,13 @@ class GpuBattleView extends ApplicationAdapter {
         scene = frame.scene();
         if (unitModels != null) { unitModels.setDisplayMode(displayMode(), boardCamera.tactical()); }
         history.accept(frame.timeline(), scene, frame.reports(), this::hasInfantryTransports);
+        // The editor plays Destroyed's collapse, which comes with the frame that shows the ruin (GpuMapSource#editorCommand).
+        // Any other change of its tiles shows at once, as Skip to results shows it, so no collapse plays on, or lies, where
+        // a structure stands again; with nothing falling the skip changes nothing.
+        if (source.isEditor() && frame.scene().tiles() != editorTiles) {
+            if (frame.timeline().isEmpty()) { history.skip(); }
+            editorTiles = frame.scene().tiles();
+        }
         scene = history.live(scene);
         // Apply HUD state independently of camera framing; panels overlay the full board viewport.
         if (ui instanceof GpuHud hud) { hud.updateState(frame, playbackBusy(), dialog()); }

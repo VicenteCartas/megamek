@@ -95,14 +95,21 @@ final class BoardComponents {
     /** Writes rule components and folds the internal owner map into their appearance; decorations stay unchanged. */
     static void write(Hex hex, ObjectNode node) {
         node.remove("terrain");
+        node.remove("ruins");
         JsonNode appearances = node.remove("appearance");
         ObjectNode components = node.putObject("components");
         COMPONENTS.forEach((owner, fields) -> {
             ObjectNode component = object();
             boolean closed = owner.equals("building") && hex.containsTerrain(Terrains.BUILDING)
                   && BuildingInteriors.resolve(hex) == BuildingInteriors.NO;
+            // A destroyed structure keeps its component, marked destroyed: its type is a ruin (Hex#getRuins); what the
+            // collapse left on the hex (a building's class or armour) is written as it is.
+            boolean destroyed = !fields.isEmpty() && !hex.containsTerrain(fields.getFirst().terrain())
+                  && hex.getRuin(fields.getFirst().terrain()) != null;
+            if (destroyed) { component.put("destroyed", true); }
             for (Field field : fields) {
                 Terrain terrain = hex.getTerrain(field.terrain());
+                if (terrain == null && destroyed) { terrain = hex.getRuin(field.terrain()); }
                 if (closed && field.terrain() == Terrains.BLDG_BASEMENT_TYPE) {
                     terrain = new Terrain(Terrains.BLDG_BASEMENT_TYPE, BasementType.NONE.ordinal());
                 }
@@ -167,6 +174,10 @@ final class BoardComponents {
             if (legacy != null) {
                 require(legacy.isObject(), owner + ".legacyExits must be an object");
             }
+            // A destroyed structure's terrains are its ruin's, not the hex's (Hex#getRuins).
+            boolean destroyed = component.path("destroyed").asBoolean(false);
+            require(!destroyed || owner.equals("building") || owner.equals("bridge") || owner.equals("fuelTank")
+                  || owner.equals("bridgeRoad") || owner.equals("bridgeRail"), owner + " cannot be destroyed");
             for (Field field : fields) {
                 boolean connections = field.connections() != null && component.has(field.connections());
                 if (!component.has(field.name())) { continue; }
@@ -183,7 +194,8 @@ final class BoardComponents {
                 int exits = raw ? integer(legacy.get(field.name()), owner + ".legacyExits." + field.name())
                       : connections ? directions(component.get(field.connections()), owner + "." + field.connections()) : 0;
                 // Native connection fields describe the saved topology, including an explicit isolated structure.
-                hex.addTerrain(new Terrain(field.terrain(), level, raw || field.connections() != null, exits));
+                var terrain = new Terrain(field.terrain(), level, raw || field.connections() != null, exits);
+                if (destroyed && Hex.structureTerrain(field.terrain())) { hex.addRuin(terrain); } else { hex.addTerrain(terrain); }
             }
             if (visuals && HexAppearance.OWNERS.contains(owner) && component.has("appearance")) {
                 require(component.get("appearance").isObject(), owner + ".appearance must be an object");

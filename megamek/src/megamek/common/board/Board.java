@@ -1810,30 +1810,11 @@ public class Board implements Serializable {
         type = Math.max(type, curHex.terrainLevel(Terrains.BRIDGE));
         type = Math.max(type, curHex.terrainLevel(Terrains.FUEL_TANK));
 
-        // Remove the building terrain.
-        curHex.removeTerrain(Terrains.BUILDING);
-        curHex.removeTerrain(Terrains.BLDG_CF);
-        curHex.removeTerrain(Terrains.BLDG_ELEV);
-        curHex.removeTerrain(Terrains.FUEL_TANK);
-        curHex.removeTerrain(Terrains.FUEL_TANK_CF);
-        curHex.removeTerrain(Terrains.FUEL_TANK_ELEV);
-        curHex.removeTerrain(Terrains.FUEL_TANK_MAGN);
-        // A destroyed section drops its field-repair badge and the road and rail on its deck with it.
-        curHex.removeBridge();
-
-        // Add rubble terrain that matches the building type.
-        if (type > 0) {
-            int rubbleLevel = bldg.getBuildingType().getTypeValue();
-            curHex.addTerrain(new Terrain(Terrains.RUBBLE, rubbleLevel));
-        }
-
-        if (curHex.containsTerrain(Terrains.BLDG_BASEMENT_TYPE)) {
-            // per TW 176 the basement doesn't change the elevation of the
-            // building hex
-            // the basement fills in with the rubble of the building
-            // any units in the basement are destroyed
-            curHex.removeTerrain(Terrains.BLDG_BASEMENT_TYPE);
-        }
+        // The structure's terrains leave the hex for its ruin under rubble that matches the building type: a destroyed
+        // bridge section drops its field-repair badge and the road and rail on its deck with it, and per TW 176 a
+        // basement fills in with the building's rubble (any units in it are destroyed) without changing the hex's
+        // elevation. The ruin only remembers them, for its look.
+        curHex.destroyStructure(type > 0 ? bldg.getBuildingType().getTypeValue() : 0);
 
         // Update the hex.
         // TODO : Do I need to initialize it???

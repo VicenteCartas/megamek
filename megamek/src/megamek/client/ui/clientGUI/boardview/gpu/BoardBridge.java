@@ -199,6 +199,15 @@ final class BoardBridge {
         return tile == null ? null : tile.features().stream().filter(f -> f.asset().equals("bridge")).findFirst().orElse(null);
     }
 
+    /**
+     * The tile's bridge while its deck stands: null for none and for the ruin of one whose span fell
+     * ({@link BoardScene.Feature#ruined}), whose landings and piers still stand but carry nothing over the gap.
+     */
+    static BoardScene.Feature standing(BoardScene.Tile tile) {
+        var bridge = feature(tile);
+        return bridge == null || bridge.ruined() ? null : bridge;
+    }
+
     /** An implicit bridge carrying only a maglev is the guideway beam itself, without a road slab or landings. */
     static boolean guideway(BoardScene.Tile tile) {
         return tile != null && feature(tile) != null && HexAppearance.implicit(tile.appearance())
@@ -375,15 +384,20 @@ final class BoardBridge {
         }
     }
 
-    /** The passages through this hex: towards each bridge it is a bank of, and along its own bridge's deck. */
+    /**
+     * The passages through this hex: towards each bridge it is a bank of, and along its own bridge's deck. A fallen span
+     * keeps those onto the banks where its landings stand; a fallen rock arch leaves none.
+     */
     static List<Approach> approaches(BoardScene scene, BoardScene.Tile tile) {
         var result = new ArrayList<Approach>();
         var center = BoardGeometry.center(tile.coords(), tile.elevation());
         var own = feature(tile);
         for (int d = 0; d < 6; d++) {
-            boolean span = own != null && (own.bridgeExits() & (1 << d)) != 0;
             var next = scene.tile(tile.coords().translated(d));
-            if (!span && !bank(next, tile, (d + 3) % 6)) { continue; }
+            boolean span = own != null && (own.bridgeExits() & (1 << d)) != 0
+                  && (!own.ruined() || family(tile) != Family.NATURAL && bank(tile, next, d));
+            boolean landing = bank(next, tile, (d + 3) % 6) && (standing(next) != null || family(next) != Family.NATURAL);
+            if (!span && !landing) { continue; }
             var direction = BoardGeometry.center(tile.coords().translated(d), tile.elevation()).sub(center);
             float length = direction.len();
             direction.scl(1 / length);

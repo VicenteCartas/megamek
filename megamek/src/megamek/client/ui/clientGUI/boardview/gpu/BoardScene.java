@@ -133,6 +133,10 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
           java.util.function.Function<Coords, megamek.common.Hex> board,
           java.util.function.Function<Coords, megamek.common.units.IBuilding> buildings, Set<String> buildingReferences,
           List<Feature> searchedWoods) {
+        // A fallen span's landings still carry the road and track that ran onto them, and the ways beside it still end
+        // there, as they stood (bridgeAsItStood); only its deck, its paint and what stood on it are gone.
+        var stood = bridgeAsItStood(hex);
+        java.util.function.Function<Coords, megamek.common.Hex> ways = at -> bridgeAsItStood(board.apply(at));
         return new BoardScene.Tile(pixels.coords(), hex.getLevel(),
               hex.containsTerrain(Terrains.WATER) ? Math.max(0, hex.terrainLevel(Terrains.WATER)) : -1,
               hex.containsTerrain(Terrains.ICE),
@@ -140,7 +144,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               BoardFeatures.surface(hex),
               terrainImages.captureOverlay(pixels.decals(), previous == null ? null : previous.decals()),
               terrainImages.capture(pixels.decalsWithoutLimbs(), previous == null ? null : previous.decalsWithoutLimbs()),
-              BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels(), pixels.blankTerrains(), board, pixels.scenery(),
+              BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels(), pixels.blankTerrains(), ways, pixels.scenery(),
                     megamek.common.board.BoardTreeDistribution.NATURAL, buildingReferences, searchedWoods),
               pixels.text(), BoardLiquid.capture(hex),
               terrainImages.capture(pixels.tileset(), previous == null ? null : previous.tileset()),
@@ -153,10 +157,21 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               terrainImages.captureOverlay(pixels.tilesetDecals(), previous == null ? null : previous.tilesetDecals()),
               terrainImages.captureOverlay(pixels.tilesetScenery(), previous == null ? null : previous.tilesetScenery()),
               hex.getAppearance(), Cover.capture(hex, buildings.apply(pixels.coords()), pixels.coords()), false,
-              BoardRoad.deck(hex), hex.containsTerrain(Terrains.BRIDGE_ROAD) ? hex.getTerrain(Terrains.BRIDGE_ROAD).getExits() & 63 : 0,
+              BoardRoad.deck(stood), stood.containsTerrain(Terrains.BRIDGE_ROAD) ? stood.getTerrain(Terrains.BRIDGE_ROAD).getExits() & 63 : 0,
               hex.deckMud(hex.terrainLevel(Terrains.BRIDGE_ELEV)) != null, RailRoute.groundSides(hex),
-              RailRoute.corridor(hex, pixels.coords(), board), RailRoute.corridor(hex, pixels.coords(), board, true),
+              RailRoute.corridor(hex, pixels.coords(), ways), RailRoute.corridor(stood, pixels.coords(), ways, true),
               BoardBackdrop.capture(hex), MinimapTerrain.capture(hex));
+    }
+
+    /**
+     * The hex as its fallen bridge stood ({@link megamek.common.Hex#restoreRuins}), for the presentation of what its
+     * span leaves: a copy; the hex itself where no bridge fell or one stands again, null for none.
+     */
+    static megamek.common.Hex bridgeAsItStood(megamek.common.Hex hex) {
+        if (hex == null || hex.containsTerrain(Terrains.BRIDGE) || hex.getRuin(Terrains.BRIDGE) == null) { return hex; }
+        var copy = hex.duplicate();
+        copy.restoreRuins();
+        return copy;
     }
 
     /**
@@ -300,15 +315,23 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
      * {@code stretch} multiplies {@code scale} per model axis before the rotation, and {@code colours} replace the
      * model's colour slots: a placed object's own, or a legacy layout row's. {@code parts} are the numbered parts of its
      * model it shows (bit N for part N, {@link RigidGlb#part}), as the fighting holes of a dug-in platoon's figures;
-     * 0 shows them all.
+     * 0 shows them all. {@code ruined}: a bridge whose span fell (megamek.common.Hex#getRuins): its landings and piers
+     * still stand and the roads still end at them, but it has no deck and is no structure.
      */
     record Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
           FeatureKind kind, int bridgeExits, boolean authoredPlacement, megamek.common.board.BoardDecoration decoration,
           megamek.common.board.BoardDecoration.Stretch stretch, megamek.common.board.BoardDecoration.Colours colours,
-          int parts) {
+          int parts, boolean ruined) {
         // Generated kits fit their outline before laying full-size facade pieces and roof fittings.
         float footprintScale() { return megamek.common.board.TilesetScenery.generatedKit(asset) ? scale : 1; }
         float modelScale() { return megamek.common.board.TilesetScenery.generatedKit(asset) ? 1 : scale; }
+        Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
+              FeatureKind kind, int bridgeExits, boolean authoredPlacement, megamek.common.board.BoardDecoration decoration,
+              megamek.common.board.BoardDecoration.Stretch stretch, megamek.common.board.BoardDecoration.Colours colours,
+              int parts) {
+            this(asset, x, y, rotation, scale, height, elevation, kind, bridgeExits, authoredPlacement, decoration, stretch,
+                  colours, parts, false);
+        }
         Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
               FeatureKind kind, int bridgeExits, boolean authoredPlacement, megamek.common.board.BoardDecoration decoration,
               megamek.common.board.BoardDecoration.Stretch stretch, megamek.common.board.BoardDecoration.Colours colours) {
@@ -585,7 +608,9 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                 // Keep the deck at its original absolute level when the ground beneath it drops.
                 if (feature == bridge && depth > 0) {
                     feature = new Feature(feature.asset(), feature.x(), feature.y(), feature.rotation(), feature.scale(),
-                          feature.height(), feature.elevation() + depth, feature.kind(), feature.bridgeExits());
+                          feature.height(), feature.elevation() + depth, feature.kind(), feature.bridgeExits(), false, null,
+                          megamek.common.board.BoardDecoration.Stretch.NONE, megamek.common.board.BoardDecoration.Colours.NONE,
+                          0, feature.ruined());
                 }
                 switch (feature.kind()) {
                     case TREE -> { if (feature.authoredPlacement()) { kept.add(feature); } }
@@ -1139,10 +1164,10 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return new Collapse(old.coords(), old, hit == null ? 0 : hit.strength(), hit == null ? null : hit.from(), loads);
         }
 
-        /** Whether the tile holds what can come down: a building, a fuel tank or a bridge span. */
+        /** Whether the tile holds what can come down: a building, a fuel tank or a bridge span, not its ruin. */
         static boolean structure(Tile tile) {
             return tile.cover().structure() > 0 && tile.cover().structure() != Cover.INDUSTRIAL
-                  || tile.features().stream().anyMatch(feature -> "bridge".equals(feature.asset()));
+                  || tile.features().stream().anyMatch(feature -> "bridge".equals(feature.asset()) && !feature.ruined());
         }
 
         /** Whether {@code coords} rises or sinks in this change. */

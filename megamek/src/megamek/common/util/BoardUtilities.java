@@ -1756,9 +1756,11 @@ public class BoardUtilities {
                 Hex hex = board.getHex(x, y).duplicate();
                 for (int type : new int[] { Terrains.ROAD, Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.BRIDGE, Terrains.CLIFF_TOP,
                                             Terrains.RAIL, Terrains.BRIDGE_RAIL, Terrains.BRIDGE_ROAD }) {
-                    Terrain terrain = hex.getTerrain(type);
-                    // High values select legacy artwork. They must never be truncated as directional bits.
-                    if (terrain != null && terrain.getExits() >= 0 && terrain.getExits() <= 63) { terrain.flipExits(horiz, vert); }
+                    // A destroyed structure's ruin (Hex#getRuins) turns with the board too.
+                    for (Terrain terrain : new Terrain[] { hex.getTerrain(type), hex.getRuin(type) }) {
+                        // High values select legacy artwork. They must never be truncated as directional bits.
+                        if (terrain != null && terrain.getExits() >= 0 && terrain.getExits() <= 63) { terrain.flipExits(horiz, vert); }
+                    }
                 }
                 hex.setDecorations(hex.getDecorations().stream().map(object -> object.flip(horiz, vert)).toList());
                 if (hex.getBuildingReference() != null) {

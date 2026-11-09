@@ -134,6 +134,13 @@ final class GpuMapSource implements BoardSource {
     private volatile Publication publication;
     /** Render-thread latch: selection and geometry must describe the same EDT capture for the entire frame. */
     private Publication rendering;
+    /**
+     * Guarded by this, with each {@link #publication}: what Destroyed brought down (editorCommand), as the game's collapse
+     * and its checkpoint, which the next frame taken carries once; and whether the tiles changed otherwise since a frame
+     * was last taken: that frame then carries none, and the view shows the change at once (GpuBattleView#renderFrame).
+     */
+    private final List<BoardScene.Animation> pendingEvents = new ArrayList<>();
+    private boolean editedSinceTake;
     private volatile UiPreferences uiPreferences = UiPreferences.capture();
     /** The editor's trace overlay settings, copied from the preferences on the EDT; none for a map preview. */
     private volatile GpuTraceOverlay.Settings trace = GpuTraceOverlay.Settings.NONE;
@@ -185,7 +192,10 @@ final class GpuMapSource implements BoardSource {
         }
     }
 
-    public void refresh() {
+    public void refresh() { refresh(null); }
+
+    /** {@code before}: the scene a Destroyed was given (editorCommand), whose structures it brings down; else null. */
+    private void refresh(BoardScene before) {
         if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
         if (closed) { return; }
         flushEditorElevation();
@@ -214,7 +224,8 @@ final class GpuMapSource implements BoardSource {
             if (markers == BoardTactical.EMPTY) { terrainMarkers.remove(coords); }
             else { terrainMarkers.put(coords, markers); }
         });
-        if (next != tiles) {
+        boolean changed = next != tiles;
+        if (changed) {
             tiles = next;
             badgeSnapshot = Map.copyOf(badges);
             editorTerrain = editor == null ? BoardTactical.EMPTY : new BoardTactical(
@@ -252,8 +263,19 @@ final class GpuMapSource implements BoardSource {
               && state.selection().stream().anyMatch(item -> board.getHex(item.coords()).getDecorations().stream()
                     .anyMatch(object -> object.id().equals(item.object())
                           && megamek.common.board.BuildingVolumes.of(object.asset()).present()));
-        publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state, projected,
-              badgeSnapshot, authoredGesture);
+        // What Destroyed brought down falls as the game's structures fall under their own weight.
+        var collapse = before == null ? null : BoardScene.TileTransition.of(before, scene, at -> null);
+        synchronized (this) {
+            if (collapse != null && !editedSinceTake) {
+                pendingEvents.add(collapse);
+                pendingEvents.add(new BoardScene.SceneUpdate(scene));
+            } else if (changed) {
+                pendingEvents.clear();
+                editedSinceTake = true;
+            }
+            publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state, projected,
+                  badgeSnapshot, authoredGesture);
+        }
     }
 
     /** Map workspaces expose their existing document and application actions without requiring a game client. */
@@ -488,7 +510,14 @@ final class GpuMapSource implements BoardSource {
     private static void onSwing(Runnable action) {
         if (SwingUtilities.isEventDispatchThread()) { action.run(); } else { SwingUtilities.invokeLater(action); }
     }
-    public Frame takeFrame() { rendering = publication; return rendering.frame(); }
+    public synchronized Frame takeFrame() {
+        rendering = publication;
+        editedSinceTake = false;
+        if (pendingEvents.isEmpty()) { return rendering.frame(); }
+        Frame taken = rendering.frame().withTimeline(List.copyOf(pendingEvents));
+        pendingEvents.clear();
+        return taken;
+    }
 
     @Override
     public BoardAtmosphere.Settings scenarioAtmosphere() {
@@ -632,8 +661,11 @@ final class GpuMapSource implements BoardSource {
         onSwing(() -> {
             if (!closed && editor != null && generation == boardGeneration && board == game.getBoard()) {
                 finishEditorStroke();
+                // Destroyed brings its structures down as a game does, from the board as it stood just before.
+                BoardScene before = null;
+                if (command.action() == BoardEditorSession.Action.DESTROYED) { refresh(); before = publication.frame().scene(); }
                 if (!editorFiles.command(command)) { editor.command(command, owner); }
-                refresh();
+                refresh(before);
             }
         });
     }

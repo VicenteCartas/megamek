@@ -455,7 +455,8 @@ final class BoardObstacles {
     /**
      * The deck's passage from the hex centre to each of its exit edges ({@link BoardBridge#PASSAGE_HALF_WIDTH} each
      * side), from the slab's underside to the deck: cover tall enough to reach it, under a deck at or near the ground,
-     * does not grow through it. A raised deck leaves the ground beneath it as it is.
+     * does not grow through it. A raised deck leaves the ground beneath it as it is. A fallen span
+     * ({@link BoardScene.Feature#ruined}) keeps only its landings' solid ramps.
      */
     private void deck(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature bridge) {
         float s = BoardGeometry.hexScale(), centreZ = BoardBridge.deckZ(tile);
@@ -468,7 +469,9 @@ final class BoardObstacles {
             var across = new Vector3(edge).sub(centre).nor();
             across.set(-across.y, across.x, 0).scl(BoardBridge.passage(tile, d) * s);
             float edgeZ = BoardBridge.deckZ(BoardBridge.edgeElevation(tile, next, d));
-            passage(centre, edge, across, Math.min(centreZ, edgeZ) - BoardBridge.SLAB * s, Math.max(centreZ, edgeZ));
+            if (!bridge.ruined()) {
+                passage(centre, edge, across, Math.min(centreZ, edgeZ) - BoardBridge.SLAB * s, Math.max(centreZ, edgeZ));
+            }
             if (BoardBridge.family(tile) != BoardBridge.Family.NATURAL && !BoardBridge.guideway(tile)
                   && BoardBridge.bank(tile, next, d) && BoardRoadGrade.ground(next) < tile.elevation() + bridge.elevation()) {
                 // The solid ramp begins at the bridge inset and ends with a wider authored landing block.
