@@ -2137,9 +2137,11 @@ final class GpuTerrain implements Disposable {
         Array<Renderable> scatterRenderables = new Array<>();
         final Array<Renderable> shadowPropRenderables = new Array<>();
         final Array<Renderable> sharedProps = new Array<>();
-        /** {@link #sharedProps} ready for the colour pass; null until it next draws them. */
+        /** {@link #sharedProps} ready for the colour and depth passes; null until one next draws them. */
         GpuTreeInstances.Placements sharedPlacements;
         final Array<Renderable> sharedShadows = new Array<>();
+        /** {@link #sharedShadows} ready for the shadow map (shadowTrees); null until it next draws them. */
+        GpuTreeInstances.Placements shadowPlacements;
         /** Placed object parts drawn with instancing, like shared building modules (mirror images too). */
         final Array<Renderable> decorationRenderables = new Array<>();
         /** Placed object parts whose pose (tilted, sheared, unevenly stretched) or material the instance data cannot hold. */
@@ -2182,7 +2184,8 @@ final class GpuTerrain implements Disposable {
         GpuWaterShader.Field waterField;
         /** Lava reuses the same current/bank sampler with its own connectivity and chunk-owned texture. */
         GpuWaterShader.Field lavaField;
-        final GpuTextures<BoardScene.Pixels> roadMasks = new GpuTextures<>();
+        /** Its roads' masks: its own atlas, or its source's where that holds them all (ChunkBuild). */
+        GpuTextures<BoardScene.Pixels> roadMasks = new GpuTextures<>();
 
         private static void supply(Array<Renderable> source, Array<Renderable> out) {
             for (Renderable renderable : source) {
@@ -2211,6 +2214,7 @@ final class GpuTerrain implements Disposable {
                 if (prop.building != null && !falling.test(prop.coords())) { shared.add(prop.instance); }
             }
             sharedShadows.clear();
+            shadowPlacements = null;
             sharedShadows.addAll(GpuTerrainDepth.snapshot(shared));
             opaqueMaterials(sharedShadows);
             for (Renderable part : sharedShadows) { part.material.remove(GpuBuildingCutaway.TYPE); }
@@ -2380,7 +2384,9 @@ final class GpuTerrain implements Disposable {
             }
             if (waterField != null) { waterField.dispose(); }
             if (lavaField != null) { lavaField.dispose(); }
-            roadMasks.dispose();
+            // Once: a shared atlas counts its owners.
+            if (roadMasks != null) { roadMasks.dispose(); }
+            roadMasks = null;
         }
     }
 
@@ -5330,7 +5336,11 @@ final class GpuTerrain implements Disposable {
                 progress.advance();
                 chunk.lavaField = prepared.lava() == null ? null : prepared.lava().upload(false);
                 progress.advance();
-                chunk.roadMasks.update(masks);
+                // A rebuild that keeps its roads (a structure coming down beside them) keeps their atlas: packing and
+                // uploading a city chunk's masks again takes tens of milliseconds of the frame it starts in.
+                if (source != null && source.roadMasks != null && source.roadMasks.holds(masks.keySet())) {
+                    chunk.roadMasks = source.roadMasks.share();
+                } else { chunk.roadMasks.update(masks); }
                 progress.advance();
             } catch (RuntimeException | Error failure) {
                 chunk.dispose();
@@ -5622,6 +5632,11 @@ final class GpuTerrain implements Disposable {
                         }
                     }
                 }
+            }
+            // Its new props take the view's levels before their caches pack them: chosen afterwards (updateDetail), a
+            // level packs the chunk's props a second time in the frame that installs it.
+            if (!Float.isNaN(detailPixelsPerUnit)) {
+                for (Prop prop : chunk.props) { prop.detail(detailPixelsPerUnit); }
             }
             refall(chunk);
             // Building shells' programs and those programs' twins link behind the loading stage (Prepass.OBJECTS).
@@ -10377,7 +10392,21 @@ final class GpuTerrain implements Disposable {
                         pass.render(wholeShadows ? chunk.shadowProps : chunk.solidProps);
                         addDecorations(chunk, pass, instances, null, shadows, shadows);
                         pass.render(chunk.routes);
-                        instances.add(wholeShadows ? chunk.sharedShadows : chunk.sharedProps);
+                        // By batch, gathered once a snapshot: part by part, a city's modules took most of a shadow
+                        // redraw and of every frame's depth pass.
+                        if (wholeShadows) {
+                            if (chunk.shadowPlacements == null) {
+                                chunk.shadowPlacements = shadowTrees.placements(chunk.sharedShadows);
+                            }
+                            instances.add(chunk.shadowPlacements);
+                        } else if (shadows) {
+                            instances.add(chunk.sharedProps);
+                        } else {
+                            if (chunk.sharedPlacements == null) {
+                                chunk.sharedPlacements = trees.placements(chunk.sharedProps);
+                            }
+                            instances.add(chunk.sharedPlacements);
+                        }
                     }
                     if (!includeScatter) { translucentGeometry(chunk, pass, false); }
                 }

@@ -52,6 +52,8 @@ final class GpuTextures<K> implements Disposable {
     private int slotCount;
     private long packedArea, liveArea;
     private boolean retainReplaced;
+    /** Its other owners (#share): each disposes it, and the last one's dispose frees it. */
+    private int sharers;
     private record Pages(TextureAtlas color, PixmapPacker colorPacker) implements Disposable {
         @Override
         public void dispose() {
@@ -392,8 +394,21 @@ final class GpuTextures<K> implements Disposable {
         return entries.get(key).region;
     }
 
+    /** Whether every one of these keys has its slot already: nothing to pack or upload for them. */
+    boolean holds(Set<K> keys) { return atlas != null && entries.keySet().containsAll(keys); }
+
+    /** This atlas for one more owner, which disposes it as every owner does. */
+    GpuTextures<K> share() {
+        sharers++;
+        return this;
+    }
+
     @Override
     public void dispose() {
+        if (sharers > 0) {
+            sharers--;
+            return;
+        }
         publishedColor = null;
         releaseRetiredPages();
         if (atlas != null) {

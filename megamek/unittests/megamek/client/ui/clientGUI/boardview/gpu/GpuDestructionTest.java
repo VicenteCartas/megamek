@@ -27,7 +27,7 @@ class GpuDestructionTest {
     }
 
     private static void run(GpuDestruction destruction, float seconds) {
-        for (float elapsed = 0; elapsed < seconds; elapsed += FRAME) { destruction.advance(FRAME, 1); }
+        for (float elapsed = 0; elapsed < seconds; elapsed += FRAME) { destruction.advance(FRAME, 1, 0, 0); }
     }
 
     @Test
@@ -71,10 +71,10 @@ class GpuDestructionTest {
     void withoutGravityAFallStillEnds() {
         var destruction = taken();
         // The game's order: the clock and its gravity run every frame before anything gives way.
-        destruction.advance(0, 0);
+        destruction.advance(0, 0, 0, 0);
         destruction.start(HEX, 0);
         destruction.committed(at -> false, (at, trees) -> true);
-        for (float elapsed = 0; elapsed < 20; elapsed += FRAME) { destruction.advance(FRAME, 0); }
+        for (float elapsed = 0; elapsed < 20; elapsed += FRAME) { destruction.advance(FRAME, 0, 0, 0); }
         assertFalse(destruction.taken(HEX));
     }
 

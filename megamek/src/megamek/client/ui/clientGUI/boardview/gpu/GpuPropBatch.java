@@ -1,9 +1,11 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -15,11 +17,14 @@ import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelCache;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.RenderableProvider;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
+import com.badlogic.gdx.math.Matrix3;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
@@ -105,7 +110,8 @@ final class GpuPropBatch implements Disposable {
     /**
      * A page's merge, a source range at a time. Chunk caches already contain world-space vertices: each range's
      * referenced vertices are appended as they are and its indices renumbered, into meshes of up to 65536 vertices with
-     * one part per run of a material. A frame continues it for its share of time only (GpuMeshPage.advance).
+     * one part per run of a material. A frame continues it for its share of time only (GpuMeshPage.advance). A range
+     * placed by a transform (a chunk's props, #cache) is appended in world space.
      */
     static final class Merge implements Disposable {
         final Array<Renderable> merged = new Array<>();
@@ -116,6 +122,8 @@ final class GpuPropBatch implements Disposable {
         // Per vertex of the current range's span, its index in the mesh being filled, or -1 where unreferenced.
         private final IntArray renumbered = new IntArray();
         private final BoundingBox bounds = new BoundingBox();
+        private final Matrix3 turn = new Matrix3();
+        private final Vector3 point = new Vector3();
         private VertexAttributes attributes;
         private Material material;
         private Renderable combined;
@@ -174,12 +182,30 @@ final class GpuPropBatch implements Disposable {
                 bounds.inf();
             }
             int position = attributes.findByUsage(VertexAttributes.Usage.Position).offset / Float.BYTES;
+            boolean placed = !Arrays.equals(value.worldTransform.val, IDENTITY);
+            // Its normals, tangents and binormals turn with it, as MeshBuilder turns them.
+            if (placed) { turn.set(value.worldTransform).inv().transpose(); }
+            int[] turned = placed ? directions(attributes) : new int[0];
             for (int vertex = 0, slot = vertices.size / stride; vertex < span; vertex++) {
                 if (index[vertex] < 0) { continue; }
                 index[vertex] = slot++;
-                int at = vertex * stride + position;
-                bounds.ext(points.items[at], points.items[at + 1], points.items[at + 2]);
+                int at = vertices.size + position;
                 vertices.addAll(points.items, vertex * stride, stride);
+                float[] added = vertices.items;
+                if (placed) {
+                    point.set(added[at], added[at + 1], added[at + 2]).mul(value.worldTransform);
+                    added[at] = point.x;
+                    added[at + 1] = point.y;
+                    added[at + 2] = point.z;
+                    for (int direction : turned) {
+                        int from = at - position + direction;
+                        point.set(added[from], added[from + 1], added[from + 2]).mul(turn).nor();
+                        added[from] = point.x;
+                        added[from + 1] = point.y;
+                        added[from + 2] = point.z;
+                    }
+                }
+                bounds.ext(added[at], added[at + 1], added[at + 2]);
             }
             int offset = elements.size;
             short[] added = elements.ensureCapacity(indices.size);
@@ -192,6 +218,17 @@ final class GpuPropBatch implements Disposable {
             bounds.getDimensions(combined.meshPart.halfExtents).scl(.5f);
             combined.meshPart.radius = combined.meshPart.halfExtents.len();
             ranges.add(new GpuMeshPage.Range(value, combined, offset, indices.size));
+        }
+
+        /** The float offsets of the layout's normal, tangent and binormal: what turns with a placed part. */
+        private static int[] directions(VertexAttributes layout) {
+            IntArray result = new IntArray(3);
+            for (int usage : new int[] { VertexAttributes.Usage.Normal, VertexAttributes.Usage.Tangent,
+                  VertexAttributes.Usage.BiNormal }) {
+                var attribute = layout.findByUsage(usage);
+                if (attribute != null) { result.add(attribute.offset / Float.BYTES); }
+            }
+            return result.toArray();
         }
 
         /** The parts from first on share one new mesh of the appended vertices and indices. */
@@ -237,13 +274,34 @@ final class GpuPropBatch implements Disposable {
     /** Whether a page the last frame showed has a merge still to make (GpuMeshPage#needsBuild). */
     boolean merging() { return enabled && pages.values().stream().anyMatch(GpuMeshPage::needsBuild); }
 
-    /** Transfers the temporary builder's tightly sized meshes to destination; source meshes remain borrowed. */
-    static void cache(Array<Renderable> destination, Consumer<ModelCache> submit) {
+    /**
+     * Packs the instances {@code submit} adds into tightly sized meshes in world space for destination, a part per run
+     * of a material; source meshes remain borrowed. Their indexed triangles go through this class's own merge: libGDX's
+     * ModelCache copies a part's whole mesh and looks every index up in a hash map (45 ms for the 45 rubble piles of a
+     * city chunk after a strike, in the frame that finished the chunk). Anything else packs through ModelCache.
+     */
+    static void cache(Array<Renderable> destination, Consumer<List<ModelInstance>> submit) {
+        List<ModelInstance> instances = new ArrayList<>();
+        submit.accept(instances);
+        Array<Renderable> parts = GpuTerrainDepth.snapshot(instances);
+        boolean triangles = true;
+        for (int i = parts.size - 1; i >= 0; i--) {
+            Renderable part = parts.get(i);
+            // ModelCache leaves skinned parts out.
+            if (part.bones != null) { parts.removeIndex(i); continue; }
+            triangles &= part.meshPart.primitiveType == GL20.GL_TRIANGLES && part.meshPart.mesh.getNumIndices() > 0;
+        }
+        if (triangles) {
+            Merge merge = new Merge(parts);
+            merge.step(Long.MAX_VALUE);
+            destination.addAll(merge.merged);
+            return;
+        }
         ModelCache.TightMeshPool meshes = new ModelCache.TightMeshPool();
         ModelCache builder = new ModelCache(new ModelCache.Sorter(), meshes);
         try {
             builder.begin();
-            submit.accept(builder);
+            instances.forEach(builder::add);
             builder.end();
             builder.getRenderables(destination, null);
         } catch (RuntimeException | Error failure) {

@@ -122,9 +122,12 @@ void main() {
             vec3 fire = mix(toLinear(vec3(0.7, 0.018, 0.001)),
                   1.55 * toLinear(vec3(1.0, 0.38 / 1.55, 0.012 / 1.55)), smoothstep(0.08, 0.5, heat));
             fire = mix(fire, 2.1 * toLinear(vec3(1.0, 1.65 / 2.1, 0.7 / 2.1)), smoothstep(0.5, 0.95, heat));
-            // Burning metal in a violent blast: small blinding pockets flicker through its fire.
-            float pocket = smoothstep(0.78, 0.86, noise(p * 13.0 + vec3(u_effect.w * 3.1, 0.0, -u_effect.x * 9.0)));
-            fire += 2.6 * toLinear(vec3(1.0, 2.3 / 2.6, 1.7 / 2.6)) * pocket * u_look.w * smoothstep(0.2, 0.6, heat);
+            // Burning metal in a violent blast: small blinding pockets flicker through its fire. No other blast pays
+            // for their noise.
+            if (u_look.w > 0.0) {
+                float pocket = smoothstep(0.78, 0.86, noise(p * 13.0 + vec3(u_effect.w * 3.1, 0.0, -u_effect.x * 9.0)));
+                fire += 2.6 * toLinear(vec3(1.0, 2.3 / 2.6, 1.7 / 2.6)) * pocket * u_look.w * smoothstep(0.2, 0.6, heat);
+            }
             smoke += toLinear(vec3(0.22, 0.045, 0.006)) * cooling * mediumSample.y;
             vec3 source = mix(smoke, fire, smoothstep(0.08, 0.5, heat));
             radiance += transmission * absorption * source;

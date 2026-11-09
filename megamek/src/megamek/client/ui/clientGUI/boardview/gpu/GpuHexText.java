@@ -143,6 +143,8 @@ final class GpuHexText implements Disposable {
     /** The count of fall changes at the last update, and the hexes whose roof labels are left out (#update). */
     private int falls;
     private final Set<Coords> down = new HashSet<>();
+    /** The last rebuild's glyphs by plane and chunk: a rebuild lays out again only the chunks whose labels changed. */
+    private Map<Plane, Map<Coords, Chunk>> built = Map.of();
 
     GpuHexText() {
         shader = GpuShaderManager.program(GpuHexText::program, next -> shader = next);
@@ -177,17 +179,21 @@ final class GpuHexText implements Disposable {
     void update(BoardScene scene, BitmapFont font, BitmapFont outline, Function<Coords, BoundingBox> roofBounds,
           boolean tactical, boolean types, boolean outlined, Predicate<Coords> fallen, int falls) {
         // Only a labelled roof coming down, or back, changes the labels.
-        if (this.falls != falls && roofs.keySet().stream().anyMatch(at -> fallen.test(at) != down.contains(at))) {
-            tiles = null;
-        }
+        boolean fell = this.falls != falls
+              && roofs.keySet().stream().anyMatch(at -> fallen.test(at) != down.contains(at));
         this.falls = falls;
         Set<Coords> units = new HashSet<>();
         if (tactical) { scene.units().forEach(unit -> units.addAll(unit.footprint())); }
         boolean same = this.font == font && this.outline == outline && tuning == BoardGeometry.revision()
-              && this.tactical == tactical && this.types == types && this.outlined == outlined
-              && covered.equals(units);
-        if (same && tiles != scene.tiles() && sameLabels(scene.tiles(), roofBounds)) { tiles = scene.tiles(); }
-        if (same && tiles == scene.tiles()) { return; }
+              && this.tactical == tactical && this.types == types && this.outlined == outlined;
+        if (same && !fell && covered.equals(units)) {
+            if (tiles != scene.tiles() && sameLabels(scene.tiles(), roofBounds)) { tiles = scene.tiles(); }
+            if (tiles == scene.tiles()) { return; }
+        }
+        // The chunks whose labels this rebuild changes; null for all of them. A strike's collapses and the scenes they
+        // leave change a few chunks of a board's thousands of labels, each time.
+        Set<Coords> stale = same && tiles != null && tiles.size() == scene.tiles().size()
+              ? staleCells(scene.tiles(), roofBounds, fallen, units) : null;
         float scaleX = font.getData().scaleX, scaleY = font.getData().scaleY;
         float outlineX = outline.getData().scaleX, outlineY = outline.getData().scaleY;
         Color color = new Color(font.getColor()), ringColor = new Color();
@@ -198,8 +204,16 @@ final class GpuHexText implements Disposable {
               .thenComparingInt(Plane::elevation));
         Map<Coords, BoundingBox> nextRoofs = new HashMap<>();
         Set<Coords> nextDown = new HashSet<>();
+        if (stale != null) {
+            built.forEach((plane, cells) -> cells.forEach((cell, chunk) -> {
+                if (!stale.contains(cell)) { next.computeIfAbsent(plane, key -> new HashMap<>()).put(cell, chunk); }
+            }));
+            roofs.forEach((at, roof) -> { if (!stale.contains(cell(at))) { nextRoofs.put(at, roof); } });
+            for (Coords at : down) { if (!stale.contains(cell(at))) { nextDown.add(at); } }
+        }
         try {
             for (BoardScene.Tile tile : scene.tiles()) {
+                if (stale != null && !stale.contains(cell(tile.coords()))) { continue; }
                 for (BoardHexText label : labels(tile, tactical, types, units.contains(tile.coords()))) {
                     BoundingBox roof = label.elevation() > 0 ? roofBounds.apply(tile.coords()) : null;
                     if (label.elevation() > 0) {
@@ -211,10 +225,8 @@ final class GpuHexText implements Disposable {
                     }
                     Plane plane = new Plane(tile.elevation() + label.elevation(), label.elevation() > 0);
                     float headroom = headroom(tile, label);
-                    Coords cell = new Coords(tile.coords().getX() / GpuTerrain.CHUNK_SIZE,
-                          tile.coords().getY() / GpuTerrain.CHUNK_SIZE);
                     Chunk chunk = next.computeIfAbsent(plane, key -> new HashMap<>())
-                          .computeIfAbsent(cell, key -> new Chunk(new ArrayList<>(), new ArrayList<>(),
+                          .computeIfAbsent(cell(tile.coords()), key -> new Chunk(new ArrayList<>(), new ArrayList<>(),
                                 new BoundingBox().inf()));
                     float centerX = BoardGeometry.centerX(tile.coords()), centerY = BoardGeometry.centerY(tile.coords());
                     float z = plane.elevation() * BoardGeometry.level();
@@ -268,6 +280,7 @@ final class GpuHexText implements Disposable {
         List<Page> uploaded = upload(ordered);
         clear();
         pages.addAll(uploaded);
+        built = next;
         roofs.clear();
         roofs.putAll(nextRoofs);
         down.clear();
@@ -292,12 +305,42 @@ final class GpuHexText implements Disposable {
             if (!tiles.get(index).equals(next.get(index))) { return false; }
         }
         for (Map.Entry<Coords, BoundingBox> roof : roofs.entrySet()) {
-            BoundingBox now = roofBounds.apply(roof.getKey()), then = roof.getValue();
-            if (now == null ? then != null : then == null || !now.min.equals(then.min) || !now.max.equals(then.max)) {
-                return false;
-            }
+            if (!sameRoof(roofBounds.apply(roof.getKey()), roof.getValue())) { return false; }
         }
         return true;
+    }
+
+    private static boolean sameRoof(BoundingBox now, BoundingBox then) {
+        return now == null ? then == null : then != null && now.min.equals(then.min) && now.max.equals(then.max);
+    }
+
+    /** The terrain chunk of a hex: its labels' glyphs are kept, and culled, by it. */
+    private static Coords cell(Coords hex) {
+        return new Coords(hex.getX() / GpuTerrain.CHUNK_SIZE, hex.getY() / GpuTerrain.CHUNK_SIZE);
+    }
+
+    /**
+     * The chunks whose labels differ from those the meshes hold: of the hexes whose tile changed, whose labelled roof
+     * moved, came down or stands again, or that a unit covers or uncovers. {@code next} lists the hexes as the held
+     * tiles do.
+     */
+    private Set<Coords> staleCells(List<BoardScene.Tile> next, Function<Coords, BoundingBox> roofBounds,
+          Predicate<Coords> fallen, Set<Coords> units) {
+        Set<Coords> stale = new HashSet<>();
+        for (int index = 0; index < next.size(); index++) {
+            BoardScene.Tile tile = next.get(index), held = tiles.get(index);
+            if (!held.equals(tile) || covered.contains(tile.coords()) != units.contains(tile.coords())) {
+                stale.add(cell(tile.coords()));
+                stale.add(cell(held.coords()));
+            }
+        }
+        for (Map.Entry<Coords, BoundingBox> roof : roofs.entrySet()) {
+            if (fallen.test(roof.getKey()) != down.contains(roof.getKey())
+                  || !sameRoof(roofBounds.apply(roof.getKey()), roof.getValue())) {
+                stale.add(cell(roof.getKey()));
+            }
+        }
+        return stale;
     }
 
     /**
@@ -438,6 +481,7 @@ final class GpuHexText implements Disposable {
         clear();
         roofs.clear();
         tiles = null;
+        built = Map.of();
         font = null;
         outline = null;
         GpuShaderManager.dispose(shader);

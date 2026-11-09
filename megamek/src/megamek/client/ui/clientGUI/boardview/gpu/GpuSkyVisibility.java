@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ForkJoinPool;
 import java.util.stream.IntStream;
 
 import com.badlogic.gdx.graphics.GL20;
@@ -42,6 +43,13 @@ final class GpuSkyVisibility implements Disposable {
     private static final int DIRECTIONS = 16;
     private static final float REACH_METRES = 300;
     private static final float STEP_GROWTH = 1.25f;
+    /**
+     * The threads of a search that replaces a board's volume in play (a collapse, a strike, an edit): a quarter of the
+     * cores. On all of them it took the frame's own for a second and a half, every stage of every frame slower. A
+     * board's first search, behind its loading stage, takes the common pool.
+     */
+    private static final ForkJoinPool IN_PLAY =
+          new ForkJoinPool(Math.max(1, Runtime.getRuntime().availableProcessors() / 4));
 
     /**
      * The board's tops and the volume's frame, all in world units: {@code heights} the tops; {@code floors} the level each
@@ -109,11 +117,11 @@ final class GpuSkyVisibility implements Disposable {
 
     private void startSearch(BoardScene scene) {
         waiting = null;
-        // On the worker: the structures' footprints may read their kits from disk.
+        // On the worker: the structures' footprints may read their kits from disk. Its parallel rows run in its pool.
         pending = CompletableFuture.supplyAsync(() -> {
             Field field = field(scene);
             return new Volume(field, search(field));
-        });
+        }, cell > 0 ? IN_PLAY : ForkJoinPool.commonPool());
     }
 
     /**

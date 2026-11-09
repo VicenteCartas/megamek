@@ -158,7 +158,7 @@ final class GpuDestruction implements Disposable {
     private final IntArray owners = new IntArray();
     private final GpuTreeInstances batches = new GpuTreeInstances((name, level) -> {
         throw new IllegalStateException("Debris draw no trees");
-    });
+    }, false, true);
     /** The pieces grouped by batch, ready for every pass until a fall comes or goes; null without any. */
     private GpuTreeInstances.Placements placements;
     private float[] texels = new float[0];

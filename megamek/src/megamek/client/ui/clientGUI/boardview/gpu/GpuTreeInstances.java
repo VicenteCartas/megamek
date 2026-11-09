@@ -457,6 +457,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     private final BiFunction<String, Integer, Model> models;
     /** Whether its trees are felled ones (GpuDestruction), whose instances name their slots instead of a dissolve. */
     private final boolean felled;
+    /** Whether every pass gathers the same placements (GpuDestruction's pieces): a part's passes share one batch. */
+    private final boolean samePasses;
     private final Map<String, Species[]> species = new HashMap<>();
     private final List<Species> stands = new ArrayList<>();
     /** A part's batch key: mirror images draw in their own batch, whose front face is flipped. */
@@ -472,9 +474,16 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     GpuTreeInstances(BiFunction<String, Integer, Model> models) { this(models, false); }
 
     /** With {@code felled} its trees fall (GpuDestruction): their stands never dissolve between levels. */
-    GpuTreeInstances(BiFunction<String, Integer, Model> models, boolean felled) {
+    GpuTreeInstances(BiFunction<String, Integer, Model> models, boolean felled) { this(models, felled, false); }
+
+    /**
+     * With {@code samePasses} every pass gathers the same placements, and a part keeps one batch for them all: one copy
+     * of its mesh, built once, and one upload of its instances.
+     */
+    GpuTreeInstances(BiFunction<String, Integer, Model> models, boolean felled, boolean samePasses) {
         this.models = models;
         this.felled = felled;
+        this.samePasses = samePasses;
     }
 
     /** Starts gathering one pass's trees and building parts. */
@@ -595,8 +604,9 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
 
     /** This pass's batch among a part's. */
     private Batch batch(Batch[] passes, Renderable source) {
-        Batch batch = passes[pass.ordinal()];
-        if (batch == null) { passes[pass.ordinal()] = batch = new Batch(source, mirrored(source.worldTransform)); }
+        int index = samePasses ? 0 : pass.ordinal();
+        Batch batch = passes[index];
+        if (batch == null) { passes[index] = batch = new Batch(source, mirrored(source.worldTransform)); }
         return batch;
     }
 
