@@ -150,8 +150,9 @@ class GpuHelpMenuPlayersSmokeTest {
                 assertEquals(List.of("MENU", players() + " [" + key(preferences, KeyCommandBind.BOT_COMMANDS) + "]",
                       "---", menu("FileMenu") + " ›", menu("GameMenu") + " ›", menu("BoardMenu") + " ›",
                       menu("ViewMenu") + " ›", menu("HelpMenu") + " ›",
-                      Messages.getString("GameCommands.title") + " ›", "Maps ›"), lines(root),
-                      "the Players row, then one group per menu of the menu bar, the commands and the maps");
+                      Messages.getString("GameCommands.title") + " ›", "Maps ›", "---",
+                      Messages.getString("GpuBoard.hud.menu.quit")), lines(root),
+                      "the Players row, then one group per menu of the menu bar, the commands, the maps and Quit");
                 hud.draw();
                 hud.capture("menu-panel").dispose();
 

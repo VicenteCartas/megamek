@@ -435,8 +435,10 @@ CANCEL (Esc by default) takes one step per press:
 10. the weapons panel: the armed weapon disarmed, else the weapon deselected (the solution card closes with it);
 11. the local planner turn's route: cleared;
 12. the inspected unit: no longer inspected;
-13. otherwise: in FIRING, TARGETING, OFFBOARD and PHYSICAL the key stops here, because MegaMek's CANCEL would clear the
-    declared attacks. In every other phase it goes to the phase display.
+13. the local movement turn without the planner (aerospace, vector): the key goes to the phase display, which clears
+    MegaMek's own path or hex pick (F10 opens the Menu there);
+14. otherwise: the Menu opens. The key never reaches the phase display here, so MegaMek's CANCEL cannot clear declared
+    attacks. The `GAME_MENU` bind (F10) toggles the Menu directly, over any other centred dialog.
 
 ## 3. Components
 
@@ -480,7 +482,7 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 | `GpuToastStack` | centre, above the dock | MegaMek's toasts: at most 5, levels INFO, SUCCESS, WARNING, ERROR, GAMEMASTER | presses pass through |
 | `GpuForceOverview` | over the board; the panels it covers are hidden (the prototype blurs them) | a card for every presented unit, grouped, filtered and searchable | locate, selection rule, unit menu |
 | `GpuHelpDialog` | centred | Compact "Controls": category sidebar, action rows and current key badges; mouse gestures have their own category | none |
-| `GpuMenuPanel` | centred | "Players", then the menu bar's groups as `GpuBoardActions` captures them (File, Game, Board, View, Help, Commands, Maps) | each item's own action, or a redirect (below) |
+| `GpuMenuPanel` | centred | "Players", then the menu bar's groups as `GpuBoardActions` captures them (File, Game, Board, View, Help, Commands, Maps), then "Quit to Main Menu" (the client's exit: the save prompt, then the startup screen or MekHQ) | each item's own action, or a redirect (below) |
 | `GpuPlayersPanel` | centred | the players as the Swing player list shows them; each bot's commands under it | bot commands |
 | `GpuContextMenu` | popover | unit menus and the hex menu (its header: the hex, MegaMek's terrain line and level, then the hex tooltip's other lines of the hex: a building, bridge or fuel tank with its height and CF, minefields, objects on the ground, clearing and bridge-building work), each starting with a Select or Inspect item per unit of its hex and ending with MegaMek's map menu of its hex in sections (a group's commands between separators, no menu of menus), weapon-row and queued-attack menus, the dock's More, select lists; a group opens its submenu beside its item as a desktop menu does: the menus before it stay open, another group replaces the chain below its menu, Esc closes the deepest and a press outside closes all | existing commands only |
 | `GpuHexTip` | popover, beside the pointer | after the pointer rests on a hex of the board for `GpuHexTip.DELAY` (0.75 s), the hex and its menu header's lines in small text on a faint plate, the first line broken only between its terms into the fewest, most even lines; gone when the pointer leaves the hex or the board, at a press, and while a menu or dialog is open | none; it never takes input |
@@ -579,7 +581,8 @@ client captured (`UiPreferences.binds()`). The defaults:
 
 | Bind | Default | Action in the HUD |
 | --- | --- | --- |
-| `CANCEL` | Esc | the Esc chain (2.3) |
+| `CANCEL` | Esc | the Esc chain (2.3); with nothing to close, the Menu |
+| `GAME_MENU` | F10 | the Menu, open or closed |
 | `ROUND_REPORT` | Ctrl+R | Log |
 | `KEY_BINDS` | Ctrl+K | Help |
 | `BOT_COMMANDS` | Ctrl+Shift+G | Players |

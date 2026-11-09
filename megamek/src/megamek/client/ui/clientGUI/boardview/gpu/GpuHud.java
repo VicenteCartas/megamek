@@ -567,6 +567,11 @@ final class GpuHud implements GpuBoardHud {
             }
             return true;
         }
+        if (binds.contains(KeyCommandBind.GAME_MENU)) {
+            state.toggle(GpuHudState.Dialog.MENU);
+            stage.setKeyboardFocus(null);
+            return true;
+        }
         if (centeredDialogOpen()) {
             if (binds.contains(KeyCommandBind.CANCEL)) {
                 state.dialog = GpuHudState.Dialog.NONE;
@@ -656,8 +661,10 @@ final class GpuHud implements GpuBoardHud {
 
     /**
      * The Esc chain (C.4), one step per press. With nothing left to close it skips a running playback, as the dock's
-     * Skip to results does. In FIRING, TARGETING, OFFBOARD (the targeting display) and PHYSICAL it never forwards
-     * CANCEL, which would clear declared attacks; elsewhere the last step forwards it to the phase display.
+     * Skip to results does. In the local movement turn MegaMek's own movement (aerospace and the other gears the
+     * planner leaves to it) forwards CANCEL to the phase display, which clears its path or hex pick; F10 opens the Menu
+     * there. With nothing else left, Esc opens the Menu, as a game's Esc does; it never forwards CANCEL in FIRING,
+     * TARGETING, OFFBOARD or PHYSICAL, where it would clear the declared attacks.
      */
     private boolean escape() {
         // A row dragged in a list (attacks or weapons) goes home first.
@@ -697,10 +704,22 @@ final class GpuHud implements GpuBoardHud {
             state.inspected = Entity.NONE;
         } else if (!phase.isEndReport() && state.history.running()) {
             state.history.skip();
+        } else if (swingMovement(inputs)) {
+            return false;
         } else {
-            return phase.isFiring() || phase.isTargeting() || phase.isOffboard() || phase.isPhysical();
+            state.dialog = GpuHudState.Dialog.MENU;
         }
         return true;
+    }
+
+    /**
+     * The local movement turn outside the planner (G20): MegaMek's own movement display holds its path and hex picks,
+     * so its CANCEL keeps Esc.
+     */
+    private static boolean swingMovement(Inputs inputs) {
+        GpuMovePlan.Snapshot move = inputs.frame().panels().move();
+        return inputs.frame().status().myTurn() && inputs.frame().status().phase().isMovement() && move.active()
+              && !move.planner();
     }
 
     /**

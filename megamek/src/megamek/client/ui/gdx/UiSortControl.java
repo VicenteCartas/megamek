@@ -13,6 +13,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.Pools;
+import megamek.client.ui.TableSort;
 import megamek.client.ui.design.DesignTokens;
 
 /**
@@ -20,7 +21,8 @@ import megamek.client.ui.design.DesignTokens;
  * button with an up or down arrow for the direction, its tooltip naming it. Choosing another key starts it in its own
  * default direction and the button flips the direction ({@link TableSort}); either fires one ChangeEvent from the
  * control, whose {@link #sort()} is then the new order. A view's own change ({@link #sort(TableSort)},
- * {@link #keys}) fires none, so the control and sortable column headers ({@link UiSortHeader}) can show one order.
+ * {@link #keys}, {@link #relabel}) fires none, so the control and sortable column headers ({@link UiSortHeader}) can
+ * show one order.
  *
  * @param <K> the keys the list sorts by
  */
@@ -86,6 +88,9 @@ public final class UiSortControl<K extends TableSort.Key> extends Table {
 
     /** Offers {@code next} instead, showing {@code shown} (whose key is one of them), without an event. */
     public UiSortControl<K> keys(List<K> next, TableSort<K> shown) {
+        if (!next.contains(shown.key())) {
+            throw new IllegalArgumentException("Not a key of this control: " + shown.key());
+        }
         keys = List.copyOf(next);
         String[] items = new String[keys.size()];
         for (int i = 0; i < items.length; i++) {
@@ -115,6 +120,17 @@ public final class UiSortControl<K extends TableSort.Key> extends Table {
     /** The keys it offers. */
     public List<K> keys() {
         return keys;
+    }
+
+    /**
+     * Names its keys again, as its names now read, without an event: the order, an open list and the keyboard focus
+     * stay as they are.
+     */
+    public UiSortControl<K> relabel() {
+        for (int i = 0; i < keys.size(); i++) {
+            select.relabel(i, names.apply(keys.get(i)));
+        }
+        return this;
     }
 
     /** Runs {@code action} with the new order each time the user changes it. */

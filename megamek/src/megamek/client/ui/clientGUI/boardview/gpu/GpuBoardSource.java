@@ -1992,6 +1992,19 @@ final class GpuBoardSource implements BoardSource {
         cardUnit = id;
     }
 
+    /**
+     * GL thread: leaves the game as closing the window does. The client asks whether to save first and stays in the
+     * game when the player cancels.
+     */
+    void quitGame() {
+        command(() -> {
+            ClientGUI gui = view.getClientgui();
+            if (gui != null) {
+                gui.handleExit();
+            }
+        });
+    }
+
     /** GL thread: the own unit whose glance card stays beside an inspection. */
     void setOwnCardUnit(int id) {
         ownCardUnit = id;

@@ -1665,10 +1665,19 @@ public final class GpuBoardWindow {
         return configuration;
     }
 
-    /** The MegaMek icons the Swing frames use, by size, that exist; a missing icon file would stop the window. */
+    /** The prefix of the icon files the native windows show; the program's own, set before its first window opens. */
+    private static volatile String iconName = "megamek";
+
+    /** Sets the prefix of the icon files the native windows opened from now on show, such as "mekhq". */
+    static void useIcons(String name) {
+        iconName = name;
+    }
+
+    /** The program's icons the Swing frames use, by size, that exist; a missing icon file would stop the window. */
     static String[] windowIcons() {
+        String name = iconName;
         return Stream.of(16, 32, 48, 256)
-              .map(size -> new File(Configuration.miscImagesDir(), "megamek-icon-" + size + "x" + size + ".png"))
+              .map(size -> new File(Configuration.miscImagesDir(), name + "-icon-" + size + "x" + size + ".png"))
               .filter(File::isFile)
               .map(File::getAbsolutePath)
               .toArray(String[]::new);

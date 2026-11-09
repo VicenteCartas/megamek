@@ -703,7 +703,7 @@ public class PointblankShotDisplay extends FiringDisplay {
         }
         ash.setAimingMode();
         updateTarget();
-        ash.showDialog();
+        showAimWindow();
     }
 
     @Override

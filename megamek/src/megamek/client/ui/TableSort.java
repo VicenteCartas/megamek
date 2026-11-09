@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
-package megamek.client.ui.gdx;
+package megamek.client.ui;
 
 import java.util.Comparator;
 import java.util.Objects;
@@ -7,9 +7,10 @@ import java.util.function.Function;
 
 /**
  * The order of a sortable list: the key it sorts by and the direction. It is plain data with no toolkit, so the layer
- * that fills the list sorts with it on any thread, and the controls that set it ({@link UiSortControl},
- * {@link UiSortHeader}) only show it. A click on a key ({@link #click}) flips the direction of the key in use and
- * starts another key in its own default direction: numbers high first, text from A to Z.
+ * that fills the list sorts with it on any thread, any view (libGDX or Swing) can share it, and the controls that set it
+ * (such as {@code UiSortControl} and {@code UiSortHeader}) only show it. A click on a key ({@link #click}) flips the
+ * direction of the key in use and starts another key in its own default direction: numbers high first, text from A to
+ * Z.
  *
  * @param key       what the list sorts by
  * @param direction which way
@@ -56,18 +57,14 @@ public record TableSort<K extends TableSort.Key>(K key, Direction direction) {
         return new TableSort<>(key, direction.flipped());
     }
 
-    /** {@code next} in this sort's direction. */
-    public TableSort<K> withKey(K next) {
-        return new TableSort<>(next, direction);
-    }
-
     public boolean ascending() {
         return direction == Direction.ASCENDING;
     }
 
     /**
-     * An order by {@code value} in {@code direction}: a row whose value is null has none and goes last whichever the
-     * direction; rows with equal values, or none, follow {@code tiebreak}, which the direction does not turn.
+     * An order by {@code value} in {@code direction}: a row whose value is {@code null} has none and goes last
+     * whichever the direction; rows with equal values, or none, follow {@code tiebreak}, which the direction does not
+     * turn.
      */
     public static <T, V extends Comparable<? super V>> Comparator<T> comparator(Function<? super T, ? extends V> value,
           Direction direction, Comparator<? super T> tiebreak) {

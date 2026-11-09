@@ -672,9 +672,10 @@ dotted `border.control` underline that turns `border.strong` on hover.
   `UiKit.sortControl(caption, ascending, descending, keys, names, initial)`, sets a list's order from above it: a
   `small` `text.secondary` caption ("Sort"), an inline select of the keys and a compact icon button with an up or down
   arrow, whose tooltip names the direction. A new key starts in its default direction (numbers high first, text A to
-  Z) and the button flips it; either fires one `ChangeEvent`, and `sort(order)` or `keys(keys, order)` from code fire
-  none. The order itself is [`TableSort`](../../megamek/src/megamek/client/ui/gdx/TableSort.java), plain data the
-  list's own layer sorts with: missing values last in either direction, ties by a tiebreak such as the name.
+  Z) and the button flips it; either fires one `ChangeEvent`, and `sort(order)`, `keys(keys, order)` or `relabel()`
+  (which renames the keys in place, as when a value's name follows a toggle) from code fire none. The order itself is [`TableSort`](../../megamek/src/megamek/client/ui/TableSort.java), plain data the
+  list's own layer sorts with, outside any toolkit package so a Swing view can share it: missing values last in
+  either direction, ties by a tiebreak such as the name.
 - **Sortable header.** [`UiSortHeader`](../../megamek/src/megamek/client/ui/gdx/UiSortHeader.java), from
   `UiKit.sortHeader(text, align)`, is a column's overline title in `text.muted`, `text.secondary` under the pointer and
   `text.primary` with an `accent.primary` `icon.sm` arrow while its column sorts. The arrow keeps its room when
@@ -1331,7 +1332,7 @@ its geometry and fill, free of GL. Swing has no step chart or arc diagram yet.
 | [`UiOptionBar`](../../megamek/src/megamek/client/ui/gdx/UiOptionBar.java), [`UiTabs`](../../megamek/src/megamek/client/ui/gdx/UiTabs.java), [`UiSegmented`](../../megamek/src/megamek/client/ui/gdx/UiSegmented.java) | The libGDX tabs and segmented control |
 | [`TokenSelects`](../../megamek/src/megamek/client/ui/design/swing/TokenSelects.java), [`FieldUIs`](../../megamek/src/megamek/client/ui/design/swing/FieldUIs.java) | The Swing select and its popup list |
 | [`UiSelect`](../../megamek/src/megamek/client/ui/gdx/UiSelect.java), [`UiListPopup`](../../megamek/src/megamek/client/ui/gdx/UiListPopup.java) | The libGDX select and its popup list |
-| [`UiSortControl`](../../megamek/src/megamek/client/ui/gdx/UiSortControl.java), [`UiSortHeader`](../../megamek/src/megamek/client/ui/gdx/UiSortHeader.java), [`TableSort`](../../megamek/src/megamek/client/ui/gdx/TableSort.java) | The libGDX sort control, sortable column header and the toolkit-free order they show |
+| [`UiSortControl`](../../megamek/src/megamek/client/ui/gdx/UiSortControl.java), [`UiSortHeader`](../../megamek/src/megamek/client/ui/gdx/UiSortHeader.java), [`TableSort`](../../megamek/src/megamek/client/ui/TableSort.java) | The libGDX sort control, sortable column header and the toolkit-free order they show |
 | [`UiStepChart`](../../megamek/src/megamek/client/ui/gdx/UiStepChart.java), [`UiArcDiagram`](../../megamek/src/megamek/client/ui/gdx/UiArcDiagram.java) | The libGDX step chart and arc diagram |
 | [`UiVirtualList`](../../megamek/src/megamek/client/ui/gdx/UiVirtualList.java), [`UiStepper`](../../megamek/src/megamek/client/ui/gdx/UiStepper.java), [`UiHealthBar`](../../megamek/src/megamek/client/ui/gdx/UiHealthBar.java), [`UiLevelTiles`](../../megamek/src/megamek/client/ui/gdx/UiLevelTiles.java), [`UiFilterChip`](../../megamek/src/megamek/client/ui/gdx/UiFilterChip.java), [`UiReveal`](../../megamek/src/megamek/client/ui/gdx/UiReveal.java) | The libGDX virtualised list, stepper, health bar, level tiles, filter chip and staggered reveal |
 | [`TokenLists`](../../megamek/src/megamek/client/ui/design/swing/TokenLists.java), [`TokenListUI`](../../megamek/src/megamek/client/ui/design/swing/TokenListUI.java), [`TokenTreeUI`](../../megamek/src/megamek/client/ui/design/swing/TokenTreeUI.java) | The Swing lists and trees |

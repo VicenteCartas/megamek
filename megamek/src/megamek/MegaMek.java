@@ -63,6 +63,7 @@ import megamek.client.ui.design.swing.MegaMekLightLaf;
 import megamek.client.ui.dialogs.MMAboutDialog;
 import megamek.client.ui.preferences.SuitePreferences;
 import megamek.client.ui.util.FontHandler;
+import megamek.client.ui.util.LauncherReadySignal;
 import megamek.common.commandLine.AbstractCommandLineParser;
 import megamek.common.commandLine.ClientServerCommandLineParser;
 import megamek.common.commandLine.MegaMekCommandLineFlag;
@@ -432,6 +433,8 @@ public class MegaMek {
      * @param currentProject the currently described project
      */
     public static void initializeSuiteGraphicalSetups(final String currentProject) {
+        LauncherReadySignal.install();
+
         // on Mac, use the system setting to color the window top bar light or dark
         // it's not possible to use dark/light based on the current FlatLaf
         System.setProperty("apple.awt.application.appearance", "system");

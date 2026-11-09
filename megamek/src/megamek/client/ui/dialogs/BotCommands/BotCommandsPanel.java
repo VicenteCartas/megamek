@@ -120,6 +120,11 @@ public class BotCommandsPanel extends JPanel {
     private boolean isStartPauseDue = true;
     /** How many groups the Move Order menu shows before it scrolls, so a bot with thirty lances still fits. */
     private static final int MOVE_ORDER_SCROLL_THRESHOLD = 20;
+    /**
+     * Explains an empty Move Order or Quick Orders popup: the player commands bots, but none of their units take unit
+     * orders - see {@link megamek.common.orders.OrderEligibility}.
+     */
+    private static final String NO_ORDERABLE_UNITS_KEY = "BotCommandPanel.emptyPopup.noOrderableUnits";
 
     private MegaMekButton pauseContinue;
     /** The popup buttons in the panel's order, each with its popup's factory for the bots that pass a test. */
@@ -219,7 +224,8 @@ public class BotCommandsPanel extends JPanel {
         pauseContinue = createButton("PauseGame");
         MegaMekButton moveOrder = createButton("MoveOrder");
         popups.put(moveOrder, this::createMoveOrderPopup);
-        popups.put(createButton("QuickOrders"), this::createQuickOrdersPopup);
+        MegaMekButton quickOrders = createButton("QuickOrders");
+        popups.put(quickOrders, this::createQuickOrdersPopup);
         popups.put(createButton("Targets"), this::createTargetsPopup);
         popups.put(createButton("Maneuver"), this::createManeuverPopup);
         popups.put(createButton("SetBehavior"), this::createSelectBehaviorPopup);
@@ -228,7 +234,14 @@ public class BotCommandsPanel extends JPanel {
         // Each popup lists every bot under the player's command.
         popups.forEach((button, popup) -> {
             if (button != moveOrder) {
-                button.addActionListener(evt -> showButtonPopup(button, () -> popup.apply(botPlayer -> true)));
+                Supplier<JPopupMenu> factory = () -> popup.apply(botPlayer -> true);
+                button.addActionListener(evt -> {
+                    if (button == quickOrders) {
+                        showButtonPopup(button, factory, NO_ORDERABLE_UNITS_KEY);
+                    } else {
+                        showButtonPopup(button, factory);
+                    }
+                });
             }
         });
         moveOrder.addActionListener(event -> {
@@ -246,7 +259,7 @@ public class BotCommandsPanel extends JPanel {
                     return;
                 }
             }
-            showButtonPopup(moveOrder, () -> createMoveOrderPopup(botPlayer -> true));
+            showButtonPopup(moveOrder, () -> createMoveOrderPopup(botPlayer -> true), NO_ORDERABLE_UNITS_KEY);
         });
         pauseContinue.addActionListener(evt -> pauseUnpause());
 
@@ -477,20 +490,36 @@ public class BotCommandsPanel extends JPanel {
     }
 
     /**
-     * Builds a button's popup and shows it, logging the reason instead of silently doing nothing if the build throws or
-     * the popup ends up empty. Popups are built lazily on click, so an exception there is otherwise lost on the AWT
-     * event thread and leaves the button looking dead (e.g. clicking it does nothing).
+     * Builds a button's popup and shows it, logging the reason if the build throws. Popups are built lazily on click,
+     * so an exception there is otherwise lost on the AWT event thread and leaves the button looking dead.
      *
      * @param button       The button the popup is anchored to
      * @param popupFactory Supplies the popup to display
      */
     private void showButtonPopup(MegaMekButton button, Supplier<JPopupMenu> popupFactory) {
+        showButtonPopup(button, popupFactory, "BotCommandPanel.emptyPopup.nothingToOffer");
+    }
+
+    /**
+     * Builds a button's popup and shows it. When the popup ends up empty it is shown anyway, holding one grayed-out
+     * line that says why, so the button never looks dead: the Commander window MekHQ's auto-resolve uses has no board
+     * to show a toast on, and an all-aerospace force left Move Order and Quick Orders doing nothing at all on a click
+     * (issue #10836).
+     *
+     * @param button          The button the popup is anchored to
+     * @param popupFactory    Supplies the popup to display
+     * @param emptyMessageKey The resource key of the line explaining an empty popup when the player does command bots
+     */
+    private void showButtonPopup(MegaMekButton button, Supplier<JPopupMenu> popupFactory, String emptyMessageKey) {
         try {
             JPopupMenu popup = popupFactory.get();
             if (popup.getComponentCount() == 0) {
-                LOGGER.info("[BotPanel] {} popup has no entries to show (no commandable bots or applicable options)",
-                      button.getText());
-                return;
+                String messageKey = getBotPlayersUnderYourCommand().isEmpty()
+                      ? "BotCommandPanel.emptyPopup.noBots" : emptyMessageKey;
+                LOGGER.info("[BotPanel] {} popup has no entries to show ({})", button.getText(), messageKey);
+                JMenuItem explanation = new JMenuItem(Messages.getString(messageKey));
+                explanation.setEnabled(false);
+                popup.add(explanation);
             }
             popup.show(button, 0, button.getHeight());
         } catch (Exception exception) {

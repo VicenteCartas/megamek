@@ -133,6 +133,34 @@ public final class UiSelect extends Table {
         return this;
     }
 
+    /**
+     * Names the item at {@code index} {@code text} in place, without an event: the current item, an open list and the
+     * keyboard focus stay as they are.
+     */
+    public UiSelect relabel(int index, String text) {
+        if (index < 0 || index >= items.length) {
+            throw new IndexOutOfBoundsException(index);
+        }
+        items[index] = text;
+        popup.label(index).setText(text);
+        popup.invalidateHierarchy();
+        GlyphLayout layout = new GlyphLayout();
+        widest = 0;
+        for (String item : items) {
+            layout.setText(font, item);
+            widest = Math.max(widest, layout.width);
+        }
+        if (placeholder != null) {
+            layout.setText(font, placeholder);
+            labelCell.prefWidth(Math.max(widest, layout.width));
+        } else {
+            labelCell.prefWidth(widest);
+        }
+        refresh();
+        invalidateHierarchy();
+        return this;
+    }
+
     /** Shows {@code text} in the muted placeholder color until the user chooses an item; nothing is current. */
     public UiSelect placeholder(String text) {
         placeholder = text;

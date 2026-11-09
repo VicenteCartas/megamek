@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
-package megamek.client.ui.gdx;
+package megamek.client.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -10,7 +10,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-import megamek.client.ui.gdx.TableSort.Direction;
+import megamek.client.ui.TableSort.Direction;
 import org.junit.jupiter.api.Test;
 
 class TableSortTest {
@@ -61,12 +61,11 @@ class TableSortTest {
     }
 
     @Test
-    void flippingAndChangingTheKeyKeepTheRest() {
+    void flippingKeepsTheKey() {
         assertEquals(Direction.ASCENDING, Direction.DESCENDING.flipped());
         assertEquals(Direction.DESCENDING, Direction.ASCENDING.flipped());
         TableSort<Key> byValue = TableSort.of(Key.VALUE);
         assertEquals(new TableSort<>(Key.VALUE, Direction.ASCENDING), byValue.flipped());
-        assertEquals(new TableSort<>(Key.NAME, Direction.DESCENDING), byValue.withKey(Key.NAME));
     }
 
     @Test

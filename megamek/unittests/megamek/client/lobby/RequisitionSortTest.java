@@ -4,7 +4,6 @@ package megamek.client.lobby;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -15,8 +14,9 @@ import megamek.client.lobby.RequisitionCatalog.Filters;
 import megamek.client.lobby.RequisitionCatalog.Rules;
 import megamek.client.lobby.RequisitionSearch.Query;
 import megamek.client.lobby.RequisitionSearch.Result;
-import megamek.client.ui.gdx.TableSort;
-import megamek.client.ui.gdx.TableSort.Direction;
+import megamek.client.ui.TableSort;
+import megamek.client.ui.TableSort.Direction;
+import megamek.common.SimpleTechLevel;
 import megamek.common.TechConstants;
 import megamek.common.loaders.MekSummary;
 import megamek.common.units.UnitRole;
@@ -34,15 +34,21 @@ class RequisitionSortTest {
     }
 
     private static List<String> names(List<RequisitionRow> rows, TableSort<RequisitionSort> sort) {
-        return RequisitionSort.sorted(rows, sort).stream().map(RequisitionRow::name).toList();
+        return names(rows, sort, false);
     }
 
+    private static List<String> names(List<RequisitionRow> rows, TableSort<RequisitionSort> sort, boolean pv) {
+        return RequisitionSort.sorted(rows, sort, pv).stream().map(RequisitionRow::name).toList();
+    }
+
+    /** The rows of {@code units} in the catalogue's name order, as the search hands them to the sort. */
     private static List<RequisitionRow> rows(MekSummary... units) {
+        RequisitionCatalog.Index index = RequisitionCatalog.index(units, unit -> false, unit -> null);
         List<RequisitionRow> rows = new ArrayList<>();
-        for (MekSummary unit : units) {
+        for (MekSummary unit : RequisitionCatalog.offer(index, Rules.OPEN, Category.ALL, Filters.NONE, "")) {
             rows.add(RequisitionRow.of(unit));
         }
-        rows.sort(RequisitionSort.NAME_ORDER);
+        assertEquals(units.length, rows.size(), "the catalogue offers every unit");
         return rows;
     }
 
@@ -70,11 +76,9 @@ class RequisitionSortTest {
         assertEquals(RequisitionSort.ARMOR, RequisitionSort.of(RequisitionRow.Column.ARMOR));
         assertEquals(RequisitionSort.ROLE, RequisitionSort.of(RequisitionRow.Column.ROLE));
         assertEquals(RequisitionSort.LEVEL, RequisitionSort.of(RequisitionRow.Column.LEVEL));
-        assertEquals(RequisitionSort.PV, RequisitionSort.value(true));
-        assertEquals(RequisitionSort.BV, RequisitionSort.value(false));
-        assertTrue(RequisitionSort.BV.isValue());
-        assertTrue(RequisitionSort.PV.isValue());
-        assertFalse(RequisitionSort.TONS.isValue());
+        assertEquals("Lobby.requisition.bv", RequisitionSort.VALUE.messageKey(false));
+        assertEquals("Lobby.requisition.pv", RequisitionSort.VALUE.messageKey(true), "the value is named as shown");
+        assertEquals(RequisitionSort.TONS.messageKey(), RequisitionSort.TONS.messageKey(true));
         for (RequisitionRow.Column column : RequisitionRow.Column.values()) {
             assertEquals(column.messageKey(), RequisitionSort.of(column).messageKey(), "a column's key reads its name");
         }
@@ -84,7 +88,7 @@ class RequisitionSortTest {
     void theNameOrderIsTheCatalogueOrderAndComesBackUntouched() {
         List<RequisitionRow> rows = rows(unit("'Astrolux'", 1, 1, 1, 3025), unit("Atlas", 1, 1, 1, 3025),
               unit("archer", 1, 1, 1, 3025));
-        assertSame(rows, RequisitionSort.sorted(rows, RequisitionSort.BY_NAME));
+        assertSame(rows, RequisitionSort.sorted(rows, RequisitionSort.BY_NAME, false));
         assertEquals(List.of("archer", "'Astrolux'", "Atlas"), names(rows, RequisitionSort.BY_NAME));
         assertEquals(List.of("Atlas", "'Astrolux'", "archer"), names(rows, down(RequisitionSort.NAME)));
     }
@@ -92,10 +96,11 @@ class RequisitionSortTest {
     @Test
     void valuesTonsAndYearsSortAsNumbers() {
         List<RequisitionRow> rows = rows(unit("Atlas", 1897, 52, 100, 2755), unit("Locust", 432, 18, 20, 2499),
-              unit("Archer", 1817, 38, 70, 2458), unit("Ostroc", 1176, 34, 60, 2763));
-        assertEquals(List.of("Atlas", "Archer", "Ostroc", "Locust"), names(rows, down(RequisitionSort.BV)));
-        assertEquals(List.of("Locust", "Ostroc", "Archer", "Atlas"), names(rows, up(RequisitionSort.BV)));
-        assertEquals(List.of("Atlas", "Archer", "Ostroc", "Locust"), names(rows, down(RequisitionSort.PV)));
+              unit("Archer", 1817, 38, 70, 2458), unit("Ostroc", 1176, 64, 60, 2763));
+        assertEquals(List.of("Atlas", "Archer", "Ostroc", "Locust"), names(rows, down(RequisitionSort.VALUE)));
+        assertEquals(List.of("Locust", "Ostroc", "Archer", "Atlas"), names(rows, up(RequisitionSort.VALUE)));
+        assertEquals(List.of("Ostroc", "Atlas", "Archer", "Locust"), names(rows, down(RequisitionSort.VALUE), true),
+              "the value sorts as the Point Value while that shows");
         assertEquals(List.of("Locust", "Ostroc", "Archer", "Atlas"), names(rows, up(RequisitionSort.TONS)));
         assertEquals(List.of("Ostroc", "Atlas", "Locust", "Archer"), names(rows, down(RequisitionSort.YEAR)));
     }
@@ -154,21 +159,24 @@ class RequisitionSortTest {
 
     @Test
     void rulesLevelsSortFromIntroductoryToUnofficialAndNoneGoesLast() {
-        MekSummary intro = unit("Intro", 1, 1, 1, 3025);
-        intro.setTechLevel("Introductory");
-        MekSummary experimental = unit("Experimental", 1, 1, 1, 3025);
-        experimental.setTechLevel("Experimental");
-        MekSummary advanced = unit("Advanced", 1, 1, 1, 3025);
-        advanced.setTechLevel("Advanced");
-        MekSummary odd = unit("Odd", 1, 1, 1, 3025);
-        odd.setTechLevel("Homebrew");
+        MekSummary intro = level(unit("Intro", 1, 1, 1, 3025), SimpleTechLevel.INTRO);
+        MekSummary experimental = level(unit("Experimental", 1, 1, 1, 3025), SimpleTechLevel.EXPERIMENTAL);
+        MekSummary advanced = level(unit("Advanced", 1, 1, 1, 3025), SimpleTechLevel.ADVANCED);
+        MekSummary unofficial = level(unit("Unofficial", 1, 1, 1, 3025), SimpleTechLevel.UNOFFICIAL);
         MekSummary none = unit("None", 1, 1, 1, 3025);
         none.setTechLevel("");
-        List<RequisitionRow> rows = rows(intro, experimental, advanced, odd, none);
-        assertEquals(List.of("Intro", "Advanced", "Experimental", "Odd", "None"),
+        List<RequisitionRow> rows = rows(intro, experimental, advanced, unofficial, none);
+        assertEquals(List.of("Intro", "Advanced", "Experimental", "Unofficial", "None"),
               names(rows, up(RequisitionSort.LEVEL)));
-        assertEquals(List.of("Odd", "Experimental", "Advanced", "Intro", "None"),
+        assertEquals(List.of("Unofficial", "Experimental", "Advanced", "Intro", "None"),
               names(rows, down(RequisitionSort.LEVEL)));
+    }
+
+    /** {@code unit} at {@code level}, as the unit cache sets it: the name and its code. */
+    private static MekSummary level(MekSummary unit, SimpleTechLevel level) {
+        unit.setTechLevel(level.toString());
+        unit.setTechLevelCode(level.ordinal());
+        return unit;
     }
 
     @Test

@@ -27,44 +27,51 @@ import javax.swing.JOptionPane;
 import jakarta.annotation.Nullable;
 
 /**
- * The one path every Swing dialog of the native lobby takes: game options, player settings, bot setup, camouflage, unit
- * customisation, C3, map setup, the load and save choosers and every question and alert. The lobby opens them all on
- * {@link #parent()}, the client's frame, which stays hidden behind the native window; the map setup's, the lobby
- * services' and the lobby prompts' dialogs use that frame too. A Swing dialog of that frame, or a modal one Swing gives its shared frame (a
- * {@code JOptionPane} without a parent, as MekHQ asks while it sets up a game), is then caught as it shows:
+ * The one path every Swing dialog of a {@link GpuHost} scene takes while the scene shows; the native lobby's game
+ * options, player settings, bot setup, camouflage, unit customisation, C3, map setup, load and save choosers, questions
+ * and alerts all take it, and so can another program's scene (MekHQ's unported Swing screens). The scene opens them all
+ * on {@link #parent()}, its hidden frame behind the native window. A Swing dialog of that frame, or a modal one Swing
+ * gives its shared frame (a {@code JOptionPane} without a parent, as MekHQ asks while it sets up a game), is then caught
+ * as it shows:
  * <ul>
  *     <li>centred over the native window rather than the hidden frame, which would put it at the screen's corner or
  *     on another monitor;</li>
  *     <li>owned natively by the window ({@link GpuNativeDialogOwner}), or kept on top where the platform can't, so it
  *     stays in front of it;</li>
- *     <li>when modal, blocking the lobby's input until the last modal one closes, as its Swing owner would be;</li>
+ *     <li>when modal, blocking the scene's input until the last modal one closes, as its Swing owner would be;</li>
  *     <li>giving the focus back to the native window as the last one closes, when it had it.</li>
  * </ul>
- * EDT only.
+ *
+ * <p>A scene {@link #install}s it as it asks for the window, passes its window to {@link #started} from
+ * {@link GpuHost.Scene#started}, calls {@link #presented} on the Swing thread once it shows, {@link #released} as its
+ * listener is disposed and {@link #uninstall} once it has ended. Swing thread, except where a method says otherwise.</p>
  */
-final class LobbyDialogs {
-    /** What the dialogs need from the lobby window. */
-    interface Host {
-        /** The client's hidden frame, which owns the lobby's dialogs. */
+public final class GpuSceneDialogs {
+    /** What the dialogs need from the scene. */
+    public interface Host {
+        /** The scene's hidden frame, which owns its dialogs. */
         @Nullable JFrame frame();
 
-        /** The native window's owner for dialogs, once the window exists. */
-        @Nullable GpuNativeDialogOwner nativeOwner();
-
         /** The native window's client area in Swing's coordinates, or null when it doesn't show. */
-        @Nullable Rectangle bounds();
+        default @Nullable Rectangle bounds() {
+            return GpuHost.swingClientBounds();
+        }
 
-        /** Blocks or restores the lobby's input. */
+        /** Blocks or restores the scene's input. */
         void inputBlocked(boolean blocked);
 
         /** Gives the focus back to the native window. */
-        void focus();
+        default void focus() {
+            GpuHost.focus();
+        }
 
-        /** Whether the lobby is closing, so new dialogs are left alone. */
+        /** Whether the scene is closing, so new dialogs are left alone. */
         boolean closing();
     }
 
     private final Host host;
+    /** The native window's owner for dialogs while the scene shows; null before, and where the platform has none. */
+    private volatile GpuNativeDialogOwner nativeOwner;
     private final Set<Dialog> modal = new LinkedHashSet<>();
     private final Map<Dialog, Boolean> onTop = new HashMap<>();
     private final Set<Dialog> raised = new HashSet<>();
@@ -73,27 +80,28 @@ final class LobbyDialogs {
     private boolean hadFocus;
     private volatile boolean blocked;
 
-    LobbyDialogs(Host host) {
+    public GpuSceneDialogs(Host host) {
         this.host = host;
     }
 
-    /** The owner for every dialog the lobby opens itself. */
-    @Nullable JFrame parent() {
+    /** The owner for every dialog the scene opens itself. */
+    public @Nullable JFrame parent() {
         return host.frame();
     }
 
-    /** Whether a modal dialog is open, so the lobby's input is blocked. */
-    boolean blocked() {
+    /** Any thread: whether a modal dialog is open, so the scene's input is blocked. */
+    public boolean blocked() {
         return blocked;
     }
 
-    void install() {
+    /** Starts catching the dialogs, as the scene asks for the window. */
+    public void install() {
         Toolkit.getDefaultToolkit().addAWTEventListener(listener,
               AWTEvent.COMPONENT_EVENT_MASK | AWTEvent.WINDOW_EVENT_MASK);
     }
 
     /** Stops watching, and puts the dialogs it kept on top back as they were. */
-    void uninstall() {
+    public void uninstall() {
         Toolkit.getDefaultToolkit().removeAWTEventListener(listener);
         modal.clear();
         raised.clear();
@@ -103,8 +111,26 @@ final class LobbyDialogs {
         onTop.clear();
     }
 
+    /** GPU thread, from {@link GpuHost.Scene#started}: the native window the dialogs are owned by from now on. */
+    public void started(long windowHandle) {
+        nativeOwner = GpuNativeDialogOwner.forGlfwWindow(windowHandle);
+    }
+
+    /** GPU thread, as the scene's listener is disposed: returns every adopted dialog to its Swing owner. */
+    public void released() {
+        GpuNativeDialogOwner owner = nativeOwner;
+        if (owner != null) {
+            owner.releaseAll();
+        }
+    }
+
+    /** The native window's owner for dialogs, once the scene has started; null where the platform has none. */
+    @Nullable GpuNativeDialogOwner nativeOwner() {
+        return nativeOwner;
+    }
+
     /** Once the native window shows: catches the dialogs that opened before it. */
-    void presented() {
+    public void presented() {
         for (Window window : Window.getWindows()) {
             if (window.isShowing() && window instanceof Dialog dialog && !(dialog instanceof FileDialog)
                   && belongs(dialog)) {
@@ -124,7 +150,7 @@ final class LobbyDialogs {
             case ComponentEvent.COMPONENT_SHOWN -> {
                 if (dialog instanceof FileDialog) {
                     // The system's file dialog has no window of AWT's to own, place or float; as a modal dialog it
-                    // only blocks the lobby's input, and a click on the window brings it to the front
+                    // only blocks the scene's input, and a click on the window brings it to the front
                     if (!host.closing() && belongs(dialog) && dialog.isModal() && modal.add(dialog)
                           && modal.size() == 1) {
                         setBlocked(true);
@@ -154,7 +180,7 @@ final class LobbyDialogs {
     }
 
     /**
-     * A dialog of the client's hidden frame, or a modal one without an owner of its own, which Swing gives its hidden
+     * A dialog of the scene's hidden frame, or a modal one without an owner of its own, which Swing gives its hidden
      * shared frame: both would otherwise hide behind the native window.
      */
     boolean belongs(Dialog dialog) {
@@ -173,8 +199,8 @@ final class LobbyDialogs {
         return false;
     }
 
-    /** EDT: brings the newest open modal dialog to the front when the window is clicked or asked to close. */
-    void frontModal() {
+    /** Brings the newest open modal dialog to the front when the window is clicked or asked to close. */
+    public void frontModal() {
         List<Dialog> showing = new ArrayList<>();
         for (Dialog dialog : modal) {
             if (dialog.isShowing()) {
@@ -214,7 +240,7 @@ final class LobbyDialogs {
 
     /** Keeps a dialog above the window until either closes: owned natively where it can be, otherwise on top. */
     private void raise(Dialog dialog) {
-        GpuNativeDialogOwner owner = host.nativeOwner();
+        GpuNativeDialogOwner owner = nativeOwner;
         if (owner != null && (dialog.getOwner() instanceof Dialog parent && parent.isShowing() && owner.owns(parent)
               || owner.adopt(dialog))) {
             Boolean wasOnTop = onTop.remove(dialog);
@@ -232,7 +258,7 @@ final class LobbyDialogs {
         if (modal.remove(dialog) && modal.isEmpty()) {
             setBlocked(false);
         }
-        GpuNativeDialogOwner owner = host.nativeOwner();
+        GpuNativeDialogOwner owner = nativeOwner;
         if (owner != null) {
             if (closed) {
                 owner.forget(dialog);

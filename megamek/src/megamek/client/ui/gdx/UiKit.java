@@ -39,6 +39,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Pools;
 import megamek.client.ui.Messages;
+import megamek.client.ui.TableSort;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Presentation;
 

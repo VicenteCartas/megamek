@@ -25,6 +25,7 @@ import com.badlogic.gdx.utils.GdxRuntimeException;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.client.ui.util.LauncherReadySignal;
 import megamek.client.ui.util.ScreenFit;
 import megamek.logging.MMLogger;
 import org.lwjgl.glfw.GLFW;
@@ -40,6 +41,11 @@ import org.lwjgl.opengl.GL30;
  * <p>Scenes are asked for on any thread and switch on the GPU thread, between frames: the old scene's listener is
  * paused and disposed, the shared OpenGL state is reset, and the new scene's listener is created and sized. A scene
  * that fails ends with the failure; the window stays for the next scene.</p>
+ *
+ * <p>Other programs of the suite (MekHQ) host their own scenes through the public part: a {@link Scene}, shown with
+ * {@link #show} and ended with {@link #end}, work handed to its GPU thread with {@link #post}, and
+ * {@link GpuSceneDialogs} for the Swing dialogs it opens over the window. A scene never touches its program's model
+ * on the GPU thread; it draws snapshots its Swing thread posts.</p>
  */
 public final class GpuHost {
     private static final MMLogger LOGGER = MMLogger.create(GpuHost.class);
@@ -47,7 +53,7 @@ public final class GpuHost {
     private static final int BOUNDS_SAVE_FRAMES = 15;
 
     /** What runs in the window. The callbacks other than {@link #ended} run on the GPU thread. */
-    interface Scene {
+    public interface Scene {
         /** GPU thread: the listener that draws the scene, made as the scene starts. */
         ApplicationListener listener();
 
@@ -154,7 +160,7 @@ public final class GpuHost {
      * Any time: what the open window shows when a scene ends and none takes its place, run on the Swing thread after
      * the scene's {@link Scene#ended}; the start screen reopens itself this way. Null leaves the window empty.
      */
-    static void whenIdle(Runnable then) {
+    public static void whenIdle(Runnable then) {
         idle = then;
     }
 
@@ -162,7 +168,7 @@ public final class GpuHost {
      * Any thread: shows {@code scene} in the window, opening the window when it is closed, and ends the scene shown
      * now. A scene asked for but not shown yet ends without starting.
      */
-    static void show(Scene scene) {
+    public static void show(Scene scene) {
         if (scene.board()) {
             // Its board's links come first: the warm-up ends now, not when the scene starts.
             GpuShaderWarmup.showing(true);
@@ -188,7 +194,7 @@ public final class GpuHost {
      * Any thread: ends {@code scene} if it shows or is about to. The window then waits for the next scene, or closes
      * when it doesn't stay open. Nothing when another scene has taken its place.
      */
-    static void end(Scene scene) {
+    public static void end(Scene scene) {
         boolean pending;
         boolean empty;
         synchronized (LOCK) {
@@ -214,7 +220,7 @@ public final class GpuHost {
     }
 
     /** Any thread: whether {@code scene} is the one asked for, shown or about to be. */
-    static boolean isShowing(Scene scene) {
+    public static boolean isShowing(Scene scene) {
         return wanted() == scene;
     }
 
@@ -247,7 +253,7 @@ public final class GpuHost {
     }
 
     /** Any thread: runs {@code work} on the GPU thread, before the next frame; nothing while the window is closed. */
-    static void post(Runnable work) {
+    public static void post(Runnable work) {
         Lwjgl3Application app = application;
         if (app != null) {
             app.postRunnable(work);
@@ -269,7 +275,7 @@ public final class GpuHost {
     }
 
     /** Any thread: brings the window to the front and gives it the keyboard. */
-    static void focus() {
+    public static void focus() {
         post(() -> {
             if (Gdx.graphics instanceof Lwjgl3Graphics graphics) {
                 Lwjgl3Window window = graphics.getWindow();
@@ -313,6 +319,7 @@ public final class GpuHost {
                     GpuNativeDialogOwner.Win32.useWindowIconsForClass(window.getWindowHandle());
                     fitOnScreen(window);
                     windowHandle = window.getWindowHandle();
+                    LauncherReadySignal.nativeWindowOpened();
                 }
 
                 @Override

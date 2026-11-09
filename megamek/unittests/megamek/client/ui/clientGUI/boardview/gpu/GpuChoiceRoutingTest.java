@@ -446,7 +446,7 @@ class GpuChoiceRoutingTest {
                 assertEquals(GifRecordingMode.ASK, preferences.getGifGameSummaryRecording(), "Not remembered");
 
                 // A game resumed without a lobby ready asks when the first summary frame is due, through its client
-                MinimapPanel panel = onSwing(() -> new MinimapPanel(null, fixture.game, fixture.view, gui, null, 0));
+                MinimapPanel panel = onSwing(() -> new MinimapPanel(null, fixture.game, fixture.view, gui, 0));
                 assertEquals(true, ask(fixture.source, () -> recallOrAsk.invoke(panel),
                       new DialogAnswer(0, List.of(), null, true, List.of())).result());
                 assertEquals(GifRecordingMode.ALWAYS, preferences.getGifGameSummaryRecording(), "Remembered");

@@ -138,6 +138,7 @@ record LOSDiagramData(
      * @param eruptingGeyser   true if an erupting geyser is present (its plume blocks LOS as ultra-heavy woods)
      * @param splitHex         true if this hex was part of a split LOS path (line along hex edge)
      * @param splitAlternate   the alternate hex coordinates if this is a split hex, null otherwise
+     * @param selectedSplitPath true if this is the split hex selected by the LOS calculation
      * @param blocksLOS        true at the engine's first blocking hex (including its split alternate)
      * @param losLineElevation the interpolated LOS line elevation at this hex position
      */
@@ -157,6 +158,7 @@ record LOSDiagramData(
           boolean eruptingGeyser,
           boolean splitHex,
           @Nullable Coords splitAlternate,
+          boolean selectedSplitPath,
           boolean blocksLOS,
           double losLineElevation
     ) {

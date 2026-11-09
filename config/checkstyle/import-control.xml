@@ -6,7 +6,8 @@
 <!--
     The native UI toolkit (megamek.client.ui.gdx, sources and tests) depends on nothing of the game or of a view: only
     java (no AWT), libGDX, MegaMek's Messages and MMLogger, the design tokens (DesignTokens and ColorMath, plain data
-    shared with Swing), its own package and JUnit. It is backend-neutral: only the
+    shared with Swing), a list's order (TableSort, plain data shared with the views' models), its own package and JUnit.
+    It is backend-neutral: only the
     test harness UiTestStage opens a desktop (LWJGL3) window, and UiCursorCapture moves the desktop cursor through GLFW
     when the backend is LWJGL3 (elsewhere it leaves the cursor alone). Callers pass in the fonts directory, the scale and all
     texts. Fully qualified names in code are not checked.
@@ -23,6 +24,8 @@
     <allow class="megamek.client.ui.design.DesignTokens.Mode" />
     <allow class="megamek.client.ui.design.DesignTokens.Presentation" />
     <allow class="megamek.client.ui.design.ColorMath" />
+    <allow class="megamek.client.ui.TableSort" />
+    <allow class="megamek.client.ui.TableSort.Direction" />
     <allow pkg="org.junit" />
     <file name="UiTestStage">
         <allow pkg="com.badlogic.gdx.backends.lwjgl3" />

@@ -11,6 +11,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Pools;
+import megamek.client.ui.TableSort;
 import megamek.client.ui.design.DesignTokens;
 
 /**
@@ -83,7 +84,9 @@ public final class UiSortHeader extends Table {
         return label.getText().toString();
     }
 
-    /** Shows the arrow of {@code shown} when its column is the key in use, or no arrow when null; fires nothing. */
+    /**
+     * Shows the arrow of {@code shown} when its column is the key in use, or no arrow when {@code null}; fires nothing.
+     */
     public UiSortHeader direction(TableSort.Direction shown) {
         direction = shown;
         arrow.setVisible(shown != null);
@@ -94,7 +97,7 @@ public final class UiSortHeader extends Table {
         return this;
     }
 
-    /** The direction its arrow shows, or null when its column is not the key in use. */
+    /** The direction its arrow shows, or {@code null} when its column is not the key in use. */
     public TableSort.Direction direction() {
         return direction;
     }

@@ -11,7 +11,8 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 
 | Code | What it does |
 | --- | --- |
-| `GpuHost` | Owns the one native application and window for the whole run and switches its scenes (start screen, lobby, board, editor, preview, UI library). |
+| `GpuHost` | Owns the one native application and window for the whole run and switches its scenes (start screen, lobby, board, editor, preview, UI library). Its public part (`Scene`, `show`, `end`, `isShowing`, `post`, `focus`, `keepOpen`, `whenIdle`) is how other programs of the suite (MekHQ) host their own scenes. |
+| `GpuSceneDialogs` | The public path for a scene's Swing dialogs: catches those of the scene's hidden frame, centres them over the window, owns them natively (`GpuNativeDialogOwner`) or keeps them on top, and blocks the scene's input while a modal one is open. The lobby uses it; so can another program's scene. |
 | `GpuLobbyWindow`, `GpuLobbyScreen`, `GpuLobbyProbe` | The lobby scene: the Swing-thread controller that turns game events into `LobbySnapshot`s and runs actions through `LobbyCommands`, the libGDX screen that draws the snapshot, and the `MM_START_PAGE=lobby` probe. |
 | `megamek.client.lobby` (`LobbySnapshot`, `LobbyCommands`, `LobbyUnitMenu`, `LobbyUnitOrder`, `LobbyUnitCleanup`, ...) | The toolkit-free lobby model: what the screen shows, the commands it sends, the unit and force menus with their permissions, the sort orders and unit clean-up. |
 | `phaseDisplay/lobby` (`LobbyServices`, `LobbyBoardPreviews`) | What the lobby scene runs on the Swing thread: ready (with its GIF question and lobby save), the menu bar's burst-fire and hot-load items, and the lobby's 3D board preview. |
