@@ -162,7 +162,8 @@ class GpuAuthoredBuildingSmokeTest {
                         camera.orbit(0, -15); camera.camera.zoom = .22f;
                         camera.center(BoardGeometry.center(at, 0).add(0, 0, targetZ + 15));
                         terrain.animate(1, List.of(), .25f, at, 6 * BoardGeometry.level());
-                        assertFalse(faded(terrain).isEmpty(), "The shaft opens to its generated interior");
+                        assertEquals(GpuTerrain.VISIBLE_BUILDING_INTERIORS_ON_HOVER, !faded(terrain).isEmpty(),
+                              "A hover opens the shaft to its generated interior where the hover cutaway is switched on");
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, "interior.png"));
                     }
@@ -446,7 +447,8 @@ class GpuAuthoredBuildingSmokeTest {
                     frame.render(terrain, camera, original); GpuReviewFrame.save(new File(output, "debug-authored.png"));
                     for (Coords at : List.of(low, high)) {
                         terrain.animate(1, List.of(), 0, at, BoardGeometry.level());
-                        assertFalse(faded(terrain).isEmpty(), "Hovering inside reveals runtime floors");
+                        assertEquals(GpuTerrain.VISIBLE_BUILDING_INTERIORS_ON_HOVER, !faded(terrain).isEmpty(),
+                              "Hovering inside reveals runtime floors where the hover cutaway is switched on");
                         frame.render(terrain, camera, original);
                         GpuReviewFrame.save(new File(output, at.equals(low) ? "debug-low-interior.png" : "debug-high-interior.png"));
                     }
@@ -752,12 +754,12 @@ class GpuAuthoredBuildingSmokeTest {
                     camera.camera.zoom = .5f;
                     camera.center(BoardGeometry.center(hpg, 1));
                     terrain.animate(1, List.of(), .25f, hpg, (original.tile(hpg).cover().height() - 1) * BoardGeometry.level());
-                    assertFalse(faded(terrain).isEmpty());
+                    assertEquals(GpuTerrain.VISIBLE_BUILDING_INTERIORS_ON_HOVER, !faded(terrain).isEmpty());
                     frame.render(terrain, camera, original);
                     GpuReviewFrame.save(new File(output, "interior.png"));
                     terrain.update(hallScene);
                     terrain.animate(1, List.of(), .25f, hpg, BoardGeometry.level());
-                    assertFalse(faded(terrain).isEmpty());
+                    assertEquals(GpuTerrain.VISIBLE_BUILDING_INTERIORS_ON_HOVER, !faded(terrain).isEmpty());
                     for (Object prop : faded(terrain)) {
                         var instance = (com.badlogic.gdx.graphics.g3d.ModelInstance) GpuTestSupport.field(prop, "instance");
                         var cut = instance.materials.first().get(GpuBuildingCutaway.class, GpuBuildingCutaway.TYPE);

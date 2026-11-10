@@ -100,7 +100,11 @@ class GpuModularBuildingSmokeTest {
                 for (int lod = 0; lod < assembly.lodCount(); lod++) {
                     ModelInstance instance = assembly.instance(lod);
                     assertSame(assembly.model(lod), instance.model, "No expanded model per combination");
-                    assertEquals(count + 1, instance.nodes.size);
+                    // A tall enough hex carries its roof's aviation lights as nodes of their own, after its storeys and roof.
+                    int lights = 0;
+                    for (var node : instance.nodes) { if (node.id.contains("-aol")) { lights++; } }
+                    assertTrue(lights == 0 || count >= ConnectedKit.LIT_LEVELS, "Aviation lights stand only on tall hexes");
+                    assertEquals(count + 1 + lights, instance.nodes.size);
                     for (int level = 0; level <= count; level++) {
                         var node = instance.nodes.get(level);
                         var bounds = node.calculateBoundingBox(new BoundingBox());
@@ -203,8 +207,11 @@ class GpuModularBuildingSmokeTest {
             terrain.update(hangars);
             for (int x : new int[] { 2, 4, 6 }) {
                 var coords = new Coords(x, 4);
-                assertEquals(hangars.tile(coords).features().getFirst().height() * BoardGeometry.level(),
-                      terrain.roofBounds(coords).max.z, BoardGeometry.level() * .1f, "The kit follows the gameplay height");
+                // A hangar's vault rises over its eaves, which stand at the gameplay height: half a level at the most.
+                float eaves = hangars.tile(coords).features().getFirst().height() * BoardGeometry.level();
+                float top = terrain.roofBounds(coords).max.z;
+                assertTrue(top >= eaves - BoardGeometry.level() * .1f && top <= eaves + BoardGeometry.level() * .6f,
+                      "The kit follows the gameplay height: " + top + " over eaves at " + eaves);
             }
             checkFloorCutaways(terrain, hangars, frame, camera);
             terrain.update(scene);
@@ -325,7 +332,7 @@ class GpuModularBuildingSmokeTest {
             var shellHit = terrain.selectionHit(scene, roofRay);
             for (int hoverLevel : new int[] { 0, 2, 4, 5, 0 }) {
                 terrain.animate(0, List.of(), .5f, coords, hoverLevel * BoardGeometry.level());
-                boolean interior = hoverLevel < 5;
+                boolean interior = GpuTerrain.VISIBLE_BUILDING_INTERIORS_ON_HOVER && hoverLevel < 5;
                 checkInteriorCache(terrain, interior);
                 for (int level = 0; level < floors.size(); level++) {
                     assertFalse(floors.get(level).materials.first().has(BlendingAttribute.Type),
@@ -386,10 +393,12 @@ class GpuModularBuildingSmokeTest {
             var hit = terrain.hit(scene, ray);
             assertNotNull(hit);
             assertEquals(coords, hit.coords());
-            assertEquals(400 - (levels + 1.2f / 18) * BoardGeometry.level(),
-                  Math.sqrt(hit.distance()), .02f);
+            // The roof is picked where it is drawn: over the gameplay height, no higher than its parapets and fittings,
+            // which stay within half a level of it.
+            float roof = 400 - (float) Math.sqrt(hit.distance());
             var bounds = terrain.roofBounds(coords);
-            assertEquals((levels + 4.72f / 18) * BoardGeometry.level(), bounds.max.z, .02f);
+            assertTrue(roof >= levels * BoardGeometry.level() && roof <= bounds.max.z + .02f, "Roof picked at " + roof);
+            assertTrue(bounds.max.z <= (levels + .5f) * BoardGeometry.level(), "Roof bounds " + bounds.max.z);
         }
     }
 }

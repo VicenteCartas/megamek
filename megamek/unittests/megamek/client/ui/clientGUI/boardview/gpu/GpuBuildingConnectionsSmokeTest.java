@@ -50,6 +50,11 @@ class GpuBuildingConnectionsSmokeTest {
                 }
             }
             var editor = new BoardEditorSession(); editor.open(board, null);
+            // A legacy board's unconnected buildings load Square (BoardSceneryLayouts): the second column is set Angled.
+            for (int y : new int[] { 2, 5, 8 }) {
+                editor.command(new Command(Action.SELECT_AT, "5," + y, ""), null);
+                editor.command(new Command(Action.FOOTPRINT, "angled"), null);
+            }
             editor.command(new Command(Action.SELECT_AT, "2,2", ""), null);
             try (var source = new GpuMapSource(editor.game(), null, editor)) {
                 scenes.add(source.takeFrame().scene());
@@ -142,7 +147,9 @@ class GpuBuildingConnectionsSmokeTest {
         for (int lod = 0; lod < assembly.lodCount(); lod++) {
             for (var node : assembly.instance(lod).nodes) {
                 for (Vector3 p : GpuTerrain.triangles(node)) {
-                    assertTrue(KitOutline.insideHex(p.x, p.y) >= -.1, "Facade or curb outside hex at " + p);
+                    // A little past the hex is fine (an Imperial eave's upturned tip reaches 1.4 out); a footprint is not.
+                    // insideHex is a cross product with a hex side: over the side's length, world units.
+                    assertTrue(KitOutline.insideHex(p.x, p.y) / KitOutline.HEX[0][0] >= -1.5, "Facade or curb outside hex at " + p);
                 }
             }
         }
@@ -172,7 +179,8 @@ class GpuBuildingConnectionsSmokeTest {
                         assertNotNull(isolated, design);
                         if (TilesetScenery.generatedKit(design)) {
                             compact(isolated, footprint == HexAppearance.Footprint.SQUARE);
-                            thickness(isolated);
+                            // The generic hangars' roofs are vaults of sheeting (BayKit.Vault), no slab.
+                            thickness(isolated, design.contains("/hangar_") ? .3f : .99f);
                         }
                         insideWalls(isolated);
                         if (!TilesetScenery.singleHexBuilding(design)) {
@@ -219,7 +227,7 @@ class GpuBuildingConnectionsSmokeTest {
         }
     }
 
-    private static void thickness(GpuBuilding.Assembly assembly) {
+    private static void thickness(GpuBuilding.Assembly assembly, float roofThickness) {
         for (int lod = 0; lod < assembly.lodCount(); lod++) {
             List<Vector3> triangles = new ArrayList<>();
             for (var node : assembly.instance(lod).nodes) { triangles.addAll(GpuTerrain.triangles(node)); }
@@ -230,7 +238,7 @@ class GpuBuildingConnectionsSmokeTest {
             Vector3 ceiling = frontHit(triangles, new Ray(new Vector3(0, 1, 30), Vector3.Z));
             Vector3 roof = frontHit(triangles, new Ray(new Vector3(0, 1, 100), new Vector3(0, 0, -1)));
             assertNotNull(ceiling); assertNotNull(roof);
-            assertTrue(roof.z - ceiling.z >= .99f, "Roof needs a solid slab at LOD " + lod);
+            assertTrue(roof.z - ceiling.z >= roofThickness, "Roof needs a solid slab at LOD " + lod);
         }
     }
 

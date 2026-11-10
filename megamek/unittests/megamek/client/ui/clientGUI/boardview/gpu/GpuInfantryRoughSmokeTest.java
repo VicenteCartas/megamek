@@ -193,7 +193,8 @@ class GpuInfantryRoughSmokeTest {
                       "Avoiding a boulder must not send infantry down the cliff");
                 feet++;
             }
-            assertTrue(gap < .2f * BoardGeometry.HEX_SCALE, "At least one foot must touch the ground or rock");
+            // A unit stands half a world unit above its ground (GpuUnitModel#placeScaled); on a boulder a foot touches it.
+            assertTrue(gap < .5f + .2f * BoardGeometry.HEX_SCALE, "At least one foot must stand on the ground or rock");
         }
         assertTrue(feet >= 4, "Real infantry feet must be checked");
         return onRock;

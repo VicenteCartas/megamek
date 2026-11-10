@@ -234,6 +234,8 @@ class GpuWireframeSmokeTest {
         try (var output = new GpuSceneTestOutput()) {
             for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.FUNGUS)) {
                 terrain.update(scatterScene(family, true));
+                // The bare board: without the fungi's features, and without the grass a meadow grows by itself.
+                plain.setScatterHidden(true);
                 plain.update(scatterScene(family, false));
                 Pixmap shaded = scatterFrame(terrain, camera, null, output);
                 Pixmap bare = scatterFrame(plain, camera, null, output);
