@@ -43,7 +43,8 @@ import megamek.common.board.HexTile;
  * retain their ground footprint above shorter neighbours, closing the exposed hexsides with those walls and roof rims.
  * A roof's {@code -closed-N} variant includes the exposed links in bitmask N in its deck and edge calculation. A piece's
  * {@code -notch-N} variant turns its walls ending at the hex corners in bitmask N on into a notch's inside corner
- * ({@link KitOutline#notched}).
+ * ({@link KitOutline#notched}). A roof corner's {@code -closed-N} variant may have {@code -valley} and {@code -wall}
+ * twins, which carry its edge on round the inside corner at its hex corner ({@link #VALLEY}, {@link #WALL}).
  */
 final class ConnectedKit {
     /** Tag directions in MegaMek's order, clockwise from north. */
@@ -52,13 +53,21 @@ final class ConnectedKit {
     private static final Pattern NODE = Pattern.compile(
           ".*-(base|floor|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)(-bend|-cap|-closed-[1-9][0-9]*|-notch-[1-9][0-9]*)?");
     private static final Pattern TAG = Pattern.compile("-(link|end)-(" + DIRECTION + ")");
-    private static final Pattern JUNCTION = Pattern.compile(".*-(junction-[0-9]+|fill|crown|aol(-[0-5])?)");
+    private static final Pattern JUNCTION = Pattern.compile(".*-(junction-[0-9]+|fill|crown|closed-[1-9][0-9]*-(?:valley|wall)|aol(-[0-5])?)");
     /**
      * In {@link #junctions}' roof row: the corner lies inside the building, where this hex and both hexes round it
      * stand to this roof's height and all connect. A roof corner piece linked both ways then draws as its
      * {@code -crown} twin where the kit holds one (BayKit's vault keeps its crown there, in place of a valley).
      */
     static final int CROWN = 1 << KitOutline.Junction.values().length;
+    /**
+     * In {@link #junctions}' roof row: at the corner this roof closes its link to one of the two hexes round it, the
+     * shorter, and runs on into the other, whose roof stands level with it and closes its own link to the shorter hex
+     * (VALLEY: the two edges meet in an inside corner) or which stands taller (WALL: the edge dies into its wall). The
+     * roof corner piece's closed twin then draws as its {@code -valley} or {@code -wall} twin where the kit holds one
+     * ({@link KitOutline#inward}).
+     */
+    static final int VALLEY = CROWN << 1, WALL = CROWN << 2;
 
     /** How many levels a hex stands, about 40 metres, before its roofs carry aviation lights ({@code aol} nodes). */
     static final int LIT_LEVELS = 7;
@@ -370,6 +379,14 @@ final class ConnectedKit {
             if (reach[corner] >= height && reach[(corner + 1) % 6] >= height && corners[6 + corner] >= height) {
                 result[height * 6 + corner] |= CROWN;
             }
+            int next = (corner + 1) % 6, on = reach[corner] >= height ? corner : next, closed = on == corner ? next : corner;
+            if (capped && reach[on] >= height && reach[closed] > 0 && reach[closed] < height) {
+                if (corners[on] > height) {
+                    result[height * 6 + corner] |= WALL;
+                } else if (corners[6 + corner] > 0 && corners[6 + corner] < height) {
+                    result[height * 6 + corner] |= VALLEY;
+                }
+            }
         }
         return result;
     }
@@ -620,6 +637,16 @@ final class ConnectedKit {
                         for (int corner = 0; corner < 6; corner++) {
                             if (piece.links() == (1 << corner | 1 << (corner + 1) % 6)
                                   && (junctions[height * 6 + (corner + turn + steps) % 6] & CROWN) != 0) { drawn += "-crown"; }
+                        }
+                    }
+                    // The top roof's corner closed one way, its edge turning an inside corner there: that twin.
+                    if (junctions != null && piece != null && level == height && role.startsWith("roof")
+                          && Integer.bitCount(piece.closed()) == 1 && Integer.bitCount(piece.links()) == 2) {
+                        for (int corner = 0; corner < 6; corner++) {
+                            int at = junctions[height * 6 + (corner + turn + steps) % 6];
+                            String twin = drawn + ((at & VALLEY) != 0 ? "-valley" : "-wall");
+                            if (piece.links() == (1 << corner | 1 << (corner + 1) % 6) && (at & (VALLEY | WALL)) != 0
+                                  && ids.contains(twin)) { drawn = twin; }
                         }
                     }
                     if (piece != null && node(source, drawn).parts.length > 0) {

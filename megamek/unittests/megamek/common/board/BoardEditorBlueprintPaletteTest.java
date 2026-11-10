@@ -225,11 +225,11 @@ class BoardEditorBlueprintPaletteTest {
         assertEquals(List.of("Lunar habitat", "Glass dome", "Biodome"), section("buildings/looks").cards().stream()
               .map(BoardEditorBlueprint.Card::label).toList());
         var buildings = BLUEPRINT.categories().stream().filter(category -> category.id().equals("buildings")).findFirst().orElseThrow();
-        assertEquals(List.of("civic", "utopia", "frontier", "imperial"), buildings.subcategories("looks"), "The modular looks open from Looks");
-        for (String look : List.of("Civic", "Utopia", "Frontier", "Imperial")) {
+        assertEquals(List.of("civic", "utopia", "frontier", "imperial", "heritage"), buildings.subcategories("looks"), "The modular looks open from Looks");
+        for (String look : List.of("Civic", "Utopia", "Frontier", "Imperial", "Heritage")) {
             assertEquals(look + " (Modular)", section("buildings/" + look.toLowerCase()).cards().getFirst().label());
         }
-        assertEquals(7, BLUEPRINT.variants("building").size(), "Only current looks");
+        assertEquals(8, BLUEPRINT.variants("building").size(), "Only current looks");
     }
 
     @Test

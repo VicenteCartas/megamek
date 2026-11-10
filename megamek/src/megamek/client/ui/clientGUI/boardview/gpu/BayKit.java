@@ -103,7 +103,9 @@ final class BayKit {
      * face's first bay and next to the middle of a whole hex's front; with no margin a bay more goes on past an end where
      * the wall goes on. Whole {@code ends} stretches fill the margins and the wall's going on; one {@code under} stretch
      * lies along the whole of it. {@code planar} materials are textured along the wall's line, units a repeat, so their
-     * texture runs on across the pieces. A rounded corner's facets each take one {@code round} piece in place of bays.
+     * texture runs on across the pieces. A rounded corner's facets each take one {@code round} piece in place of bays; with
+     * {@code shallow}, a corner that turns less than {@link #SHARP} takes that piece instead (a kit's turrets stand on
+     * its square corners only). A wall too short for a bay within its margins is laid with its {@code ends} alone.
      * A module is one hex's storey ({@link KitOutline#joints}): with {@code joints}, a wall ends its module where a linked
      * hexside goes on past it or the outline turns into a joint (a cap's wall leaving that room to the walls beside it),
      * and goes on along a joint that continues it. A roof's {@code seam} lies along each joint, the roof slab kept its
@@ -111,7 +113,10 @@ final class BayKit {
      * empty. All but bays and bay are optional.
      */
     record Run(List<String> bays, double bay, double margin, String door, Stretch ends, Stretch under,
-               Map<String, Double> planar, Stretch round, Joints joints, Stretch seam) { }
+               Map<String, Double> planar, Stretch round, Stretch shallow, Joints joints, Stretch seam) { }
+
+    /** The turn, in radians, from which a rounded corner takes its run's {@code round} piece rather than its {@code shallow}. */
+    private static final double SHARP = Math.toRadians(75);
 
     /** The pieces ending a module's wall at its {@code start} and {@code end}, each {@code length} long, unstretched. */
     record Joints(String start, String end, double length) { }
@@ -155,7 +160,8 @@ final class BayKit {
         spec.modules().values().stream().flatMap(List::stream).forEach(run -> {
             if (run.bays() != null && !run.bays().isEmpty() && !(run.bay() > 0)
                   || run.ends() != null && !(run.ends().length() > 0) || run.under() != null && !(run.under().length() > 0)
-                  || run.round() != null && !(run.round().length() > 0) || run.joints() != null && !(run.joints().length() > 0)
+                  || run.round() != null && !(run.round().length() > 0) || run.shallow() != null && !(run.shallow().length() > 0)
+                  || run.joints() != null && !(run.joints().length() > 0)
                   || run.seam() != null && !(run.seam().length() > 0)) {
                 throw new IllegalArgumentException("Bay kit " + name + " lays a piece without its length");
             }
@@ -224,6 +230,14 @@ final class BayKit {
         int links = closing ? KitOutline.links(piece) : 0;
         boolean fills = !role.startsWith("roof") && !piece.tags().endsWith("-cap") && joined(spec, role, lod);
         if (fills) { putFill(result, "-fill", fill(spec, modelled, role, piece, 0, lod, square)); }
+        boolean jointed = spec.modules().values().stream().flatMap(List::stream).anyMatch(run -> run.joints() != null);
+        // A storey's sills, where another storey stands on it (ConnectedKit places a fill).
+        GeneratedMesh sill = role.startsWith("roof") || fills || square || piece.tags().endsWith("-cap") ? null : sill(spec, piece);
+        boolean sills = sill != null && !sill.parts.isEmpty();
+        if (sills) { result.put("-fill", sill); }
+        // A roof's corner linked both ways and closed one way: its edge turns an inside corner there (ConnectedKit#VALLEY).
+        boolean turns = role.startsWith("roof") && !square && !seamed && !jointed && spec.roof().vault() == null
+              && piece.direction() != null && piece.walls().isEmpty() && Integer.bitCount(links) == 2;
         for (int closed = links; closed > 0; closed = (closed - 1) & links) {
             // Its new corners round like the kit's others.
             var closedPiece = KitOutline.rounded(KitOutline.closed(piece, closed), spec.cornerRadius(),
@@ -232,10 +246,16 @@ final class BayKit {
                   square, footprintScale, fitting, layout, halfLength));
             if (lit) { GeneratedKit.lights(result, "-closed-" + closed, closedPiece, facet, deck, lod); }
             if (fills) { putFill(result, "-closed-" + closed + "-fill", fill(spec, modelled, role, closedPiece, closed, lod, square)); }
+            if (sills) { result.put("-closed-" + closed + "-fill", sill); }
+            if (turns && Integer.bitCount(closed) == 1) {
+                result.put("-closed-" + closed + "-valley", module(spec, modelled, role, KitOutline.inward(closedPiece, true), closed,
+                      lod, square, footprintScale, fitting, layout, halfLength));
+                result.put("-closed-" + closed + "-wall", module(spec, modelled, role, KitOutline.inward(closedPiece, false), closed,
+                      lod, square, footprintScale, fitting, layout, halfLength));
+            }
         }
         // At a notch its walls ending open turn the corner with the next hex's ({@link KitOutline#notched}): a twin for
         // each set of such corners, which ConnectedKit picks; not where modules part at their joints.
-        boolean jointed = spec.modules().values().stream().flatMap(List::stream).anyMatch(run -> run.joints() != null);
         int open = square || jointed || piece.tags().endsWith("-cap") ? 0 : KitOutline.openCorners(piece);
         for (int notch = open; notch > 0; notch = (notch - 1) & open) {
             var notched = KitOutline.notched(piece, notch);
@@ -307,7 +327,7 @@ final class BayKit {
                   : new KitOutline.Wall[] { partner(spec, piece.direction(), wall, true, turned(spec, fitting)),
                         partner(spec, piece.direction(), wall, false, turned(spec, fitting)) };
             double[] goesOn = facade(result, run, wall, keeps, modelled, lod, top ? ROOF_INSET : 0, ground, outlineScale,
-                  facet(spec, wall), joints, cap, chamfer, cut, partners, spec.varyBays());
+                  wall.turn() > 0 ? corner(run, wall) : null, joints, cap, chamfer, cut, partners, spec.varyBays());
             if (ground && spec.sidewalk() != null) { sidewalk(result, spec.sidewalk(), wall, keeps, goesOn[0], goesOn[1]); }
         }
         // Closed modules: a module parted from the next at its joints has its own side along each, behind the grooves,
@@ -365,10 +385,12 @@ final class BayKit {
     /** The dark of a module's inside, as vertex colour on the building body. */
     private static final float DARK = .17f;
 
-    /** Whether a wall is a facet of a rounded corner's arc: both ends round, and no longer than an arc's facet. */
-    private static boolean facet(Spec spec, KitOutline.Wall wall) {
-        return spec.cornerRadius() > 0 && wall.start() == KitOutline.End.ROUND && wall.end() == KitOutline.End.ROUND
-              && wall.length() <= spec.cornerRadius() * Math.PI / 2 / Math.max(1, spec.cornerSegments()) + 1e-6;
+    /**
+     * The piece a rounded corner's facet takes ({@code null}: bays, as any wall): the run's {@code round}, or its
+     * {@code shallow} where the outline turns less than {@link #SHARP} at that corner.
+     */
+    private static Stretch corner(Run run, KitOutline.Wall facet) {
+        return run.shallow() != null && run.round() != null && facet.turn() < SHARP ? run.shallow() : run.round();
     }
 
     /**
@@ -401,7 +423,7 @@ final class BayKit {
      * Returns how far it goes on before and after the wall.
      */
     private static double[] facade(GeneratedMesh result, Run run, KitOutline.Wall wall, List<GeneratedMesh.Keep> wallKeeps,
-          List<ModelData> modelled, int lod, double inset, boolean ground, double outlineScale, boolean facet,
+          List<ModelData> modelled, int lod, double inset, boolean ground, double outlineScale, Stretch corner,
           List<KitOutline.Wall> joints, boolean cap, double chamfer, List<GeneratedMesh.Keep> cut, KitOutline.Wall[] partners,
           boolean vary) {
         double length = wall.length();
@@ -444,8 +466,8 @@ final class BayKit {
         // The bays laid on past the wall's ends, for the next piece's cut or mitre to trim: at a cut, they stop exactly
         // on it, so no sliver of them shows past it where the next piece's own end bay stands.
         List<Placed> beyond = new ArrayList<>();
-        List<Placed> placements = new ArrayList<>(facet && run.round() != null
-              ? List.of(new Placed(-before, run.round().piece(), (length + before + after) / run.round().length()))
+        List<Placed> placements = new ArrayList<>(corner != null
+              ? List.of(new Placed(-before, corner.piece(), (length + before + after) / corner.length()))
               : layout(run, wall, length, before, after, ground, outlineScale, pads[0], pads[1], laps, beyond, partners, vary));
         if (!cap && pads[0] > 0) { placements.add(new Placed(0, run.joints().start(), 1)); }
         if (!cap && pads[1] > 0) { placements.add(new Placed(length - pads[1], run.joints().end(), 1)); }
@@ -527,6 +549,37 @@ final class BayKit {
     private static boolean joined(Spec spec, String role, int lod) {
         List<Run> runs = spec.modules().get(role);
         return runs.get(Math.min(lod, runs.size() - 1)).joints() != null;
+    }
+
+    /**
+     * A storey's sills: its top over each corner that it turns only where it closes links ({@link KitOutline#closed}),
+     * as far in as the corner's rounding cuts. The storey standing on it may close those links above a lower neighbour
+     * and round that corner, which would open this one's inside to the roofs beside it.
+     */
+    private static GeneratedMesh sill(Spec spec, KitOutline.Piece piece) {
+        var result = new GeneratedMesh();
+        int links = spec.cornerRadius() > 0 ? KitOutline.links(piece) : 0;
+        List<double[]> covered = new ArrayList<>();
+        for (int closed = links; closed > 0; closed = (closed - 1) & links) {
+            List<KitOutline.Wall> walls = KitOutline.closed(piece, closed).walls();
+            for (var first : walls) {
+                double[] at = first.q();
+                var second = first.end() != KitOutline.End.CORNER ? null
+                      : walls.stream().filter(wall -> KitOutline.close(wall.p(), at)).findFirst().orElse(null);
+                if (second == null || covered.stream().anyMatch(point -> KitOutline.close(point, at))
+                      || piece.walls().stream().anyMatch(wall -> wall.end() == KitOutline.End.CORNER && KitOutline.close(wall.q(), at))) {
+                    continue;
+                }
+                double[] u = KitOutline.direction(first), v = KitOutline.direction(second);
+                double turn = Math.atan2(KitOutline.cross(u, v), u[0] * v[0] + u[1] * v[1]);
+                if (turn <= 1e-6) { continue; }
+                covered.add(at);
+                double reach = Math.min(spec.cornerRadius() * Math.tan(turn / 2), Math.min(first.length(), second.length()));
+                flat(result, board(spec.floors().material()), List.of(at, new double[] { at[0] - u[0] * reach, at[1] - u[1] * reach },
+                      new double[] { at[0] + v[0] * reach, at[1] + v[1] * reach }), KitOutline.LEVEL - .02, spec.floors().repeat(), null);
+            }
+        }
+        return result;
     }
 
     private static void putFill(Map<String, GeneratedMesh> result, String key, GeneratedMesh fill) {
@@ -714,11 +767,16 @@ final class BayKit {
         if (run.under() != null && length + before + after > 1e-6) {
             result.add(new Placed(-before, run.under().piece(), (length + before + after) / run.under().length()));
         }
+        double usable = length - 2 * run.margin() - startPad - endPad;
+        // Too short for a bay within its margins: its ends' stretch along the whole of it, no bay squashed between them.
+        if (run.ends() != null && run.bays() != null && !run.bays().isEmpty() && usable < SQUASHED * run.bay()) {
+            stretches(result, run.ends(), -before, length + after);
+            return result;
+        }
         if (run.ends() != null) {
             stretches(result, run.ends(), -before, run.margin());
             stretches(result, run.ends(), length - run.margin(), length + after);
         }
-        double usable = length - 2 * run.margin() - startPad - endPad;
         // A wall no longer than its margins holds no bay.
         if (run.bays() == null || run.bays().isEmpty() || usable <= 1e-6) { return result; }
         double scale = scale(run, wall, length, startPad, endPad, outlineScale, vary);

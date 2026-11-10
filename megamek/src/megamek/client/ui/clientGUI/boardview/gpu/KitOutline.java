@@ -43,9 +43,14 @@ final class KitOutline {
 
     /**
      * A wall from p to q with the building on its left. {@code front}: on a whole-hex piece's front (its outline's first
-     * edge), where an entrance belongs.
+     * edge), where an entrance belongs. {@code turn}: for a facet of a rounded corner's arc ({@link #rounded}), how far
+     * the outline turns at that corner, in radians; 0 for any other wall.
      */
-    record Wall(double[] p, double[] q, End start, End end, List<GeneratedMesh.Keep> keeps, boolean front) {
+    record Wall(double[] p, double[] q, End start, End end, List<GeneratedMesh.Keep> keeps, boolean front, double turn) {
+        Wall(double[] p, double[] q, End start, End end, List<GeneratedMesh.Keep> keeps, boolean front) {
+            this(p, q, start, end, keeps, front, 0);
+        }
+
         double length() { return Math.hypot(q[0] - p[0], q[1] - p[1]); }
     }
 
@@ -137,7 +142,29 @@ final class KitOutline {
                     keeps.add(mitre(at, n, partner, wall.p()));
                 }
             }
-            walls.add(new Wall(wall.p(), wall.q(), start, end, keeps, wall.front()));
+            walls.add(new Wall(wall.p(), wall.q(), start, end, keeps, wall.front(), wall.turn()));
+        }
+        return new Piece(piece.tags(), piece.direction(), piece.polygons(), walls);
+    }
+
+    /**
+     * A closed roof corner piece whose wall closing one link ends open at the piece's own hex corner, where the roof's
+     * edge turns an inside corner round the hex across its other link: the wall goes on past the corner. {@code level}:
+     * that hex's roof stands level with this one and closes the same link's side ({@link Junction#C0_CAP}, C1_CAP), and
+     * the two meet on the mitre, eaves in a valley; else that hex stands taller and the wall runs on into its wall.
+     */
+    static Piece inward(Piece piece, boolean level) {
+        double[] at = hexCorner(piece.direction());
+        List<Wall> walls = new ArrayList<>();
+        for (Wall wall : piece.walls()) {
+            boolean starts = wall.start() == End.OPEN && close(wall.p(), at), ends = wall.end() == End.OPEN && close(wall.q(), at);
+            List<GeneratedMesh.Keep> keeps = new ArrayList<>(wall.keeps());
+            if (level && (starts || ends)) {
+                keeps.add(mitre(at, normal(wall.p(), wall.q()),
+                      partnerNormal(starts ? Junction.C0_CAP : Junction.C1_CAP, piece.direction()), starts ? wall.q() : wall.p()));
+            }
+            walls.add(new Wall(wall.p(), wall.q(), starts ? End.NOTCH : wall.start(), ends ? End.NOTCH : wall.end(), keeps, wall.front(),
+                  wall.turn()));
         }
         return new Piece(piece.tags(), piece.direction(), piece.polygons(), walls);
     }
@@ -648,10 +675,8 @@ final class KitOutline {
         return scaled(MIDPOINTS[side], (NOSE - inset / Math.sin(Math.PI / 3)) / H);
     }
 
-    /** Whether a wall is a facet of a rounded corner's arc: both ends round, no longer than {@code facet}. */
-    private static boolean facet(Wall wall, double facet) {
-        return wall.start() == End.ROUND && wall.end() == End.ROUND && wall.length() <= facet + 1e-6;
-    }
+    /** Whether a wall is a facet of a rounded corner's arc, no longer than {@code facet}. */
+    private static boolean facet(Wall wall, double facet) { return wall.turn() > 0 && wall.length() <= facet + 1e-6; }
 
     /** The wall of {@code walls} that starts where {@code wall} ends, or null. */
     private static Wall following(Wall wall, List<Wall> walls) {
@@ -701,7 +726,7 @@ final class KitOutline {
             current.put(second, started);
             List<GeneratedMesh.Keep> keeps = new ArrayList<>();
             for (int k = 0; k < segments; k++) {
-                result.add(new Wall(arc.get(k), arc.get(k + 1), End.ROUND, End.ROUND, List.of(), false));
+                result.add(new Wall(arc.get(k), arc.get(k + 1), End.ROUND, End.ROUND, List.of(), false, angle));
                 double[] p = arc.get(k), q = arc.get(k + 1);
                 keeps.add((x, y) -> cross(new double[] { q[0] - p[0], q[1] - p[1] }, new double[] { x - p[0], y - p[1] }));
             }

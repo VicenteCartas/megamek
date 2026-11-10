@@ -24,7 +24,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 class ConnectedKitFootprintTest {
     private static final List<String> ASSETS = List.of("buildings/building_light/building_light",
           "buildings/lunar_habitat/lunar_habitat", "buildings/lunar_habitat/lunar_habitat@parapet", "buildings/civic/civic",
-          "buildings/utopia/utopia", "buildings/frontier/frontier", "buildings/imperial/imperial");
+          "buildings/utopia/utopia", "buildings/frontier/frontier", "buildings/imperial/imperial",
+          "buildings/heritage/heritage");
 
     @BeforeAll
     static void natives() { GdxNativesLoader.load(); }
@@ -84,6 +85,21 @@ class ConnectedKitFootprintTest {
 
     private static List<Vector3> triangles(ConnectedKit.Kit kit, int lod, int height, int[] reach) {
         return triangles(kit, lod, height, reach, false);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 2, 3 })
+    void aRoofsEdgeClosingALinkTurnsTheInsideCornerRoundTheNextHex(int northTop) {
+        // Two levels, linked north (2 levels, or 3) and north-west (1 level), which link each other: over the north-west
+        // one its roof's edge ends at the corner between them, where the north one's edge goes on or its wall stands.
+        var kit = GpuBuilding.kit("buildings/imperial/imperial");
+        int[] reach = { 2, 0, 0, 0, 0, 1 }, corners = { northTop, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1 };
+        var placed = ConnectedKit.placements(kit, 0, GpuBuilding.select(kit.roles(), 2, 0), reach, 0, false,
+              ConnectedKit.junctions(2, reach, corners, true));
+        List<String> turned = placed.stream().map(ConnectedKit.Placement::node)
+              .filter(node -> node.endsWith("-valley") || node.endsWith("-wall")).toList();
+        assertEquals(1, turned.size(), turned.toString());
+        assertTrue(turned.getFirst().endsWith("-link-nw-link-n-closed-32" + (northTop == 2 ? "-valley" : "-wall")), turned.getFirst());
     }
 
     @ParameterizedTest
