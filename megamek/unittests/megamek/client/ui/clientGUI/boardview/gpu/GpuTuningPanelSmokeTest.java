@@ -13,22 +13,13 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.awt.AWTEvent;
-import java.awt.Component;
-import java.awt.Container;
-import java.awt.Toolkit;
-import java.awt.event.AWTEventListener;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
-import java.awt.event.WindowEvent;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.swing.JButton;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -52,9 +43,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.Pools;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.boardeditor.BoardEditorSession;
-import megamek.client.ui.clientGUI.CancelAction;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTestStage;
@@ -1045,7 +1034,7 @@ class GpuTuningPanelSmokeTest {
                 UiButton conditions = hud.find("tuning-planetary-conditions");
                 assertEquals("PLANETARY CONDITIONS…", conditions.getText().toString());
                 hud.click(conditions);
-                verify(hud.source).editPlanetaryConditions(any());
+                verify(hud.source).editPlanetaryConditions(any(), any());
                 assertTrue(conditions.isDisabled(), "while its editor is open");
 
                 // Defaults restores the page and the extra effect controls.
@@ -1106,52 +1095,6 @@ class GpuTuningPanelSmokeTest {
                 assertTrue(returning.isTicked());
             }
         });
-    }
-
-    @Test
-    void planetaryConditionsOpensTheExistingDialog() throws Exception {
-        CountDownLatch opened = new CountDownLatch(1);
-        CountDownLatch closed = new CountDownLatch(1);
-        AWTEventListener answer = event -> {
-            if (event instanceof WindowEvent window && window.getWindow() instanceof PlanetaryConditionsDialog dialog) {
-                if (window.getID() == WindowEvent.WINDOW_OPENED) {
-                    opened.countDown();
-                    SwingUtilities.invokeLater(() -> cancel(dialog));
-                } else if (window.getID() == WindowEvent.WINDOW_CLOSED) {
-                    closed.countDown();
-                }
-            }
-        };
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            Toolkit.getDefaultToolkit().addAWTEventListener(answer, AWTEvent.WINDOW_EVENT_MASK);
-            try {
-                GpuHudTestStage.run(harness -> {
-                    GpuHudState state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
-                    GpuTuningPanel panel = new GpuTuningPanel(harness.kit, fixture.source, state, new BoardCamera(),
-                          new GpuBoardTuning(harness.theme.skin, fixture.source));
-                    harness.window.addActor(panel.actor());
-                    panel.actor().setSize(harness.width(), harness.height());
-                    state.dialog = GpuHudState.Dialog.TUNING;
-                    GpuHud.Inputs inputs = new GpuHud.Inputs(null, GpuHud.HudView.EMPTY, null, null,
-                          GpuHud.Metrics.of(harness.width(), harness.height()), List.of());
-                    panel.update(inputs);
-                    harness.draw();
-                    UiButton tab = harness.stage.getRoot().findActor("tuning-atmosphere-tab");
-                    clickOn(harness, tab);
-                    panel.update(inputs);
-                    harness.draw();
-                    UiButton conditions = harness.stage.getRoot().findActor("tuning-planetary-conditions");
-                    clickOn(harness, conditions);
-                    assertTrue(opened.await(30, TimeUnit.SECONDS), "the Swing planetary conditions editor opens");
-                    panel.update(inputs);
-                    harness.draw();
-                    assertTrue(conditions.isDisabled(), "one editor at a time");
-                    assertTrue(closed.await(30, TimeUnit.SECONDS), "the test closes it");
-                });
-            } finally {
-                Toolkit.getDefaultToolkit().removeAWTEventListener(answer);
-            }
-        }
     }
 
     /** Each model control has a shown control of its name and kind: a slider, a checkbox or a hud button. */
@@ -1215,37 +1158,5 @@ class GpuTuningPanelSmokeTest {
         ChangeListener.ChangeEvent event = Pools.obtain(ChangeListener.ChangeEvent.class);
         model.fire(event);
         Pools.free(event);
-    }
-
-    /** A left click at the actor's centre through the harness's stage. */
-    private static void clickOn(GpuHudTestStage harness, Actor actor) {
-        assertNotNull(actor);
-        Vector2 point = harness.stage.stageToScreenCoordinates(
-              actor.localToStageCoordinates(new Vector2(actor.getWidth() / 2, actor.getHeight() / 2)));
-        harness.stage.touchDown((int) point.x, (int) point.y, 0, Input.Buttons.LEFT);
-        harness.stage.touchUp((int) point.x, (int) point.y, 0, Input.Buttons.LEFT);
-    }
-
-    /** Presses the dialog's own Cancel button, or closes it without one. */
-    private static void cancel(PlanetaryConditionsDialog dialog) {
-        for (JButton button : buttons(dialog)) {
-            if (button.getAction() instanceof CancelAction) {
-                button.doClick();
-                return;
-            }
-        }
-        dialog.dispose();
-    }
-
-    private static List<JButton> buttons(Container parent) {
-        List<JButton> buttons = new ArrayList<>();
-        for (Component child : parent.getComponents()) {
-            if (child instanceof JButton button) {
-                buttons.add(button);
-            } else if (child instanceof Container container) {
-                buttons.addAll(buttons(container));
-            }
-        }
-        return buttons;
     }
 }

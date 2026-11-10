@@ -3352,11 +3352,26 @@ public class ClientGUI extends AbstractClientGUI
         return loadUnitFile(player, unitFile, false);
     }
 
+    /** The MUL version warnings, asked through {@link #message} and {@link #confirm} so the battle window draws them. */
+    private MULVersionValidator.Prompts versionPrompts() {
+        return new MULVersionValidator.Prompts() {
+            @Override
+            public void message(String message, String title, int messageType) {
+                ClientGUI.this.message(message, title, messageType);
+            }
+
+            @Override
+            public int confirm(String message, String title, int optionType, int messageType) {
+                return ClientGUI.this.confirm(message, title, optionType, messageType);
+            }
+        };
+    }
+
     private int loadUnitFile(Player player, File unitFile, boolean reinforce) throws Exception {
         // Read the units from the file.
         final MULParser parser = new MULParser(unitFile,
               (GameOptions) getClient().getGame().getOptions());
-        if (!MULVersionValidator.isCorrectVersion(frame, parser)) {
+        if (!MULVersionValidator.isCorrectVersion(versionPrompts(), parser)) {
             return -1;
         }
         final Vector<Entity> loadedUnits = parser.getEntities();

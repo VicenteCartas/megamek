@@ -1327,6 +1327,24 @@ The open items below were copied to the gap analysis and are tracked there; this
          kept message boxes in `GpuBoardWindow`; the Swing `MMAboutDialog` stays for the lounge and the Legacy 2D
          preview. Covered by `GpuSwingDialogGateTest`, `GpuMapMenuSmokeTest`, `BattleMenuCardsSmokeTest`,
          `StartWelcomeSmokeTest` and `GpuBoardWindowSmokeTest`, and it was tried by hand in the game.
+       - Done: the board's last Swing leftovers but Client Settings.
+         - The conditions editor behind the Tuning utility opens the lobby's native conditions card
+           (`LobbyConditionsView`) over the battle and the map editor. OK previews the conditions on the board, as
+           the Swing dialog's did, and never changes the game. The Swing `PlanetaryConditionsDialog` left the
+           allowlist; it stays for the lounge.
+         - Report a Bug is a native card (`GpuBugReport`) over the battle, the lobby and the start screen, from the
+           menus, the command bar and the error box's Report button. Report a Bug asks for the archive in the
+           window's file dialog, packages it (`BugReportPackager`, taken out of `PackageBugReportAction`) and shows
+           what the zip holds in a result card, with MegaMek (the issue form, the zip on the clipboard), Copy File
+           and Close. The Swing `BugReportDialog` stays for the lounge and the Legacy 2D client.
+         - A reinforcement file saved in another version warns, or asks to load it anyway, in the client's native
+           message cards (`MULVersionValidator.Prompts`); MegaMekLab and MekHQ keep the Swing boxes.
+         - The "Save First?" question was already native (#39); its title was a leftover.
+         - The kept message boxes in `GpuBoardWindow` are gone: only Client Settings, the file chooser and the Game
+           Master's player list are still raised over the battle. `GpuSwingDialogGateTest` now removes the listener
+           of a window it presents again, which the save question's title had hidden. Covered by
+           `GpuSwingDialogGateTest`, `GpuPlanetaryConditionsSmokeTest`, `GpuTuningPanelSmokeTest` and
+           `BattleMenuCardsSmokeTest`.
        - The "Save First?" question when leaving a battle is native since #39.
        - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
          thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser

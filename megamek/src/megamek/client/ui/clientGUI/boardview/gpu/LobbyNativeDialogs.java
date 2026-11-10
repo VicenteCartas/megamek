@@ -262,8 +262,15 @@ final class LobbyNativeDialogs {
 
     /** Opens the planetary conditions. */
     LobbyConditionsView conditions(PlanetaryConditionsForm form, LobbyConditionsView.Host host) {
-        UiDialog dialog = begin(Messages.getString("PlanetaryConditionsDialog.title"), "dialog.md", false,
-              () -> conditionsView = null);
+        return conditions(form, host, () -> { });
+    }
+
+    /** Opens the planetary conditions; {@code closed} runs once the card closes, after OK's send or on cancel. */
+    LobbyConditionsView conditions(PlanetaryConditionsForm form, LobbyConditionsView.Host host, Runnable closed) {
+        UiDialog dialog = begin(Messages.getString("PlanetaryConditionsDialog.title"), "dialog.md", false, () -> {
+            conditionsView = null;
+            closed.run();
+        });
         conditionsView = new LobbyConditionsView(kit, dialog, form, host, this::close);
         show(dialog);
         return conditionsView;
@@ -900,7 +907,27 @@ final class LobbyNativeDialogs {
         return dialog;
     }
 
-    /** Shows {@code text} with an OK button over whatever shows, as an alert. */    UiDialog message(String title, String text) {
+    /**
+     * The bug report, in place of whatever shows; Report a Bug packages through {@code host} and shows what that came to
+     * over it ({@link #bugReportResult}).
+     */
+    UiDialog bugReport(GpuBugReport.Host host) {
+        UiDialog dialog = begin(GpuBugReport.title(), "dialog.lg", false, () -> { });
+        GpuBugReport.fill(kit, dialog, host, this::bugReportResult, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /** What packaging the bug report came to, over whatever shows. */
+    UiDialog bugReportResult(megamek.client.ui.BugReportPackager.Outcome outcome) {
+        UiDialog dialog = begin(GpuBugReport.resultTitle(), "dialog.md", true, () -> { });
+        GpuBugReport.result(kit, dialog, outcome, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /** Shows {@code text} with an OK button over whatever shows, as an alert. */
+    UiDialog message(String title, String text) {
         UiDialog dialog = begin(title, "dialog.sm", true, () -> { });
         var label = kit.typeLabel(text, "body", "text.primary");
         label.setWrap(true);

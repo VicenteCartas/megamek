@@ -53,6 +53,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
 import jakarta.annotation.Nullable;
+import megamek.client.Client;
 import megamek.client.lobby.GameMasterUnitTools;
 import megamek.client.lobby.LobbyGameMaster;
 import megamek.client.lobby.UnitDamageForm;
@@ -177,14 +178,12 @@ public final class GpuBoardWindow {
     private static volatile GpuBoardWindow active;
     /**
      * The Swing windows the user kept over the battle window (rebuild plan R9, closed by Z1), each with its decision:
-     * R6 and swing-inventory Q1 (the menu-level dialogs stay Swing for now) and U2 (user item 6). Message boxes and
-     * file choosers have no class of their own; {@link #approved} names the kept ones. Everything else is native.
+     * R6 and swing-inventory Q1 (Client Settings stays Swing for now). File choosers have no class of their own;
+     * {@link #approved} names the kept ones. Everything else is native.
      */
     private static final List<Class<? extends Dialog>> SWING_DIALOGS = List.of(
           // R6: Client Settings, which hold the real settings (user item 3)
-          megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog.class,
-          // U2: the developer conditions editor behind the Tuning utility
-          megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog.class);
+          megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog.class);
     private final ClientGUI gui;
     private final BoardClientState initialView;
     private final Supplier<JComponent> panel;
@@ -970,15 +969,12 @@ public final class GpuBoardWindow {
 
     /**
      * A Swing surface the user kept over the battle window: one of {@link #SWING_DIALOGS}; a file chooser (user item
-     * 21); the game master's choice of the player to reinforce from a file (a modal player list; U2, GM tools); or a
-     * message box the user kept, known by its title, as it has no class of its own (see
-     * {@link #approvedMessageBoxes}).
+     * 21); or the game master's choice of the player to reinforce from a file (a modal player list; U2, GM tools).
+     * No message box is kept: every one the battle asks shows as its own card.
      */
     private static boolean approved(Dialog dialog) {
         return SWING_DIALOGS.stream().anyMatch(type -> type.isInstance(dialog)) || shows(dialog, JFileChooser.class)
-              || dialog instanceof megamek.client.ui.dialogs.PlayerListDialog players && players.isModal()
-              || shows(dialog, JOptionPane.class)
-                    && approvedMessageBoxes().stream().anyMatch(title -> title.equals(dialog.getTitle()));
+              || dialog instanceof megamek.client.ui.dialogs.PlayerListDialog players && players.isModal();
     }
 
     /** Whether the dialog opens inside a kept surface: owned by one, or while one shows modally. */
@@ -990,19 +986,6 @@ public final class GpuBoardWindow {
         }
         return List.of(Window.getWindows()).stream().anyMatch(window -> window != dialog && window.isShowing()
               && window instanceof Dialog open && open.isModal() && approved(open));
-    }
-
-    /** The titles of the message boxes the user kept in Swing, in the client's language. */
-    private static List<String> approvedMessageBoxes() {
-        megamek.client.ui.BugReportMessages bugReport = new megamek.client.ui.BugReportMessages();
-        return List.of(
-              // D11: the exit's save question
-              Messages.getString("ClientGUI.gameSaveFirst"),
-              // R6: the bug report, and the result of its package (a file the player saves, user item 21)
-              bugReport.get("title"), bugReport.get("package.result.title"),
-              // User item 21: the version check of the unit file a game master reinforces from
-              Messages.getString("MULParser.versionWarning.newerVersion.title"),
-              Messages.getString("MULParser.versionWarning.olderVersion.title"));
     }
 
     /** Whether a Swing dialog shows a component of the type, as a message box or a file chooser does. */
@@ -1495,6 +1478,21 @@ public final class GpuBoardWindow {
         GpuBattleTools tools = battleTools(gui);
         if (tools != null) {
             tools.novaNetworks();
+        }
+        return tools != null;
+    }
+
+    /**
+     * EDT: shows the bug report natively over the battle window that asks its client's prompts; false, showing nothing,
+     * when none does.
+     *
+     * @param client the client whose game Report a Bug packages, read when it is pressed
+     */
+    static boolean showBugReport(Supplier<Client> client) {
+        GpuBoardWindow window = active;
+        GpuBattleTools tools = window == null ? null : battleTools(window.gui);
+        if (tools != null) {
+            tools.bugReport(client);
         }
         return tools != null;
     }

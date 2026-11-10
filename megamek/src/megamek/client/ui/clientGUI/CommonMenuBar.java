@@ -61,6 +61,7 @@ import megamek.client.ui.CopySystemDataAction;
 import megamek.client.ui.Messages;
 import megamek.client.ui.PackageBugReportAction;
 import megamek.client.ui.ShowBugReportDialogAction;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBugReport;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuUiLibraryWindow;
 import megamek.client.ui.design.swing.SwingUiLibrary;
 import megamek.client.ui.util.KeyCommandBind;
@@ -384,7 +385,8 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         // This must stay a lambda rather than the method reference clientSupplier::get, which would capture the
         // placeholder supplier installed above and ignore whatever setClientSupplier later provides.
         menu.add(new ShowBugReportDialogAction(this, new CopySystemDataAction(),
-              new PackageBugReportAction(this, () -> clientSupplier.get())));
+              new PackageBugReportAction(this, () -> clientSupplier.get()),
+              () -> GpuBugReport.show(() -> clientSupplier.get())));
         menu.add(new CopySystemDataAction());
 
         menu.addSeparator();

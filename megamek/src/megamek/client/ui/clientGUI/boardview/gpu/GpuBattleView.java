@@ -426,6 +426,7 @@ class GpuBattleView extends ApplicationAdapter {
         loadingTheme = null;
         tuning = new GpuBoardTuning(theme.skin, source, boardCamera);
         tuning.terrainCacheStatus(() -> terrain == null ? null : terrain.materialCacheStatus());
+        tuning.cards(this::cards);
         // The switch resizes and redraws the window: after the HUD's event, not inside it.
         tuning.onDisplayMode(fullscreen -> Gdx.app.postRunnable(() -> setFullscreen(fullscreen)));
         // Before the scene renderers: the atmosphere starts with the board's conditions, as the first frame sets them.

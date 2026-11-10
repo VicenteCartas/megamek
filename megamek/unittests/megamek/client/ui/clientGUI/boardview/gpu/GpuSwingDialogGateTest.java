@@ -67,6 +67,7 @@ import megamek.client.ui.dialogs.MMDialogs.MMNarrativeStoryDialog;
 import megamek.client.ui.dialogs.PlayerListDialog;
 import megamek.client.ui.dialogs.SliderDialog;
 import megamek.client.ui.dialogs.TurretFacingDialog;
+import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
 import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.dialogs.phaseDisplay.AbandonUnitDialog;
@@ -515,20 +516,19 @@ class GpuSwingDialogGateTest {
         try (Declaring declaring = Declaring.create(); Gate gate = new Gate(declaring.gui, declaring.fixture)) {
             JFrame frame = declaring.frame;
             gate.present();
-            // A kept window (the developer conditions editor) and a dialog it owns. LOS, Help, the network
-            // information and the Nova network view have native cards now.
-            PlanetaryConditionsDialog help = onSwing(
-                  () -> new PlanetaryConditionsDialog(frame, new PlanetaryConditions()));
+            // A kept window (Client Settings) and a dialog it owns. LOS, Help, the network information, the Nova
+            // network view, the conditions editor and the bug report have native cards now.
+            CommonSettingsDialog help = onSwing(() -> new CommonSettingsDialog(frame));
             assertTrue(gate.raised(() -> {
                 help.setVisible(true);
                 return null;
-            }, PlanetaryConditionsDialog.class::isInstance), "U2: the developer conditions editor");
+            }, CommonSettingsDialog.class::isInstance), "Q1: Client Settings");
             assertTrue(gate.raised(() -> {
                 JDialog detail = new JDialog(help, "Help detail");
                 detail.setSize(120, 80);
                 detail.setVisible(true);
                 return null;
-            }, window -> window.getOwner() == help), "A dialog the conditions editor owns");
+            }, window -> window.getOwner() == help), "A dialog Client Settings owns");
             assertEquals(List.of(), gate.errors, "A dialog a kept window owns is part of it");
             onSwing(() -> {
                 help.dispose();
@@ -545,16 +545,7 @@ class GpuSwingDialogGateTest {
                 return null;
             });
             gate.present();
-            // The bug report (R6)
-            assertTrue(gate.raised(() -> {
-                new BugReportDialog(frame, null).show();
-                return null;
-            }, MESSAGE_BOX), "R6: the bug report");
-            // A game master's reinforcements: the player to reinforce, then the unit file's version check
-            MULParser older = mock(MULParser.class);
-            when(older.isOlderVersion()).thenReturn(true);
-            assertTrue(gate.raised(() -> MULVersionValidator.isCorrectVersion(frame, older), MESSAGE_BOX),
-                  "Item 21: the version check of a reinforcement file");
+            // A game master's reinforcements: the player to reinforce. The unit file's version check is a card now.
             PlayerListDialog players = onSwing(() -> new PlayerListDialog(frame, declaring.client, true));
             FutureTask<Void> choosing = new FutureTask<>(() -> {
                 players.setVisible(true);
@@ -616,11 +607,21 @@ class GpuSwingDialogGateTest {
                 box.setVisible(true);
                 return null;
             }, MESSAGE_BOX), "An untitled message box is not raised");
+            // The conditions editor has a card now
+            assertFalse(gate.raised(() -> {
+                PlanetaryConditionsDialog conditions = new PlanetaryConditionsDialog(frame, new PlanetaryConditions());
+                conditions.setModal(false);
+                conditions.setVisible(true);
+                return null;
+            }, PlanetaryConditionsDialog.class::isInstance), "The Swing conditions editor is not raised");
             assertEquals(List.of("A Swing dialog outside the allowlist opened over the battle window: "
                   + "javax.swing.JDialog \"Gate probe\"", "A Swing dialog outside the allowlist opened over the battle "
                   + "window: javax.swing.JDialog \"Load by Crane\"", "A Swing dialog outside the allowlist opened over "
                   + "the battle window: javax.swing.JDialog \"About MegaMek\"", "A Swing dialog outside the allowlist "
-                  + "opened over the battle window: javax.swing.JDialog \"null\""), gate.errors);
+                  + "opened over the battle window: javax.swing.JDialog \"null\"", "A Swing dialog outside the "
+                  + "allowlist opened over the battle window: "
+                  + "megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog \""
+                  + Messages.getString("PlanetaryConditionsDialog.title") + "\""), gate.errors);
 
             // While the window closes, the client's prompts fall back to Swing, raised. While it starts they wait for
             // it (GpuDialogRoutingTest).
@@ -671,8 +672,19 @@ class GpuSwingDialogGateTest {
                 return null;
             }, window -> window instanceof JDialog dialog && "Modal gate probe".equals(dialog.getTitle())),
                   "A modal dialog outside the allowlist");
-            assertEquals(List.of("A Swing dialog outside the allowlist opened over the battle window: "
-                  + "javax.swing.JDialog \"Modal gate probe\""), gate.errors);
+            // The bug report and a reinforcement file's version check have cards now; their Swing boxes are reported
+            assertTrue(gate.raised(() -> {
+                new BugReportDialog(frame, null).show();
+                return null;
+            }, MESSAGE_BOX), "The bug report's Swing box");
+            MULParser older = mock(MULParser.class);
+            when(older.isOlderVersion()).thenReturn(true);
+            assertTrue(gate.raised(() -> MULVersionValidator.isCorrectVersion(frame, older), MESSAGE_BOX),
+                  "The Swing version check of a reinforcement file");
+            String outside = "A Swing dialog outside the allowlist opened over the battle window: javax.swing.JDialog ";
+            assertEquals(List.of(outside + "\"Modal gate probe\"", outside + "\"" + GpuBugReport.title() + "\"",
+                  outside + "\"" + Messages.getString("MULParser.versionWarning.olderVersion.title") + "\""),
+                  gate.errors);
             // The first turn's sound question falls back to an ownerless confirmation box.
             assertTrue(gate.raised(() -> JOptionPane.showConfirmDialog(null, "Mute?", "Turn Notifications",
                   JOptionPane.YES_NO_OPTION), MESSAGE_BOX), "A modal box without an owner");
@@ -770,6 +782,10 @@ class GpuSwingDialogGateTest {
 
         /** Registers the client's native window as presented, with its dialog listener. */
         void present() throws Exception {
+            if (listener != null) {
+                // The window presented before is replaced; its listener would still judge the Legacy 2D client's dialogs
+                Toolkit.getDefaultToolkit().removeAWTEventListener(listener);
+            }
             window = GpuDialogFixture.present(gui, fixture.view, fixture.source);
             Field field = GpuBoardWindow.class.getDeclaredField("dialogListener");
             field.setAccessible(true);

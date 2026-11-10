@@ -38,6 +38,7 @@ import static megamek.client.ui.Messages.getString;
 import java.awt.Container;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
+import java.util.function.BooleanSupplier;
 import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.SwingUtilities;
@@ -50,6 +51,7 @@ public class ShowBugReportDialogAction extends AbstractAction {
     private final Container container;
     private final Action copySystemDataAction;
     private final Action packageBugReportAction;
+    private final BooleanSupplier shownNatively;
 
     /**
      * Creates an action that shows the Bug Report helper dialog, without a bug report packaging button.
@@ -78,14 +80,28 @@ public class ShowBugReportDialogAction extends AbstractAction {
      */
     public ShowBugReportDialogAction(@Nullable Container parent, @Nullable CopySystemDataAction copySystemDataAction,
           @Nullable Action packageBugReportAction) {
+        this(parent, copySystemDataAction, packageBugReportAction, () -> false);
+    }
+
+    /**
+     * As {@link #ShowBugReportDialogAction(Container, CopySystemDataAction, Action)}, first trying
+     * {@code shownNatively}, which shows the bug report in the program's own (libGDX) window and answers whether it
+     * did; the Swing dialog shows only when it did not.
+     */
+    public ShowBugReportDialogAction(@Nullable Container parent, @Nullable CopySystemDataAction copySystemDataAction,
+          @Nullable Action packageBugReportAction, BooleanSupplier shownNatively) {
         super(getString("CommonMenuBar.helpReportBug"));
         this.container = parent;
         this.copySystemDataAction = copySystemDataAction;
         this.packageBugReportAction = packageBugReportAction;
+        this.shownNatively = shownNatively;
     }
 
     @Override
     public void actionPerformed(ActionEvent e) {
+        if (shownNatively.getAsBoolean()) {
+            return;
+        }
         Window parentWindow = null;
         if (container instanceof Window window) {
             parentWindow = window;

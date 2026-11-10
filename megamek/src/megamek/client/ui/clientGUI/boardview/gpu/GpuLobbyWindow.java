@@ -22,6 +22,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import javax.imageio.ImageIO;
 import javax.swing.JFrame;
 import javax.swing.JMenu;
@@ -455,6 +456,42 @@ public final class GpuLobbyWindow {
     /** EDT: whether a lobby holds the window and is not closing. */
     static boolean isShowing() {
         return active != null && !active.closing;
+    }
+
+    /**
+     * EDT: shows the bug report over the lobby that shows, as {@link #bugReport}; false, showing nothing, when none
+     * shows.
+     */
+    static boolean showBugReport(Supplier<Client> client) {
+        GpuLobbyWindow window = active;
+        if (window == null || window.closing || window.screen == null) {
+            return false;
+        }
+        window.bugReport(client);
+        return true;
+    }
+
+    /** EDT: shows the bug report over the lobby; Report a Bug asks for the archive in the lobby's file dialog. */
+    void bugReport(Supplier<Client> client) {
+        GpuBugReport.Host host = new GpuBugReport.Host() {
+            @Override
+            public void choose(SystemFileDialog.Request request, Consumer<File> chosen) {
+                chooseFileOrNone(request, "Lobby.files.replace", chosen);
+            }
+
+            @Override
+            public Client client() {
+                return client.get();
+            }
+
+            @Override
+            public void gpu(Runnable work) {
+                if (!closing) {
+                    GpuHost.post(work);
+                }
+            }
+        };
+        onScreen(shown -> shown.nativeDialog(dialogs -> dialogs.bugReport(host)));
     }
 
     /**
@@ -1181,6 +1218,15 @@ public final class GpuLobbyWindow {
         SwingUtilities.invokeLater(() -> {
             if (!closing && !swingDialogs.blocked()) {
                 gui.openClientSettings();
+            }
+        });
+    }
+
+    /** Any thread: shows the bug report over the lobby, which packages this lobby's game. */
+    void reportBug() {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing) {
+                bugReport(gui::getClient);
             }
         });
     }

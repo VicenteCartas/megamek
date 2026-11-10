@@ -114,6 +114,7 @@ final class GpuBoardTuning {
     private final Label terrainCacheDetails;
     private Supplier<GpuMaterialCache.Status> terrainCacheStatus = () -> null;
     private GpuMaterialCache.Status shownTerrainCache;
+    private Supplier<LobbyNativeDialogs> cards = () -> null;
     private final SelectBox<UnitDisplayMode> unitDisplayMode;
     private final CheckBox vsync;
     /** Windowed or Fullscreen; the view switches the window and shows its state here every frame. */
@@ -535,7 +536,7 @@ final class GpuBoardTuning {
                 conditions.setChecked(false);
                 conditions.setDisabled(true);
                 var application = Gdx.app;
-                source.editPlanetaryConditions(settings -> application.postRunnable(() -> {
+                source.editPlanetaryConditions(cards, settings -> application.postRunnable(() -> {
                     if (source.isClosed()) { return; }
                     conditions.setDisabled(false);
                     if (settings != null) { applyConditions(settings); }
@@ -1195,6 +1196,9 @@ final class GpuBoardTuning {
     boolean terrainCache() { return terrainCache.isChecked(); }
 
     boolean terrainCacheDebug() { return terrainCacheDebug.isChecked(); }
+
+    /** Where Planetary conditions opens its card: the view's cards over the HUD; null opens nothing. */
+    void cards(Supplier<LobbyNativeDialogs> cards) { this.cards = cards; }
 
     /** The current renderer, resolved on the render thread so an asset reload cannot leave a disposed cache here. */
     void terrainCacheStatus(Supplier<GpuMaterialCache.Status> status) { terrainCacheStatus = status; }

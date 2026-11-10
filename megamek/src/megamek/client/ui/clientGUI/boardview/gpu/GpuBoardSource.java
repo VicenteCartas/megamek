@@ -232,8 +232,6 @@ final class GpuBoardSource implements BoardSource {
         this.view = view;
         this.phasePanel = phasePanel;
         atmosphere = new GpuAtmosphereControls(
-              () -> view.getClientgui() == null ? null
-                    : view.getClientgui().getFrame(),
               () -> this.view.game.getBoard(this.view.getBoardId()), () -> this.view.game.getPlanetaryConditions(),
               () -> !acceptsInput());
         GUIPreferences preferences = GUIPreferences.getInstance();
@@ -2277,7 +2275,6 @@ final class GpuBoardSource implements BoardSource {
         closed = true;
         // A closing window always releases the EDT: every pending ask returns the cancelled answer.
         pendingDialogs.forEach(pending -> pending.complete(GpuBoardWindow.DialogAnswer.cancelled(pending.request)));
-        atmosphere.close();
         timer.stop();
         view.setMovingUnits(false);
         view.setVisibleArea(() -> new double[] { 0, 0, 1, 1 });

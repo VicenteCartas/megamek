@@ -5,6 +5,7 @@ import java.awt.Rectangle;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import megamek.client.ui.clientGUI.BoardGraphics;
@@ -226,7 +227,11 @@ interface BoardSource extends AutoCloseable {
     /** A game's work in progress as ghosts of what it builds (GpuEditorPreview#work), published with the frame. */
     default GpuEditorPreview.Data workGhosts() { return GpuEditorPreview.Data.NONE; }
 
-    default void editPlanetaryConditions(Consumer<BoardAtmosphere.Settings> completed) { atmosphere().edit(completed); }
+    /** GPU thread: opens the conditions card in {@code cards}; see {@link GpuAtmosphereControls#edit}. */
+    default void editPlanetaryConditions(Supplier<LobbyNativeDialogs> cards,
+          Consumer<BoardAtmosphere.Settings> completed) {
+        atmosphere().edit(cards, completed);
+    }
     default BoardAtmosphere.Settings atmosphereFor(PlanetaryConditions conditions, boolean inSpace) {
         return atmosphere().settings(conditions, inSpace);
     }

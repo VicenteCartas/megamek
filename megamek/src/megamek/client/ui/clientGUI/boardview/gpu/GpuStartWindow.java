@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
@@ -36,6 +37,7 @@ import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.utils.Os;
 import com.badlogic.gdx.utils.SharedLibraryLoader;
 import jakarta.annotation.Nullable;
+import megamek.client.Client;
 import megamek.client.lobby.LobbyError;
 import megamek.client.lobby.LobbyFiles;
 import megamek.client.ui.Messages;
@@ -701,11 +703,16 @@ public final class GpuStartWindow {
      * over is confirmed on the screen first. {@code chosen} gets the file on the EDT, or null when none.
      */
     private void chooseRouteFile(LobbyFiles.Ask ask, Consumer<File> chosen) {
-        SystemFileDialog.show(SystemFileDialog.Request.of(ask), () -> nativeOwner, () -> anchor,
+        chooseFile(SystemFileDialog.Request.of(ask), chosen);
+    }
+
+    /** EDT: as {@link #chooseRouteFile}, for a full request. */
+    private void chooseFile(SystemFileDialog.Request request, Consumer<File> chosen) {
+        SystemFileDialog.show(request, () -> nativeOwner, () -> anchor,
               busy -> setStartEnabled(!busy), choice -> {
                   if (choice == null || !live) {
                       chosen.accept(null);
-                  } else if (ask.save() && choice.askReplace()) {
+                  } else if (request.save() && choice.askReplace()) {
                       File file = choice.file();
                       post(() -> screen.dialogs.confirm(Messages.getString("ChatLounge.map.confirmReplace"),
                             Messages.getString("Lobby.files.replace", file.getName()),
@@ -786,6 +793,37 @@ public final class GpuStartWindow {
     /** Any thread: the alert waiting for the start screen, as its title and text, and forgets it; null when none. */
     static String[] takeNotice() {
         return NOTICE.getAndSet(null);
+    }
+
+    /**
+     * EDT: shows the bug report over the open start screen, with Report a Bug asking for the archive in the system's
+     * file dialog. Returns false, showing nothing, when the screen does not show, so the caller shows Swing's.
+     *
+     * @param client the client whose game Report a Bug packages, read when it is pressed
+     */
+    static boolean showBugReport(Supplier<Client> client) {
+        GpuStartWindow window = open;
+        if (window == null || window.closeRequested || !window.live || window.screen == null) {
+            return false;
+        }
+        GpuBugReport.Host host = new GpuBugReport.Host() {
+            @Override
+            public void choose(SystemFileDialog.Request request, Consumer<File> chosen) {
+                window.chooseFile(request, chosen);
+            }
+
+            @Override
+            public Client client() {
+                return client.get();
+            }
+
+            @Override
+            public void gpu(Runnable work) {
+                window.post(work);
+            }
+        };
+        window.post(() -> window.screen.dialogs.bugReport(host));
+        return true;
     }
 
     /**

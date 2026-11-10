@@ -1,57 +1,88 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.awt.Window;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 
-import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
+import com.badlogic.gdx.Application;
+import com.badlogic.gdx.Gdx;
+import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.common.board.Board;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 
 /** Window-owned visual previews; authoritative scenario conditions are never modified here. */
-final class GpuAtmosphereControls implements AutoCloseable {
-    private final Supplier<Window> owner;
+final class GpuAtmosphereControls {
     private final Supplier<Board> board;
     private final Supplier<PlanetaryConditions> scenario;
     private final BooleanSupplier closed;
     private final double timeSample = ThreadLocalRandom.current().nextDouble();
     private double previewTimeSample = timeSample;
     private PlanetaryConditions previewConditions;
-    private PlanetaryConditionsDialog dialog;
+    /** EDT: whether the conditions card is open. */
+    private boolean editing;
 
-    GpuAtmosphereControls(Supplier<Window> owner, Supplier<Board> board,
-          Supplier<PlanetaryConditions> scenario, BooleanSupplier closed) {
-        this.owner = owner;
+    GpuAtmosphereControls(Supplier<Board> board, Supplier<PlanetaryConditions> scenario, BooleanSupplier closed) {
         this.board = board;
         this.scenario = scenario;
         this.closed = closed;
     }
 
-    void edit(Consumer<BoardAtmosphere.Settings> completed) {
+    /**
+     * GPU thread: opens the planetary conditions card in {@code cards} with the previewed conditions. {@code completed}
+     * gets, on the Swing thread, the board's settings for the conditions confirmed, or null when the card is cancelled,
+     * the board changed meanwhile or no card can open.
+     */
+    void edit(Supplier<LobbyNativeDialogs> cards, Consumer<BoardAtmosphere.Settings> completed) {
+        Application application = Gdx.app;
         SwingUtilities.invokeLater(() -> {
-            if (closed.getAsBoolean() || dialog != null) { completed.accept(null); return; }
-            Board initialBoard = board.get();
-            BoardAtmosphere.Settings result = null;
-            try {
-                var initial = new PlanetaryConditions(previewConditions == null ? scenario.get() : previewConditions);
-                dialog = new PlanetaryConditionsDialog(owner.get() instanceof JFrame frame ? frame : null, initial);
-                dialog.setAlwaysOnTop(true);
-                if (dialog.showDialog() && !closed.getAsBoolean() && board.get() == initialBoard) {
-                    var selected = dialog.getConditions();
-                    if (selected.getLight() != initial.getLight()) { previewTimeSample = timeSample; }
-                    previewConditions = new PlanetaryConditions(selected);
-                    result = BoardAtmosphere.fromScenario(previewConditions, initialBoard.isSpace(), previewTimeSample);
-                }
-            } finally {
-                if (dialog != null) { dialog.dispose(); }
-                dialog = null;
-                completed.accept(result);
+            if (closed.getAsBoolean() || editing) {
+                completed.accept(null);
+                return;
             }
+            editing = true;
+            Board initialBoard = board.get();
+            var initial = new PlanetaryConditions(previewConditions == null ? scenario.get() : previewConditions);
+            AtomicReference<BoardAtmosphere.Settings> result = new AtomicReference<>();
+            Runnable finish = () -> SwingUtilities.invokeLater(() -> {
+                editing = false;
+                completed.accept(result.get());
+            });
+            application.postRunnable(() -> {
+                LobbyNativeDialogs dialogs = cards.get();
+                if (dialogs == null) {
+                    finish.run();
+                    return;
+                }
+                dialogs.conditions(new PlanetaryConditionsForm(initial), new LobbyConditionsView.Host() {
+                    @Override
+                    public void send(PlanetaryConditions selected) {
+                        if (closed.getAsBoolean() || board.get() != initialBoard) {
+                            return;
+                        }
+                        if (selected.getLight() != initial.getLight()) {
+                            previewTimeSample = timeSample;
+                        }
+                        previewConditions = new PlanetaryConditions(selected);
+                        result.set(BoardAtmosphere.fromScenario(previewConditions, initialBoard.isSpace(),
+                              previewTimeSample));
+                    }
+
+                    @Override
+                    public void edt(Runnable work, Runnable then) {
+                        SwingUtilities.invokeLater(() -> {
+                            try {
+                                work.run();
+                            } finally {
+                                application.postRunnable(then);
+                            }
+                        });
+                    }
+                }, finish);
+            });
         });
     }
 
@@ -74,8 +105,6 @@ final class GpuAtmosphereControls implements AutoCloseable {
     void reset() {
         onEdt(() -> { previewConditions = null; previewTimeSample = timeSample; });
     }
-
-    public void close() { onEdt(() -> { if (dialog != null) { dialog.dispose(); } }); }
 
     private static void onEdt(Runnable action) {
         if (SwingUtilities.isEventDispatchThread()) { action.run(); } else { SwingUtilities.invokeLater(action); }

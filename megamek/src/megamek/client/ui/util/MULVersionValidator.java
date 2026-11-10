@@ -64,9 +64,27 @@ public final class MULVersionValidator {
      * @return {@code true} if loading should proceed, {@code false} if it must be aborted
      */
     public static boolean isCorrectVersion(final Component parent, final MULParser parser) {
+        return isCorrectVersion(new Prompts() {
+            @Override
+            public void message(String message, String title, int messageType) {
+                JOptionPane.showMessageDialog(parent, message, title, messageType);
+            }
+
+            @Override
+            public int confirm(String message, String title, int optionType, int messageType) {
+                return JOptionPane.showConfirmDialog(parent, message, title, optionType, messageType);
+            }
+        }, parser);
+    }
+
+    /**
+     * {@link #isCorrectVersion(Component, MULParser)} with the warnings shown by {@code prompts}, so a caller that draws
+     * its own dialogs (the libGDX battle window) asks them natively. Same rules and answers.
+     */
+    public static boolean isCorrectVersion(final Prompts prompts, final MULParser parser) {
         if (parser.isNewerVersion()) {
             final String fileVersion = (parser.getFileVersion() == null) ? "?" : parser.getFileVersion().toString();
-            JOptionPane.showMessageDialog(parent,
+            prompts.message(
                   Messages.getString("MULParser.versionWarning.newerVersion", fileVersion, SuiteConstants.VERSION),
                   Messages.getString("MULParser.versionWarning.newerVersion.title"),
                   JOptionPane.ERROR_MESSAGE);
@@ -75,7 +93,7 @@ public final class MULVersionValidator {
 
         if (parser.isOlderVersion()) {
             final String fileVersion = (parser.getFileVersion() == null) ? "?" : parser.getFileVersion().toString();
-            final int choice = JOptionPane.showConfirmDialog(parent,
+            final int choice = prompts.confirm(
                   Messages.getString("MULParser.versionWarning.olderVersion", fileVersion, SuiteConstants.VERSION),
                   Messages.getString("MULParser.versionWarning.olderVersion.title"),
                   JOptionPane.YES_NO_OPTION,
@@ -84,5 +102,12 @@ public final class MULVersionValidator {
         }
 
         return true;
+    }
+
+    /** How the warnings are shown; the arguments and answers are those of {@link JOptionPane}. */
+    public interface Prompts {
+        void message(String message, String title, int messageType);
+
+        int confirm(String message, String title, int optionType, int messageType);
     }
 }

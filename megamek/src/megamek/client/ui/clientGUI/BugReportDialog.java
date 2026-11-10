@@ -55,6 +55,7 @@ import megamek.client.Client;
 import megamek.client.ui.BugReportMessages;
 import megamek.client.ui.CopySystemDataAction;
 import megamek.client.ui.PackageBugReportAction;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBugReport;
 import megamek.client.ui.util.UIUtil;
 import megamek.client.ui.widget.HazardStripeBorder;
 import megamek.common.util.IssueReportUrl;
@@ -128,6 +129,10 @@ public class BugReportDialog {
      *                       button rather than now; may return {@code null}, which packages the logs alone
      */
     public static void showWithGameTools(@Nullable Window parent, Supplier<Client> clientSupplier) {
+        // In the libGDX battle, lobby or start screen the bug report is the window's own card
+        if (GpuBugReport.show(clientSupplier)) {
+            return;
+        }
         new BugReportDialog(parent, new CopySystemDataAction(),
               new PackageBugReportAction(parent, clientSupplier)).show();
     }

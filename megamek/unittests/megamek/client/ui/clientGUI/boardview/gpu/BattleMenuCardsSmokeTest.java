@@ -13,11 +13,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javax.swing.SwingUtilities;
@@ -37,6 +41,7 @@ import megamek.client.lobby.EditBotsForm;
 import megamek.client.lobby.FactionChoice;
 import megamek.client.lobby.RandomArmyForm;
 import megamek.client.lobby.RatBrowser;
+import megamek.client.ui.BugReportPackager;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.gdx.UiButton;
@@ -242,6 +247,97 @@ class BattleMenuCardsSmokeTest {
             assertFalse(cards.isOpen());
             cards.dispose();
         });
+    }
+
+    /** Report a Bug over the battle: the native card with the issue links, which Close closes. */
+    @Test
+    void theBugReportShowsOverTheBattle() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs cards = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            Queue<Runnable> gl = new ConcurrentLinkedQueue<>();
+            GpuBattleTools tools = new GpuBattleTools(mock(ClientGUI.class), gl::add, () -> false, () -> cards);
+
+            tools.bugReport(() -> null);
+            for (Runnable work = gl.poll(); work != null; work = gl.poll()) {
+                work.run();
+            }
+            ui.draw();
+            assertTrue(cards.isOpen(), "the bug report shows over the battle");
+            find(ui, "bug-report-card");
+            for (String link : List.of("bug-report-package", "bug-report-discord", "bug-report-mm", "bug-report-mml",
+                  "bug-report-mhq", "bug-report-data")) {
+                find(ui, link);
+            }
+            click(ui, find(ui, "bug-report-close"));
+            assertFalse(cards.isOpen());
+            cards.dispose();
+        });
+    }
+
+    /**
+     * Report a Bug packages the logs into the archive the file dialog picks and shows what it holds over the card; a
+     * failed package shows why with Close alone.
+     */
+    @Test
+    void reportABugPackagesTheLogsAndShowsTheResult() throws Exception {
+        Path folder = Files.createTempDirectory("bug-report");
+        try {
+            UiTestStage.run(ui -> {
+                LobbyNativeDialogs cards = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+                Queue<Runnable> gl = new ConcurrentLinkedQueue<>();
+                AtomicReference<SystemFileDialog.Request> asked = new AtomicReference<>();
+                cards.bugReport(new GpuBugReport.Host() {
+                    @Override
+                    public void choose(SystemFileDialog.Request request, Consumer<File> chosen) {
+                        asked.set(request);
+                        chosen.accept(folder.resolve("report").toFile());
+                    }
+
+                    @Override
+                    public Client client() {
+                        return null;
+                    }
+
+                    @Override
+                    public void gpu(Runnable work) {
+                        gl.add(work);
+                    }
+                });
+                ui.draw();
+                UiButton report = (UiButton) find(ui, "bug-report-package");
+                click(ui, report);
+                assertTrue(report.isDisabled(), "one package at a time");
+                long deadline = System.nanoTime() + 60_000_000_000L;
+                while (ui.stage.getRoot().findActor("bug-report-result") == null) {
+                    assertTrue(System.nanoTime() < deadline, "packaging finishes");
+                    flushSwing();
+                    for (Runnable work = gl.poll(); work != null; work = gl.poll()) {
+                        work.run();
+                    }
+                    ui.draw();
+                }
+                assertTrue(asked.get().save(), "the archive is asked in a save dialog");
+                assertTrue(Files.isRegularFile(folder.resolve("report.zip")), "the chosen name gets .zip");
+                assertFalse(report.isDisabled(), "Report a Bug is ready again");
+                find(ui, "bug-report-result-issue");
+                find(ui, "bug-report-result-copy");
+                click(ui, find(ui, "bug-report-result-close"));
+                ui.draw();
+                assertNull(ui.stage.getRoot().findActor("bug-report-result"));
+                assertTrue(cards.isOpen(), "the bug report shows again under its result");
+
+                cards.bugReportResult(new BugReportPackager.Outcome(null, "Saving the game failed."));
+                ui.draw();
+                find(ui, "bug-report-result");
+                assertNull(ui.stage.getRoot().findActor("bug-report-result-issue"), "nothing to send");
+                click(ui, find(ui, "bug-report-result-close"));
+                cards.dispose();
+            });
+        } finally {
+            try (var files = Files.walk(folder)) {
+                files.sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(File::delete);
+            }
+        }
     }
 
     private static void flushSwing() {

@@ -177,7 +177,7 @@ final class GpuMapSource implements BoardSource {
         this.requestClose = requestClose;
         this.requestLegacy2D = requestLegacy2D;
         this.requestEditor = requestEditor;
-        atmosphere = new GpuAtmosphereControls(() -> owner, game::getBoard, game::getPlanetaryConditions, () -> closed);
+        atmosphere = new GpuAtmosphereControls(game::getBoard, game::getPlanetaryConditions, () -> closed);
         if (editor != null) { trace = GpuTraceOverlay.Settings.capture(); }
         timer = new Timer(33, event -> refresh());
         try {
@@ -805,7 +805,6 @@ final class GpuMapSource implements BoardSource {
         finishEditorStroke();
         timer.stop();
         closeMeasuring();
-        atmosphere.close();
         game.removeGameListener(gameListener);
         if (board != null) { board.removeBoardListener(boardListener); }
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(preferences);

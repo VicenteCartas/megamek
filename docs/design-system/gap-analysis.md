@@ -308,31 +308,35 @@ Done so far, in short:
   footers, the libGDX start screen (G1 to G6: the menu, Host, Connect, Load game, the scenario browser and the
   briefing) and its follow-ups, and the libGDX lobby (L0 to L18) with its review rounds. The lobby opens no Swing
   dialog except Client Settings and the startup-failure fallback. On the board, the Game Master's tools, the
-  reinforcements, Edit Bots, the portrait chooser, Network information, the Nova network view, About and the battle
-  menu's dialogs are native; the accessibility window is gone. The unit cache's
+  reinforcements, Edit Bots, the portrait chooser, Network information, the Nova network view, About, Report a Bug,
+  the conditions editor and the battle menu's dialogs are native; the accessibility window is gone. The unit cache's
   progress, Refresh and Rebuild are a native Unit cache page under the start screen's Tools (#58), and the Swing
   loading window no longer opens at startup.
 
 Still open:
 
-1. The board's remaining Swing dialogs, the `SWING_DIALOGS` allowlist in `GpuBoardWindow` (R6/U2), by size of the
-   port:
-   - Big: Client Settings (`CommonSettingsDialog`, about 4,900 lines, several PRs; the lobby's gear and the map
-     editor open it too).
-   - Developer only: the conditions editor behind the Tuning utility (`PlanetaryConditionsDialog`).
-2. Live checks: a real MekHQ game, a network reconnect, a password-protected game and a second human player in a
+1. The board's last Swing dialog, the `SWING_DIALOGS` allowlist in `GpuBoardWindow` (R6/U2): Client Settings
+   (`CommonSettingsDialog`, about 4,900 lines, several PRs; the lobby's gear, the map editor and the start screen
+   open it too).
+2. The start screen's Swing windows, from its Tools and Help menus (`MegaMekGUI.perform`):
+   - Tools: the unit browser (`MainMenuUnitBrowserDialog`), the random army (`MMMainMenuRandomArmyDialog`; the
+     lobby's native Force Generator could serve) and the skin editor (`SkinEditorMainGUIPanel`).
+   - Help: the help contents (`MMReadMeHelpDialog`), the skinning help (`HelpDialog`) and About (`MMAboutDialog`;
+     the native `GpuAbout` could serve).
+   - The map editor has no Report a Bug yet.
+3. Live checks: a real MekHQ game, a network reconnect, a password-protected game and a second human player in a
    second MegaMek window. The system file dialog on macOS and Linux hasn't been tried on a real machine yet; step
    5.5 in the history lists what to try.
-3. A Swing modal that a dead client leaves open could still block the start screen. The prompt routing covers the
+4. A Swing modal that a dead client leaves open could still block the start screen. The prompt routing covers the
    questions found so far.
-4. Step 7: a settings check across the startup path. The lobby's part (L14) is done.
-5. To propose to the MegaMek team: a **Load anyway** for saves from another version.
-6. Each Swing dialog the lobby stopped using stays while MekHQ, MegaMekLab or the in-game screens still open it;
+5. Step 7: a settings check across the startup path. The lobby's part (L14) is done.
+6. To propose to the MegaMek team: a **Load anyway** for saves from another version.
+7. Each Swing dialog the lobby stopped using stays while MekHQ, MegaMekLab or the in-game screens still open it;
    retire it once its last user moves.
-7. Accessibility in libGDX: a spike on how a screen reader can follow the game, since a libGDX window shows it
+8. Accessibility in libGDX: a spike on how a screen reader can follow the game, since a libGDX window shows it
    nothing. The Swing accessibility window, a text log with typed commands that was never finished, is deleted;
    `EntityAction.toAccessibilityDescription` is kept for this.
-8. If the developers accept the system, move hud-v3 onto the tokens and the new libGDX controls (including the
+9. If the developers accept the system, move hud-v3 onto the tokens and the new libGDX controls (including the
    `UiTheme` rename pass). Until then, hud-v3 code does not change.
 
 ## Review probes

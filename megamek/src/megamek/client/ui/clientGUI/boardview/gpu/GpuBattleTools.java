@@ -19,6 +19,7 @@ import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import jakarta.annotation.Nullable;
+import megamek.client.Client;
 import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.PrincessException;
 import megamek.client.event.BoardViewEvent;
@@ -302,6 +303,30 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
     /** Shows About MegaMek. */
     void about() {
         open(LobbyNativeDialogs::about);
+    }
+
+    /** Shows the bug report; Report a Bug saves the game of {@code client} and asks for the archive in the battle. */
+    void bugReport(Supplier<Client> client) {
+        GpuBugReport.Host host = new GpuBugReport.Host() {
+            @Override
+            public void choose(SystemFileDialog.Request request, Consumer<File> chosen) {
+                Optional<File> file = GpuBoardWindow.chooseFile(gui, request);
+                chosen.accept(file == null ? null : file.orElse(null));
+            }
+
+            @Override
+            public Client client() {
+                return client.get();
+            }
+
+            @Override
+            public void gpu(Runnable work) {
+                if (!closing.getAsBoolean()) {
+                    gpu.accept(work);
+                }
+            }
+        };
+        open(dialogs -> dialogs.bugReport(host));
     }
 
     // ---- The Game Master's cards ----
