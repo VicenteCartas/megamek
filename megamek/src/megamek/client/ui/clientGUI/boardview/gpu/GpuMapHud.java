@@ -19,9 +19,12 @@ import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuHudState.Dialog;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiFileDialog;
 import megamek.client.ui.gdx.UiHexSides;
 import megamek.client.ui.gdx.UiKit;
@@ -74,6 +77,9 @@ final class GpuMapHud implements GpuBoardHud {
     private GpuHud.Metrics metrics;
     private float scale = 1;
     private BoardScene scene;
+    /** The About card from the Menu, once opened; GPU thread. */
+    private UiDialog about;
+    private static final String ABOUT = "helpAbout";
 
     /** {@code tuningModel} is the model the board view reads; {@code history} the view's (no game plays here). */
     GpuMapHud(BoardSource source, Skin skin, Batch batch, BoardCamera camera, GpuBoardTuning tuningModel,
@@ -285,7 +291,11 @@ final class GpuMapHud implements GpuBoardHud {
         tree.rows(editor == null ? commands : editor.menu(commands), "", 0, rows);
         tree.show(rows, null, command -> {
             state.dialog = Dialog.NONE;
-            command.action().run();
+            if (ABOUT.equals(command.id())) {
+                showAbout();
+            } else {
+                command.action().run();
+            }
         });
         float width = Math.min(UiKit.DIALOG_WIDTH, metrics.width() - 2 * metrics.gap());
         float height = Math.min(menuSlot.getActor().getPrefHeight(), metrics.height() - UiKit.DIALOG_MARGIN);
@@ -293,6 +303,27 @@ final class GpuMapHud implements GpuBoardHud {
         menuLayer.setBounds(0, 0, metrics.width(), metrics.height());
         menuLayer.toFront();
         menuLayer.focus();
+    }
+
+    /**
+     * Menu → About: the native About card over the map. The source's own About command, the Swing box, is what a
+     * window without this HUD runs.
+     */
+    void showAbout() {
+        if (about != null && about.isOpen()) {
+            return;
+        }
+        contextMenu.cancel();
+        if (editor != null) { editor.closeSettings(); editor.closeHelp(); }
+        UiDialog dialog = new UiDialog(kit.ui, GpuAbout.title(), () -> about.close()).width("dialog.md");
+        GpuAbout.fill(kit.ui, dialog, dialog::close);
+        about = dialog;
+        dialog.show(stage, !GUIPreferences.getInstance().getReduceMotion());
+    }
+
+    /** The open About card, or null. */
+    @Nullable UiDialog about() {
+        return about != null && about.isOpen() ? about : null;
     }
 
     /**

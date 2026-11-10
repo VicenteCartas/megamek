@@ -892,6 +892,14 @@ final class LobbyNativeDialogs {
         return dialog;
     }
 
+    /** About MegaMek: the version and the suite's legal notice, in place of whatever shows. */
+    UiDialog about() {
+        UiDialog dialog = begin(GpuAbout.title(), "dialog.md", false, () -> { });
+        GpuAbout.fill(kit, dialog, this::close);
+        show(dialog);
+        return dialog;
+    }
+
     /** Shows {@code text} with an OK button over whatever shows, as an alert. */    UiDialog message(String title, String text) {
         UiDialog dialog = begin(title, "dialog.sm", true, () -> { });
         var label = kit.typeLabel(text, "body", "text.primary");

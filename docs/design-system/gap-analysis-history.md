@@ -1320,6 +1320,13 @@ The open items below were copied to the gap analysis and are tracked there; this
          - All three left the allowlist; the Swing `NetworkInformationDialog` stays for the lounge. Covered by
            `NetworkInformationFormTest`, `NovaNetworkFormTest`, `GpuSwingDialogGateTest` and
            `NetworkCardsSmokeTest`, and both cards were tried by hand in a game.
+       - Done: About is a native card (`GpuAbout`). It opens from the map editor's and the map preview's Menu, from
+         Help > About in a battle and from the lobby's system menu, and shows the name, the version and the same
+         legal notice as the start screen's welcome: the open source callout, the rules, wiki and Discord links and
+         the trademark fine print. The welcome and About share that notice (`SuiteLegalNotice`). About left the
+         kept message boxes in `GpuBoardWindow`; the Swing `MMAboutDialog` stays for the lounge and the Legacy 2D
+         preview. Covered by `GpuSwingDialogGateTest`, `GpuMapMenuSmokeTest`, `BattleMenuCardsSmokeTest`,
+         `StartWelcomeSmokeTest` and `GpuBoardWindowSmokeTest`, and it was tried by hand in the game.
        - The "Save First?" question when leaving a battle is native since #39.
        - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
          thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser

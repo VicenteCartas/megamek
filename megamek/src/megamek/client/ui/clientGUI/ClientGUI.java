@@ -1118,6 +1118,9 @@ public class ClientGUI extends AbstractClientGUI
      * Called when the user selects the "Help->About" menu item.
      */
     private void showAbout() {
+        if (!inLounge() && GpuBoardWindow.showAbout(this)) {
+            return;
+        }
         new MMAboutDialog(frame).show();
     }
 

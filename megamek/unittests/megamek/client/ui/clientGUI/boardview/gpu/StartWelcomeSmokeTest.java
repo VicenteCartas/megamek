@@ -138,9 +138,9 @@ class StartWelcomeSmokeTest {
 
     @Test
     void theSwingTextsReadAsPlainSentences() {
-        assertEquals("an unofficial game", StartWelcome.plain("an <b>unofficial</b> game"));
-        assertEquals("visit our wiki.", StartWelcome.sentence("visit our wiki: "));
-        assertEquals("join us.", StartWelcome.sentence("join us."));
+        assertEquals("an unofficial game", SuiteLegalNotice.plain("an <b>unofficial</b> game"));
+        assertEquals("visit our wiki.", SuiteLegalNotice.sentence("visit our wiki: "));
+        assertEquals("join us.", SuiteLegalNotice.sentence("join us."));
     }
 
     /** MegaMek's welcome, as its start screen makes it. */
