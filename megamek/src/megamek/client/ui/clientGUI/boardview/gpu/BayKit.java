@@ -38,11 +38,12 @@ final class BayKit {
      * Convex corners round to {@code cornerRadius} in {@code cornerSegments} facets (0: square). With {@code fittings}
      * every roof module comes once per layout of the footprint's fittings, and the kit is not turned (its pieces stand
      * in all six corners, as the fittings stand in the hex's middle). With {@code varyBays} a wall may hold a bay fewer
-     * or more than the nearest count, by its place ({@link #scale}).
+     * or more than the nearest count, by its place ({@link #scale}). {@code door}: its large doors' look
+     * ({@link KitDoors.Style}; a plain steel door without).
      */
     record Spec(String name, String style, String pieces, List<double[]> lone, double bandEnd, Slab roof, Slab floors,
                 Sidewalk sidewalk, Map<String, List<Run>> modules, double cornerRadius, int cornerSegments,
-                HabitatKit.Fittings fittings, boolean varyBays) { }
+                HabitatKit.Fittings fittings, boolean varyBays, KitDoors.Style door) { }
 
     /**
      * A flat surface over the piece: a board material, {@code repeat} units a repeat on the board's axes, at a height per
@@ -50,8 +51,44 @@ final class BayKit {
      * a planted bed just under it, so the glass shows a greenhouse rather than the ground down a seam; with {@code aol}
      * (a roof), aviation obstruction lights on its convex corners ({@link GeneratedKit#lights}).
      */
-    record Slab(String material, double repeat, double inset, double[] heights, boolean underlay, boolean aol) {
+    record Slab(String material, double repeat, double inset, double[] heights, boolean underlay, boolean aol, Vault vault) {
         double height(int lod) { return heights[Math.min(lod, heights.length - 1)]; }
+    }
+
+    /**
+     * A roof that spans its hall, as a hangar's does, in place of the flat slab: a hexside wide, it rises {@code rise}
+     * over the roof's height in the {@code shape} of a {@code gable}, a shallow {@code bow} (a circle's segment, a
+     * bowstring roof) or an {@code arch} (half an ellipse, a barrel vault), in {@code segments} facets a side per level
+     * of detail (the last for any further). It follows the hall ({@link #barrels}): a Square hex's runs north to south
+     * along its column, so a column's hexes share one roof and columns side by side meet in valleys; an Angled hex's
+     * runs out along each of its links, the roofs of two links meeting in a valley (but level at the crown where the
+     * hexes across both are one building with it: a wide hall's roof is one roof), and turns round its unlinked sides in
+     * hipped facets, so a hall's roof turns where the hall does. Every wall under it is filled up to it in the
+     * {@code gable} surface (a material may carry its pieces' finish, as {@code ...#paint}), a {@code verge} high band
+     * of the {@code trim} surface along its top. Ribs of the trim surface cross it every {@code ribPitch} along it, from
+     * half a pitch off the hex's middle (where a hall's wall bays meet), {@code ribWidth} wide and {@code ribHeight}
+     * high (0: none). {@code tint}: the roof sheeting's linear tint. It rises half a level at
+     * the most: a unit on the roof plays at the eaves' level and is drawn standing on the roof.
+     */
+    record Vault(String shape, double rise, int[] segments, KitDoors.Part gable, KitDoors.Part trim, double verge,
+          double ribPitch, double ribWidth, double ribHeight, float[] tint) {
+        int segments(int lod) { return Math.max(1, segments[Math.min(lod, segments.length - 1)]); }
+
+        /** The roof's height over its eaves, {@code x} off the middle line of a column {@code half} wide a side. */
+        double height(double x, double half) {
+            double t = Math.abs(x) / half;
+            if (t >= 1) { return 0; }
+            return switch (shape) {
+                case "gable" -> rise * (1 - t);
+                case "arch" -> rise * Math.sqrt(1 - t * t);
+                case "bow" -> {
+                    // A circle through both eaves and the crown.
+                    double radius = (half * half + rise * rise) / (2 * rise);
+                    yield Math.sqrt(radius * radius - x * x) - (radius - rise);
+                }
+                default -> throw new IllegalArgumentException("a vault's shape is gable, bow or arch, not " + shape);
+            };
+        }
     }
 
     /** A strip {@code width} out from the ground storey's walls at {@code kerb} height, a board material on its axes. */
@@ -126,10 +163,21 @@ final class BayKit {
         if (spec.cornerRadius() > 0 && spec.cornerSegments() < 1) {
             throw new IllegalArgumentException("Bay kit " + name + " rounds its corners in no segments");
         }
+        Vault vault = spec.roof().vault();
+        if (vault != null && vault.rise() > KitOutline.LEVEL / 2) {
+            // A unit on it plays at its eaves' level and is drawn on it (GpuTerrain#roofLift): higher would mislead.
+            throw new IllegalArgumentException("Bay kit " + name + " has a vault higher than half a level");
+        }
+        if (vault != null && (!(vault.rise() > 0) || vault.segments() == null || vault.segments().length == 0 || vault.gable() == null
+              || vault.gable().material() == null || (vault.verge() > 0 || vault.ribHeight() > 0) && (vault.trim() == null
+              || vault.trim().material() == null) || vault.ribHeight() > 0 && !(vault.ribPitch() > 0 && vault.ribWidth() > 0))) {
+            throw new IllegalArgumentException("Bay kit " + name + " needs its vault's rise, segments and gable, and a trim for a verge or ribs");
+        }
         // Slabs and sidewalks under a material of their own: a piece of the same board material keeps its UVs.
         Map<String, Float> boardUVs = new HashMap<>();
         for (Slab slab : new Slab[] { spec.roof(), spec.floors() }) { boardUVs.put(board(slab.material()), (float) slab.repeat()); }
         boardUVs.put(board(spec.floors().material()) + GeneratedMesh.BUILDING_FLOOR, (float) spec.floors().repeat());
+        boardUVs.put(board(deck(spec.roof())), (float) spec.roof().repeat());
         if (spec.sidewalk() != null) { boardUVs.put(board(spec.sidewalk().material()), (float) spec.sidewalk().repeat()); }
         HabitatKit.Fitting fitting = spec.fittings() == null ? null : square ? spec.fittings().square() : spec.fittings().angled();
         // With fittings, each roof module comes once per layout: roof roles numbered on, each naming its module and layout.
@@ -147,7 +195,7 @@ final class BayKit {
                 layouts.put(numbered, layout);
             }
         }
-        List<KitOutline.Piece> pieces = KitOutline.footprint(square, spec.bandEnd(), fitting == null, footprintScale).stream()
+        List<KitOutline.Piece> pieces = KitOutline.footprint(square, spec.bandEnd(), turned(spec, fitting), footprintScale).stream()
               .map(piece -> KitOutline.rounded(piece, spec.cornerRadius(), Math.max(1, spec.cornerSegments()))).toList();
         double halfLength = spec.lone() == null ? H : spec.lone().stream().mapToDouble(p -> Math.abs(p[1])).max().orElse(H);
         return GeneratedKit.lods(name, square, modelled, List.copyOf(modules.keySet()), pieces, boardUVs,
@@ -194,6 +242,11 @@ final class BayKit {
             result.put("-notch-" + notch, module(spec, modelled, role, notched, 0, lod, square, footprintScale, fitting, layout,
                   halfLength));
             if (lit) { GeneratedKit.lights(result, "-notch-" + notch, notched, facet, deck, lod); }
+        }
+        // A vault's corner linked both ways, where the hexes round it are one building: no valley (ConnectedKit#CROWN).
+        if (role.startsWith("roof") && spec.roof().vault() != null && !square && piece.direction() != null && piece.walls().isEmpty()
+              && Integer.bitCount(KitOutline.links(piece)) == 2) {
+            result.put("-crown", crown(spec.roof(), piece, lod));
         }
         // A storey's other junctions at the corner, held by its corner piece linked both ways (ConnectedKit places them).
         List<Run> runs = spec.modules().get(role);
@@ -251,8 +304,8 @@ final class BayKit {
             double outlineScale = piece.direction() == null && !piece.tags().contains("-link-") ? footprintScale : 1;
             List<GeneratedMesh.Keep> keeps = keeps(wall, sides);
             KitOutline.Wall[] partners = square || piece.direction() == null ? new KitOutline.Wall[2]
-                  : new KitOutline.Wall[] { partner(spec, piece.direction(), wall, true, fitting == null),
-                        partner(spec, piece.direction(), wall, false, fitting == null) };
+                  : new KitOutline.Wall[] { partner(spec, piece.direction(), wall, true, turned(spec, fitting)),
+                        partner(spec, piece.direction(), wall, false, turned(spec, fitting)) };
             double[] goesOn = facade(result, run, wall, keeps, modelled, lod, top ? ROOF_INSET : 0, ground, outlineScale,
                   facet(spec, wall), joints, cap, chamfer, cut, partners, spec.varyBays());
             if (ground && spec.sidewalk() != null) { sidewalk(result, spec.sidewalk(), wall, keeps, goesOn[0], goesOn[1]); }
@@ -282,15 +335,22 @@ final class BayKit {
             for (var part : inset > 0 ? KitOutline.inset(polygon, edges, inset) : List.of(polygon)) {
                 // The authored rim has a horizontal lip at this height; keep the deck just underneath it.
                 double height = slab.height(lod) - (top ? .02 : 0);
+                if (top && slab.vault() != null) {
+                    vault(result, slab, part, height, barrels(square, piece), lod);
+                    continue;
+                }
                 if (along != null) {
-                    flat(result, slab.material(), part, height, slab.repeat(), along);
+                    flat(result, top ? deck(slab) : slab.material(), part, height, slab.repeat(), along);
                 } else {
-                    flat(result, board(slab.material()) + (top ? "" : GeneratedMesh.BUILDING_FLOOR), part, height, slab.repeat(), null);
+                    flat(result, top ? board(deck(slab)) : board(slab.material()) + GeneratedMesh.BUILDING_FLOOR, part, height, slab.repeat(), null);
                 }
                 if (top) { result.slab(GeneratedMesh.BUILDING_BODY, part, height - 1.2, height, false); }
                 // A glass roof's underlay: the biodome's planted bed, which the sun lights through the glass.
                 if (top && slab.underlay()) { flat(result, board(BoardMultiHexBuilding.GARDEN), part, height - .3, 24, null); }
             }
+        }
+        if (top && slab.vault() != null) {
+            for (var wall : piece.walls()) { gable(result, slab.vault(), wall, slab.height(lod) - .02, barrels(square, piece), lod); }
         }
         if (top && layout != null) {
             HabitatKit.fittings(result, modelled, lod, fitting, layout, piece, spec.roof().height(lod), halfLength, footprintScale);
@@ -630,6 +690,9 @@ final class BayKit {
         return best;
     }
 
+    /** The roof's own surface, apart from its parapets and fittings ({@link GeneratedMesh#ROOF_DECK}). */
+    private static String deck(Slab roof) { return roof.material() + GeneratedMesh.ROOF_DECK; }
+
     /** A board material's part textured on the board's axes ({@link GeneratedMesh#BOARD_UV}). */
     private static String board(String material) { return material + GeneratedMesh.BOARD_UV; }
 
@@ -819,6 +882,265 @@ final class BayKit {
               walk.kerb() + (Math.abs(n[0]) > .5 ? .02 : 0), walk.repeat(), null);
         // Mitred, never cut to the hex: a walkway reaching a little past it is fine (user, 2026-11-08).
         result.add(strip.clipped(wallKeeps));
+    }
+
+    /**
+     * Whether the kit's Angled corner pieces are built once and turned by the runtime: not where they hold something that
+     * lies one way in the hex, roof fittings or a vault along its column.
+     */
+    private static boolean turned(Spec spec, HabitatKit.Fitting fitting) { return fitting == null && spec.roof().vault() == null; }
+
+    /** How far a piece's column reaches each side of its middle line: half a hexside, or a lone hex's half width. */
+    private static double halfSpan(KitOutline.Piece piece) {
+        double half = 0;
+        if (piece.direction() == null && !piece.tags().contains("-link-")) {
+            for (var wall : piece.walls()) {
+                if (Math.abs(normal(wall.p(), wall.q())[1]) > .9) { half = Math.max(half, Math.max(Math.abs(wall.p()[0]), Math.abs(wall.q()[0]))); }
+            }
+        }
+        return half > 0 ? half : KitOutline.A;
+    }
+
+    /**
+     * One run of a piece's vault: it runs along {@code axis} through the hex's middle, {@code half} wide a side, over
+     * the piece's part {@code within}; {@code ribbed}: the hall's ribs cross it.
+     */
+    private record Barrel(double[] axis, double half, List<GeneratedMesh.Keep> within, boolean ribbed) {
+        /** How far a point lies to the right of the axis. */
+        double across(double x, double y) { return x * axis[1] - y * axis[0]; }
+
+        double along(double x, double y) { return x * axis[0] + y * axis[1]; }
+    }
+
+    /**
+     * How a piece's vault runs ({@link Vault}). Square, a lone hex and where nothing else is said: north to south. An
+     * Angled hex linked across one side only: along that link. An Angled corner piece: along the link of its one linked
+     * side; with both linked, along each on its side of the line between them, a valley; with neither, across the line
+     * to the hex corner between its sides, a hip facet. On the line to a side's middle every piece reads that side
+     * alone: the crown where it is linked, else the same fall to the eave, so the pieces of a hex and its neighbours
+     * meet whatever the others' links.
+     */
+    private static List<Barrel> barrels(boolean square, KitOutline.Piece piece) {
+        int links = KitOutline.links(piece);
+        if (square || piece.direction() == null && links == 0) {
+            return List.of(new Barrel(new double[] { 0, 1 }, halfSpan(piece), List.of(), true));
+        }
+        if (piece.direction() == null) {
+            return List.of(new Barrel(towards(Integer.numberOfTrailingZeros(links)), KitOutline.A, List.of(), true));
+        }
+        int side = piece.direction(), next = (side + 1) % 6;
+        double[] a = towards(side), b = towards(next), between = KitOutline.hexCorner(side);
+        boolean first = (links & 1 << side) != 0, second = (links & 1 << next) != 0;
+        if (first && second) {
+            double sign = Math.signum(KitOutline.cross(between, a));
+            return List.of(new Barrel(a, KitOutline.A, List.of((x, y) -> sign * (between[0] * y - between[1] * x)), true),
+                  new Barrel(b, KitOutline.A, List.of((x, y) -> -sign * (between[0] * y - between[1] * x)), true));
+        }
+        if (first || second) { return List.of(new Barrel(first ? a : b, KitOutline.A, List.of(), true)); }
+        double length = Math.hypot(between[0], between[1]);
+        return List.of(new Barrel(new double[] { -between[1] / length, between[0] / length }, KitOutline.A, List.of(), false));
+    }
+
+    /** The unit vector from a hex's middle towards the middle of its side {@code direction}. */
+    private static double[] towards(int direction) {
+        double[] middle = KitOutline.MIDPOINTS[direction];
+        double length = Math.hypot(middle[0], middle[1]);
+        return new double[] { middle[0] / length, middle[1] / length };
+    }
+
+    /** The lines a vault's facets meet on, eave to eave, with its height over the eaves and its girth from the first at each. */
+    private static double[][] facets(Vault vault, double half, int lod) {
+        int n = vault.segments(lod);
+        double[] cs = new double[2 * n + 1], zs = new double[2 * n + 1], girth = new double[2 * n + 1];
+        for (int k = 0; k <= 2 * n; k++) {
+            cs[k] = half * (k - n) / n;
+            zs[k] = vault.height(cs[k], half);
+            if (k > 0) { girth[k] = girth[k - 1] + Math.hypot(cs[k] - cs[k - 1], zs[k] - zs[k - 1]); }
+        }
+        return new double[][] { cs, zs, girth };
+    }
+
+    /**
+     * A roof {@link Vault} over {@code polygon}, a part of a piece's floor, from {@code base} up, each of its
+     * {@code barrels} over its own part: its facets between the eaves, level outside them, sheeting textured along it
+     * and round its girth, a dark underside, and its ribs.
+     */
+    private static void vault(GeneratedMesh result, Slab slab, List<double[]> polygon, double base, List<Barrel> barrels, int lod) {
+        Vault vault = slab.vault();
+        double area = 0;
+        for (int i = 0; i < polygon.size(); i++) { area += KitOutline.cross(polygon.get(i), polygon.get((i + 1) % polygon.size())); }
+        List<double[]> outline = area > 0 ? polygon : polygon.reversed();
+        float[] tint = vault.tint() == null ? new float[] { 1, 1, 1 } : vault.tint();
+        boolean smooth = !vault.shape().equals("gable");
+        for (Barrel barrel : barrels) {
+            double[][] lines = facets(vault, barrel.half(), lod);
+            double[] cs = lines[0], zs = lines[1], girth = lines[2], axis = barrel.axis();
+            int last = cs.length - 1;
+            var own = barrel.within().isEmpty() ? outline : KitOutline.clipped(outline, barrel.within());
+            for (int k = -1; k <= last && !own.isEmpty(); k++) {
+                // Outside the eaves the roof lies level; between two lines it is one facet.
+                double c0 = k < 0 ? -1e9 : cs[k], c1 = k == last ? 1e9 : cs[k + 1];
+                var part = KitOutline.clipped(own, List.of((x, y) -> barrel.across(x, y) - c0, (x, y) -> c1 - barrel.across(x, y)));
+                if (part.isEmpty()) { continue; }
+                List<float[]> top = new ArrayList<>(), under = new ArrayList<>();
+                for (double[] point : part) {
+                    double c = barrel.across(point[0], point[1]), z = base, g, slope = 0;
+                    if (k < 0) {
+                        g = c - cs[0];
+                    } else if (k == last) {
+                        g = girth[last] + c - cs[last];
+                    } else {
+                        double f = (c - cs[k]) / (cs[k + 1] - cs[k]);
+                        z += zs[k] + (zs[k + 1] - zs[k]) * f;
+                        g = girth[k] + (girth[k + 1] - girth[k]) * f;
+                        slope = smooth ? slope(cs, zs, k) * (1 - f) + slope(cs, zs, k + 1) * f : (zs[k + 1] - zs[k]) / (cs[k + 1] - cs[k]);
+                    }
+                    double length = Math.hypot(slope, 1);
+                    // Sheeting runs down the slope: its ribs repeat along the roof.
+                    top.add(new float[] { (float) point[0], (float) point[1], (float) z, (float) (-slope * axis[1] / length),
+                          (float) (slope * axis[0] / length), (float) (1 / length), tint[0], tint[1], tint[2], 1,
+                          (float) (barrel.along(point[0], point[1]) / slab.repeat()), (float) (g / slab.repeat()) });
+                    under.addFirst(new float[] { (float) point[0], (float) point[1], (float) (z - .35), 0, 0, -1, DARK, DARK, DARK, 1, 0, 0 });
+                }
+                result.polygon(deck(slab), top);
+                result.polygon(GeneratedMesh.BUILDING_BODY, under);
+                if (barrel.ribbed() && k >= 0 && k < last && vault.ribHeight() > 0) { ribs(result, vault, barrel, part, base, cs, zs, k); }
+            }
+        }
+    }
+
+    /**
+     * A vault's corner piece inside a building, level at its crown: where three hexes of a building meet, their roofs
+     * are one roof, not three that fall into a valley between them.
+     */
+    private static GeneratedMesh crown(Slab slab, KitOutline.Piece piece, int lod) {
+        Vault vault = slab.vault();
+        float[] tint = vault.tint() == null ? new float[] { 1, 1, 1 } : vault.tint();
+        double z = slab.height(lod) - .02 + vault.rise();
+        var result = new GeneratedMesh();
+        for (var polygon : piece.polygons()) {
+            double area = 0;
+            for (int i = 0; i < polygon.size(); i++) { area += KitOutline.cross(polygon.get(i), polygon.get((i + 1) % polygon.size())); }
+            List<float[]> top = new ArrayList<>(), under = new ArrayList<>();
+            for (double[] point : area > 0 ? polygon : polygon.reversed()) {
+                top.add(new float[] { (float) point[0], (float) point[1], (float) z, 0, 0, 1, tint[0], tint[1], tint[2], 1,
+                      (float) (point[0] / slab.repeat()), (float) (-point[1] / slab.repeat()) });
+                under.addFirst(new float[] { (float) point[0], (float) point[1], (float) (z - .35), 0, 0, -1, DARK, DARK, DARK, 1, 0, 0 });
+            }
+            result.polygon(deck(slab), top);
+            result.polygon(GeneratedMesh.BUILDING_BODY, under);
+        }
+        return result.clipped(KitOutline.sector(piece.direction(), KitOutline.SEAM_OVERLAP));
+    }
+
+    /** A vault's slope across itself at line {@code k}: between the facets either side of it. */
+    private static double slope(double[] cs, double[] zs, int k) {
+        int a = Math.max(0, k - 1), b = Math.min(cs.length - 1, k + 1);
+        return (zs[b] - zs[a]) / (cs[b] - cs[a]);
+    }
+
+    /** The ribs across one facet's part of a vault (between its lines k and k + 1): each a top and the sides that show. */
+    private static void ribs(GeneratedMesh result, Vault vault, Barrel barrel, List<double[]> facet, double base, double[] cs, double[] zs,
+          int k) {
+        double low = Double.POSITIVE_INFINITY, high = Double.NEGATIVE_INFINITY, pitch = vault.ribPitch(), wide = vault.ribWidth() / 2;
+        for (double[] point : facet) {
+            low = Math.min(low, barrel.along(point[0], point[1]));
+            high = Math.max(high, barrel.along(point[0], point[1]));
+        }
+        var trim = vault.trim();
+        double[] axis = barrel.axis(), right = { axis[1], -axis[0] };
+        double slope = (zs[k + 1] - zs[k]) / (cs[k + 1] - cs[k]), length = Math.hypot(slope, 1);
+        double[] up = { -slope * right[0] / length, -slope * right[1] / length, 1 / length };
+        for (double middle = (Math.floor(low / pitch - .5) + .5) * pitch; middle - wide < high; middle += pitch) {
+            double from = middle - wide, to = middle + wide;
+            var part = KitOutline.clipped(facet, List.of((x, y) -> barrel.along(x, y) - from, (x, y) -> to - barrel.along(x, y)));
+            if (part.isEmpty()) { continue; }
+            double[][] top = new double[part.size()][];
+            for (int i = 0; i < top.length; i++) {
+                double[] point = part.get(i);
+                top[i] = new double[] { point[0], point[1], base + vault.ribHeight() + zs[k] + slope * (barrel.across(point[0], point[1]) - cs[k]) };
+            }
+            face(result, trim, 1, up, top);
+            for (int i = 0; i < top.length; i++) {
+                double[] a = top[i], b = top[(i + 1) % top.length];
+                double la = barrel.along(a[0], a[1]), lb = barrel.along(b[0], b[1]), ca = barrel.across(a[0], a[1]), cb = barrel.across(b[0], b[1]);
+                // Its sides along the roof, and its end over an eave; where the facet's own edge cuts it, it goes on.
+                double[] out = Math.abs(la - from) < 1e-6 && Math.abs(lb - from) < 1e-6 ? new double[] { -axis[0], -axis[1], 0 }
+                      : Math.abs(la - to) < 1e-6 && Math.abs(lb - to) < 1e-6 ? new double[] { axis[0], axis[1], 0 }
+                      : k == 0 && Math.abs(ca - cs[0]) < 1e-6 && Math.abs(cb - cs[0]) < 1e-6 ? new double[] { -right[0], -right[1], 0 }
+                      : k == cs.length - 2 && Math.abs(ca - cs[k + 1]) < 1e-6 && Math.abs(cb - cs[k + 1]) < 1e-6 ? new double[] { right[0], right[1], 0 }
+                      : null;
+                if (out != null) {
+                    face(result, trim, .8, out, new double[][] { { a[0], a[1], a[2] - vault.ribHeight() }, { b[0], b[1], b[2] - vault.ribHeight() }, b, a });
+                }
+            }
+        }
+    }
+
+    /**
+     * A wall filled from the roof's {@code base} up to the vault over it: a gable end, or a wall that crosses the roof
+     * at a slant; nothing along an eave. A verge band of the trim surface follows its top.
+     */
+    private static void gable(GeneratedMesh result, Vault vault, KitOutline.Wall wall, double base, List<Barrel> barrels, int lod) {
+        double[] p = wall.p(), q = wall.q(), n = normal(p, q);
+        double length = wall.length();
+        List<Double> stops = new ArrayList<>(List.of(0.0, 1.0));
+        for (Barrel barrel : barrels) {
+            double from = barrel.across(p[0], p[1]), to = barrel.across(q[0], q[1]);
+            for (double c : facets(vault, barrel.half(), lod)[0]) {
+                double t = (c - from) / (to - from);
+                if (Math.abs(to - from) > 1e-9 && t > 1e-6 && t < 1 - 1e-6) { stops.add(t); }
+            }
+        }
+        stops.sort(null);
+        double[] out = { n[0], n[1], 0 };
+        for (int i = 0; i < stops.size() - 1; i++) {
+            double[] a = KitOutline.lerp(p, q, stops.get(i)), b = KitOutline.lerp(p, q, stops.get(i + 1));
+            double za = 0, zb = 0;
+            for (Barrel barrel : barrels) {
+                za = Math.max(za, vault.height(barrel.across(a[0], a[1]), barrel.half()));
+                zb = Math.max(zb, vault.height(barrel.across(b[0], b[1]), barrel.half()));
+            }
+            if (za < 1e-6 && zb < 1e-6) { continue; }
+            double ua = stops.get(i) * length, ub = stops.get(i + 1) * length;
+            double[] in = { -n[0] * ROOF_INSET, -n[1] * ROOF_INSET }, proud = { n[0] * .15, n[1] * .15 };
+            face(result, vault.gable(), 1, out, new double[][] { { a[0] + in[0], a[1] + in[1], base }, { b[0] + in[0], b[1] + in[1], base },
+                  { b[0] + in[0], b[1] + in[1], base + zb }, { a[0] + in[0], a[1] + in[1], base + za } },
+                  new double[][] { { ua, base }, { ub, base }, { ub, base + zb }, { ua, base + za } });
+            if (vault.verge() > 0) {
+                double la = Math.max(0, za - vault.verge()), lb = Math.max(0, zb - vault.verge());
+                face(result, vault.trim(), 1, out, new double[][] { { a[0] + proud[0], a[1] + proud[1], base + la },
+                      { b[0] + proud[0], b[1] + proud[1], base + lb }, { b[0] + proud[0], b[1] + proud[1], base + zb },
+                      { a[0] + proud[0], a[1] + proud[1], base + za } });
+            }
+        }
+    }
+
+    /** A face of {@code surface} through {@code corners}, wound to face {@code out}, textured by its two widest axes. */
+    private static void face(GeneratedMesh result, KitDoors.Part surface, double shade, double[] out, double[][] corners) {
+        double[][] uv = new double[corners.length][];
+        for (int i = 0; i < corners.length; i++) {
+            double[] c = corners[i];
+            uv[i] = Math.abs(out[2]) > .7 ? new double[] { c[1], c[0] } : Math.abs(out[0]) > Math.abs(out[1]) ? new double[] { c[1], c[2] }
+                  : new double[] { c[0], c[2] };
+        }
+        face(result, surface, shade, out, corners, uv);
+    }
+
+    /** As {@link #face(GeneratedMesh, KitDoors.Part, double, double[], double[][])}, textured at {@code uv} (units, the second up). */
+    private static void face(GeneratedMesh result, KitDoors.Part surface, double shade, double[] out, double[][] corners, double[][] uv) {
+        float[] tint = surface.colour();
+        List<float[]> vertices = new ArrayList<>();
+        for (int i = 0; i < corners.length; i++) {
+            double[] c = corners[i];
+            vertices.add(new float[] { (float) c[0], (float) c[1], (float) c[2], (float) out[0], (float) out[1], (float) out[2],
+                  (float) (tint[0] * shade), (float) (tint[1] * shade), (float) (tint[2] * shade), 1, (float) (uv[i][0] / surface.units()),
+                  (float) (-uv[i][1] / surface.units()) });
+        }
+        double[] a = corners[0], b = corners[1], c = corners[2];
+        double nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]), ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]),
+              nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+        result.polygon(surface.material(), nx * out[0] + ny * out[1] + nz * out[2] >= 0 ? vertices : vertices.reversed());
     }
 
     /**

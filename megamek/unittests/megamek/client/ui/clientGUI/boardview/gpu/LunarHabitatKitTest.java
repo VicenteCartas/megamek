@@ -102,7 +102,7 @@ class LunarHabitatKitTest {
     @Test
     void aGeneratedKitsVariantRidesOnItsAssetAndAnUnknownOneDrawsTheFirst() {
         String habitat = "buildings/lunar_habitat/lunar_habitat";
-        assertEquals(List.of("rounded", "parapet"), TilesetScenery.kitVariants(habitat), "The spec's names, in its order");
+        assertEquals(List.of("rounded", "parapet", "hangar"), TilesetScenery.kitVariants(habitat), "The spec's names, in its order");
         String parapet = TilesetScenery.kitVariant(TilesetScenery.footprint(habitat,
               megamek.common.board.HexAppearance.Footprint.SQUARE), "parapet");
         assertEquals(habitat + "-square@parapet", parapet);

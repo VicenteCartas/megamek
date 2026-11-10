@@ -4683,7 +4683,8 @@ final class GpuTerrain implements Disposable {
             GpuBuilding.Assembly building = generatedIndustrial || feature.decoration() != null ? null : assets.building(feature.asset(), Math.round(feature.height()),
                   ConnectedKit.reach(scene, tile, Math.round(feature.height())), GpuBuilding.seed(tile, feature),
                   feature.kind() == BoardScene.FeatureKind.BUILDING && !wallBuilding ? tile.cover().interiors() : BuildingInteriors.NO,
-                  HexAppearance.steppedBuilding(tile.appearance()), feature.footprintScale(), ConnectedKit.corners(scene, tile));
+                  HexAppearance.steppedBuilding(tile.appearance()), feature.footprintScale(), ConnectedKit.corners(scene, tile),
+                  feature.kind() == BoardScene.FeatureKind.BUILDING ? KitDoors.cuts(scene, tile, feature) : List.of());
             // A placed object draws the same way in every view: one shared mesh per model and level (GpuAssets#slotted),
             // its colours passed per placement, its parts instanced (Chunk#cacheDecorations). Rail and maglev routes keep
             // their own route caching. What a rail owns (its buffer stops) is drawn as an object but never edited as one.
@@ -7136,8 +7137,13 @@ final class GpuTerrain implements Disposable {
                     continue;
                 }
                 for (Prop prop : chunk.cutaways) {
-                    if (!prop.industrial && coverScene.tile(prop.coords).cover().interiors() != BuildingInteriors.NO
-                          && Float.isNaN(prop.floorZ) && prop.bounds().intersects(unit)) {
+                    BoardScene.Tile tile = coverScene.tile(prop.coords);
+                    // A unit on the roof is not inside, whatever of the roof (parapets, fittings, a vault) reaches its
+                    // bounds. The Tactical View still takes the building away, so that none of it covers the token.
+                    boolean onRoof = buildingOpacity > 0 && tile.cover().height() > 0 && unit.min.z
+                          > (tile.elevation() + tile.cover().height() - ROOF_REACH) * BoardGeometry.level();
+                    if (!prop.industrial && tile.cover().interiors() != BuildingInteriors.NO
+                          && Float.isNaN(prop.floorZ) && !onRoof && prop.bounds().intersects(unit)) {
                         occupiedHexes.merge(prop.coords(), unit.min.z, Math::min);
                     }
                 }
@@ -8547,6 +8553,47 @@ final class GpuTerrain implements Disposable {
         });
     }
 
+    /**
+     * How far a unit's height may lie from a roof's for it to stand on that roof: drawn on it ({@link #roofLift}) and
+     * not inside the building under it (the occupancy cutaway in {@link #animate}), in levels.
+     */
+    private static final float ROOF_REACH = .25f;
+
+    /**
+     * How far over its game height a unit at {@code position} is drawn so that it stands on the roof under it: on a kit
+     * building's roof as drawn, its own surface (GpuBuilding.Assembly#roof: a vault, a raised deck), never its parapets,
+     * fittings or lights. Presentation only: the unit plays at its roof's level. 0 off a roof, on a roof that marks no
+     * surface, and on an authored building, whose roof for a unit is its volumes' top, the game's height. It fades out
+     * as the unit leaves the roof's level (climbing, jumping), so nothing jumps.
+     */
+    float roofLift(BoardScene scene, Vector3 position) {
+        BoardScene.Tile tile = BoardGeometry.tile(scene, position.x, position.y);
+        if (tile == null || tile.cover().structure() == 0 || tile.cover().height() <= 0) { return 0; }
+        float roof = (tile.elevation() + tile.cover().height()) * BoardGeometry.level();
+        float near = 1 - Math.abs(position.z - roof) / (ROOF_REACH * BoardGeometry.level());
+        Coords at = tile.coords();
+        int index = at.getX() / CHUNK_SIZE * chunkRows + at.getY() / CHUNK_SIZE;
+        if (near <= 0 || index >= chunks.size()) { return 0; }
+        TileMesh mesh = chunks.get(index).tileMeshes.get(at);
+        if (mesh == null) { return 0; }
+        var hit = new Vector3();
+        float aside = .3f * BoardGeometry.hexScale();
+        for (Prop prop : mesh.props) {
+            if (prop.building == null || prop.supportTriangles != null || !Float.isNaN(prop.floorZ)) { continue; }
+            Matrix4 inverse = new Matrix4(prop.instance().transform).inv();
+            // A hair aside where the roof's pieces meet under the unit, as hitProp looks.
+            for (float[] offset : SEAM_ASIDE) {
+                Ray local = new Ray(new Vector3(position.x + offset[0] * aside, position.y + offset[1] * aside, prop.bounds().max.z + 1)
+                      .mul(inverse), new Vector3(0, 0, -1).rot(inverse));
+                if (prop.building.roof(local, hit)) {
+                    // A roof rises half a level at the most over its game height (BayKit.Vault).
+                    return near * MathUtils.clamp(hit.mul(prop.instance().transform).z - roof, 0, BoardGeometry.level() / 2);
+                }
+            }
+        }
+        return 0;
+    }
+
     /** How far the moving elevator platform at {@code coords} stands from its after height; 0 where none moves. */
     float liftOffset(Coords coords) { return lifts == null ? 0 : lifts.offset(coords); }
 
@@ -8830,7 +8877,8 @@ final class GpuTerrain implements Disposable {
                         || HexAppearance.steppedBuilding(before.appearance()) != HexAppearance.steppedBuilding(after.appearance())
                         || !Arrays.equals(ConnectedKit.reach(was.scene(), before, Math.round(feature.height())),
                               ConnectedKit.reach(shown.scene(), after, Math.round(feature.height())))
-                        || !Arrays.equals(ConnectedKit.corners(was.scene(), before), ConnectedKit.corners(shown.scene(), after)))) {
+                        || !Arrays.equals(ConnectedKit.corners(was.scene(), before), ConnectedKit.corners(shown.scene(), after))
+                        || !KitDoors.cuts(was.scene(), before, feature).equals(KitDoors.cuts(shown.scene(), after, feature)))) {
                 return false;
             }
             if (BoardRail.route(feature) && !BoardRail.layout(was.scene(), before, feature, was.surfaces().get(at),

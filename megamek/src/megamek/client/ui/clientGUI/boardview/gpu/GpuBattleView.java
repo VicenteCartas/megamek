@@ -1707,6 +1707,8 @@ class GpuBattleView extends ApplicationAdapter {
             }
             // A unit on an elevator the server moved rides its platform (GpuTerrain#present).
             position.z += terrain.liftOffset(unit.location().coords());
+            // On a kit building's roof it stands on the roof as drawn (GpuTerrain#roofLift): looks only.
+            if (!airborne) { position.z += terrain.roofLift(scene, position); }
             float footprintFacing = facing;
             GpuUnitModel visual = unit.sensorContact() ? markers.model(BoardMarker.Kind.SENSOR_CONTACT)
                   : unitModels == null ? null : unitModels.get(unit.model(), unit.id(), unit.part());

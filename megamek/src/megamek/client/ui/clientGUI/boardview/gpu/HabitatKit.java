@@ -43,11 +43,12 @@ final class HabitatKit {
      * on the ground ({@code null}: none); the Angled lone hex's half length and a single link's band end; the storeys
      * above the ground ({@code windows} lit or dim, shifted along by a fraction of a repeat); the roofs' fittings per
      * footprint (hatch and vent pieces, laid out at x, y); with {@code aol}, aviation obstruction lights on the roofs'
-     * convex corners ({@link GeneratedKit#lights}).
+     * convex corners ({@link GeneratedKit#lights}); its large doors' look ({@code door}, {@link KitDoors.Style}; a plain
+     * steel door without).
      */
     record Spec(String name, String style, Map<String, String> materials, String pieces, double cornerRadius, int cornerSegments, Parapet parapet,
                 Eave eave, Skirt skirt, Uprights piers, Uprights tops, Uprights footings, Lone lone, List<Storey> storeys,
-                Fittings fittings, boolean aol) { }
+                Fittings fittings, boolean aol, KitDoors.Style door) { }
 
     record Parapet(double height, double width) { }
 
@@ -383,7 +384,7 @@ final class HabitatKit {
             var laid = spec.parapet() != null || radius == 0 ? List.of(polygon)
                   : KitOutline.inset(polygon, piece.walls(), ROOF_INSET + radius);
             for (var part : laid) {
-                plate(geometry, roof, part, deck, plating, 1);
+                plate(geometry, roof + GeneratedMesh.ROOF_DECK, part, deck, plating, 1);
                 geometry.slab(GeneratedMesh.BUILDING_BODY, part, deck - 1.2, deck, false);
             }
         }

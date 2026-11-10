@@ -38,6 +38,12 @@ final class GeneratedMesh {
      */
     static final String BOARD_UV = "#board";
     static final String BUILDING_BODY = "structures/common/cast-concrete#body";
+    /**
+     * A roof part keyed {@code <board material>#deck} (before any {@link #BOARD_UV}) is the roof's own surface, drawn as
+     * that board material: what units stand on ({@link GpuBuilding.Assembly#roof}). Its parapets, fittings and lights
+     * are other parts.
+     */
+    static final String ROOF_DECK = "#deck";
     static final String BUILDING_FLOOR = "#floor";
     /** A mesh's vertex count limit: kit parts index their vertices with shorts. */
     private static final int MESH_VERTICES = 65_536;
@@ -249,16 +255,21 @@ final class GeneratedMesh {
 
     /** Sutherland-Hodgman: {@code polygon}'s part where {@code keep} holds, attributes interpolated; empty below three. */
     static List<float[]> clip(List<float[]> polygon, Keep keep) {
+        return clipBy(polygon, p -> keep.at(p[0], p[1]));
+    }
+
+    /** As {@link #clip(List, Keep)}, kept where {@code side} of a vertex (its position first) is not negative. */
+    static List<float[]> clipBy(List<float[]> polygon, java.util.function.ToDoubleFunction<float[]> side) {
         boolean inside = false, outside = false;
         for (float[] p : polygon) {
-            if (keep.at(p[0], p[1]) >= 0) { inside = true; } else { outside = true; }
+            if (side.applyAsDouble(p) >= 0) { inside = true; } else { outside = true; }
         }
         if (!outside) { return polygon; }
         if (!inside) { return List.of(); }
         List<float[]> result = new ArrayList<>(polygon.size() + 1);
         for (int i = 0; i < polygon.size(); i++) {
             float[] a = polygon.get(i), b = polygon.get((i + 1) % polygon.size());
-            double da = keep.at(a[0], a[1]), db = keep.at(b[0], b[1]);
+            double da = side.applyAsDouble(a), db = side.applyAsDouble(b);
             if (da >= 0) { result.add(a); }
             if (da < 0 != db < 0 && da != 0 && db != 0) { result.add(between(a, b, (float) (da / (da - db)))); }
         }

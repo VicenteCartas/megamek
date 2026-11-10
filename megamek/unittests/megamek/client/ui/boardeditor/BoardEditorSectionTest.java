@@ -164,7 +164,7 @@ class BoardEditorSectionTest {
             session.board().setHex(at, hex);
         }
         select(middle);
-        assertEquals(List.of("rounded", "parapet"), session.snapshot().kitVariants(), "The panel lists the spec's names");
+        assertEquals(List.of("rounded", "parapet", "hangar"), session.snapshot().kitVariants(), "The panel lists the spec's names");
         send(Action.KIT_VARIANT, "", "gone");
         assertEquals("Choose one of the building's variants.", session.snapshot().message(), "Only a listed name");
         send(Action.KIT_VARIANT, "", "parapet");

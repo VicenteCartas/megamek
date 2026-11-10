@@ -1796,6 +1796,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             } else {
             buildingFootprint();
             buildingVariant();
+            buildingDoors();
             if (!snapshot.buildingConnected()) {
                 if (!snapshot.kitVariants().isEmpty()) {
                     number(UiKit.text("BoardEditor.buildingPadding"), megamek.common.board.HexAppearance.padding(snapshot.appearance()),
@@ -1986,9 +1987,38 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private void buildingVariant() {
         var names = snapshot.kitVariants();
         if (names.size() < 2) { return; }
-        String stored = megamek.common.board.HexAppearance.kitVariant(snapshot.appearance());
-        choose(UiKit.text("BoardEditor.kitVariant"), stored != null && names.contains(stored) ? stored : names.getFirst(),
+        var buildingClass = snapshot.property("bldg_class");
+        String drawn = megamek.common.board.TilesetScenery.drawnVariant(megamek.common.board.HexAppearance.kitVariant(snapshot.appearance()),
+              names, buildingClass == null ? 0 : buildingClass.value());
+        choose(UiKit.text("BoardEditor.kitVariant"), drawn,
               names.stream().map(name -> new Option(name, name)).toList(), name -> send(Action.KIT_VARIANT, name));
+    }
+
+    /**
+     * A hangar's large doors ({@link megamek.common.board.HexAppearance#doors}): the hex's sides, each a door or none (a
+     * click on a side adds one as high as the building, or takes it away), and each door's height in levels. Shown for
+     * a building of the hangar class, and for any that has doors.
+     */
+    private void buildingDoors() {
+        int[] doors = megamek.common.board.HexAppearance.doors(snapshot.appearance());
+        var buildingClass = snapshot.property("bldg_class");
+        int mask = 0;
+        for (int side = 0; side < 6; side++) { if (doors[side] > 0) { mask |= 1 << side; } }
+        if (mask == 0 && (buildingClass == null || buildingClass.value() != megamek.common.units.IBuilding.HANGAR)) { return; }
+        var storeys = snapshot.property("bldg_elev");
+        int height = storeys == null ? 1 : Math.max(1, storeys.value());
+        heading(UiKit.text("BoardEditor.doors"));
+        UiHexSides sides = new UiHexSides(ui, mask, side -> send(Action.BUILDING_DOOR, Integer.toString(side),
+              Integer.toString(doors[side] > 0 ? 0 : height)));
+        sides.setName("editor-building-doors");
+        ui.tip(sides).getActor().setText(UiKit.text("BoardEditor.doors.tooltip"));
+        detail.add(sides).row();
+        for (int side = 0; side < 6; side++) {
+            if (doors[side] > 0) {
+                number(UiKit.text("BoardEditor.doorHeight", UiKit.text("BoardEditor.doorSide." + side)), Math.min(doors[side], height),
+                      1, height, 1, Action.BUILDING_DOOR, Integer.toString(side));
+            }
+        }
     }
 
     private static String edgesKey(megamek.common.board.HexAppearance.Edges edges) {

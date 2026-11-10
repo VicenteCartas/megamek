@@ -52,7 +52,13 @@ final class ConnectedKit {
     private static final Pattern NODE = Pattern.compile(
           ".*-(base|floor|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)(-bend|-cap|-closed-[1-9][0-9]*|-notch-[1-9][0-9]*)?");
     private static final Pattern TAG = Pattern.compile("-(link|end)-(" + DIRECTION + ")");
-    private static final Pattern JUNCTION = Pattern.compile(".*-(junction-[0-9]+|fill|aol(-[0-5])?)");
+    private static final Pattern JUNCTION = Pattern.compile(".*-(junction-[0-9]+|fill|crown|aol(-[0-5])?)");
+    /**
+     * In {@link #junctions}' roof row: the corner lies inside the building, where this hex and both hexes round it
+     * stand to this roof's height and all connect. A roof corner piece linked both ways then draws as its
+     * {@code -crown} twin where the kit holds one (BayKit's vault keeps its crown there, in place of a valley).
+     */
+    static final int CROWN = 1 << KitOutline.Junction.values().length;
 
     /** How many levels a hex stands, about 40 metres, before its roofs carry aviation lights ({@code aol} nodes). */
     static final int LIT_LEVELS = 7;
@@ -90,10 +96,13 @@ final class ConnectedKit {
      * A kit file's levels of detail and pieces, read and checked once and shared by terrain workers. {@code pieces}: the
      * near level's; {@code parts}: each level of detail's ({@link #parts}). {@code grounds}: per level of detail, each
      * role's lowest point over its core and all its tagged pieces, the height it stands on (a generated bays kit's roofs
-     * stand at their 0 instead: GeneratedKit#seated).
+     * stand at their 0 instead: GeneratedKit#seated). {@code doors}: what a generated kit's large doors need of it
+     * ({@link KitDoors}); null for a kit read from a GLB, which has none.
      */
     record Kit(List<RigidGlb.Data> lods, List<Piece> pieces, List<List<Piece>> parts, Map<String, String> roles,
-          boolean symmetric, List<Map<String, Float>> grounds) { }
+          boolean symmetric, List<Map<String, Float>> grounds, KitDoors.Frame doors) {
+        Kit withDoors(KitDoors.Frame doors) { return new Kit(lods, pieces, parts, roles, symmetric, grounds, doors); }
+    }
 
     /** Validate every node name before any assembly; a kit without tags has one core piece per role. */
     static List<Piece> parts(ModelData data) {
@@ -235,7 +244,7 @@ final class ConnectedKit {
             });
             grounds.add(Map.copyOf(ground));
         }
-        return new Kit(data, pieces, parts, Map.copyOf(roles), symmetric, List.copyOf(grounds));
+        return new Kit(data, pieces, parts, Map.copyOf(roles), symmetric, List.copyOf(grounds), null);
     }
 
     private static Set<String> signature(List<Piece> pieces) {
@@ -357,6 +366,9 @@ final class ConnectedKit {
         for (int corner = 0; height > 0 && corner < 6; corner++) {
             if (corners[corner] == height && corners[(corner + 1) % 6] == height) {
                 result[height * 6 + corner] = result[(height - 1) * 6 + corner] & NOTCHES;
+            }
+            if (reach[corner] >= height && reach[(corner + 1) % 6] >= height && corners[6 + corner] >= height) {
+                result[height * 6 + corner] |= CROWN;
             }
         }
         return result;
@@ -601,9 +613,18 @@ final class ConnectedKit {
                           ? 0 : turn(notches(junctions, level), -turn - steps)
                           & notchable.getOrDefault(role, Map.of()).getOrDefault(piece.identity(), 0);
                     if (notch != 0) { piece = notched.get(role).getOrDefault(piece.identity() | (long) notch << 20, piece); }
-                    if (piece != null && node(source, piece.node()).parts.length > 0) {
-                        result.add(new Placement(piece.node(), role, level, placement(level * GpuBuilding.LEVEL_HEIGHT
-                              - ground.get(role), turn + steps), piece.node() + "@" + turn + "/" + role + "-at-" + level + "/"));
+                    // The top roof's corner inside the building: its crown twin (board corner b at its own b - steps - turn).
+                    String drawn = piece == null ? null : piece.node();
+                    if (junctions != null && piece != null && level == height && role.startsWith("roof") && piece.closed() == 0
+                          && piece.ends() == 0 && Integer.bitCount(piece.links()) == 2 && ids.contains(drawn + "-crown")) {
+                        for (int corner = 0; corner < 6; corner++) {
+                            if (piece.links() == (1 << corner | 1 << (corner + 1) % 6)
+                                  && (junctions[height * 6 + (corner + turn + steps) % 6] & CROWN) != 0) { drawn += "-crown"; }
+                        }
+                    }
+                    if (piece != null && node(source, drawn).parts.length > 0) {
+                        result.add(new Placement(drawn, role, level, placement(level * GpuBuilding.LEVEL_HEIGHT
+                              - ground.get(role), turn + steps), drawn + "@" + turn + "/" + role + "-at-" + level + "/"));
                     }
                     // A tall enough hex's roof takes its aviation lights there (GeneratedKit#lights).
                     String lights = piece == null ? null : piece.node() + "-aol";

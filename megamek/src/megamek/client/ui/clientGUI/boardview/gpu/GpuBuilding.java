@@ -44,19 +44,22 @@ final class GpuBuilding implements Disposable {
 
     static final float LEVEL_HEIGHT = BoardGeometry.MODEL_LEVEL_HEIGHT;
     private final ConnectedKit.Kit kit;
+    private final Function<ModelData, Model> upload;
     private final List<Model> models = new ArrayList<>();
     /** Each level's kit data, which its fragments are cut from ({@link KitFragments}). */
     private final List<RigidGlb.Data> data;
     /** Each level a scene drew, broken into fragments on the kit cutter's thread ({@link #cutFragments}). */
     private final Map<Model, java.util.concurrent.CompletableFuture<KitFragments>> fragments = new java.util.IdentityHashMap<>();
     private final Map<Recipe, Assembly> assemblies = new HashMap<>();
-    // Whether the kit holds junctions or notch twins where its walls meet the neighbours' at a corner
-    // (ConnectedKit#junctions).
+    // Whether the kit holds junctions or notch twins where its walls meet the neighbours' at a corner, or crown twins
+    // for its roofs' corners inside a building (ConnectedKit#junctions).
     private boolean junctions;
     // Per piece in its authored frame: near for picking and roof outlines, far for wall sections.
     private final Map<String, List<Vector3>> triangles = new HashMap<>();
     private final Map<String, List<Vector3>> farTriangles = new HashMap<>();
     private final Map<String, BoundingBox> bounds = new HashMap<>();
+    // Per roof piece in its authored frame: its own surface (Assembly#roof); filled on the render thread as asked for.
+    private final Map<String, List<Vector3>> decks = new HashMap<>();
     // Per piece and slab height in its authored frame: its wall faces beside a floor slab there (faces).
     private final Map<String, Faces> faces = new HashMap<>();
     // Per piece in its authored frame: its floor cap (cap).
@@ -70,16 +73,31 @@ final class GpuBuilding implements Disposable {
     private final Map<Assembly, BoundingBox> instanceBounds = new java.util.IdentityHashMap<>();
 
     private record Interior(List<List<Vector3>> footprints, int floors) { }
-    /** {@code junctions}: {@link ConnectedKit#junctions} where the kit holds them, else empty. */
+    /**
+     * {@code junctions}: {@link ConnectedKit#junctions} where the kit holds them, else empty. {@code doors}: the hex's
+     * large doors ({@link KitDoors#cuts}).
+     */
     record Recipe(List<String> modules, List<Integer> reach, BuildingInteriors interiors, boolean stepped,
-          List<Integer> junctions) { }
+          List<Integer> junctions, List<KitDoors.Cut> doors) { }
 
-    /** No expanded Model is cached: each level of detail places the shared kit's nodes ({@link #instance}). */
-    record Assembly(Recipe recipe, List<ConnectedKit.Placement> near, Model interior, GpuBuilding kit) {
+    /**
+     * No expanded Model is cached: each level of detail places the shared kit's nodes ({@link #instance}). A hex with
+     * doors is the exception: its pieces are cut open, so it owns a model per level ({@code doored}, else null).
+     */
+    record Assembly(Recipe recipe, List<ConnectedKit.Placement> near, Model interior, GpuBuilding kit, List<Model> doored) {
         int lodCount() { return kit.models.size(); }
-        Model model(int lod) { return kit.models.get(lod); }
-        ModelInstance instance(int lod) { return kit.instance(lod == 0 ? near : kit.placements(recipe, lod), lod); }
-        boolean hit(Ray ray, Vector3 result) { return kit.hit(near, ray, result); }
+        Model model(int lod) { return doored == null ? kit.models.get(lod) : doored.get(lod); }
+        ModelInstance instance(int lod) {
+            return doored != null ? new ModelInstance(doored.get(lod)) : kit.instance(lod == 0 ? near : kit.placements(recipe, lod), lod);
+        }
+        boolean hit(Ray ray, Vector3 result) { return kit.hit(near, ray, result, false); }
+
+        /**
+         * Where {@code ray}, in the assembly's frame, meets its roofs' own surface ({@link GeneratedMesh#ROOF_DECK}):
+         * what a unit on the roof stands on, whatever parapets, fittings and lights stand there. False for a kit that
+         * marks none.
+         */
+        boolean roof(Ray ray, Vector3 result) { return kit.hit(near, ray, result, true); }
 
         /** A copy of the near instance's box in its own frame, scanned from {@code instance} once per assembly. */
         BoundingBox bounds(ModelInstance instance) {
@@ -89,6 +107,7 @@ final class GpuBuilding implements Disposable {
 
     GpuBuilding(ConnectedKit.Kit kit, Function<ModelData, Model> upload) {
         this.kit = kit;
+        this.upload = upload;
         data = lods(kit.lods());
         try {
             for (int lod = 0; lod < data.size(); lod++) {
@@ -100,7 +119,7 @@ final class GpuBuilding implements Disposable {
             for (Node node : models.getFirst().nodes) {
                 triangles.put(node.id, GpuTerrain.triangles(List.of(node), part -> !part.material.id.endsWith(GeneratedMesh.BUILDING_FLOOR)));
                 bounds.put(node.id, node.calculateBoundingBox(new BoundingBox()));
-                junctions |= node.id.contains("-junction-") || node.id.contains("-notch-");
+                junctions |= node.id.contains("-junction-") || node.id.contains("-notch-") || node.id.endsWith("-crown");
             }
         } catch (RuntimeException | Error error) {
             dispose();
@@ -169,22 +188,46 @@ final class GpuBuilding implements Disposable {
 
     /** {@code corners}: {@link ConnectedKit#corners}, or null for none of its walls' junctions with the neighbours'. */
     Assembly assemble(int levels, int[] reach, long seed, BuildingInteriors policy, boolean stepped, int[] corners) {
+        return assemble(levels, reach, seed, policy, stepped, corners, List.of());
+    }
+
+    /** {@code doors}: the hex's large doors ({@link KitDoors#cuts}), which only a generated kit draws. */
+    Assembly assemble(int levels, int[] reach, long seed, BuildingInteriors policy, boolean stepped, int[] corners,
+          List<KitDoors.Cut> doors) {
         // Pieces stand by the ground's connections where the kit caps the links above ({@link ConnectedKit#placements}).
         boolean capped = ConnectedKit.capped(kit, stepped);
         List<Integer> junctions = corners == null || !this.junctions ? List.of()
               : Arrays.stream(ConnectedKit.junctions(levels, reach, corners, capped)).boxed().toList();
         var recipe = new Recipe(select(kit.roles(), levels, seed), Arrays.stream(reach).boxed().toList(), policy, stepped,
-              junctions);
+              junctions, kit.doors() == null ? List.of() : doors);
         return assemblies.computeIfAbsent(recipe, key -> {
             var near = placements(key, 0);
-            if (policy == BuildingInteriors.NO) { return new Assembly(key, near, null, this); }
+            List<Model> doored = key.doors().isEmpty() ? null : doored(key, near);
+            if (policy == BuildingInteriors.NO) { return new Assembly(key, near, null, this, doored); }
             var storeys = volumes(key, near);
             int floors = policy == BuildingInteriors.NO_FLOORS ? 1 : levels;
             var footprints = storeys.stream().map(GpuBuildingInterior.Storey::triangles).toList();
             Model interior = interiors.computeIfAbsent(new Interior(footprints, floors),
                   ignored -> GpuBuildingInterior.buildStoreys(storeys, LEVEL_HEIGHT, floors));
-            return new Assembly(key, near, interior, this);
+            return new Assembly(key, near, interior, this, doored);
         });
+    }
+
+    /** A hex's own model per level of detail, its kit pieces cut open over its doors, with the doors ({@link KitDoors#model}). */
+    private List<Model> doored(Recipe recipe, List<ConnectedKit.Placement> near) {
+        List<Model> result = new ArrayList<>();
+        try {
+            for (int lod = 0; lod < data.size(); lod++) {
+                // A level the kit repeats is one model here too.
+                int previous = data.indexOf(data.get(lod));
+                result.add(previous < lod ? result.get(previous) : upload.apply(KitDoors.model(kit, lod,
+                      lod == 0 ? near : placements(recipe, lod), recipe.doors(), kit.lods().getFirst().id + "-doored-lod" + lod)));
+            }
+        } catch (RuntimeException | Error error) {
+            result.stream().distinct().forEach(Model::dispose);
+            throw error;
+        }
+        return List.copyOf(result);
     }
 
     private List<ConnectedKit.Placement> placements(Recipe recipe, int lod) {
@@ -345,7 +388,11 @@ final class GpuBuilding implements Disposable {
 
     /** Keep only assemblies used by installed/cached chunks, at the scene commit boundary on the GL thread. */
     void retain(Set<Assembly> live) {
-        assemblies.values().removeIf(assembly -> !live.contains(assembly));
+        assemblies.values().removeIf(assembly -> {
+            if (live.contains(assembly)) { return false; }
+            if (assembly.doored() != null) { assembly.doored().stream().distinct().forEach(Model::dispose); }
+            return true;
+        });
         instanceBounds.keySet().removeIf(assembly -> !live.contains(assembly));
         Set<Model> needed = new java.util.HashSet<>();
         assemblies.values().forEach(assembly -> needed.add(assembly.interior()));
@@ -356,8 +403,11 @@ final class GpuBuilding implements Disposable {
         });
     }
 
-    /** Picking borrows one triangle set per piece, never expands every floor of every random combination. */
-    private boolean hit(List<ConnectedKit.Placement> pieces, Ray ray, Vector3 result) {
+    /**
+     * Picking borrows one triangle set per piece, never expands every floor of every random combination. {@code deck}:
+     * only the roofs' own surface.
+     */
+    private boolean hit(List<ConnectedKit.Placement> pieces, Ray ray, Vector3 result, boolean deck) {
         float nearest = Float.POSITIVE_INFINITY;
         Vector3 point = new Vector3();
         Ray local = new Ray();
@@ -366,7 +416,10 @@ final class GpuBuilding implements Disposable {
             inverse.set(piece.matrix()).inv();
             local.origin.set(ray.origin).mul(inverse);
             local.direction.set(ray.direction).rot(inverse);
-            var shape = triangles.get(piece.node());
+            if (deck && !piece.role().startsWith("roof")) { continue; }
+            var shape = !deck ? triangles.get(piece.node()) : decks.computeIfAbsent(piece.node(),
+                  node -> GpuTerrain.triangles(List.of(models.getFirst().getNode(node)),
+                        part -> part.material.id.contains(GeneratedMesh.ROOF_DECK)));
             if (!shape.isEmpty() && Intersector.intersectRayBoundsFast(local, bounds.get(piece.node()))
                   && Intersector.intersectRayTriangles(local, shape, point)) {
                 point.mul(piece.matrix());
@@ -435,8 +488,11 @@ final class GpuBuilding implements Disposable {
         interiors.clear();
         models.stream().distinct().forEach(Model::dispose);
         models.clear();
+        assemblies.values().stream().filter(assembly -> assembly.doored() != null)
+              .forEach(assembly -> assembly.doored().stream().distinct().forEach(Model::dispose));
         assemblies.clear();
         triangles.clear();
+        decks.clear();
         farTriangles.clear();
         bounds.clear();
     }

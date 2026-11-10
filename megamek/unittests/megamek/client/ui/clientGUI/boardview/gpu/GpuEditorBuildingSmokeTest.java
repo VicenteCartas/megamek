@@ -42,7 +42,7 @@ class GpuEditorBuildingSmokeTest {
             editor.command(new Command(Action.SELECT_AT, at.getX() + "," + at.getY(), ""), null);
             editor.command(new Command(Action.COMPONENT, "building"), null);
             assertNull(HexAppearance.kitVariant(editor.snapshot().appearance()));
-            assertEquals(2, editor.snapshot().kitVariants().size());
+            assertEquals(3, editor.snapshot().kitVariants().size());
             return new GpuMapSource(editor.game(), null, editor);
         });
         SwingUtilities.invokeAndWait(setup);

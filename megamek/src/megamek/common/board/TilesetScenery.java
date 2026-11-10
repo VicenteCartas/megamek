@@ -285,6 +285,20 @@ public final class TilesetScenery {
         return name != null && kitVariants(asset).indexOf(name) > 0 ? asset + "@" + name : asset;
     }
 
+    /** The variant a kit names for its hangars: a hall, without the rooms its other variants show. */
+    private static final String HANGAR_VARIANT = "hangar";
+
+    /**
+     * The variant a building of {@code buildingClass} draws of a kit that lists {@code names}: its {@code stored} one
+     * where the kit lists it; else, for a hangar, the kit's {@code hangar} variant where it has one; else the first
+     * (null where the kit lists none).
+     */
+    public static String drawnVariant(String stored, List<String> names, int buildingClass) {
+        if (stored != null && names.contains(stored)) { return stored; }
+        if (buildingClass == IBuilding.HANGAR && names.contains(HANGAR_VARIANT)) { return HANGAR_VARIANT; }
+        return names.isEmpty() ? null : names.getFirst();
+    }
+
     /** A generated kit's spec, read for its variants' names while the file is unchanged ({@link #kitVariants}). */
     private record Variants(long modified, long length, List<String> names) { }
 
@@ -410,8 +424,11 @@ public final class TilesetScenery {
             }
         }
         if (connected && singleHexBuilding(models.get(Terrains.BUILDING))) { models.put(Terrains.BUILDING, generic); }
-        models.computeIfPresent(Terrains.BUILDING, (terrain, asset) -> kitVariant(footprint(asset,
-              HexAppearance.footprint(hex.getAppearance())), HexAppearance.kitVariant(hex.getAppearance())));
+        models.computeIfPresent(Terrains.BUILDING, (terrain, asset) -> {
+            String kit = footprint(asset, HexAppearance.footprint(hex.getAppearance()));
+            return kitVariant(kit, drawnVariant(HexAppearance.kitVariant(hex.getAppearance()), kitVariants(kit),
+                  hex.terrainLevel(Terrains.BLDG_CLASS)));
+        });
         // Walls are a supported building type without legacy building art. The renderer generates their solid mesh.
         if (hex.terrainLevel(Terrains.BUILDING) == megamek.common.enums.BuildingType.WALL.getTypeValue()) {
             models.putIfAbsent(Terrains.BUILDING, "buildings/wall-" + (hex.getTerrain(Terrains.BUILDING).getExits() & 63));

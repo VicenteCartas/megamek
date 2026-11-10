@@ -56,11 +56,23 @@ final class GeneratedKit {
                       new File(Configuration.dataDir(), "models").toPath());
                 String name = spec.getName().replaceFirst("\\.json$", "");
                 String style = chosen.path("style").asText();
-                var kit = ConnectedKit.load(List.copyOf(switch (style) {
-                    case "habitat" -> HabitatKit.lods(JSON.treeToValue(chosen, HabitatKit.Spec.class), modelled, square, name, footprintScale);
-                    case "bays" -> BayKit.lods(JSON.treeToValue(chosen, BayKit.Spec.class), modelled, square, name, footprintScale);
+                KitDoors.Frame doors;
+                List<RigidGlb.Data> lods;
+                switch (style) {
+                    case "habitat" -> {
+                        var habitat = JSON.treeToValue(chosen, HabitatKit.Spec.class);
+                        lods = HabitatKit.lods(habitat, modelled, square, name, footprintScale);
+                        doors = doors(habitat.door(), square, habitat.lone().bandEnd(), footprintScale, habitat.cornerRadius(),
+                              habitat.cornerSegments(), modelled);
+                    }
+                    case "bays" -> {
+                        var bays = JSON.treeToValue(chosen, BayKit.Spec.class);
+                        lods = BayKit.lods(bays, modelled, square, name, footprintScale);
+                        doors = doors(bays.door(), square, bays.bandEnd(), footprintScale, bays.cornerRadius(), bays.cornerSegments(), modelled);
+                    }
                     default -> throw new IllegalArgumentException("a variant's style is habitat or bays, not " + style);
-                }));
+                }
+                var kit = ConnectedKit.load(List.copyOf(lods)).withDoors(doors);
                 return style.equals("bays") ? seated(kit) : kit;
             } catch (IOException | RuntimeException failure) {
                 throw new IllegalArgumentException("Cannot read building kit " + spec + ": " + failure.getMessage(), failure);
@@ -80,7 +92,14 @@ final class GeneratedKit {
             seated.replaceAll((role, z) -> role.startsWith("roof") ? z - near.get(role) : z);
             return Map.copyOf(seated);
         }).toList();
-        return new ConnectedKit.Kit(kit.lods(), kit.pieces(), kit.parts(), kit.roles(), kit.symmetric(), grounds);
+        return new ConnectedKit.Kit(kit.lods(), kit.pieces(), kit.parts(), kit.roles(), kit.symmetric(), grounds, kit.doors());
+    }
+
+    /** What the kit's doors need of it ({@link KitDoors.Frame}): its footprint and its variant's door, or the plain one. */
+    private static KitDoors.Frame doors(KitDoors.Style door, boolean square, double bandEnd, float footprintScale, double cornerRadius,
+          int cornerSegments, List<ModelData> modelled) {
+        return new KitDoors.Frame(square, bandEnd, footprintScale, cornerRadius, cornerSegments,
+              door == null ? KitDoors.Style.DEFAULT : door.resolved(), modelled);
     }
 
     /** The spec's variant named {@code name}, else its first; their names distinct, each a valid appearance key. */
@@ -185,27 +204,33 @@ final class GeneratedKit {
                 nodes.put(kit + "-lod" + lod + "-aol-" + side, light);
             }
             var generated = GeneratedMesh.kit(kit + "-lod" + lod, nodes, boardUVs);
-            // Each piece material keeps its finish and alpha mode, as an authored GLB's do: the kit draws it under the
-            // same id (GeneratedMesh#piece), a cutout alpha tested rather than blended as its board material's .tres says;
-            // the aviation light's too, where the kit stands them (lights).
-            List<RigidGlb.Data> sources = new ArrayList<>(List.of((RigidGlb.Data) modelled.get(lod)));
-            if (deck != null) { sources.add((RigidGlb.Data) aviationLight().getFirst()); }
-            for (var source : sources) {
-                source.surfaces.forEach((id, surface) -> {
-                    if (surface.board() == null || !generated.surfaces.containsKey(id)) { return; }
-                    if (source.buildingPaint.contains(id)) { generated.buildingPaint.add(id); }
-                    if (source.emissions.containsKey(id)) { generated.emissions.put(id, source.emissions.get(id)); }
-                    if (source.ownGlows.containsKey(id)) { RigidGlb.ownGlow(generated, id, source.ownGlows.get(id)); }
-                    if (source.alphaTests.containsKey(id)) {
-                        generated.alphaTests.put(id, source.alphaTests.get(id));
-                        generated.blends.remove(id);
-                    }
-                    if (source.fades.contains(id)) { generated.fades.add(id); }
-                });
-            }
+            finishes(generated, modelled, lod, deck != null);
             result.add(generated);
         }
         return result;
+    }
+
+    /**
+     * Gives {@code generated}'s piece materials their finish and alpha mode, as an authored GLB's have them: the kit
+     * draws each under the id its pieces GLB gives it ({@link GeneratedMesh#piece}), a cutout alpha tested rather than
+     * blended as its board material's .tres says; with {@code lights}, the aviation light's too ({@link #lights}).
+     */
+    static void finishes(RigidGlb.Data generated, List<ModelData> modelled, int lod, boolean lights) {
+        List<RigidGlb.Data> sources = new ArrayList<>(List.of((RigidGlb.Data) modelled.get(Math.min(lod, modelled.size() - 1))));
+        if (lights) { sources.add((RigidGlb.Data) aviationLight().getFirst()); }
+        for (var source : sources) {
+            source.surfaces.forEach((id, surface) -> {
+                if (surface.board() == null || !generated.surfaces.containsKey(id)) { return; }
+                if (source.buildingPaint.contains(id)) { generated.buildingPaint.add(id); }
+                if (source.emissions.containsKey(id)) { generated.emissions.put(id, source.emissions.get(id)); }
+                if (source.ownGlows.containsKey(id)) { RigidGlb.ownGlow(generated, id, source.ownGlows.get(id)); }
+                if (source.alphaTests.containsKey(id)) {
+                    generated.alphaTests.put(id, source.alphaTests.get(id));
+                    generated.blends.remove(id);
+                }
+                if (source.fades.contains(id)) { generated.fades.add(id); }
+            });
+        }
     }
 
     /** A modelled piece of the kit's pieces GLB at {@code lod}, {@link GeneratedMesh#piece}. */

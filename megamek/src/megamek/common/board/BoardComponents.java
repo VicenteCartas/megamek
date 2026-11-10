@@ -151,8 +151,17 @@ final class BoardComponents {
 
     private static void buildingAppearance(ObjectNode component, JsonNode appearances) {
         if (!component.has("appearance") && !appearances.has("footprint") && !appearances.has("kitVariant")
-              && !appearances.has("buildingProfile")) { return; }
+              && !appearances.has("buildingProfile") && !appearances.has("doors")) { return; }
         ObjectNode style = component.withObject("/appearance");
+        if (appearances.has("doors")) {
+            // Each door's height in levels by its hexside (HexAppearance#doors).
+            int[] heights = HexAppearance.doors(Map.of("doors",
+                  new HexAppearance(appearances.get("doors").path("variant").asText(), null, null, null)));
+            ObjectNode doors = style.putObject("doors");
+            for (int side = 0; side < 6; side++) {
+                if (heights[side] > 0) { doors.put(DIRECTIONS.get(side), heights[side]); }
+            }
+        }
         if (appearances.has("footprint")) {
             String footprint = appearances.get("footprint").path("variant").asText();
             style.put("footprint", footprint.substring("footprint/".length()));
@@ -232,6 +241,19 @@ final class BoardComponents {
         JsonNode footprint = style.remove("footprint");
         if (footprint != null && "square".equals(footprint.asText())) {
             appearances.putObject("footprint").put("variant", "footprint/square");
+        }
+        JsonNode doors = style.remove("doors");
+        if (doors != null) {
+            require(doors.isObject(), "building.appearance.doors must be an object of heights by direction");
+            int[] heights = new int[6];
+            doors.fields().forEachRemaining(door -> {
+                int side = DIRECTIONS.indexOf(door.getKey());
+                require(side >= 0, "Unknown direction in building.appearance.doors: " + door.getKey());
+                heights[side] = integer(door.getValue(), "building.appearance.doors." + door.getKey());
+                require(heights[side] >= 1, "building.appearance.doors." + door.getKey() + " must be at least one level");
+            });
+            HexAppearance stored = HexAppearance.ofDoors(heights);
+            if (stored != null) { appearances.putObject("doors").put("variant", stored.variant()); }
         }
         JsonNode variant = style.remove("kitVariant");
         if (variant != null) {

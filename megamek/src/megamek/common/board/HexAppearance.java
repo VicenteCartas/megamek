@@ -61,7 +61,7 @@ public record HexAppearance(String variant, String asset, String material, Doubl
     }
     public static final Set<String> OWNERS = Set.of("ground", "road", "building", "pavement", "fuelTank",
           "vegetation", "rough", "bridge", "bridgeRoad", "rail", "bridgeRail", "scorch", "footprint", "kitVariant", "buildingProfile",
-          "water", "fortification");
+          "water", "fortification", "doors");
     /** Per-hex upper storeys step back above shorter neighbours; absent means keep the ground footprint. */
     public static final HexAppearance STEPPED_BUILDING = new HexAppearance("building/stepped", null, null, null);
 
@@ -341,6 +341,41 @@ public record HexAppearance(String variant, String asset, String material, Doubl
     /** The appearance that stores the kit variant {@code name}; null for none. */
     public static HexAppearance ofKitVariant(String name) {
         return name == null ? null : new HexAppearance(name, null, null, null);
+    }
+
+    private static final String DOORS = "doors/";
+
+    /**
+     * A building hex's large doors (owner {@code "doors"}), as a hangar has them: each door's height in levels from the
+     * ground, by the hexside it stands on, clockwise from north; 0 for none. A door stands in the kit's wall towards
+     * its hexside; doors of one height side by side along a straight wall, in this hex or the next, are one wide door.
+     * Cosmetic for now, like the {@link Footprint}: the 3D views draw them; rules and the 2D views ignore them.
+     */
+    public static int[] doors(Map<String, HexAppearance> appearance) {
+        HexAppearance stored = appearance.get("doors");
+        int[] result = new int[6];
+        if (stored == null || stored.variant() == null || !stored.variant().startsWith(DOORS)) { return result; }
+        String[] heights = stored.variant().substring(DOORS.length()).split("-");
+        for (int side = 0; side < 6 && side < heights.length; side++) {
+            try {
+                result[side] = Math.max(0, Integer.parseInt(heights[side]));
+            } catch (NumberFormatException ignored) {
+                // A height that is no number is no door.
+            }
+        }
+        return result;
+    }
+
+    /** The appearance that stores the door {@code heights} of the six hexsides ({@link #doors}); null for none. */
+    public static HexAppearance ofDoors(int[] heights) {
+        StringBuilder variant = new StringBuilder(DOORS);
+        boolean any = false;
+        for (int side = 0; side < 6; side++) {
+            int height = Math.max(0, heights[side]);
+            any |= height > 0;
+            variant.append(side == 0 ? "" : "-").append(height);
+        }
+        return any ? new HexAppearance(variant.toString(), null, null, null) : null;
     }
 
     public static final HexAppearance EDGES_FITTED = new HexAppearance("pavement/fitted", null, null, null);

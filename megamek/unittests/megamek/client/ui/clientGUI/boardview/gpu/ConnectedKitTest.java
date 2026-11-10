@@ -226,8 +226,17 @@ class ConnectedKitTest {
         hexes[northEast.getY() * 7 + northEast.getX()].getTerrain(Terrains.BUILDING).setExits((1 << 4) | (1 << 5));
         scene = new BoardScene(0, 7, 7, BoardTiles.captureAll(new Board(7, 7, hexes)), List.of(), List.of(),
               Entity.NONE, "", List.of());
-        assertArrayEquals(new int[18], junctions(scene, north, 2));
-        assertArrayEquals(new int[18], junctions(scene, northEast, 2));
+        // No wall ends there; over that corner each one's roof keeps its crown: its corner 2 (north's), 4 and 0.
+        assertArrayEquals(crowned(2), junctions(scene, north, 2));
+        assertArrayEquals(crowned(4), junctions(scene, northEast, 2));
+        assertArrayEquals(crowned(0), junctions(scene, centre, 2));
+    }
+
+    /** The junctions of a two-level hex with none but its roof's corner {@code corner} inside the building. */
+    private static int[] crowned(int corner) {
+        int[] result = new int[18];
+        result[2 * 6 + corner] = ConnectedKit.CROWN;
+        return result;
     }
 
     @Test

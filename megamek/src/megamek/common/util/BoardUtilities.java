@@ -1787,6 +1787,17 @@ public class BoardUtilities {
                         appearance.put(owner, HexAppearance.withSeparated(appearance.get(owner), sides.getExits()));
                     }
                 }
+                // A building's large doors move to their sides' new places.
+                int[] doors = HexAppearance.doors(appearance);
+                int[] flipped = new int[6];
+                for (int side = 0; side < 6; side++) {
+                    if (doors[side] > 0) {
+                        Terrain door = new Terrain(Terrains.BUILDING, 1, true, 1 << side);
+                        door.flipExits(horiz, vert);
+                        flipped[Integer.numberOfTrailingZeros(door.getExits())] = doors[side];
+                    }
+                }
+                if (!java.util.Arrays.equals(doors, flipped)) { appearance.put("doors", HexAppearance.ofDoors(flipped)); }
                 if (!appearance.equals(hex.getAppearance())) { hex.setAppearance(appearance); }
                 int nx = horiz ? width - x - 1 : x, ny = vert ? height - y - 1 : y;
                 transformed[ny * width + nx] = hex;

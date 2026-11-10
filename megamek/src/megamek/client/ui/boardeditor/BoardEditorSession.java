@@ -123,6 +123,11 @@ public final class BoardEditorSession {
          */
         KIT_VARIANT,
         /**
+         * Gives the selected building hex a large door, as a hangar has them, on one hexside (target: the side, 0 north,
+         * clockwise; value: its height in levels, 0 for none; {@link HexAppearance#doors}).
+         */
+        BUILDING_DOOR,
+        /**
          * Changes the board, not a hex (target: "arena" with value true/false, "tag" or "untag" with a manual
          * tag, "autotags"); see {@link #boardSetting(String, String)}. Not an undo step: the control is its own undo.
          */
@@ -1021,6 +1026,20 @@ public final class BoardEditorSession {
                     for (Coords cell : structure(selected, Terrains.BUILDING)) {
                         change(cell, hex -> kitVariant(hex, command.value()));
                     }
+                    if (!continuousEdit) { finishStroke(); }
+                }
+                case BUILDING_DOOR -> {
+                    require(selected != null && board().getHex(selected).containsTerrain(Terrains.BUILDING),
+                          Messages.getString("BoardEditor.selectBuildingFirst"));
+                    int side = Integer.parseInt(command.target()), height = (int) Math.round(Double.parseDouble(command.value()));
+                    require(side >= 0 && side < 6 && height >= 0, "A door stands on one of the six hexsides.");
+                    require(height == 0 || !board().getHex(selected).containsTerrainExit(Terrains.BUILDING, side),
+                          Messages.getString("BoardEditor.doorNeedsWall"));
+                    edit(hex -> {
+                        int[] doors = HexAppearance.doors(hex.getAppearance());
+                        doors[side] = Math.min(height, Math.max(1, hex.terrainLevel(Terrains.BLDG_ELEV)));
+                        appearance(hex, "doors", HexAppearance.ofDoors(doors));
+                    });
                     if (!continuousEdit) { finishStroke(); }
                 }
                 case DESTROYED -> {
@@ -3745,7 +3764,7 @@ public final class BoardEditorSession {
         var appearance = new LinkedHashMap<>(hex.getAppearance());
         appearance.remove(definition.id());
         if (definition.id().equals("building")) {
-            appearance.keySet().removeAll(Set.of("footprint", "kitVariant", "buildingProfile"));
+            appearance.keySet().removeAll(Set.of("footprint", "kitVariant", "buildingProfile", "doors"));
             hex.setBuildingReference(null);
         }
         hex.setAppearance(appearance);
