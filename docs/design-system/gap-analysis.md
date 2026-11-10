@@ -320,20 +320,39 @@ Still open:
    - Big: Client Settings (`CommonSettingsDialog`, about 4,900 lines, several PRs; the lobby's gear and the map
      editor open it too).
    - Developer only: the conditions editor behind the Tuning utility (`PlanetaryConditionsDialog`).
-2. Live checks: a real MekHQ game, a network reconnect, a password-protected game and a second human player in a
+2. The developer tools that are still Swing windows of their own, outside the allowlist because they are not
+   dialogs over the battle:
+   - The shader editor (`GpuShaderEditor`): a `JFrame` with its compiled GLSL window and a reload confirmation.
+   - The material palette (`GpuMaterialPalette`): a `JFrame`.
+3. Swing message boxes and choosers still shown by the native scenes:
+   - The map editor's and preview's Print: the file chooser (`GpuMapSource.choosePrintFile`) is Swing's, not
+     `SystemFileDialog`, and its failure is a Swing message box.
+   - The map editor's Run Board Tagger report (`GpuMapSource.runBoardTagger`).
+   - `GpuBoardWindow`'s "already open" and "the game waits for the editor" messages.
+   - The message boxes the battle keeps (`approvedMessageBoxes`): the exit's save question, the bug report and its
+     result, and the unit file version warnings for the game master's reinforcements, plus the modal
+     `PlayerListDialog` choosing the player to reinforce.
+   - The Legacy 2D window of the editor's 2D Preview and the preview's 2D Board (`GpuBoardWindow.boardWindow2D`): a
+     Swing `BoardView` with a Swing menu bar, Client Settings and `MMAboutDialog`. Kept by decision (see Native
+     window); listed so the menu's dialogs are not forgotten.
+
+   These stay Swing by design: the start screen's failure messages when the native window cannot open or fails
+   (`GpuStartWindow`), the error box `GpuErrorPresenter` falls back to while a native error already shows, and Swing's
+   file chooser as `SystemFileDialog`'s fallback.
+4. Live checks: a real MekHQ game, a network reconnect, a password-protected game and a second human player in a
    second MegaMek window. The system file dialog on macOS and Linux hasn't been tried on a real machine yet; step
    5.5 in the history lists what to try.
-3. A Swing modal that a dead client leaves open could still block the start screen. The prompt routing covers the
+5. A Swing modal that a dead client leaves open could still block the start screen. The prompt routing covers the
    questions found so far.
-4. Step 7: a settings check across the startup path. The lobby's part (L14) is done.
-5. To propose to the MegaMek team: a **Load anyway** for saves from another version.
-6. Each Swing dialog the lobby stopped using stays while MekHQ, MegaMekLab or the in-game screens still open it;
+6. Step 7: a settings check across the startup path. The lobby's part (L14) is done.
+7. To propose to the MegaMek team: a **Load anyway** for saves from another version.
+8. Each Swing dialog the lobby stopped using stays while MekHQ, MegaMekLab or the in-game screens still open it;
    retire it once its last user moves.
-7. Accessibility in libGDX: a spike on how a screen reader can follow the game, since a libGDX window shows it
+9. Accessibility in libGDX: a spike on how a screen reader can follow the game, since a libGDX window shows it
    nothing. The Swing accessibility window, a text log with typed commands that was never finished, is deleted;
    `EntityAction.toAccessibilityDescription` is kept for this.
-8. If the developers accept the system, move hud-v3 onto the tokens and the new libGDX controls (including the
-   `UiTheme` rename pass). Until then, hud-v3 code does not change.
+10. If the developers accept the system, move hud-v3 onto the tokens and the new libGDX controls (including the
+    `UiTheme` rename pass). Until then, hud-v3 code does not change.
 
 ## Review probes
 
