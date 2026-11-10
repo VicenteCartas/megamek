@@ -86,6 +86,7 @@ class GpuCommandDockSmokeTest {
     private static final int ENEMY_LOCUST = 10;
     private static final String DONE = GpuBoardActions.DONE_ID;
     private static final String SKIP = GpuBoardActions.SKIP_ID;
+    private static final String GET_UP = "moveGetUp";
     private static final String REROLL = "reportRerollInitiative";
     /** The hint line's gap above the dock, and its height (one 11-unit line). */
     private static final float HINT_GAP = 12;
@@ -288,6 +289,24 @@ class GpuCommandDockSmokeTest {
             show(hud, dock, skipHidden);
             clickAndShow(hud, dock, skipHidden, "dock-secondary");
             assertEquals(List.of(DONE), ran);
+
+            // A unit down stands first: Stand up leads the modes in Jump's place, runs MegaMek's Get Up and leaves
+            // More. Standing, Jump returns and Get Up waits among More's unavailable commands.
+            ran.clear();
+            Shot down = withGetUp(movement(GpuMovePlan.Snapshot.EMPTY, ATLAS), true);
+            show(hud, dock, down);
+            hud.capture("g6-stand-up").dispose();
+            assertNotNull(dock.find("dock-stand-up"));
+            assertNull(dock.find("dock-mode-jump"));
+            assertNotNull(dock.find("dock-mode-walk"));
+            assertTrue(dock.dock().more().items().stream().noneMatch(command -> command.id().equals(GET_UP)));
+            clickAndShow(hud, dock, down, "dock-stand-up");
+            assertEquals(List.of(GET_UP), ran);
+            Shot standing = withGetUp(movement(GpuMovePlan.Snapshot.EMPTY, ATLAS), false);
+            show(hud, dock, standing);
+            assertNull(dock.find("dock-stand-up"));
+            assertNotNull(dock.find("dock-mode-jump"));
+            assertTrue(dock.dock().more().commands().stream().anyMatch(command -> command.id().equals(GET_UP)));
 
             // Weapons (H3, H7): the orders' count and the own units left to declare.
             ran.clear();
@@ -1254,6 +1273,13 @@ class GpuCommandDockSmokeTest {
               command("moveTurn", "Turn", true), command("moveGoProne", "Go Prone", true),
               command("moveHullDown", "Hull Down", false), command(DONE, "Done", true), command(SKIP, "Skip", true),
               command(GpuBoardActions.CLEAR_ID, "Clear", true));
+    }
+
+    /** The shot with MegaMek's Get Up, available while the unit, or its plan's end, is down. */
+    private Shot withGetUp(Shot shot, boolean down) {
+        List<BoardScene.Command> commands = new ArrayList<>(shot.commands());
+        commands.add(command(GET_UP, "Get Up", down));
+        return new Shot(shot.status(), shot.panels(), commands);
     }
 
     private BoardScene.Command command(String id, String label, boolean enabled) {
