@@ -76,9 +76,12 @@ public final class UiTheme implements Disposable {
     public static final Color TRACK = new Color(1, 1, 1, .1f);
 
     public static final String ROBOTO = "Roboto/Roboto-VariableFont_wdth,wght.ttf";
+    /** Roboto's italics; its named instances are numbered as the upright face's. */
+    public static final String ROBOTO_ITALIC = "Roboto/Roboto-Italic-VariableFont_wdth,wght.ttf";
     // FreeType's 1-based named instances of the shipped variable Roboto, in its fvar order.
     public static final int REGULAR = 4;
     public static final int MEDIUM = 5;
+    public static final int BOLD = 7;
     public static final int CONDENSED_MEDIUM = 14;
     public static final int CONDENSED_SEMIBOLD = 15;
     public static final int CONDENSED_BOLD = 16;
@@ -2176,6 +2179,32 @@ public final class UiTheme implements Disposable {
      */
     public BitmapFont font(String name, String path, float size, float border) {
         return font(name, path, 0, size, 0, border, null);
+    }
+
+    /**
+     * The faces of {@link UiRichText} body text at {@code size} stage units in {@code color}, with links in
+     * {@code link}: Roboto regular, bold, italic and bold italic, and bold headings a step up the scale. They are made
+     * on first use and kept for the theme's life, so every view asking for the same size and colors shares them.
+     */
+    public UiRichText.Style richText(float size, Color color, Color link) {
+        String prefix = String.format(Locale.ROOT, "rich-%.1f-", size);
+        String key = prefix + color + "-" + link;
+        if (skin.has(key, UiRichText.Style.class)) {
+            return skin.get(key, UiRichText.Style.class);
+        }
+        BitmapFont[] headings = new BitmapFont[UiRichText.Style.HEADING_SCALES.length];
+        for (int i = 0; i < headings.length; i++) {
+            headings[i] = richFont(prefix + "h" + (i + 1), ROBOTO, BOLD, size * UiRichText.Style.HEADING_SCALES[i]);
+        }
+        UiRichText.Style style = new UiRichText.Style(richFont(prefix + "regular", ROBOTO, REGULAR, size),
+              richFont(prefix + "bold", ROBOTO, BOLD, size), richFont(prefix + "italic", ROBOTO_ITALIC, REGULAR, size),
+              richFont(prefix + "bold-italic", ROBOTO_ITALIC, BOLD, size), headings, size, new Color(color),
+              new Color(link), new TextureRegion(skin.get("white", Texture.class)));
+        return add(key, style, UiRichText.Style.class);
+    }
+
+    private BitmapFont richFont(String name, String path, int instance, float size) {
+        return skin.has(name, BitmapFont.class) ? skin.getFont(name) : font(name, path, instance, size, 0, 0, null);
     }
 
     /** A board label font, with an optional outline, on padded, mipmapped and anisotropically filtered pages. */
