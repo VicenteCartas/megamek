@@ -11,7 +11,7 @@ uniform vec2 u_coverShare;
 uniform float u_coverHexWidth;
 uniform float u_levelHeight;
 uniform float u_metre;
-// 1 for a field's plant, 0 for grass; and how far up its sward a point stands.
+// 1 for a field's plant, 0 for grass, .25 for tundra's sward; and how far up its sward a point stands.
 out vec2 v_coverData;
 out vec2 v_coverRoot;
 
@@ -50,6 +50,11 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     float scar = max(groundScarCover(groundDamageAt(root.xy)), scorchedGrass(root.xy));
     if (scar > grassRandom(seed + 83u)) { return false; }
     int rimCode = int(fract(a_coverRoot.w) * 4096.0 + .5);
+    // A meadow's root has a whole rank. Earth tundra's sward marks its roots with half a rank more, and with their
+    // ground's slope (GpuGroundCover.swardCode): its rise per metre in eight steps of .2 and its uphill heading in sixteen.
+    bool sward = part == 0 && rimCode >= 2048;
+    vec2 slope = sward ? float(rimCode >> 4 & 7) * .2 * vec2(cos(float(rimCode & 15) * .3926991), sin(float(rimCode & 15) * .3926991))
+          : vec2(0.0);
     if (rim && rimCode >= 2048) {
         // The middle shoulder grows only the broken turf its ground draws (terrain-materials.glsl, cliffMaterial).
         vec3 metres = root / u_metre;
@@ -99,14 +104,26 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
         v_coverRoot = root.xy / u_worldMetre;
         return true;
     }
-    float meadow = wheat ? 1.0 : meadowCover(root.xy / u_worldMetre);
+    float meadow = wheat || sward ? 1.0 : meadowCover(root.xy / u_worldMetre);
     float t = samplePoint.y;
     float height = wheat ? u_levelHeight * CROP_HEIGHT * mix(.9, 1.06, variation)
           : u_coverHexWidth * mix(.025, GRASS_MAX_HEIGHT, variation) * mix(.55, 1.0, meadow);
-    height *= 1.0 - scar * .5;
     float width = wheat ? u_coverHexWidth * (t > WHEAT_EAR.x && t < WHEAT_EAR.y ? .0026 : .0009)
                 * mix(.85, 1.15, grassRandom(seed + 37u))
           : u_coverHexWidth * mix(.0015, .0028, grassRandom(seed + 37u)) * mix(.75, 1.0, meadow) * (1.0 - t);
+    vec3 stands = vec3(0.0);
+    if (sward) {
+        // Long blades that lie over: `height` is their length. The straw grows longest, the russet sedge shortest. A
+        // blade is a leaf, narrow at its root and widest below its middle, never narrower than two and a half pixels:
+        // from above the sward is its blades' upper halves, and hairlines would shimmer. Each blade belongs to one
+        // stand or the other, by its own chance.
+        stands = tundraSwardStands(root.xy / u_worldMetre);
+        stands.xy = smoothstep(-.3, .3, stands.xy - grassRandom(seed + 61u));
+        height = u_coverHexWidth * GRASS_MAX_HEIGHT * mix(.65, 1.25, variation) * mix(mix(1.0, .6, stands.x), .8, stands.y * (1.0 - stands.x));
+        width = max(u_coverHexWidth * mix(.0034, .0054, grassRandom(seed + 37u)), 1.25 * u_coverHexWidth / pixels)
+              * (.35 + .65 * smoothstep(0.0, .45, t)) * (1.0 - t * t * t);
+    }
+    height *= 1.0 - scar * .5;
     // Fractional growth of the last blade keeps density transitions continuous, without shading invisible blades.
     float growth = clamp(density - a_coverRoot.w, 0.0, 1.0) / widening;
     float gust = vegetationGust(root.xy);
@@ -122,6 +139,12 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     } else {
         vec3 rest = vec3(direction * (wheat ? mix(.02, .10, grassRandom(seed + 51u)) : mix(.25, .65, grassRandom(seed + 51u))),
               1.0);
+        // The sward lies over, combed one way by the prevailing wind, its tips a little above the ground.
+        if (sward) {
+            direction = normalize(direction * .75 + vec2(.84, -.54));
+            side = vec3(-direction.y, direction.x, 0.0);
+            rest = vec3(direction, mix(.2, .75, grassRandom(seed + 51u)));
+        }
         float alongWind = dot(rest.xy, u_wind.xy);
         vec3 acrossWind = rest - vec3(u_wind.xy * alongWind, 0.0);
         float acrossLength = length(acrossWind);
@@ -131,6 +154,8 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
               u_wind.z * (wheat ? .5 : 1.0));
         tip = height * (acrossWind * (cos(windAngle) / acrossLength) + vec3(u_wind.xy * sin(windAngle), 0.0));
         control = vec3(0.0, 0.0, height * (wheat ? .5 : .65));
+        // It leaves the ground at a slant and arches over.
+        if (sward) { control = height * vec3(direction * .18, .62); }
     }
     // A blast's wind flattens the blade away from ground zero as its front passes, and lets it spring back
     // (terrain-shocks.glsl).
@@ -143,14 +168,20 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     }
     vec3 curve = 2.0 * (1.0 - t) * t * control + t * t * tip;
     vec3 tangent = 2.0 * (1.0 - t) * control + 2.0 * t * (tip - control);
+    // The sward lies along its ground, and is lit as that ground is, each blade tilted a little its own way: lit by
+    // their own faces, the blades on a bank turned from the sun would stand out bright against it.
+    if (sward) { curve.z += dot(slope, curve.xy); }
     position = root + curve + side * samplePoint.x * width * growth;
-    normal = normalize(cross(side, tangent));
+    normal = sward ? normalize(vec3(-slope + .25 * vec2(cos(angle), sin(angle)), 1.0)) : normalize(cross(side, tangent));
     // A rim's blades hang half under the sward above them, in the meadow's darker tones.
     float tone = grassRandom(seed + 71u) * (rim ? .6 : 1.0);
     color = vec4(wheat ? (t > WHEAT_EAR.x ? cropHead(false, tone) : cropStalk(false, tone))
+          // The first blades to stand, far apart, keep to their thatch's colour: sunlit tips come with the full sward.
+          : sward ? tundraSwardColor(stands, mix(.55, .4 + .6 * smoothstep(0.0, .6, t),
+                smoothstep(GRASS_START_PIXELS, GRASS_FULL_PIXELS, pixels)), tone)
           : mix(toLinear(vec3(.24, .30, .10)), toLinear(vec3(.44, .48, .21)), tone), 1.0);
     color.rgb = mix(color.rgb, toLinear(vec3(.18, .14, .08)), scar * .75);
-    v_coverData = vec2(wheat ? 1.0 : 0.0, t);
+    v_coverData = vec2(wheat ? 1.0 : sward ? .25 : 0.0, t);
     v_coverRoot = root.xy / u_worldMetre;
     return true;
 }

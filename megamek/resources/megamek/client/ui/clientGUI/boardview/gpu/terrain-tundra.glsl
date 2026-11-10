@@ -18,6 +18,15 @@ float tundraWetness() {
     return hollow * .85 * (1.0 - .8 * dry);
 }
 
+// BoardBiome.sward: earth tundra's grass covers most of its carpet and leaves openings of lichen, moss and gravel some
+// metres across. The CPU plants the sward's roots by this field, and their ground takes its colour (tundraSurface).
+float tundraSward(vec2 metres) {
+    vec2 p = metres + 6.0 * (vec2(biomeNoise(metres / 19.0 + vec2(7.0, -3.0)),
+          biomeNoise(metres / 19.0 + vec2(-13.0, 5.0))) - .5);
+    float field = .65 * biomeNoise(p / 13.0 + vec2(3.0, 11.0)) + .35 * biomeNoise(p / 4.1 + vec2(-17.0, 23.0));
+    return smoothstep(.18, .50, field);
+}
+
 vec3 tundraFamily(float f) {
     if (abs(f - FUNGUS_FAMILY) < .5) return vec3(0.0, 1.0, 0.0);
     if (abs(f - MARS_FAMILY) < .5 || abs(f - LUNAR_FAMILY) < .5 || abs(f - VOLCANO_FAMILY) < .5) {
@@ -139,16 +148,30 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
             mappedCavity += mix(.55, 1.0, n.a) * kinds[i];
         }
     }
+    // Earth's carpets grow a sward (BoardBiome.sward). Where its blades root, the ground is their thatch: the sward's
+    // stands' colours over the grain of the theme's own ground (its colour against its mean, the bounce), so the sward
+    // keeps its look where the blades are too small to draw.
+    float sward = (kinds.x + kinds.w) * (1.0 - concrete);
+    if (sward > .0001) {
+        sward *= tundraSward(world.xy);
+        const vec3 LUMA = vec3(.2126, .7152, .0722);
+        float grain = clamp(dot(color, LUMA) / max(dot(bounce, LUMA), .001), .45, 1.7);
+        // The thatch is paler in its stands' colours than the blades standing over it.
+        vec3 stands = tundraSwardStands(world.xy) * vec3(.85, .85, 1.0);
+        treated = mix(treated, tundraSwardColor(stands, .55, .5) * mix(1.0, grain, .6), sward * .9);
+    }
     amount *= mix(1.0, concreteLichen / max(kinds.x + kinds.w, .0001), concrete);
     // The Snow theme retains quiet snow remnants, free of lichen speckling. Explicit SNOW wins at capture.
     float remnant = smoothstep(.55, .72, biomeNoise(world.xy / 8.0 + 29.0)) * snow;
     amount *= 1.0 - remnant;
+    // Under the sward the theme's ground keeps its own finish and relief.
+    float carpet = amount * (1.0 - .8 * sward);
     color = mix(color, treated, amount);
-    finish = mixFinish(finish, mappedFinish, amount);
+    finish = mixFinish(finish, mappedFinish, carpet);
     if (u_normalMaps > .5) {
-        normal = normalize(mix(normal, normalize(mappedNormal), amount));
-        cavity = mix(cavity, mappedCavity, amount);
+        normal = normalize(mix(normal, normalize(mappedNormal), carpet));
+        cavity = mix(cavity, mappedCavity, carpet);
     }
-    grass *= 1.0 - amount;
+    grass *= 1.0 - amount * (1.0 - sward);
     bounce = mix(bounce, treated * .25, amount);
 }

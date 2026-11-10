@@ -174,19 +174,17 @@ final class BoardScatter {
     }
 
     /**
-     * Earth tundra's grass tussocks, a couple of metres apart in loose clusters, clear of the unit at the centre. They
-     * stand as tall as the meadow's grass, well below the low woods, so they never read as cover; fungal mats, mineral
-     * crust and pavement lichen grow none.
+     * Earth tundra's grass tussocks, a couple of metres apart in loose clusters, clear of the unit at the centre, in
+     * the openings of its sward ({@link BoardBiome#sward}), whose blades stand as tall. They stand as tall as the
+     * meadow's grass, well below the low woods, so they never read as cover; fungal mats, mineral crust and pavement
+     * lichen grow none.
      */
     private static void tussocks(BoardScene.Surface surface, Coords coords, List<BoardScene.Feature> result) {
-        switch (surface) {
-            case FUNGUS, MARS, LUNAR, VOLCANO, CONCRETE -> { return; }
-            default -> { }
-        }
+        if (!BoardBiome.earthTundra(surface)) { return; }
         Random random = new Random(coords.getX() * 0x632BE59BD9B4E019L ^ coords.getY() * 0x85157AF5L ^ 0x7155L);
         float half = BoardGeometry.TILE_WIDTH / 2, scale = BoardGeometry.hexScale();
         float centreX = BoardGeometry.centerX(coords), centreY = BoardGeometry.centerY(coords);
-        float cluster = BoardGeometry.TILE_WIDTH / 6;
+        float cluster = BoardGeometry.TILE_WIDTH / 6, metre = BoardRelief.metres(1);
         // The tallest meadow blade's height, in levels.
         float levels = BoardGeometry.width() * GpuGroundCover.MAX_HEIGHT_FRACTION / BoardGeometry.level();
         List<float[]> placed = new ArrayList<>();
@@ -201,7 +199,7 @@ final class BoardScatter {
             if (chance > BoardRelief.smooth((BoardRelief.noise(worldX / cluster, worldY / cluster) - .45f) / .3f)) {
                 continue;
             }
-            boolean crowded = false;
+            boolean crowded = BoardBiome.sward((centreX + x * scale) / metre, (centreY + y * scale) / metre) > .5f;
             for (float[] other : placed) {
                 crowded |= Math.hypot(x - other[0], y - other[1]) < TUSSOCK_SPACING;
             }

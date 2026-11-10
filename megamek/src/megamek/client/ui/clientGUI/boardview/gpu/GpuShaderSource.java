@@ -225,6 +225,7 @@ final class GpuShaderSource {
             functions += read("terrain-materials.glsl");
             functions += read("scar-material.glsl");
             functions += read("terrain-damage.glsl");
+            functions += read("terrain-tundra-sward.glsl");
             functions += read("terrain-tundra.glsl");
             functions += read("terrain-biome.glsl");
         }

@@ -43,6 +43,27 @@ final class BoardBiome {
               + .30f * BoardRelief.noise(px / 2 + 19, py / 2 - 7) + .15f * BoardRelief.noise(px / .65f, py / .65f);
     }
 
+    /** Whether tundra over this ground is earth's: its carpets, tussocks and grass. Fungal mats and mineral crust grow none. */
+    static boolean earthTundra(BoardScene.Surface surface) {
+        return switch (surface) {
+            case FUNGUS, MARS, LUNAR, VOLCANO, CONCRETE -> false;
+            default -> true;
+        };
+    }
+
+    /**
+     * Earth tundra's grass sward at a point in metres, 0 to 1: it covers most of the carpet and leaves openings of
+     * lichen, moss and gravel some metres across. Same field as tundraSward in terrain-tundra.glsl, where the ground
+     * takes the sward's colour under the roots this plants.
+     */
+    static float sward(float x, float y) {
+        float px = x + 6 * (BoardRelief.noise(x / 19 + 7, y / 19 - 3) - .5f);
+        float py = y + 6 * (BoardRelief.noise(x / 19 - 13, y / 19 + 5) - .5f);
+        float field = .65f * BoardRelief.noise(px / 13 + 3, py / 13 + 11)
+              + .35f * BoardRelief.noise(px / 4.1f - 17, py / 4.1f + 23);
+        return BoardRelief.smooth((field - .18f) / .32f);
+    }
+
     /** How fully ground at height {@code z} belongs to a biome floor at {@code floor}; banks and steps fade it out. */
     static float sameLevel(float z, float floor) {
         return 1 - BoardRelief.smooth((Math.abs(z - floor) / BoardRelief.metres(1) - .15f) / 1.1f);

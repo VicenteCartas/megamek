@@ -80,15 +80,25 @@ final class GpuGroundCover implements Disposable {
     /** Metres beyond a bridge landing's solid asphalt over which standing grass thickens to the full meadow. */
     private static final float LANDING_FADE_METRES = 5;
 
-    /** Whether a hex grows grass: natural grass ground, or its neighbour within a level of a grass hex. */
+    /** Whether a hex's tundra grows its grass sward: earth's carpets, as its tussocks (BoardScatter). */
+    static boolean sward(BoardScene.Tile tile) {
+        return BoardBiome.kind(tile) == BoardScene.Biome.TUNDRA && BoardSurfaceBlend.natural(tile)
+              && BoardBiome.earthTundra(tile.surface());
+    }
+
+    /**
+     * Whether a hex grows grass: natural grass ground or earth tundra, or its neighbour within a level of such a hex,
+     * which their cover reaches into.
+     */
     static boolean grows(BoardScene scene, BoardScene.Tile tile) {
+        if (sward(tile)) { return true; }
         boolean shallow = shallowShore(tile);
         if ((!BoardSurfaceBlend.natural(tile) && !shallow) || BoardBiome.kind(tile) != BoardScene.Biome.NONE) { return false; }
         if (shallow && BoardBiome.plantKind(scene, tile) != BoardScene.Biome.NONE) { return false; }
         if (!shallow && tile.surface() == BoardScene.Surface.GRASS) { return true; }
         for (int direction = 0; direction < 6; direction++) {
             var neighbor = scene.tile(tile.coords().translated(direction));
-            if (BoardSurfaceBlend.natural(neighbor) && neighbor.surface() == BoardScene.Surface.GRASS
+            if (BoardSurfaceBlend.natural(neighbor) && (neighbor.surface() == BoardScene.Surface.GRASS || sward(neighbor))
                   && Math.abs(neighbor.elevation() - tile.elevation()) <= 1) { return true; }
         }
         return false;
@@ -139,8 +149,25 @@ final class GpuGroundCover implements Disposable {
     }
 
     /**
+     * The share of tundra at a point that grows its sward: earth's carpets where no pavement lies, between the
+     * sward's own openings ({@link BoardBiome#sward}), clear of the Snow theme's remnants (terrain-tundra.glsl draws
+     * its ground by the same shares).
+     */
+    private static float swardShare(BoardSurfaceBlend.Cover cover, float xMetres, float yMetres) {
+        float earth = cover.grass() + cover.dirt() + cover.sand() + cover.rock() + cover.snow() + cover.desert()
+              + cover.tropical() + cover.concrete();
+        float total = earth + cover.lunar() + cover.fungus() + cover.mars() + cover.volcano();
+        if (earth <= 0) { return 0; }
+        float remnant = cover.snow() <= 0 ? 0 : cover.snow() / total
+              * BoardRelief.smooth((BoardRelief.noise(xMetres / 8 + 29, yMetres / 8 + 29) - .55f) / .17f);
+        return earth / total * (1 - cover.concrete() / total) * (1 - remnant) * BoardBiome.sward(xMetres, yMetres);
+    }
+
+    /**
      * Deterministic roots over the hex, filtered by the existing surface and road rules, as (x, y, z, rank) in rank
-     * order. Candidates are drawn in the hex's plane and dropped onto the finished ground, so a root keeps its place
+     * order. A meadow's root has a whole rank; earth tundra's sward grows from the same candidates, where the tundra
+     * reaches, and marks its roots in the rank's fraction ({@link #swardCode}).
+     * Candidates are drawn in the hex's plane and dropped onto the finished ground, so a root keeps its place
      * and rank at every terrain detail level and only its height follows the installed ground: a medium-detail
      * chunk's grass carries over to its full-detail replacement without a blade moving. Density selects a prefix by
      * rank, so zooming never moves an existing blade either. No blade grows through {@code paint} (null when nothing
@@ -181,7 +208,7 @@ final class GpuGroundCover implements Disposable {
         var roads = BoardRoad.nearbyRoads(scene, tile);
         var landings = deckLandings(scene, tile);
         float landingFade = BoardRelief.metres(LANDING_FADE_METRES) / BoardGeometry.hexScale();
-        float sink = BoardGeometry.width() * .001f;
+        float sink = BoardGeometry.width() * .001f, metre = BoardRelief.metres(1);
         // Frozen land's jagged border reaches across a shared edge (terrain-ice.glsl); no blade grows through it.
         List<Vector3[]> iceEdges = new ArrayList<>();
         List<Vector3[]> shoreEdges = new ArrayList<>();
@@ -235,42 +262,67 @@ final class GpuGroundCover implements Disposable {
                 iced |= Math.hypot(x - edge[0].x - t * ex, y - edge[0].y - t * ey) < iceReach;
             }
             if (iced) { continue; }
-            float grass = boundary ? BoardSurfaceBlend.grass(tile, cover.sample(x, y, z), x, y)
+            var mixture = boundary ? cover.sample(x, y, z) : BoardSurfaceBlend.solid(tile.surface());
+            float grass = boundary ? BoardSurfaceBlend.grass(tile, mixture, x, y)
                   : tile.surface() == BoardScene.Surface.GRASS ? 1 : 0;
-            if (tundraEdge) { grass *= 1 - BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, x, y, z); }
-            if (marshEdge && waterHeights.containsKey(face.a())) {
-                grass *= 1 - BoardBiome.coverage(scene, BoardScene.Biome.MARSH, x, y, z);
+            float sward = 0;
+            if (tundraEdge) {
+                float tundra = BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, x, y, z);
+                grass *= 1 - tundra;
+                sward = tundra * swardShare(mixture, x / metre, y / metre);
             }
-            if (paint != null && grass > 0) { grass *= 1 - paint.at(x, y); }
+            // Marsh, paint and mineral soil leave either kind as little.
+            float clear = 1;
+            if (marshEdge && waterHeights.containsKey(face.a())) {
+                clear *= 1 - BoardBiome.coverage(scene, BoardScene.Biome.MARSH, x, y, z);
+            }
+            if (paint != null && grass + sward > 0) { clear *= 1 - paint.at(x, y); }
             if (!minerals.isEmpty()) {
-                grass *= 1 - GpuMineralGround.coverage(minerals, (x - centerX) / BoardGeometry.hexScale(),
+                clear *= 1 - GpuMineralGround.coverage(minerals, (x - centerX) / BoardGeometry.hexScale(),
                       (y - centerY) / BoardGeometry.hexScale());
             }
-            float growth = grass * BoardRelief.smooth((grass - .55f) / .35f);
+            grass *= clear;
+            sward *= clear;
             // Follow the same smoothly varying normals as the turf material, including the next hex's slope toe.
             // A whole-triangle cutoff removes green ground and leaves straight, full-density blade edges.
-            growth *= groundGrowth(face, normals, waterHeights, x, y, z, normal);
-            if (growth <= 0 || chance > growth) { continue; }
+            float slope = grass + sward > 0 ? groundGrowth(face, normals, waterHeights, x, y, z, normal) : 0;
+            float growth = grass * BoardRelief.smooth((grass - .55f) / .35f) * slope;
+            // The sward thins out into its openings. It takes the candidates the meadow leaves: the far end of chance.
+            float swardGrowth = sward * BoardRelief.smooth(sward / .6f) * slope;
+            boolean meadow = growth > 0 && chance <= growth;
+            if (!meadow && chance <= 1 - swardGrowth) { continue; }
+            float fade = 1;
             if (!shoreEdges.isEmpty()) {
                 float distance = shoreReach;
                 for (Vector3[] edge : shoreEdges) {
                     distance = Math.min(distance, BoardRelief.distance(x, y, edge[0].x, edge[0].y, edge[1].x, edge[1].y));
                 }
                 // Thin the accepted roots, not the cover input: its grass threshold would turn this fade into a cut.
-                growth *= BoardRelief.smooth(distance / shoreReach);
+                fade *= BoardRelief.smooth(distance / shoreReach);
             }
             // Beside a dirt track the meadow thins out towards its ruts.
-            growth *= verge;
+            fade *= verge;
             if (!landings.isEmpty()) {
                 // None on a landing's solid asphalt; the meadow thickens again across its fading apron.
-                growth *= BoardRelief.smooth((BoardRoad.distance(landings, x, y) - BoardRoad.SHOULDER - 1) / landingFade);
+                fade *= BoardRelief.smooth((BoardRoad.distance(landings, x, y) - BoardRoad.SHOULDER - 1) / landingFade);
             }
-            if (chance <= growth) {
-                roots.addAll(x, y, z - sink, rank);
+            if (meadow ? chance <= growth * fade : chance > 1 - swardGrowth * fade) {
+                roots.addAll(x, y, z - sink, meadow ? rank : rank + swardCode(normal));
             }
         }
         roots.shrink();
         return roots;
+    }
+
+    /**
+     * What a sward's root adds to its rank: the half that marks it, and its ground's slope, which its blades lie along
+     * and are lit by (terrain-grass.glsl): the rise per metre in eight steps of .2 and the uphill heading in sixteen.
+     * Twelve bits in all, which a rank below {@link #ROOTS_PER_HEX} keeps exactly, like a rim root's.
+     */
+    private static float swardCode(Vector3 normal) {
+        int rise = Math.min(7, Math.round((float) Math.hypot(normal.x, normal.y) / Math.max(normal.z, .01f) / .2f));
+        int heading = Math.floorMod(Math.round((float) (Math.atan2(-normal.y, -normal.x) / (2 * Math.PI) * 16)), 16);
+        return (2048 | rise << 4 | heading) / 4096f;
     }
 
     /** Interpolate the rendered normal and water reference on the actual support; allocate nothing per root. */
@@ -635,7 +687,8 @@ final class GpuGroundCover implements Disposable {
     private final Map<Coords, Long> arrivals = new HashMap<>();
 
     static String vertex(String source) {
-        String meadow = GpuShaderSource.read("surface-noise.glsl") + GpuShaderSource.read("terrain-meadow.glsl");
+        String meadow = GpuShaderSource.read("surface-noise.glsl") + GpuShaderSource.read("terrain-meadow.glsl")
+              + GpuShaderSource.read("terrain-tundra-sward.glsl");
         String wind = GpuShaderSource.read("terrain-vegetation-wind.glsl");
         String blade = "#define GRASS_START_PIXELS " + START_PIXELS + "\n#define GRASS_FULL_PIXELS " + FULL_PIXELS
               + "\n#define GRASS_RIM_START " + RIM_START_PIXELS + "\n#define GRASS_RIM_STAND " + RIM_STAND_PIXELS
