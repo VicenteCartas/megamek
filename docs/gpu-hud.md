@@ -518,7 +518,7 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 | `GpuToastStack` | centre, above the dock | MegaMek's toasts: at most 5, levels INFO, SUCCESS, WARNING, ERROR, GAMEMASTER | presses pass through |
 | `GpuForceOverview` | over the board; the panels it covers are hidden (the prototype blurs them) | a card for every presented unit, grouped, filtered and searchable | locate, selection rule, unit menu |
 | `GpuHelpDialog` | centred | Compact "Controls": category sidebar, action rows and current key badges; mouse gestures have their own category | none |
-| `GpuMenuPanel` | centred | "Players", then the menu bar's groups as `GpuBoardActions` captures them (File, Game, Board, View, Help, Commands, Maps), then "Return to Lobby" (the Commands group's Reset Game, offered where the player may reset: its confirmation, then the game ends for everyone and the server returns to the lobby) and "Quit to Main Menu" (the client's exit: the save prompt, then the startup screen or MekHQ) | each item's own action, or a redirect (below) |
+| `GpuMenuPanel` | centred | the lobby's game menu (`GpuGameMenu`). Its first page: Resume, Save Game…, Quick Save, Players, the pages Game, Display, Commands, Maps (with more than one map), Settings and the Help page, then "Return to Lobby" (the Commands group's Reset Game, offered where the player may reset: its confirmation, then the game ends for everyone and the server returns to the lobby) and "Quit to Main Menu" (the client's exit: the save prompt, then the startup screen or MekHQ). A page opens in place with a Back button; Esc or Backspace goes back a page, and Esc on the first page closes the Menu | each item's own action, or a native surface (below) |
 | `GpuPlayersPanel` | centred | the players as the Swing player list shows them; each bot's commands under it | bot commands |
 | `GpuContextMenu` | popover | unit menus and the hex menu (its header: the hex, MegaMek's terrain line and level, then the hex tooltip's other lines of the hex: a building, bridge or fuel tank with its height and CF, minefields, objects on the ground, clearing and bridge-building work), each starting with a Select or Inspect item per unit of its hex and ending with MegaMek's map menu of its hex in sections (a group's commands between separators, no menu of menus), weapon-row and queued-attack menus, the dock's More, select lists; a group opens its submenu beside its item as a desktop menu does: the menus before it stay open, another group replaces the chain below its menu, Esc closes the deepest and a press outside closes all | existing commands only |
 | `GpuHexTip` | popover, beside the pointer | after the pointer rests on a hex of the board for `GpuHexTip.DELAY` (0.75 s), the hex and its menu header's lines in small text on a faint plate, the first line broken only between its terms into the fewest, most even lines; gone when the pointer leaves the hex or the board, at a press, and while a menu or dialog is open | none; it never takes input |
@@ -597,16 +597,15 @@ The Menu's items that open a native surface instead of Swing (`GpuMenuPanel`):
 
 | Menu item | In the HUD |
 | --- | --- |
-| Unit Display | the unit sheet |
-| Force Display | the forces overview |
-| Keyboard Shortcuts | Help |
-| Player List | Players |
-| Round Report | Log |
-| Rounds in the Air | Log (its Summary lists the artillery in flight) |
-| Ruler / LOS Tool | Native LOS panel |
-| Isometric View (labelled "Tactical view") | the Tactical View |
-| Zoom In, Zoom Out, Toggle Overview Zoom | the board camera |
-| Reset Window Positions | not shown |
+| Players | Players |
+| Help › Keyboard Shortcuts | Help |
+
+The menu bar's items the HUD shows or does itself are left out of the Menu: Unit Display, Force Display, the minimap,
+Player List, Round Report, Rounds in the Air, the keybinds overlay, Planetary Conditions, Reset Window Positions, the
+camera (Zoom In/Out, Overview, Isometric), the hex coordinate and type labels, the field-of-view and LOS settings,
+sensor range, field of fire and unit links. So are the lobby's Load and Quick Load, the GM commands, the cache and
+board-image commands, Reset Nags, skinning, accessibility and the Renderer and Bot commands submenus. A check item shows
+as a switch that applies at once and keeps the Menu open.
 
 Every other item runs its own action on the EDT. The client's menu shortcuts reach the same items (2.2).
 
