@@ -1569,9 +1569,8 @@ work for Swing, and item 11 is under investigation.
          - Checks: `MapNoteFormTest`, `ClientCommandFormTest`, `GameMasterPlayerSetupTest`, `BuildingEditFormTest`,
          `HexBrushTest`, `LobbyGameMasterTest`, `GameMasterCardsSmokeTest`.
        - The board's remaining Swing dialogs, the `SWING_DIALOGS` allowlist (R6/U2), by size of the port:
-         - Medium: Edit Bots (`EditBotsDialog`) and a bot's settings (`BotConfigDialog`), the Nova network view
-           (`NovaNetworkViewDialog`), Network information (`NetworkInformationDialog`) and the accessibility window
-           (`AccessibilityDialog`).
+         - Medium: the Nova network view (`NovaNetworkViewDialog`), Network information
+           (`NetworkInformationDialog`) and the accessibility window (`AccessibilityDialog`).
          - Small: the cache progress (`UnitLoadingDialog`) behind File > Refresh and Rebuild Unit Cache.
          - Big: Client Settings (`CommonSettingsDialog`, several PRs; also the map editor's), and the map editor's
            About.
@@ -1584,6 +1583,15 @@ work for Swing, and item 11 is under investigation.
          from the card. Its Load list and Random army sources open the unit file chooser and the native Force
          Generator. The Swing `MegaMekUnitSelectorDialog` is deleted. Covered by `LobbyCommandsTest`,
          `GameMasterCardsSmokeTest` and `LobbyRecipientSmokeTest`.
+       - Done: Edit Bots is a native card over the battle (`LobbyEditBotsView`, from Game > Edit Bots). Each seat is
+         a panel with its type chip and a segmented action bar: a ghost is kept or replaced with Princess (or CASPAR
+         when it is on), defaulting to its saved bot; a local bot gets No action, Edit or Kick; a remote bot No
+         action or Kick. Bot Settings opens the native bot setup (`LobbyBotSetupView`) over the card, and its OK
+         sets the seat to Edit; a saved configuration can be restored. The toolkit-free `EditBotsForm` holds the
+         choices and builds the result, which `ClientGUI.applyBotEdits` applies as the Swing dialog's OK did, so
+         `EditBotsDialog` and `BotConfigDialog` left the allowlist. Both Swing classes stay for the lounge, the
+         start screen and the Swing player settings. Covered by `EditBotsFormTest` and
+         `BattleMenuCardsSmokeTest`.
        - The "Save First?" question when leaving a battle is native since #39.
        - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
          thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser
