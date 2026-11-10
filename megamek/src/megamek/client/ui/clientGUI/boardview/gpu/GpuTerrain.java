@@ -1566,15 +1566,16 @@ final class GpuTerrain implements Disposable {
         private final boolean translucent;
         /** Whether a material of its model fades (GpuCutoutFade#fades). */
         private final boolean fades;
-        /** What picking and placement hit: the near level (LOD0) whatever level draws. */
-        private Model pickingModel;
+        /** What picking and placement hit: the near level (LOD0) whatever level draws; null for a kit assembly. */
+        private final Model pickingModel;
         /** The triangles picked instead of {@link #pickingModel}'s, for an instance of only some of its nodes; or null. */
         private List<Vector3> pickingTriangles;
         /**
-         * A placed object's mesh per level ({@link GpuAssets#objectLevels}), its near mesh first; null when it has one.
-         * {@link #detail} chooses among them by the buildings' rule.
+         * Its mesh per level, near mesh first, as the assets hand a model out ({@link GpuAssets#levels}); one mesh for a
+         * model without simpler levels, and for a kit assembly, whose levels are its kit's. {@link #detail} chooses among
+         * them; a tree in the stand takes the stand's levels instead.
          */
-        private List<Model> levels;
+        private final List<Model> levels;
         private final float treeDiameter;
         private ModelInstance instance;
         private final boolean hardSurface;
@@ -1618,53 +1619,55 @@ final class GpuTerrain implements Disposable {
         /** World support height for an interior floor; NaN for shells and other props. */
         private final float floorZ;
         private ModelInstance hoverOpaque;
-        /** The drawn level of a building's or placed object's mesh ({@link #detail}). */
+        /** The drawn level of its mesh ({@link #detail}). */
         private int lod;
+        /** The numbered parts of its model it shows, at every level ({@link BoardGroundCut#showParts}); 0 shows them all. */
+        private int parts;
 
-        Prop(Coords coords, ModelInstance instance, BoundingBox bounds, String treeAsset, boolean hardSurface) {
-            this(coords, instance, bounds, treeAsset, hardSurface, null, false);
+        Prop(Coords coords, ModelInstance instance, List<Model> levels, BoundingBox bounds, String treeAsset,
+              boolean hardSurface) {
+            this(coords, instance, levels, bounds, treeAsset, hardSurface, null, false, Float.NaN, false);
         }
 
-        Prop(Coords coords, ModelInstance instance, BoundingBox bounds, String treeAsset, boolean hardSurface,
-              GpuBuilding.Assembly building, boolean structure) {
-            this(coords, instance, bounds, treeAsset, hardSurface, building, structure, Float.NaN);
-        }
-
-        Prop(Coords coords, ModelInstance instance, BoundingBox bounds, String treeAsset, boolean hardSurface,
-              GpuBuilding.Assembly building, boolean structure, float floorZ) {
-            this(coords, instance, bounds, treeAsset, hardSurface, building, structure, floorZ, false);
-        }
-
-        Prop(Coords coords, ModelInstance instance, BoundingBox bounds, String treeAsset, boolean hardSurface,
-              GpuBuilding.Assembly building, boolean structure, float floorZ, boolean industrial) {
+        /**
+         * {@code instance} draws one of {@code levels}, the near one unless it copies a prop that drew another. What
+         * the prop is (translucent, fading, picked) is read from the near level, whichever draws.
+         */
+        Prop(Coords coords, ModelInstance instance, List<Model> levels, BoundingBox bounds, String treeAsset,
+              boolean hardSurface, GpuBuilding.Assembly building, boolean structure, float floorZ, boolean industrial) {
             this.coords = coords;
             this.building = building;
             this.structure = structure;
             this.industrial = industrial;
             this.floorZ = floorZ;
             this.instance = instance;
+            this.levels = levels;
             this.bounds = bounds;
             this.treeAsset = treeAsset;
             boolean hasBlend = false, hasFade = false;
-            for (Material material : instance.model.materials) {
+            for (Material material : levels.getFirst().materials) {
                 hasBlend |= blended(material) || GpuCrystalTransmission.ruby(material);
                 hasFade |= GpuCutoutFade.fades(material);
             }
             translucent = hasBlend;
             fades = hasFade;
             this.hardSurface = hardSurface;
-            pickingModel = building == null ? instance.model : null;
+            pickingModel = building == null ? levels.getFirst() : null;
             treeDiameter = treeAsset == null ? 0 : bounds.getDimensions(new Vector3()).len();
         }
 
+        /** How many mesh levels it has to choose from: its kit's, else its model's. */
+        int lodCount() { return building != null ? building.lodCount() : levels.size(); }
+
         /**
-         * The one level rule of buildings and placed objects: the larger side of the placed bounds, up to
+         * The one level rule of every prop outside the tree stands: the larger side of the placed bounds, up to
          * {@link TreeLod#PROPS_SIDE}, on screen against {@link TreeLod#PROPS}, so both camera views choose alike. Picking stays on
-         * the near level ({@link #pickingModel}); shadows draw the chosen level from the chunk's next cache.
+         * the near level ({@link #pickingModel}); shadows draw the chosen level from the chunk's next cache. A tree of
+         * the stand takes its level there, each by its own size (GpuTreeInstances.Stand#detail).
          */
         boolean detail(float pixelsPerUnit) {
-            int count = building != null ? building.lodCount() : levels == null ? 1 : levels.size();
-            if (count < 2) { return false; }
+            int count = lodCount();
+            if (count < 2 || standTree()) { return false; }
             lod = Math.min(count - 1, TreeLod.prop(Math.max(bounds.getWidth(), bounds.getHeight()), pixelsPerUnit, lod));
             Model next = building != null ? building.model(lod) : levels.get(lod);
             if (instance.model == next) { return false; }
@@ -1679,6 +1682,7 @@ final class GpuTerrain implements Disposable {
          */
         private ModelInstance level(int level, ModelInstance source) {
             ModelInstance result = building != null ? building.instance(level) : new ModelInstance(levels.get(level));
+            BoardGroundCut.showParts(result, parts);
             result.transform.set(source.transform);
             result.userData = source.userData;
             // The placement's fade (#fade): a material that blends where its model's does not. NaN while it is solid, and
@@ -1740,6 +1744,8 @@ final class GpuTerrain implements Disposable {
         BoundingBox bounds() { return previewInstance == null ? bounds : previewBounds; }
         float anchorZ() { return previewInstance == null ? decorationAnchorZ : previewAnchorZ; }
         boolean tree() { return treeAsset != null; }
+        /** A tree the chunk's stand draws, at the stand's levels: no crystal, which draws as its own translucent parts. */
+        boolean standTree() { return tree() && !translucent; }
         /** A route marker, rail or maglev: its track is cached with its chunk in every view and never fades. */
         boolean route() { return decorationFeature != null && BoardRail.route(decorationFeature); }
         /**
@@ -1747,7 +1753,7 @@ final class GpuTerrain implements Disposable {
          * the instance data cannot hold (a tilt or mirror) draws as an object part until the rebuild.
          */
         boolean standing() {
-            return tree() && !translucent && (previewInstance == null || GpuTreeInstances.placeable(previewInstance.transform));
+            return standTree() && (previewInstance == null || GpuTreeInstances.placeable(previewInstance.transform));
         }
 
     }
@@ -2199,6 +2205,12 @@ final class GpuTerrain implements Disposable {
 
         /** The falls' revision its prop snapshot left out the falling structures at (GpuTerrain#refall). */
         int fallsRevision = -1;
+        /**
+         * Its packed props have left the levels its caches hold (GpuTerrain#packLevels); {@link #levelsChanged}: one
+         * did since the last frame's check; {@link #levelsPacked}: the frame its caches last packed a level change.
+         */
+        boolean levelsStale, levelsChanged;
+        long levelsPacked = -LEVEL_WAIT - 1;
         /** Its props by hex, in their order, gathered on first use (#propsAt). */
         private Map<Coords, List<Prop>> propsByHex;
 
@@ -2215,6 +2227,7 @@ final class GpuTerrain implements Disposable {
 
         /** Caches the props for drawing and shadows; the kit structures at {@code falling} hexes fall as pieces instead. */
         void cacheProps(Predicate<Coords> falling) {
+            levelsStale = false;
             cacheDecorations();
             if (cutaways.isEmpty() && struts.isEmpty()) { return; }
             if (shadowPropRenderables.isEmpty()) {
@@ -3663,7 +3676,7 @@ final class GpuTerrain implements Disposable {
                     liveRoutes.add(prop.instance.model);
                 }
                 if (prop.building != null) { liveBuildings.add(prop.building); }
-                if (prop.industrial || prop.levels != null) { liveIndustrial.add(prop.instance.model); }
+                if (!prop.tree()) { liveIndustrial.add(prop.instance.model); }
             }
             for (ModelInstance pane : chunk.glass) { liveIndustrial.add(pane.model); }
             for (Renderable part : chunk.sharedShadows) { sharedSources.add(part.meshPart.mesh); }
@@ -3851,6 +3864,7 @@ final class GpuTerrain implements Disposable {
         Chunk old = chunks.set(index, next);
         // A level kept while structures came down or were restored draws them as they are now.
         if (next.fallsRevision != destruction.revision()) { refall(next); }
+        levelsPending |= next.levelsStale;
         // The kit levels a chunk at another detail level draws break ahead of their falls too (KitFragments).
         cutFragments(next);
         // Level tops of one family are the same at every detail: the cache keeps their pages and forgets only the old
@@ -4505,20 +4519,23 @@ final class GpuTerrain implements Disposable {
             List<BoardSurface.Face> cliffs = new ArrayList<>(surface.faces);
             cliffs.addAll(surface.walls(scene, floor, surfaces));
             for (var placement : BoardFungus.cliffs(scene, tile, cliffs)) {
-                ModelInstance instance = new ModelInstance(foliage(assets.lodModel(placement.asset(), 0)));
+                List<Model> levels = assets.levels(placement.asset());
+                levels.forEach(GpuTerrain::foliage);
+                ModelInstance instance = new ModelInstance(levels.getFirst());
                 instance.transform.set(placement.transform());
                 BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox()).mul(instance.transform);
-                var prop = new Prop(tile.coords(), instance, bounds, placement.asset(), false);
+                var prop = new Prop(tile.coords(), instance, levels, bounds, placement.asset(), false);
                 prop.scatter = true;
                 chunk.props.add(prop);
                 chunk.bounds.ext(bounds);
             }
         }
         for (BoardRough.Placement placement : surface.roughModels()) {
-            ModelInstance instance = new ModelInstance(assets.model(placement.asset()));
+            List<Model> levels = assets.levels(placement.asset());
+            ModelInstance instance = new ModelInstance(levels.getFirst());
             instance.transform.set(placement.transform());
             BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox()).mul(instance.transform);
-            var rough = new Prop(tile.coords(), instance, bounds, null, false);
+            var rough = new Prop(tile.coords(), instance, levels, bounds, null, false);
             chunk.props.add(rough);
             chunk.bounds.ext(bounds);
         }
@@ -4529,9 +4546,8 @@ final class GpuTerrain implements Disposable {
     /** Portals belong to their road in every graphics mode. */
     private void collectTunnels(ChunkBuild build, BoardScene.Tile tile) {
         for (var tunnel : BoardTunnel.entrances(build.scene, tile)) {
-            Model model = assets.model(tunnel.asset());
-            if (model == null) { continue; }
-            ModelInstance instance = new ModelInstance(model);
+            List<Model> levels = assets.levels(tunnel.asset());
+            ModelInstance instance = new ModelInstance(levels.getFirst());
             // The road continues inside with the same world UVs, normal/surface maps and weather response as its approach.
             Material tunnelFloor = instance.getMaterial("tunnel-floor");
             String road = GpuRoads.texture(tunnel.kind());
@@ -4539,7 +4555,7 @@ final class GpuTerrain implements Disposable {
             tunnelFloor.set(new BridgeDeck(assets.roadCoverage(road)));
             instance.transform.set(tunnel.transform());
             BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox()).mul(instance.transform);
-            var portal = new Prop(tile.coords(), instance, bounds, null, false);
+            var portal = new Prop(tile.coords(), instance, levels, bounds, null, false);
             build.chunk.props.add(portal);
             build.chunk.bounds.ext(bounds);
         }
@@ -4690,27 +4706,33 @@ final class GpuTerrain implements Disposable {
             // their own route caching. What a rail owns (its buffer stops) is drawn as an object but never edited as one.
             boolean placedObject = feature.decoration() != null && authored == null;
             boolean editable = (placedObject || authored != null) && !BoardFeatures.terrainOwned(feature.decoration());
-            // Both graphics modes use the same finished rail carrier, including road embedding and bridge grades.
-            Model model = authored != null ? authored.levels().getFirst() : BoardRail.route(feature) ? routeModel(build, BoardRail.layout(scene, tile, feature, surface,
-                        prepared.bridgeShapes()::get))
+            // What it draws, as its mesh per level, near mesh first: the one place a feature's model is chosen, so no
+            // kind draws a model file without the file's simpler levels (Prop#detail). A generated mesh has one level, a
+            // kit assembly its kit's. Both graphics modes use the same finished rail carrier, including road embedding
+            // and bridge grades.
+            List<Model> levels = authored != null ? authored.levels()
+                  : BoardRail.route(feature) ? List.of(routeModel(build, BoardRail.layout(scene, tile, feature, surface,
+                        prepared.bridgeShapes()::get)))
                   : placedObject ? (BoardFlag.ASSET.equals(feature.asset())
-                        ? assets.flag(feature.decoration())
+                        ? List.of(assets.flag(feature.decoration()))
                         : BoardBillboard.ASSET.equals(feature.asset()) ? assets.billboardLevels(feature.decoration().billboard(),
-                              BoardBillboardMesh.legs(feature.decoration(), tile.elevation())).getFirst()
-                        : assets.slotted(feature.asset()))
-                  : generatedIndustrial ? assets.industrial(BoardIndustrial.layout(scene, tile, feature))
-                  : wallLayout != null ? assets.wall(wallLayout)
-                  : multiHexLayout != null ? assets.multiHexLevels(multiHexLayout).getFirst()
-                  : building != null ? building.model(0)
-                  : feature.kind() == BoardScene.FeatureKind.TREE
-                  ? assets.lodModel(feature.asset(), 0)
-                  : assets.model(feature.asset(), BoardGroundCut.colours(tile, feature), BoardFeatures.label(tile, feature));
+                              BoardBillboardMesh.legs(feature.decoration(), tile.elevation()))
+                        : assets.objectLevels(feature.asset()))
+                  : generatedIndustrial ? List.of(assets.industrial(BoardIndustrial.layout(scene, tile, feature)))
+                  : wallLayout != null ? assets.wallLevels(wallLayout)
+                  : multiHexLayout != null ? assets.multiHexLevels(multiHexLayout)
+                  : building != null ? List.of(building.model(0))
+                  : feature.kind() == BoardScene.FeatureKind.TREE ? assets.levels(feature.asset())
+                  : assets.levels(feature.asset(), BoardGroundCut.colours(tile, feature), BoardFeatures.label(tile, feature));
+            Model model = levels.getFirst();
             assets.take(build.preview == null ? this : build.preview, building, model);
             if (authored != null) { assets.take(build.preview == null ? this : build.preview, null, authored.interior()); }
-            java.util.function.UnaryOperator<Model> drawn = mesh ->
-                  feature.kind() == BoardScene.FeatureKind.TREE || fungus || foliageModel(mesh) ? foliage(mesh) : mesh;
-            ModelInstance instance = building != null ? building.instance(0)
-                  : new ModelInstance(drawn.apply(model));
+            if (building == null) {
+                for (Model level : levels) {
+                    if (feature.kind() == BoardScene.FeatureKind.TREE || fungus || foliageModel(level)) { foliage(level); }
+                }
+            }
+            ModelInstance instance = building != null ? building.instance(0) : new ModelInstance(model);
             if (feature.kind() == BoardScene.FeatureKind.BUILDING || authored != null) {
                 GpuBuilding.tint(instance, feature.colours());
             }
@@ -4865,7 +4887,6 @@ final class GpuTerrain implements Disposable {
                       BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()),
                       feature.kind() != BoardScene.FeatureKind.TREE && onDeck ? BoardBridge.deckZ(tile) : Float.NEGATIVE_INFINITY);
                 placeAuthored(instance, px, py, base, BoardGroundCut.fitted(scene, tile, feature));
-                BoardGroundCut.showParts(instance, feature.parts());
             } else {
                 // Trees and structures retain inspectable proportions; their actual Z extent fits the rules' height.
                 // Fuel tanks and industrial structures also use the building catalog, without building cutaways.
@@ -4905,12 +4926,14 @@ final class GpuTerrain implements Disposable {
             var object = feature.decoration();
             boolean standTree = object == null ? feature.kind() == BoardScene.FeatureKind.TREE || fungus
                   : foliageModel(model) && GpuTreeInstances.placeable(instance.transform);
-            var prop = new Prop(tile.coords(), instance, bounds, standTree ? feature.asset() : null,
+            var prop = new Prop(tile.coords(), instance, levels, bounds, standTree ? feature.asset() : null,
                   feature.kind() == BoardScene.FeatureKind.LIMB || metal, building,
                   object != null && !foliageModel(model) || feature.kind() == BoardScene.FeatureKind.BUILDING
                         || feature.asset().startsWith("buildings/"),
                   Float.NaN, feature.kind() == BoardScene.FeatureKind.INDUSTRIAL);
             prop.editorBounds = editorBounds;
+            prop.parts = feature.parts();
+            BoardGroundCut.showParts(instance, prop.parts);
             if (standTree) { prop.plantFeature = feature; }
             prop.infrastructure = routeFeature(tile, feature);
             if (feature.kind() == BoardScene.FeatureKind.BUILDING || authored != null) {
@@ -4935,23 +4958,6 @@ final class GpuTerrain implements Disposable {
             if (placedObject || authored != null) { prop.decorationFeature = feature; }
             prop.decorationAnchorZ = instance.transform.val[Matrix4.M23] - feature.elevation() * BoardGeometry.level();
             // A click on a maglev's pier selects its route (batch-10 answer 8): the beam's triangles and its piers'.
-            // A placed object's simpler levels, shared meshes as its near one (a stand tree has the stand's levels).
-            if (authored != null) { prop.levels = authored.levels(); }
-            else if (wallLayout != null) {
-                prop.levels = assets.wallLevels(wallLayout);
-            } else if (multiHexLayout != null) {
-                prop.levels = assets.multiHexLevels(multiHexLayout);
-            } else if (BoardBillboard.ASSET.equals(feature.asset())) {
-                prop.levels = assets.billboardLevels(object.billboard(), BoardBillboardMesh.legs(object, tile.elevation()));
-            } else if ((object != null && !standTree || prop.translucent) && !BoardRail.route(feature)) {
-                List<Model> levels = assets.objectLevels(feature.asset());
-                if (levels.stream().distinct().count() > 1) { prop.levels = levels.stream().map(drawn).toList(); }
-            } else if (object == null && feature.kind() == BoardScene.FeatureKind.SCENERY) {
-                // Terrain-owned scenery drawn as its file's own near mesh (rubble: 5,000-7,000 triangles a pile,
-                // hundreds of piles after a strike) takes the file's simpler levels by the same rule.
-                List<Model> levels = assets.objectLevels(feature.asset());
-                if (levels.getFirst() == model && levels.stream().distinct().count() > 1) { prop.levels = levels; }
-            }
             prop.receiver = authored != null && feature.kind() == BoardScene.FeatureKind.BUILDING ? "building" : BoardFeatures.receiver(feature);
             chunk.props.add(prop);
             Model glass = multiHexLayout == null ? null : assets.multiHexGlass(multiHexLayout);
@@ -4993,7 +4999,8 @@ final class GpuTerrain implements Disposable {
                               new Vector3(part.meshPart.center).add(part.meshPart.halfExtents)));
                     }
                     floorBounds.mul(floorInstance.transform);
-                    Prop floorProp = new Prop(tile.coords(), floorInstance, floorBounds, null, false, null, true, floorBounds.max.z);
+                    Prop floorProp = new Prop(tile.coords(), floorInstance, List.of(floorInstance.model), floorBounds, null, false,
+                          null, true, floorBounds.max.z, false);
                     floorProp.infrastructure = prop.infrastructure;
                     floorProp.openShell = open;
                     chunk.props.add(floorProp);
@@ -5408,7 +5415,7 @@ final class GpuTerrain implements Disposable {
                     }
                     // Instances have mutable fading/LoD state, while their authored models remain asset-owned.
                     for (Prop prop : previous.props) {
-                        Prop copy = new Prop(coords, copy(prop.instance), prop.bounds,
+                        Prop copy = new Prop(coords, copy(prop.instance), prop.levels, prop.bounds,
                               prop.treeAsset, prop.hardSurface, prop.building, prop.structure, prop.floorZ, prop.industrial);
                         copy.scatter = prop.scatter;
                         copy.infrastructure = prop.infrastructure;
@@ -5426,10 +5433,9 @@ final class GpuTerrain implements Disposable {
                         copy.nightLights = prop.nightLights;
                         copy.drawnLights = prop.drawnLights;
                         // The copy draws the level the original drew, and still picks the near level.
-                        copy.pickingModel = prop.pickingModel;
                         copy.pickingTriangles = prop.pickingTriangles;
-                        copy.levels = prop.levels;
                         copy.lod = prop.lod;
+                        copy.parts = prop.parts;
                         tile.props.add(copy);
                     }
                     for (InteriorStruts strut : previous.struts) {
@@ -8398,9 +8404,8 @@ final class GpuTerrain implements Disposable {
 
     /** The prop's model at its finest level within {@code triangles}, else its coarsest. */
     private static ModelInstance finest(Prop prop, int triangles) {
-        int count = prop.building != null ? prop.building.lodCount() : prop.levels == null ? 1 : prop.levels.size();
         ModelInstance level = prop.near();
-        for (int lod = 1; lod < count && triangles(level) > triangles; lod++) { level = prop.level(lod, prop.instance()); }
+        for (int lod = 1; lod < prop.lodCount() && triangles(level) > triangles; lod++) { level = prop.level(lod, prop.instance()); }
         return level;
     }
 
@@ -9610,7 +9615,7 @@ final class GpuTerrain implements Disposable {
      * out: they advance after the opaque flush, past the frame's page deadline whenever that flush outlasts it.
      */
     boolean pagesMerging() {
-        return propBatch.merging() || terrainPages.merging() || topPages.merging();
+        return propBatch.merging() || terrainPages.merging() || topPages.merging() || levelsPending;
     }
 
     /** In render's colour stage: whether a depth pre-pass drew, so the scene depth holds its surfaces. */
@@ -9623,6 +9628,7 @@ final class GpuTerrain implements Disposable {
     Map<Shader, Shader> prepassTwins() { return Collections.unmodifiableMap(prepassTwins); }
 
     private void recacheProps(Chunk chunk) {
+        chunk.levelsPacked = levelFrame;
         scarSurfaceRevision++;
         GpuPropBatch.disposeMeshes(chunk.shadowPropRenderables);
         chunk.shadowPropRenderables.clear();
@@ -9771,6 +9777,7 @@ final class GpuTerrain implements Disposable {
         materialCache.end();
         shadingPass++;
         updateDetail(camera);
+        packLevels();
         lavaLighting.update(coverScene, terrain, 1 - environmentLighting.daylight());
         if (terrain) {
             groundDamage.update(coverScene);
@@ -10413,9 +10420,14 @@ final class GpuTerrain implements Disposable {
         renderDepth(camera, units, pass, false, true);
     }
 
-    /** Wireframe fill and lines share the camera's cutaway and detail selection, without scatter terrain. */
+    /**
+     * Wireframe fill and lines share the camera's cutaway and detail selection, without scatter terrain. No colour pass
+     * draws with them, so the chunks that wait for their levels' pack take it here: by the second of a frame's two
+     * draws at the latest (packLevels).
+     */
     void renderWireframe(Camera camera, ModelBatch pass) {
         updateDetail(camera);
+        packLevels();
         renderDepth(camera, List.of(), pass, false, false);
     }
 
@@ -10576,15 +10588,18 @@ final class GpuTerrain implements Disposable {
                     if (prop.building != null && fragments) { prop.building.kit().cutFragments(prop.instance().model); }
                 }
             }
-            // Buildings repack the chunk's prop caches (which also gather its placed objects again); placed objects alone
-            // only gather their instanced parts again. The rebuilt caches serve the next shadow refit; an outline is the
-            // same at every level, so the map is not redrawn for the change alone (200-400 ms per redraw on an Intel Iris
-            // Xe when the fit spans MesaCity 1, and its 233 building hexes change level throughout a tilt).
-            if (packedLevels) {
+            // Packed props (buildings, scenery) repack the chunk's prop caches, which also gather its placed objects
+            // again: at once, unless the chunk packed a level change within the last LEVEL_WAIT frames (packLevels).
+            // Placed objects alone only gather their instanced parts again. The rebuilt caches serve the next shadow
+            // refit; an outline is the same at every level, so the map is not redrawn for the change alone (200-400 ms
+            // per redraw on an Intel Iris Xe when the fit spans MesaCity 1, and its 233 building hexes change level
+            // throughout a tilt).
+            if (packedLevels && levelFrame - chunk.levelsPacked > LEVEL_WAIT) {
                 recacheProps(chunk);
-            } else if (objectLevels) {
+            } else if (packedLevels || objectLevels) {
                 scarSurfaceRevision++;
                 chunk.cacheDecorations();
+                if (packedLevels) { chunk.levelsStale = chunk.levelsChanged = levelsPending = true; }
             }
             detailTrees(chunk, pixelsPerUnit);
         }
@@ -10593,6 +10608,38 @@ final class GpuTerrain implements Disposable {
             pixelsPerUnit = BoardCamera.pixelsPerUnit(camera, nearest(camera, destruction.bounds(new BoundingBox()), nearest));
         }
         destruction.detail(pixelsPerUnit);
+    }
+
+    /** Frames between a chunk's repacks while its props keep changing level ({@link #packLevels}). */
+    private static final int LEVEL_WAIT = 30;
+    /** The frames drawn, as {@link #packLevels} counts them. */
+    private long levelFrame;
+    /** Some chunk's packed props left the levels its caches hold ({@link Chunk#levelsStale}). */
+    private boolean levelsPending;
+
+    /**
+     * Once a frame, after its detail selection. A chunk repacks its prop caches the moment a packed prop changes level
+     * (updateDetail); a pack copies every packed prop of the chunk (24 ms for 64 hexes of rubble, strongpoints and
+     * timber on an RTX 4070), and in a zoom that keeps crossing some prop's threshold (props of many sizes) that was
+     * every frame. A chunk that packed a level change within the last {@link #LEVEL_WAIT} frames therefore waits
+     * here, drawing the levels it packed last: until the first frame its props kept their levels, or until those
+     * frames have passed, one such chunk a frame.
+     */
+    private void packLevels() {
+        levelFrame++;
+        if (!levelsPending) { return; }
+        levelsPending = false;
+        boolean waited = false;
+        for (Chunk chunk : chunks) {
+            if (!chunk.levelsStale) { continue; }
+            if (!chunk.levelsChanged || levelFrame - chunk.levelsPacked > LEVEL_WAIT && !waited) {
+                waited |= chunk.levelsChanged;
+                recacheProps(chunk);
+            } else {
+                levelsPending = true;
+            }
+            chunk.levelsChanged = false;
+        }
     }
 
     /** The corner of {@code box} nearest along the camera's view, where a perspective view chooses its detail. */
@@ -10609,6 +10656,22 @@ final class GpuTerrain implements Disposable {
         float dissolve = treeDissolves ? TreeLod.DISSOLVE : 0;
         treesSettle = Math.max(treesSettle, Math.max(chunk.stand.detail(pixelsPerUnit, clock, dissolve),
               chunk.scatterStand.detail(pixelsPerUnit, clock, dissolve)));
+    }
+
+    /**
+     * For tests: each model file a prop outside the tree stands draws from, and whether one of its props draws the
+     * file's near mesh in the last view. Where every prop is small on screen, a file that holds simpler levels and
+     * still draws its near mesh is drawn by a path that never takes them.
+     */
+    Map<java.io.File, Boolean> propFiles() {
+        Map<java.io.File, Boolean> files = new HashMap<>();
+        for (Chunk chunk : chunks) {
+            for (Prop prop : chunk.props) {
+                java.io.File file = prop.standTree() ? null : assets.modelFile(prop.levels.getFirst());
+                if (file != null) { files.merge(file, prop.instance.model == prop.levels.getFirst(), Boolean::logicalOr); }
+            }
+        }
+        return files;
     }
 
     /** Whether the board has water, where a falling unit splashes (GpuWaterImpacts). */

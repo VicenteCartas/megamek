@@ -60,6 +60,8 @@ final class GpuAssets implements Disposable {
     private GpuMaterialCatalog catalog;
     private final Map<String, Model> models = new HashMap<>();
     private final Map<String, List<Model>> modelLods = new HashMap<>();
+    /** Each model file's levels in its own colours, as a prop draws them ({@link #levels(String)}). */
+    private final Map<String, List<Model>> plainLevels = new HashMap<>();
     /** Each recoloured model's decoded levels, in the model's own colours (a missing level repeats the one before). */
     private final Map<String, List<ModelData>> recolourable = new HashMap<>();
     /** Models' levels decoding on the common pool ahead of their first use ({@link #prepareModels}); each taken once. */
@@ -72,8 +74,8 @@ final class GpuAssets implements Disposable {
     private final java.util.Set<String> reported = new java.util.HashSet<>();
     /** Whether each placed model has colour slots, read from its file's JSON once. */
     private final Map<String, Boolean> hasSlots = new HashMap<>();
-    /** How many mesh levels each placed model's file holds, read from its JSON once. */
-    private final Map<String, Integer> fileLevels = new HashMap<>();
+    /** The file each model made of a model file's mesh came from ({@link #fileModel}). */
+    private final Map<Model, File> modelFiles = new java.util.IdentityHashMap<>();
     /** Each placed model's own box ({@link #bounds}); a model no longer referenced drops out. */
     private final Map<Model, BoundingBox> bounds = new java.util.WeakHashMap<>();
     /** Whether each model, kit or paint file exists, asked once ({@link #isFile}). */
@@ -1199,13 +1201,19 @@ final class GpuAssets implements Disposable {
 
     /** {@link #model(String, BoardDecoration.Colours)} with {@code label} written on its label materials ({@link RigidGlb#label}). */
     Model model(String name, megamek.common.board.BoardDecoration.Colours colours, String label) {
-        if (colours.slots().isEmpty() && label.isEmpty()) { return lodModel(name, 0); }
+        return model(name, colours, label, 0);
+    }
+
+    /** {@link #model(String, BoardDecoration.Colours, String)} at a mesh level: each level has its own copy. */
+    private Model model(String name, megamek.common.board.BoardDecoration.Colours colours, String label, int level) {
+        if (colours.slots().isEmpty() && label.isEmpty()) { return lodModel(name, level); }
         if (unloadable.containsKey(name)) { return missing(name, unloadable.get(name)); }
         try {
-            // A copy's key cannot meet a level's name ("name-lodN").
-            return models.computeIfAbsent(name + colours.slots() + "#" + label, key -> {
+            int own = ownLevel(name, level);
+            // A copy's key cannot meet a level's name ("name-lodN") or a slotted mesh's ("...#slots"): it holds "[".
+            return fileModel((own == 0 ? name : MeshLod.name(name, own)) + colours.slots() + "#" + label, name, () -> {
                 // The file is decoded once; each set of colours and label changes a copy of its vertices for its own mesh.
-                ModelData data = decoded(name).getFirst();
+                ModelData data = decoded(name).get(own);
                 var mesh = data.meshes.first();
                 float[] vertices = mesh.vertices;
                 mesh.vertices = vertices.clone();
@@ -1217,6 +1225,53 @@ final class GpuAssets implements Disposable {
             });
         } catch (RuntimeException failure) { return missing(name, reason(failure)); }
     }
+
+    /**
+     * {@link #levels(String, BoardDecoration.Colours, String)} in the model's own colours, without a label: one list
+     * per model file, as every tree and rock of a chunk build asks for it.
+     */
+    List<Model> levels(String name) {
+        List<Model> known = plainLevels.get(name);
+        if (known != null) { return known; }
+        List<Model> levels = List.copyOf(propLevels(level -> lodModel(name, level)));
+        // Only a model file's own models live as long as these assets: the marked box and generated models do not.
+        if (modelFiles.containsKey(levels.getFirst())) { plainLevels.put(name, levels); }
+        return levels;
+    }
+
+    /**
+     * A model file's mesh per level of the props' rule ({@link TreeLod#PROPS}), near mesh first, in {@code colours} and
+     * with {@code label} as {@link #model(String, BoardDecoration.Colours, String)} makes them: what a prop draws its
+     * levels from. A file with one level gives a list of one.
+     */
+    List<Model> levels(String name, megamek.common.board.BoardDecoration.Colours colours, String label) {
+        return colours.slots().isEmpty() && label.isEmpty() ? levels(name)
+              : propLevels(level -> model(name, colours, label, level));
+    }
+
+    /** The levels of the props' rule, without the trailing repeats of a file that lacks its last ones. */
+    private static List<Model> propLevels(java.util.function.IntFunction<Model> mesh) {
+        List<Model> result = new ArrayList<>(TreeLod.PROPS.length + 1);
+        for (int level = 0; level <= TreeLod.PROPS.length; level++) { result.add(mesh.apply(level)); }
+        while (result.size() > 1 && result.getLast() == result.get(result.size() - 2)) { result.removeLast(); }
+        return result;
+    }
+
+    /**
+     * The model of a model file's mesh under {@code key}, made once, and remembered as that file's
+     * ({@link #modelFile}).
+     */
+    private Model fileModel(String key, String name, java.util.function.Supplier<Model> create) {
+        Model known = models.get(key);
+        if (known != null) { return known; }
+        Model model = create.get();
+        models.put(key, model);
+        modelFiles.put(model, RigidGlb.source(root, name).file());
+        return model;
+    }
+
+    /** The model file {@code model}'s mesh came from; null for a generated model. */
+    File modelFile(Model model) { return modelFiles.get(model); }
 
     /**
      * The marked box a model that cannot load draws as, in every view, so a board with a missing or unreadable model
@@ -1312,21 +1367,9 @@ final class GpuAssets implements Disposable {
         return levels.indexOf(levels.get(level));
     }
 
-    /**
-     * A placed object's mesh per level of the props' level rule ({@link TreeLod#PROPS}: its near mesh and two simpler
-     * ones), each {@link #slotted}. A level its file lacks repeats the one before, so a model with one level is its near
-     * mesh alone; its file's level count is read once.
-     */
+    /** A placed object's mesh per level, each {@link #slotted}: {@link #levels} for the placed objects' shared meshes. */
     List<Model> objectLevels(String name) {
-        int count = fileLevels.computeIfAbsent(name, key -> {
-            var source = RigidGlb.source(root, key);
-            try {
-                return source.file().isFile() ? RigidGlb.levels(source.file()) : 1;
-            } catch (RuntimeException unreadable) { return 1; } // slotted reports it
-        });
-        List<Model> result = new ArrayList<>(List.of(slotted(name)));
-        for (int level = 1; level < Math.min(count, TreeLod.PROPS.length + 1); level++) { result.add(slotted(name, level)); }
-        return result;
+        return propLevels(level -> slotted(name, level));
     }
 
     private record FlagKey(String id, BoardFlag artwork, BoardDecoration.Colours colours) {
@@ -1412,8 +1455,8 @@ final class GpuAssets implements Disposable {
             }
             int own = ownLevel(name, level);
             // The key cannot meet a detail level's name or a colour copy's "name[...]".
-            return models.computeIfAbsent((own == 0 ? name : MeshLod.name(name, own)) + "#slots",
-                  key -> createModel(RigidGlb.colourSlotMesh(decoded(name).get(own))));
+            return fileModel((own == 0 ? name : MeshLod.name(name, own)) + "#slots", name,
+                  () -> createModel(RigidGlb.colourSlotMesh(decoded(name).get(own))));
         } catch (RuntimeException failure) { return missing(name, reason(failure)); }
     }
 
@@ -1639,7 +1682,7 @@ final class GpuAssets implements Disposable {
                 for (int index = 0; index < data.size(); index++) {
                     int previous = data.indexOf(data.get(index));
                     levels.add(previous < index ? levels.get(previous)
-                          : models.computeIfAbsent(MeshLod.name(shape, index), key -> createModel(data.get(previous))));
+                          : fileModel(MeshLod.name(shape, index), shape, () -> createModel(data.get(previous))));
                 }
                 return List.copyOf(levels);
             }).get(level);
@@ -1687,16 +1730,12 @@ final class GpuAssets implements Disposable {
         if (share.glass() != null) { share.glass().dispose(); }
     }
 
-    /** The captured wall layout determines the shared mesh; this asset owner's ordinary cache disposes it. */
-    Model wall(BoardWall.Layout layout) {
-        return wallLevels(layout).getFirst();
-    }
-
     /** Two authored component levels; remaining slots reuse the far mesh, like the ordinary rigid model loader. */
     List<Model> wallLevels(String asset, int levels) {
         return wallLevels(BoardWall.layout(asset, levels));
     }
 
+    /** The captured wall layout determines the shared meshes; this asset owner's ordinary cache disposes them. */
     List<Model> wallLevels(BoardWall.Layout layout) {
         String shape = layout.asset() + "@family-" + layout.family().folder + "@height-" + layout.height() + "@arms-" + layout.arms();
         // A family's kit that cannot load is reported once by its name; its walls draw the marked box.
@@ -2087,6 +2126,8 @@ final class GpuAssets implements Disposable {
         materials.values().forEach(Texture::dispose);
         liquids.values().forEach(animation -> animation.frames().forEach(Texture::dispose));
         models.clear();
+        modelFiles.clear();
+        plainLevels.clear();
         modelLods.clear();
         decoding.clear();
         materials.clear();
