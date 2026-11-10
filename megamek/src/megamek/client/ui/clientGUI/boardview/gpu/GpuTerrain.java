@@ -2207,10 +2207,21 @@ final class GpuTerrain implements Disposable {
         int fallsRevision = -1;
         /**
          * Its packed props have left the levels its caches hold (GpuTerrain#packLevels); {@link #levelsChanged}: one
-         * did since the last frame's check; {@link #levelsPacked}: the frame its caches last packed a level change.
+         * did since the last frame's check; {@link #levelsFiner}: one of them to a finer level, which shows while it
+         * waits; {@link #levelsPacked}: the frame its caches last packed a level change.
          */
-        boolean levelsStale, levelsChanged;
+        boolean levelsStale, levelsChanged, levelsFiner;
         long levelsPacked = -LEVEL_WAIT - 1;
+        /** The scale, pixels a world unit, its props last chose their levels at; and that of its first waiting finer level. */
+        float levelScale, finerScale;
+
+        /**
+         * Whether a level change packs now: none was packed within the last {@link #LEVEL_WAIT} frames, or a waiting
+         * finer level's prop has grown {@link #LEVEL_GROWTH} on screen since it asked.
+         */
+        boolean levelsDue(long frame) {
+            return frame - levelsPacked > LEVEL_WAIT || levelsFiner && levelScale >= finerScale * LEVEL_GROWTH;
+        }
         /** Its props by hex, in their order, gathered on first use (#propsAt). */
         private Map<Coords, List<Prop>> propsByHex;
 
@@ -2227,7 +2238,7 @@ final class GpuTerrain implements Disposable {
 
         /** Caches the props for drawing and shadows; the kit structures at {@code falling} hexes fall as pieces instead. */
         void cacheProps(Predicate<Coords> falling) {
-            levelsStale = false;
+            levelsStale = levelsFiner = false;
             cacheDecorations();
             if (cutaways.isEmpty() && struts.isEmpty()) { return; }
             if (shadowPropRenderables.isEmpty()) {
@@ -10581,9 +10592,18 @@ final class GpuTerrain implements Disposable {
             // Scatter this small casts a shadow under a texel: its appearance waits for the next refit.
             chunk.scatterVisible = scatterPixels >= (chunk.scatterVisible ? 2 : 3);
             boolean packedLevels = false, objectLevels = false;
+            chunk.levelScale = pixelsPerUnit;
             for (Prop prop : chunk.props) {
+                int level = prop.lod;
                 if (prop.detail(pixelsPerUnit)) {
-                    if (prop.decorationFeature != null || prop.translucent) { objectLevels = true; } else { packedLevels = true; }
+                    if (prop.decorationFeature != null || prop.translucent) { objectLevels = true; }
+                    else {
+                        packedLevels = true;
+                        if (prop.lod < level && !chunk.levelsFiner) {
+                            chunk.levelsFiner = true;
+                            chunk.finerScale = pixelsPerUnit;
+                        }
+                    }
                     // A kit level drawn now breaks ahead of its fall too (KitFragments).
                     if (prop.building != null && fragments) { prop.building.kit().cutFragments(prop.instance().model); }
                 }
@@ -10594,7 +10614,7 @@ final class GpuTerrain implements Disposable {
             // refit; an outline is the same at every level, so the map is not redrawn for the change alone (200-400 ms
             // per redraw on an Intel Iris Xe when the fit spans MesaCity 1, and its 233 building hexes change level
             // throughout a tilt).
-            if (packedLevels && levelFrame - chunk.levelsPacked > LEVEL_WAIT) {
+            if (packedLevels && chunk.levelsDue(levelFrame)) {
                 recacheProps(chunk);
             } else if (packedLevels || objectLevels) {
                 scarSurfaceRevision++;
@@ -10612,6 +10632,11 @@ final class GpuTerrain implements Disposable {
 
     /** Frames between a chunk's repacks while its props keep changing level ({@link #packLevels}). */
     private static final int LEVEL_WAIT = 30;
+    /**
+     * How much a prop that waits for a finer level may grow on screen before its chunk repacks anyway: the coarse mesh
+     * shows meanwhile, whatever the zoom's speed or the frame rate. A coarser level only waits with more triangles.
+     */
+    private static final float LEVEL_GROWTH = 1.25f;
     /** The frames drawn, as {@link #packLevels} counts them. */
     private long levelFrame;
     /** Some chunk's packed props left the levels its caches hold ({@link Chunk#levelsStale}). */
@@ -10622,8 +10647,9 @@ final class GpuTerrain implements Disposable {
      * (updateDetail); a pack copies every packed prop of the chunk (24 ms for 64 hexes of rubble, strongpoints and
      * timber on an RTX 4070), and in a zoom that keeps crossing some prop's threshold (props of many sizes) that was
      * every frame. A chunk that packed a level change within the last {@link #LEVEL_WAIT} frames therefore waits
-     * here, drawing the levels it packed last: until the first frame its props kept their levels, or until those
-     * frames have passed, one such chunk a frame.
+     * here, drawing the levels it packed last: until the first frame its props kept their levels, until those frames
+     * have passed, or until a prop waiting for a finer level has grown {@link #LEVEL_GROWTH} on screen
+     * ({@link Chunk#levelsDue}); one such chunk a frame.
      */
     private void packLevels() {
         levelFrame++;
@@ -10632,7 +10658,7 @@ final class GpuTerrain implements Disposable {
         boolean waited = false;
         for (Chunk chunk : chunks) {
             if (!chunk.levelsStale) { continue; }
-            if (!chunk.levelsChanged || levelFrame - chunk.levelsPacked > LEVEL_WAIT && !waited) {
+            if (!chunk.levelsChanged || chunk.levelsDue(levelFrame) && !waited) {
                 waited |= chunk.levelsChanged;
                 recacheProps(chunk);
             } else {
