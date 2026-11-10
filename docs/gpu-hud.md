@@ -322,7 +322,8 @@ The client applies authoritative updates immediately. `GpuBoardSource` retains t
 queues the detonation, one final terrain checkpoint and its visible casualty animations; a nested explosion queues inside
 the enclosing one and plays after it. `UnitPlayback` releases the checkpoint at flash contact. A strike holds its front;
 an explosion plays as the hit that set it off ends and holds its front and its falls, or, in a chain, only until its
-front reaches the next tank, which goes off there; the camera eases to an explosion without holding its clock. An
+front reaches the next tank, which goes off there. No detonation frames, follows or returns the camera: it stays the
+player's. An
 explosion draws a fireball, smoke and its shock ring, moves plants without scorching, pushes units only within its
 damage's reach, and bursts the fuel tank that went off: every piece at once, thrown up and out. If an update conceals a unit, visibility takes
 precedence: catch up first, discard consequences that could restore its identity (including carrier attachments), then
@@ -337,8 +338,13 @@ felled by its front). The trees those hexes lose in the attack's checkpoint are 
 names them on that checkpoint's `SceneUpdate` with the attack's hit. As the playback shows that checkpoint at the hit, `GpuTerrain#breakTrees` breaks them into
 fragments that burst away from the attacker and out, scatter and sink once the terrain shows them gone. A tree's model
 splits on the fragment cutter thread as the checkpoint arrives (`KitFragments#splitLater`): leaf cards and twigs stay
-whole, a trunk breaks between its triangles; a model not split by the hit falls in whole parts. Instant and a review
-show only the outcome.
+whole, a trunk breaks between its triangles; a model not split by the hit falls in whole parts. Woods drawn as a
+container yard or as crystals break the same way, each prop in its own fragments, and behind a blast's front too.
+Instant and a review show only the outcome.
+
+A piece thrown past the board's edge does not land: it falls on and shrinks to nothing below its floor's height, as do
+the cut pieces of a bridge, an authored building or a destroyed unit. A blast also removes the visual props of the hexes
+it damages (decals, route markers and building models stay).
 
 ## 2. Input routing
 
