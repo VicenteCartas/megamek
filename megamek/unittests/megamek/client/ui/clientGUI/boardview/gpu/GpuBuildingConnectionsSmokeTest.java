@@ -161,7 +161,9 @@ class GpuBuildingConnectionsSmokeTest {
             kits.add("buildings/lunar_habitat/lunar_habitat@parapet");
             kits.addAll(List.of("buildings/civic/civic", "buildings/civic/civic@ribbons", "buildings/civic/civic@offices",
                   "buildings/utopia/utopia", "buildings/utopia/utopia@bands", "buildings/frontier/frontier",
-                  "buildings/frontier/frontier@medical", "buildings/frontier/frontier@industrial", "buildings/frontier/frontier@greenhouse"));
+                  "buildings/frontier/frontier@medical", "buildings/frontier/frontier@industrial", "buildings/frontier/frontier@greenhouse",
+                  "buildings/imperial/imperial", "buildings/imperial/imperial@tower", "buildings/imperial/imperial@habitat",
+                  "buildings/imperial/imperial@commercial", "buildings/imperial/imperial@industrial"));
             for (String asset : kits) {
                 for (var footprint : HexAppearance.Footprint.values()) {
                     String design = TilesetScenery.footprint(asset, footprint);

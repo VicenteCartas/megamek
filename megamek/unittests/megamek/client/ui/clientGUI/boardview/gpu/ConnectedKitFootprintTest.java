@@ -24,7 +24,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 class ConnectedKitFootprintTest {
     private static final List<String> ASSETS = List.of("buildings/building_light/building_light",
           "buildings/lunar_habitat/lunar_habitat", "buildings/lunar_habitat/lunar_habitat@parapet", "buildings/civic/civic",
-          "buildings/utopia/utopia", "buildings/frontier/frontier");
+          "buildings/utopia/utopia", "buildings/frontier/frontier", "buildings/imperial/imperial");
 
     @BeforeAll
     static void natives() { GdxNativesLoader.load(); }
