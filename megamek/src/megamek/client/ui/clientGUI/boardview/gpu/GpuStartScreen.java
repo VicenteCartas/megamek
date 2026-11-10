@@ -328,7 +328,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         if (stage == null || disposed || (welcome != null && welcome.isOpen())) {
             return;
         }
-        welcome = new StartWelcome(kit, motion, new StartWelcome.Answer() {
+        welcome = new StartWelcome(kit, motion, content.welcomeTitle(), content.title(), new StartWelcome.Answer() {
             @Override
             public void acknowledged(boolean dontShowAgain) {
                 welcome = null;

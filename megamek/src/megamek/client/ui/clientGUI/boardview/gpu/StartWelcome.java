@@ -15,12 +15,13 @@ import megamek.client.ui.gdx.UiReveal;
 import megamek.client.ui.gdx.UiTheme;
 
 /**
- * The start screen's welcome, the libGDX form of the Swing {@code LicensingDialog} that MekHQ and MegaMekLab keep: a
- * kit dialog that unfolds over a darkening scrim, its sections then rising in one after another, as MekHQ's immersive
- * transmissions do. An accent callout says the suite is unofficial and fan-made; sections in overline headings cover
- * the licences and where to find help, each with its links; the trademarks follow in fine print. Acknowledge, with
- * "Do not bother me again" on the footer's leading side, carries on; Quit, Escape and the close button end MegaMek, as
- * closing the Swing form does.
+ * The start screen's welcome, the libGDX form of the Swing {@code LicensingDialog}, for whichever program the screen
+ * starts (MegaMek or MekHQ); MegaMekLab, and any start without the screen, keep the Swing form. A kit dialog that
+ * unfolds over a darkening scrim, its sections then rising in one after another, as MekHQ's immersive transmissions
+ * do. An accent callout says the suite is unofficial and fan-made; sections in overline headings cover the licences
+ * and where to find help, each with its links; the trademarks follow in fine print. Acknowledge, with "Do not bother
+ * me again" on the footer's leading side, carries on; Quit, Escape and the close button end the program, as closing
+ * the Swing form does.
  */
 final class StartWelcome {
     /** What the Commander's answers do. */
@@ -43,11 +44,11 @@ final class StartWelcome {
     private final UiButton acknowledge;
     private final UiButton quit;
 
-    StartWelcome(UiKit kit, boolean motion, Answer answer) {
+    /** {@code title} heads the welcome, such as "Welcome to MekHQ"; {@code program} names what Quit ends. */
+    StartWelcome(UiKit kit, boolean motion, String title, String program, Answer answer) {
         this.kit = kit;
         this.motion = motion;
-        dialog = new UiDialog(kit, Messages.getString("LicensingDialog.title"), answer::quit).width("dialog.md")
-              .unfold(true);
+        dialog = new UiDialog(kit, title, answer::quit).width("dialog.md").unfold(true);
         dialog.card().setName("start-welcome");
         bands = new UiReveal(motion, motion ? UiDialog.unfoldSeconds() : 0);
         dialog.body().add(bands).growX().minWidth(0);
@@ -84,7 +85,7 @@ final class StartWelcome {
             answer.acknowledged(dontShowAgain.isTicked());
         });
         acknowledge.setName("welcome-acknowledge");
-        quit = dialog.secondary(Messages.getString("StartWelcome.quit"), answer::quit);
+        quit = dialog.secondary(Messages.getString("StartWelcome.quit", program), answer::quit);
         quit.setName("welcome-quit");
     }
 
