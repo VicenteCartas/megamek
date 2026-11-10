@@ -58,10 +58,11 @@ final class GpuCommandDock implements GpuHud.Component {
 
     /**
      * What decides the dock's cells; they are rebuilt only when it changes. {@code buttons} are the ids of the option
-     * row's physical options or phase commands; {@code turns} shows the plan's turn buttons.
+     * row's physical options or phase commands; {@code turns} shows the plan's turn buttons; {@code standUp} puts
+     * Stand up in Jump's place.
      */
     private record Shape(Variant variant, List<String> buttons, boolean more, boolean primary, boolean secondary,
-          boolean stop, boolean legend, boolean steps, boolean backwards, boolean turns) { }
+          boolean stop, boolean legend, boolean steps, boolean backwards, boolean turns, boolean standUp) { }
 
     /**
      * The More popover's content (plan A.7 G14, A.8 H38, C.2), which G12 shows above the More button: a title and
@@ -101,6 +102,9 @@ final class GpuCommandDock implements GpuHud.Component {
      */
     private static final Set<String> MOVE_SHOWN = Stream.of(MoveCommand.MOVE_WALK, MoveCommand.MOVE_JUMP,
           MoveCommand.MOVE_BACK_UP, MoveCommand.MOVE_TURN, MoveCommand.MOVE_NEXT).map(MoveCommand::getCmd)
+          .collect(Collectors.toUnmodifiableSet());
+    private static final String GET_UP = MoveCommand.MOVE_GET_UP.getCmd();
+    private static final Set<String> MOVE_SHOWN_DOWN = Stream.concat(MOVE_SHOWN.stream(), Stream.of(GET_UP))
           .collect(Collectors.toUnmodifiableSet());
     private static final Set<String> FIRE_SHOWN = Stream.of(FiringCommand.FIRE_TWIST, FiringCommand.FIRE_FIRE,
           FiringCommand.FIRE_SKIP, FiringCommand.FIRE_NEXT, FiringCommand.FIRE_NEXT_TARG, FiringCommand.FIRE_MODE,
@@ -142,6 +146,8 @@ final class GpuCommandDock implements GpuHud.Component {
     private final GpuMoreDrawer drawer;
     // Movement plan.
     private final List<UiButton> modes = new ArrayList<>();
+    /** MegaMek's Get Up, in Jump's place while the planned unit is down: it cannot jump until it stands. */
+    private final UiButton standUp;
     private final TextButton.TextButtonStyle plainStyle;
     private final TextButton.TextButtonStyle autoStyle;
     private final UiButton turnLeft;
@@ -247,6 +253,12 @@ final class GpuCommandDock implements GpuHud.Component {
             modes.add(button);
             modeTips.add(ui.tip(button));
         }
+        standUp = button("hud", null, text("GpuBoard.hud.dock.standUp"), "", "dock-stand-up");
+        // Outlined in white like the route's mode, so the one thing a fallen unit needs stands out.
+        standUp.setStyle(autoStyle);
+        UiKit.size(standUp.getLabel(), "hud-button", 14);
+        onChange(standUp, () -> run(GET_UP));
+        ui.tip(standUp).getActor().setText(text("GpuBoard.hud.dock.standUpTip"));
         turnLeft = turn("twist-left", text("Left"), -1);
         turnRight = turn("twist-right", text("Right"), 1);
         undo = button("hud", "undo", null, null, "dock-undo");
@@ -419,7 +431,7 @@ final class GpuCommandDock implements GpuHud.Component {
               && (variant != Variant.GENERIC || done() != null), secondaryShown, stopShown,
               variant == Variant.PLAN && panels.move().route().isEmpty(), stepsShown(),
               variant == Variant.PLAN && enabled(command(MoveCommand.MOVE_BACK_UP.getCmd())),
-              variant == Variant.PLAN && panels.move().facingMatters());
+              variant == Variant.PLAN && panels.move().facingMatters(), standUpShown());
         if (!shape.equals(shown)) {
             shown = shape;
             layout(shape);
@@ -552,7 +564,15 @@ final class GpuCommandDock implements GpuHud.Component {
         row2.defaults().padLeft(GAP).height(ACTION);
         switch (shape.variant()) {
             case PLAN -> {
-                modes.forEach(mode -> row1.add(mode).growX().uniformX().minWidth(0).height(TALL));
+                // A unit down (prone or hull down) stands first: Stand up leads, and takes Jump's place.
+                if (shape.standUp()) {
+                    row1.add(standUp).growX().uniformX().minWidth(0).height(TALL);
+                }
+                for (int i = 0; i < MODES.size(); i++) {
+                    if (!shape.standUp() || MODES.get(i) != GpuMovePlan.Mode.JUMP) {
+                        row1.add(modes.get(i)).growX().uniformX().minWidth(0).height(TALL);
+                    }
+                }
                 if (shape.turns()) {
                     row1.add(turnLeft).width(SQUARE).height(TALL);
                     row1.add(turnRight).width(SQUARE).height(TALL);
@@ -725,6 +745,11 @@ final class GpuCommandDock implements GpuHud.Component {
             }
         }
         undo.setDisabled(!move.canUndo());
+        if (shown.standUp()) {
+            standUp.details.getFirst().setText(unit == null ? "" : GpuHudKit.UnitRow.prone(unit)
+                  ? text("GpuBoard.hud.state.prone") : GpuHudKit.UnitRow.hullDown(unit)
+                  ? text("GpuBoard.hud.dock.hullDown") : "");
+        }
         main(text("GpuBoard.hud.dock.confirmMove"), route && enabled(done()));
         secondary(text("GpuBoard.hud.dock.holdPosition"), enabled(skip()));
         waypoint.setDisabled(!move.canPin());
@@ -1120,7 +1145,8 @@ final class GpuCommandDock implements GpuHud.Component {
         List<BoardScene.Command> items = new ArrayList<>();
         More more = switch (variant) {
             case PLAN -> {
-                items.addAll(others(MOVE_SHOWN).map(GpuCommandDock::entry).toList());
+                items.addAll(others(standUpShown() ? MOVE_SHOWN_DOWN : MOVE_SHOWN).map(GpuCommandDock::entry)
+                      .toList());
                 yield new More(text("GpuBoard.hud.dock.moreMovement"), null,
                       items.stream().filter(BoardScene.Command::enabled).toList(),
                       items.stream().filter(command -> !command.enabled()).toList());
@@ -1252,6 +1278,14 @@ final class GpuCommandDock implements GpuHud.Component {
 
     private static boolean enabled(BoardScene.Command command) {
         return command != null && command.enabled();
+    }
+
+    /**
+     * Stand up shows in the movement plan while MegaMek offers Get Up: the unit, or the plan's end, is prone or hull
+     * down.
+     */
+    private boolean standUpShown() {
+        return variant == Variant.PLAN && enabled(command(GET_UP));
     }
 
     /** The "Steps" mini: the turn-details preference is on and the local turn has steps (plan C.2, P6). */

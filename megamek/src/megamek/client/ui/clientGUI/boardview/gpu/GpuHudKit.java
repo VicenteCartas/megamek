@@ -393,8 +393,12 @@ final class GpuHudKit implements Disposable {
      * helpers give both lists and the forces grid the same lines, colors, tooltips and unit menu (C5, C6, C12, C13).
      */
     final class UnitRow extends UiButton {
-        /** The board-label status words of a prone and of a shut-down unit ({@code UnitStatusWords.statusWords} keys). */
+        /**
+         * The board-label status words of a prone, a hull-down and a shut-down unit
+         * ({@code UnitStatusWords.statusWords} keys).
+         */
         private static final String PRONE = "PRONE";
+        private static final String HULL_DOWN = "HULLDOWN";
         private static final String SHUTDOWN = "SHUTDOWN";
         final UnitSprite sprite;
         final Label model;
@@ -602,6 +606,11 @@ final class GpuHudKit implements Disposable {
         /** The unit's board label says it is prone ({@code UnitStatusWords.statusWords}). */
         static boolean prone(UnitStatus unit) {
             return word(unit, PRONE);
+        }
+
+        /** The unit's board label says it is hull down ({@code UnitStatusWords.statusWords}). */
+        static boolean hullDown(UnitStatus unit) {
+            return word(unit, HULL_DOWN);
         }
 
         /** The unit has acted in this phase, one in which units act in turn (movement, attacks, physical). */
