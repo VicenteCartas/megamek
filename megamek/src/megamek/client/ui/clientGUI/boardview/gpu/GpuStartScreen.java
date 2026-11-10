@@ -116,7 +116,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         }
     }
 
-    enum Page { MAIN, HELP, HOST, CONNECT, LOAD, RESUME, SCENARIOS, BRIEFING }
+    enum Page { MAIN, HELP, HOST, CONNECT, LOAD, RESUME, SCENARIOS, BRIEFING, UNIT_CACHE }
 
     final GpuStartWindow window;
     private final StartScreenContent content;
@@ -144,6 +144,9 @@ final class GpuStartScreen extends ApplicationAdapter {
     final StartLoadPage loadPage = new StartLoadPage(this);
     final StartScenarioPage scenarioPage = new StartScenarioPage(this);
     final StartBriefingPage briefingPage = new StartBriefingPage(this);
+    final StartUnitCachePage unitCachePage = new StartUnitCachePage(this);
+    /** The main menu's Unit cache button, whose detail follows the cache; null on other pages. */
+    private UiButton unitCacheItem;
     private final List<String> tips;
     final boolean motion;
     /** The developer switch's page and shot, or null; only the first start window of a run reads it. */
@@ -474,6 +477,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     void showPage(Page shown) {
         page = shown;
         pageBackButton = null;
+        unitCacheItem = null;
         generation++;
         column.forEach(Actor::remove);
         column.clear();
@@ -494,6 +498,8 @@ final class GpuStartScreen extends ApplicationAdapter {
             scenarioPage.showScenarios();
         } else if (shown == Page.BRIEFING) {
             briefingPage.showBriefing();
+        } else if (shown == Page.UNIT_CACHE) {
+            unitCachePage.showUnitCache();
         } else {
             List<Actor> items = new ArrayList<>();
             if (shown == Page.MAIN && content.gamePages()) {
@@ -514,6 +520,11 @@ final class GpuStartScreen extends ApplicationAdapter {
                 items.add(item("button-quiet", "StartScreen.mapEditor", Action.MAP_EDITOR, null));
                 items.add(item("button-quiet", "StartScreen.openMap", Action.OPEN_MAP, null));
                 items.add(item("button-quiet", "StartScreen.unitBrowser", Action.UNIT_BROWSER, null));
+                unitCacheItem = kit.button("button-quiet", null, Messages.getString("StartScreen.unitCache"),
+                      StartUnitCachePage.detail());
+                leftAligned(unitCacheItem);
+                UiKit.onChange(unitCacheItem, () -> showPage(Page.UNIT_CACHE));
+                items.add(unitCacheItem);
                 items.add(item("button-quiet", "StartScreen.randomArmy", Action.RANDOM_ARMY, null));
                 items.add(item("button-quiet", "StartScreen.skinEditor", Action.SKIN_EDITOR, null));
             } else if (shown == Page.MAIN) {
@@ -1325,6 +1336,11 @@ final class GpuStartScreen extends ApplicationAdapter {
             stepParticles(dt);
         }
         drawScene(t);
+        if (page == Page.UNIT_CACHE) {
+            unitCachePage.update();
+        } else if (unitCacheItem != null && !unitCacheItem.details.isEmpty()) {
+            unitCacheItem.details.get(0).setText(StartUnitCachePage.detail());
+        }
         layoutMenu();
         stage.act(dt);
         hud.update(Set.of());

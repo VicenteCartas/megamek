@@ -1104,8 +1104,8 @@ public class ClientGUI extends AbstractClientGUI
         // The scene follows the server's first phase: the lobby for the lounge, the board for a scenario or a running
         // game. Until then whatever holds the window stays, so a scenario never flashes the lobby on its way in
         client.changePhase(GamePhase.UNKNOWN);
-        // Unit tools are created on demand; constructing them here can wait for the cache on the EDT.
-        new UnitLoadingDialog(frame).showForBackgroundLoad();
+        // Unit tools are created on demand; constructing them here can wait for the cache on the EDT. The native
+        // lobby's Requisition says it is reading the unit catalogue while the cache still loads.
         frame.setVisible(getClient() instanceof BotClient);
         GUIP.addPreferenceChangeListener(this);
     }

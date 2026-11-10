@@ -308,7 +308,9 @@ Done so far, in short:
   footers, the libGDX start screen (G1 to G6: the menu, Host, Connect, Load game, the scenario browser and the
   briefing) and its follow-ups, and the libGDX lobby (L0 to L18) with its review rounds. The lobby opens no Swing
   dialog except Client Settings and the startup-failure fallback. On the board, the Game Master's tools, the
-  reinforcements, Edit Bots, the portrait chooser and the battle menu's dialogs are native.
+  reinforcements, Edit Bots, the portrait chooser and the battle menu's dialogs are native. The unit cache's
+  progress, Refresh and Rebuild are a native Unit cache page under the start screen's Tools (#58), and the Swing
+  loading window no longer opens at startup.
 
 Still open:
 
@@ -318,8 +320,6 @@ Still open:
      editor open it too), and the map editor's About.
    - Medium: the Nova network view (`NovaNetworkViewDialog`), Network information (`NetworkInformationDialog`) and
      the accessibility window (`AccessibilityDialog`).
-   - Small: the cache progress (`UnitLoadingDialog`) behind File > Refresh and Rebuild Unit Cache; in review as
-     exeea/megamek#58, a native Unit cache page under the start screen's Tools.
    - Developer only: the conditions editor behind the Tuning utility (`PlanetaryConditionsDialog`).
 2. Live checks: a real MekHQ game, a network reconnect, a password-protected game and a second human player in a
    second MegaMek window. The system file dialog on macOS and Linux hasn't been tried on a real machine yet; step
@@ -336,7 +336,7 @@ Still open:
 ## Review probes
 
 To review a start screen page without clicking through it, set `MM_START_PAGE` (such as `host+online+reveal`,
-`connect+bot`, `load`, `resume`, `scenarios` or `briefing`, with `MM_START_SCENARIO` naming the
+`connect+bot`, `load`, `resume`, `scenarios`, `briefing` or `unit_cache`, with `MM_START_SCENARIO` naming the
 scenario file) before `gradlew :megamek:run`. `MM_START_SHOT` saves a PNG from the screen's own frame buffer,
 `MM_START_SHOT_AT` sets when, and `MM_START_QUIT=true` quits afterwards (`StartScreenProbe`).
 

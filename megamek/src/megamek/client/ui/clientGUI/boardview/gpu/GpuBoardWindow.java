@@ -189,8 +189,6 @@ public final class GpuBoardWindow {
           megamek.client.ui.dialogs.AccessibilityDialog.class,
           // U2: the Nova network view
           megamek.client.ui.dialogs.phaseDisplay.NovaNetworkViewDialog.class,
-          // U2: unit cache loading
-          megamek.client.ui.dialogs.UnitLoadingDialog.class,
           // U2: the developer conditions editor behind the Tuning utility
           megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog.class);
     private final ClientGUI gui;
