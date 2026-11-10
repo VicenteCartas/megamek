@@ -179,7 +179,8 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `MeepleShatter` | Cuts a meeple's mesh along several planes into closed rigid pieces, each with its outermost points as contacts. |
 | `MeepleDebris` | Rigid-body physics of the thrown pieces against a height field sampled from the board's picking, with a time limit that always stops them. |
 | `GpuAttackEffects` | Chooses visual attacks and their emitters from the posed loadout. |
-| `GpuMissileEffects`, `GpuExplosionEffects`, `GpuJumpJets` | Render batched missiles, bounded fire/smoke volumes and visible jump exhaust. |
+| `GpuMissileEffects`, `GpuExplosionEffects`, `GpuJumpJets` | Render batched missiles, bounded fire/smoke volumes (a collapse's dust cloud among them) and visible jump exhaust. |
+| `GpuEffectLayer` | The half-resolution layer soft volumes draw into, joined to the scene along the opaque depth's edges; shared by `GpuExplosionEffects` and `GpuTerrainEffects`. |
 | `GpuPilotFlames` | Renders the pilot flame every working flamer keeps at its `flame` emitter: a blue gas core and flickering fire tongues in the flamer stream's shader. |
 | `GpuTerrainEffects` | Maintains board fire/smoke emitters and their projected-size detail. |
 | `GpuEffectBatch`, `GpuEffectDepth` | Batch effect geometry and lazily provide opaque scene depth for soft intersections. |

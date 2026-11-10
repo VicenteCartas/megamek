@@ -163,10 +163,9 @@ exits. Wall geometry is shared by rendering, picking and dressing clearance. Gra
 turf grow up to a military wall's body (`BoardWall.footprint`: the 30-unit deck and 52-unit junction every
 military family shares) and everywhere under a civilian wall's open net.
 The layered GLBs in `data/models/buildings/walls/<family>/` supply straight sections,
-piers and terminals; their arms are connected-kit pieces (`data/models/buildings/README.md`). The game and editor select the family from pristine
-map CF (`BLDG_CF`): civilian 1–10, light 11–15, medium 16–40, heavy 41–90,
-hardened 91–150, Castle Brian 151+. Damage never changes the family. Editing map CF
-across a tier boundary rebuilds the geometry; explicit model overrides keep their artwork.
+piers and terminals; their arms are connected-kit pieces (`data/models/buildings/README.md`). The game and editor select the family from the
+wall's weight (`BLDG_WEIGHT`): civilian, light, medium, heavy, hardened, Castle Brian. Its CF plays no part, so damage
+never changes the family. An edit of the weight rebuilds the geometry; explicit model overrides keep their artwork.
 Base and floor modules each fill one rules level, with the roof capping the complete
 stack. Tall bodies repeat floors without stretching their textures. Connecting arms
 meet the neighboring wall's roof in world space, with narrower civilian junction offsets.

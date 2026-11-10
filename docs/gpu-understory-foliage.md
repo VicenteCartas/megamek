@@ -26,14 +26,7 @@ The meshes and their textures are in the sibling `mm-data` repository:
 - `data/models/board/textures/vegetation/shrubs/shrub-{family}_albedo.png`: original, opaque
   1254 × 1254 botanical atlases.
 
-Tundra's grass tussock, `foliage-tussock.glb`, shares this drawing path but is not
-woods: `BoardScatter` places it on earth tundra at grass height, and it is never
-cover (see [terrain materials](gpu-terrain-materials.md)). Its LOD0-2 are crossed, slightly
-tilted and bowed full-width cards of the `vegetation/tundra-tussock` cutout's side view, its
-blades fountaining from a dense base, over a low skirt whose edge rests on the ground and
-carries the cutout's view from above; LOD3 is the usual impostor. 408, 128, 48 and 2
-triangles. Built by
-`mm-data/tools/board-models/foliage/build_tussock.py`, then the impostor by `tools/prepare_tree_lods.py`.
+Tundra's tussocks are tufts of blades in the grass engine ([grass](gpu-grass-rendering.md#tundra-sward)), not models.
 
 ## Families and triangle counts
 

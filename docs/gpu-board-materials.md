@@ -287,7 +287,7 @@ these values safely).
 - `structures/turret/`: `turret-dark`, `turret-edge`, `turret-paint`
 - `terrain/classic/`: `concrete`, `dirt`, `fungus`, `high-incline-dark`, `incline-dark`, `lunar`, `mars`, `rock`, `sand`, `snow`, `volcano`, `water-bed`
 - `terrain/damage/`: `ballistic-blast`, `ballistic-gouge`, `explosive-blast`, `fire-burn`, `laser-blast`, `laser-gouge`, `plasma-splash`, `ppc-blast`, `ppc-gouge`
-- `vegetation/`: `bark`, `birch-bark`, `broadleaf-cutout`, `broadleaf-snow-cutout`, `cactus-flower-cutout`, `cactus-skin`, `conifer-cutout`, `conifer-snow-cutout`, `fern-cutout`, `marsh-sedge`, `palm-bark`, `palm-frond-cutout`, `palm-fronds`, `shrub-cutout`, `snow`, `tundra-tussock`
+- `vegetation/`: `bark`, `birch-bark`, `broadleaf-cutout`, `broadleaf-snow-cutout`, `cactus-flower-cutout`, `cactus-skin`, `conifer-cutout`, `conifer-snow-cutout`, `fern-cutout`, `marsh-sedge`, `palm-bark`, `palm-frond-cutout`, `palm-fronds`, `shrub-cutout`, `snow`
 - `vegetation/fungus/`: `fungus-atlas`
 - `vegetation/mars/`: `mars-coral-atlas`
 - `vegetation/orchard/`: `orchard-leaning`, `orchard-round`, `orchard-spreading`, `orchard-upright`, `orchard-vase`, `orchard-young`

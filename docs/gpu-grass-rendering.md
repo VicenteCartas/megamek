@@ -16,8 +16,9 @@ density and mesh rules.
 | `BoardVegetation`, `BoardBiome` | Terrain eligibility, deterministic placement inputs and shared growth fields. |
 | `BoardPlants` | What each terrain detail level plants; grass and its banks' rim blades on medium and full detail. |
 | `GpuGroundCover` | Root planting for terrain workers (meadow and bank rims), projected density, blade templates and per-chunk submission. |
-| `terrain-grass.glsl` | Blade shape, root-fixed bending, a rim blade's hang and per-root detail selection. |
+| `terrain-grass.glsl` | Blade shape, root-fixed bending, a rim blade's hang, a tussock's tuft and per-root detail selection. |
 | `terrain-meadow.glsl` | Growth variation shared by ground color and grass shape. |
+| `terrain-tundra-sward.glsl`, `BoardBiome.sward` | Earth tundra's sward: its stands' colours for blades and ground, and its openings. |
 | `terrain-vegetation-wind.glsl` | World-space gust used by grass, crops and marsh plants. |
 | `terrain-vegetation.frag` | Plant surface lighting, root darkening and wetness. |
 | `terrain-materials.glsl` | The ground under the blades, including a bank's turf lip and the root mat below it. |
@@ -190,6 +191,51 @@ on NVIDIA the frames match the old order but for single pixels at roots. Two fur
 changes measured within noise on the Iris Xe in A/B runs on those views and were not
 kept: one draw per chunk in the orthographic view (roots interleaved by rank instead
 of a range per hex), and the grid shade taken once per plant in the vertex stage.
+
+## Tundra sward
+
+Earth tundra (every theme but Fungus, Mars, Lunar and Volcano, and not under pavement) grows a sward of long dry
+grass from the meadow's own candidates, buffers and program. `GpuGroundCover.plant` gives a candidate to the sward
+where the tundra's coverage reaches and `BoardBiome.sward` grows: about two thirds of a hex, with openings some
+metres across where the carpet's lichen, moss and gravel show. The sward
+crosses into neighbouring hexes with the tundra's coverage and stops at the Snow theme's remnants. A sward root
+carries half a rank more than a meadow's.
+
+Its blades (`terrain-grass.glsl`) are leaves two to three times as wide as the meadow's and up to a quarter longer,
+never narrower than two and a half pixels. They lie over, combed one way, along their ground's slope, and are lit by
+that ground's normal, like all grass. Stands several metres across colour them (`terrain-tundra-sward.glsl`): straw from bleached to ochre for
+the most part, russet sedge, which grows shortest, and green. Stands have no outline: between two, each blade
+belongs to one or the other. The ground under the sward (`tundraSurface`) is its thatch in the same stands' tones,
+a little paler, over the grain of the theme's own ground, so Low, which draws no blades, and distant views keep the look. The first
+blades to stand keep to the thatch's colour; sunlit tips come with the full sward. Wind, scorch, blast, the
+**Grass blades** option and the quality's meadow share apply as to the meadow.
+
+Tussocks are tufts of the same grass (`GpuGroundCover.tufts`, template part 10): the first 32 candidates of a hex may
+seed one where earth tundra grows, in loose clusters 1.6 m apart or more, some ten a hex, in the sward and its
+openings alike. Each grows 112 finer blades out of a disc .9 to 1.8 m across: those at its centre stand, half as tall
+again as the sward's are long at most, and towards its rim they lean out, arch over and droop to the ground. A tuft is
+dark at its heart, pale at its tips, takes half its stand's colour and is lit as a mound, its blades' normals leaning
+out with them. The tufts' blades stand up and thin out as a bank rim's do (100 to 140 px/hex, fewer and wider below
+400), in their own layer of the chunk. Low and the **Grass blades** option draw none.
+
+## Lighting and planting cost
+
+Meadow, sward and tussock blades are lit by a normal the vertex stage gives them: their ground's (its slope rides in
+the low seven bits of a root's rank fraction, `GpuGroundCover.slopeCode`), tilted a quarter each blade's own way, or a
+tussock's mound. Lit by their own faces, blades peppered a meadow with near-black pixels and stood out bright on banks
+turned from the sun. A meadow's blade is a pixel wide at its root or more. Rim blades and crops keep their own faces.
+
+A planter asks the biome coverage of thousands of points in one hex: `BoardBiome.Coverage` looks the nine hexes of
+its stencil up once per hex (4,096 tundra points: 1.20 ms per point, 0.78 ms per hex, same sums), and level tundra
+with level tundra all around skips the query (`BoardVegetation.uniform`), as fields and marsh do.
+
+Measured 2026-11-10 on a busy machine, the fastest of twelve batches: planting a level tundra hex with its sward takes
+0.90 ms, a meadow hex 0.80 ms (0.67 to 0.70 ms before the slope code). Whole frames on the Esker (Tundra) board at
+1920x1080 on NVIDIA, against the build without tundra grass: High 6.4 to 7.2 against 5.6 to 6.3 ms at 330 px/hex and
+4.9 to 5.5 against 4.6 to 5.3 ms at 700; Medium within the 0.5 ms between runs. On the Iris Xe at Medium only the
+sward without tufts was timed: one undisturbed pair read 21.5, 20.5 and 18.4 ms without and 23.4, 20.1 and 17.6 ms
+with it (330 and 700 px/hex, and a tilted view), a second pair was disturbed, so its cost there is not resolved below
+about 2 ms, and the tufts' is not measured.
 
 ## Wind
 

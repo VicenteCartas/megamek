@@ -12,15 +12,18 @@
 | `GpuBuilding` | Upload a kit, choose stable base/floor/roof recipes, instance their placed pieces and expose picking geometry. |
 | `GpuBuildingInterior` | Generate shared floor sheets and supports from the roof's occupied footprint. |
 | `BoardIndustrial` | Generate deterministic machinery with independent equipment heights and neighbor pipe joints. |
-| `BoardWall` | Choose a wall family from pristine map CF and assemble its layered components for drawing, picking and clearance. |
+| `BoardWall` | Choose a wall family from its weight and assemble its layered components for drawing, picking and clearance. |
 | `GpuTreeInstances / GpuTerrain` | Instance module ranges; install chunks and retire unused recipes/interior buffers. |
 
-The board's tileset still chooses building artwork. `TilesetScenery.customBuildingFile` maps the selected legacy
-asset to `data/models/buildings/<family>/<name>.glb`, removing the `saxarba/` provenance directory. For example,
-`buildings/saxarba/fortress_light/fortress_light_a_52` selects
-`data/models/buildings/fortress_light/fortress_light_a_52.glb`. Without that exact file, a kit named for the design
-alone stands for all of its per-combination keys: `buildings/saxarba/fuel_tanks/fuel_tank_light_05` selects
-`data/models/buildings/fuel_tanks/fuel_tank_light.glb`.
+A building hex draws its explicit look or, without one, the standard kit of its gameplay class and weight
+(`TilesetScenery.genericBuilding`): `data/models/buildings/standard/<class>-<weight>.json`, for example
+`standard/fortress-light.json`. The weights are civilian, light, medium, heavy, hard and castle-brian
+(`TilesetScenery.buildingWeight`). The rules know the four in the middle: a building's `BUILDING` type is its weight as
+they see it (a civilian building is light, a Castle Brian hardened), and only those two store their own in
+`BLDG_WEIGHT`. A look's kit is `data/models/buildings/<look>/<look>.json`; the kit file's format is
+described in `data/models/buildings/README.md`. A structure asset names its file (`TilesetScenery.customBuildingFile`):
+`buildings/fuel_tanks/fuel_tank_light` is `data/models/buildings/fuel_tanks/fuel_tank_light.glb`. A fuel tank's kit follows
+its weight (`TilesetScenery.genericFuelTank`), as a generic building's does; the Classic model tileset has no entry for it.
 
 Every kit may carry connection pieces (`data/models/buildings/README.md`). The hex's own exits pick them
 (`ConnectedKit.reach`): a connected side runs the structure's whole height, lowered to the top of a neighbour of the
@@ -33,11 +36,11 @@ Discovery accepts a custom kit even if there is no legacy model.
 Malformed custom kits fail with an authoring error rather than silently concealing invalid assets.
 
 Generated `buildings/wall-<exits>` uses `data/models/buildings/walls/<family>/` in both
-the game and editor. Pristine `BLDG_CF` selects civilian (1–10), light (11–15), medium
-(16–40), heavy (41–90), hardened (91–150), or Castle Brian (151+). `Cover.pristineCF`
-captures the map value separately from current gameplay CF, so damage cannot change
-the family. Editor CF edits across a tier boundary invalidate geometry and select a
-different cached layout. Explicit wall model overrides retain their authored appearance.
+the game and editor. The wall's weight (`BLDG_WEIGHT`, `TilesetScenery.buildingWeight`, in `Cover.wallWeight`)
+selects civilian, light, medium, heavy, hardened or Castle Brian; its CF plays no part, so damage cannot change the
+family. A legacy `.board` wall has no weight: its conversion gives it the one its CF belongs to (1–10 civilian, 11–15
+light, 16–40 medium, 41–90 heavy, 91–150 hardened, 151+ Castle Brian). An editor edit of the weight invalidates
+geometry and selects a different cached layout. Explicit wall model overrides retain their authored appearance.
 
 Each wall component has base/floor/roof modules and two internal LODs. The shared
 module-role selection grounds one base and repeats 18-unit floors for the remaining
@@ -49,12 +52,12 @@ same assembled geometry and scale. Civilian connectors use the narrower junction
 One building kit per GLB, with identity root groups:
 
 ```
-fortress_light_a_52-lod0
-  fortress_light_a_52-lod0-base0
-  fortress_light_a_52-lod0-floor0
-  fortress_light_a_52-lod0-floor1
-  fortress_light_a_52-lod0-roof0
-fortress_light_a_52-lod1     (optional; same module roles)
+fuel_tank_light-lod0
+  fuel_tank_light-lod0-base0
+  fuel_tank_light-lod0-floor0
+  fuel_tank_light-lod0-floor1
+  fuel_tank_light-lod0-roof0
+fuel_tank_light-lod1     (optional; same module roles)
   ...
 ```
 

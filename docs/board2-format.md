@@ -63,10 +63,13 @@ placed `decorations` retain their existing fields. Gameplay and appearance are r
 }
 ```
 
-Structure `type`: `building` or `wall`. Both have a separate `weight`: `light`, `medium`, `heavy`, or `hardened`.
+Structure `type`: `building` or `wall`. Both have a separate `weight`: `civilian`, `light`, `medium`, `heavy`,
+`hardened`, or `castleBrian`. The rules know the four in the middle: to them a civilian building is light and a
+Castle Brian hardened.
 Building `class`: `standard` (the default), `hangar`, `fortress`, or `gunEmplacement`.
 Thus a medium hangar stores `"type":"building","weight":"medium","class":"hangar"`;
-a heavy wall stores `"type":"wall","weight":"heavy"`. Walls always have no interiors and no basement,
+a heavy wall stores `"type":"wall","weight":"heavy"`. A building's kit and a wall's look follow the `weight`, never
+the `cf`. Walls always have no interiors and no basement,
 including when a file requests otherwise. `cf`, `height`, and optional `armor` are independent integers.
 `basement` is `unknown`, `none`, `twoDeepFeet`, `oneDeepFeet`, `oneDeepNormal`, `oneDeepInfantry`, `oneDeepHead`, or
 `twoDeepHead`. Missing `basement` means `unknown`; saving omits `unknown`. A building whose resolved interiors
@@ -93,6 +96,8 @@ select its modular kit. Building appearance supports:
 - Optional `profile`: `stepped` makes upper storeys step back above shorter connected neighbours. Omitted (or `straight`)
   keeps the ground footprint through the full height. The editor saves only `stepped`, separately for each hex.
 - Optional `kitVariant`: a named variant inside a generated kit, such as `parapet`.
+- Optional `roof`: `vaulted` or `flat`, for a hangar-class building whose kit variant has both roofs. Omitted, a
+  hangar is vaulted. Other building classes ignore it.
 - Optional `rotation`: clockwise whole degrees, 0–359; 0 is omitted. Connected buildings ignore rotation.
 - Optional `colours`: the existing array of up to four `#rrggbb` slot overrides; `null` retains a slot's original color.
   Buildings currently use slot 0 for a whole-building multiplicative tint; white restores the original surfaces.
@@ -160,8 +165,8 @@ stores a side on both hexes, and either one parts it. A legacy file's hand-set e
 
 | Component | Fields |
 |---|---|
-| `bridge` | `type`, `cf`, `height`, `mud`, `connections` |
-| `fuelTank` | `type`, `cf`, `height`, `magnitude`, `connections` |
+| `bridge` | `weight`, `cf`, `height`, `mud`, `connections` |
+| `fuelTank` | `weight`, `cf`, `height`, `magnitude`, `connections` |
 | `road`, `bridgeRoad` | `type` (`paved`, `alley`, `dirt`, `gravel`), `connections` |
 | `rail`, `bridgeRail` | `type` (`rail`, `maglev`), `connections` |
 | `water` | `depth`, `rapids` |
@@ -169,7 +174,7 @@ stores a side on both hexes, and either one parts it. A legacy file's hand-set e
 | `ground` | `sand`, `tundra`, `fields`, `swamp`, `mud` |
 | `pavement` | `level` |
 | `rough` | `level` (`normal`, `ultra`) |
-| `rubble` | `type` (`light`, `medium`, `heavy`, `hardened`, `wall`, `ultra`) |
+| `rubble` | `type` (what fell: `building`, `wall`, `ultra`), `weight` of a building's (`light`, `medium`, `heavy`, `hardened`) |
 | `industry` | `height` |
 | `cliff` | `level`, `connections` |
 | `weather` | `ice`, `snow`, `blackIce` |

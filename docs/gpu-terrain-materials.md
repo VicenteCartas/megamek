@@ -714,8 +714,9 @@ views of these themes.
 `Terrains.TUNDRA` selects a surface-only biome treatment while retaining the theme's
 geology and ground mixture. Reference-authored low mats break into exposed substrate:
 sage/ochre lichen on ordinary ground, lilac/cyan colonies on Fungus, and mineral
-pigments on Mars and Lunar. Dense meadow blades stop at the shared biome
-boundary; existing dry-grass scatter remains available on Grass and Tropical.
+pigments on Mars and Lunar. Meadow blades stop at the shared biome
+boundary, where earth tundra's own sward takes over
+([grass](gpu-grass-rendering.md#tundra-sward)); existing dry-grass scatter remains available on Grass and Tropical.
 Mats continue over slopes between tundra terraces using the same broad contact
 stencil as marsh sediment. Isolated banks taper below their rim, and sheer faces
 retain exposed geology. Shared material projection carries color and normals over bends:
@@ -749,11 +750,10 @@ Sedge fills the hollows at the foot of rises, unless a drop is near (`tundraWetn
 ground's rim and foot distances); the fell-field carries its own lichen, moss and gravel everywhere else. The
 transition is metres wide, so the carpets meet as tones, never as patches.
 
-Earth tundra's straw grass tussocks are not in the carpet (they were painted out of its source) but stand as meshes:
-`foliage-tussock.glb` (`BoardScatter.tussocks`), up to ten a hex in loose clusters that run on across hex edges, clear
-of the unit at the centre. They draw with the trees in the foliage pass, with its four levels of detail, and stand
-as tall as the meadow's tallest blades, far below the low woods, so they never read as cover; the Tactical View omits
-them like the grass. Fungal mats, mineral crust and pavement lichen grow none. Material Maker projects and
+Earth tundra's straw grass tussocks are not in the carpet (they were painted out of its source): they grow as tufts
+of blades with its sward ([grass](gpu-grass-rendering.md#tundra-sward)), as tall as the meadow's tallest blades or a
+half more, far below the low woods, so they never read as cover; the Tactical View omits them like the grass. Fungal
+mats, mineral crust and pavement lichen grow none. Material Maker projects and
 their required source images remain the authoring source of truth.
 
 `BoardTundraTest` checks native capture, theme preservation, precedence, cliff
