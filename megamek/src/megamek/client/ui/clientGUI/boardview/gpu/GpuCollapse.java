@@ -35,12 +35,11 @@ final class GpuCollapse implements Disposable {
     static final float REST_SECONDS = GpuDestruction.REST_SECONDS, SINK_SECONDS = GpuDestruction.SINK_SECONDS;
     /** Playback seconds after which pieces still rocking count as settled, as at zero gravity. */
     private static final float LONGEST_FALL = 6;
-    /** How long the dust of the foot giving way, its column and a piece's landing last, in playback seconds. */
-    private static final float SURGE_SECONDS = 2.6f, COLUMN_SECONDS = 4.5f, PUFF_SECONDS = 1.4f;
+    /** How long the dust of a piece's landing lasts, in playback seconds. */
+    private static final float PUFF_SECONDS = 1.4f;
     /** At most this many landings raise their own dust: the explosion volumes are shared with every other effect. */
     private static final int MAX_PUFFS = 16;
-    /** Pale, a little warm, concrete and plaster dust; over water, white spray. */
-    private static final GpuExplosionEffects.Look DUST = new GpuExplosionEffects.Look(-1, 0, .15f);
+    /** Over water, white spray for dust. */
     private static final GpuExplosionEffects.Look SPRAY = new GpuExplosionEffects.Look(-1, 0, 0);
 
     /** Cuts run here, one at a time: off the render thread, and off the common pool, whose work the render thread joins. */
@@ -191,45 +190,20 @@ final class GpuCollapse implements Disposable {
 
     /** Whether it has nothing more to show: its pieces have sunk away and its dust has cleared, or it never fell. */
     boolean done() {
-        return failed || debris != null && sinking() >= 1 && seconds >= COLUMN_SECONDS;
+        return failed || debris != null && sinking() >= 1 && seconds >= GpuDestruction.CLOUD_SECONDS;
     }
 
     /**
-     * Its dust this frame: a surge racing out along the ground as a building's foot gives way (a span has none), a
-     * column rising from the wreck, and a puff, or spray over water, where a piece lands hard. It shares the volumes the effects hold with the
-     * {@code collapses} under way, itself among them, rather than crowding out the rest.
+     * Its dust this frame: its cloud (GpuDestruction#cloud; a span's has no surge) and a puff, or spray over water,
+     * where a piece lands hard. It shares the volumes the effects hold with the {@code collapses} under way, itself
+     * among them, rather than crowding out the rest.
      */
     void explosions(GpuExplosionEffects effects, int collapses) {
         if (debris == null || !released) { return; }
         float share = Math.min(1, 4f / Math.max(collapses, 1));
-        var look = water ? SPRAY : DUST;
+        var look = water ? SPRAY : GpuDestruction.DUST;
         var point = new Vector3();
-        var axis = new Vector3();
-        float surge = seconds / SURGE_SECONDS;
-        if (surge < 1 && !fall.span()) {
-            float spread = 1 - (float) Math.exp(-surge * 3.5f);
-            int puffs = Math.max(5, Math.round(10 * share));
-            for (int puff = 0; puff < puffs; puff++) {
-                float bearing = puff * MathUtils.PI2 / puffs + GpuArtilleryBlast.random(seed, puff) * .4f;
-                float out = reach * (.7f + 1.1f * spread * MathUtils.lerp(.6f, 1.2f, GpuArtilleryBlast.random(seed, puff + 20)));
-                float radius = reach * .35f * (.6f + .9f * surge) * MathUtils.lerp(.7f, 1.3f, GpuArtilleryBlast.random(seed, puff + 40));
-                point.set(base).add(MathUtils.cos(bearing) * out, MathUtils.sin(bearing) * out, reach * .1f);
-                // Drawn out around the ring, so neighbouring puffs merge into one sheet of dust rolling outward.
-                axis.set(-MathUtils.sin(bearing), MathUtils.cos(bearing), 0).scl(1.1f);
-                effects.add(point, radius, surge, 0, .45f * GpuArtilleryBlast.fadeOut(surge, .35f), seed + puff * 31, look, axis);
-            }
-        }
-        float column = seconds / COLUMN_SECONDS;
-        if (column < 1) {
-            float alpha = MathUtils.clamp(seconds / .5f, 0, 1) * GpuArtilleryBlast.fadeOut(column, .45f);
-            for (int puff = 0, puffs = Math.max(2, Math.round(4 * share)); puff < puffs; puff++) {
-                float bearing = puff * 2.1f + GpuArtilleryBlast.random(seed, puff + 60);
-                point.set(base).add(MathUtils.cos(bearing) * reach * .3f, MathUtils.sin(bearing) * reach * .3f,
-                      height * (.2f + puff * .22f) + reach * column * .8f);
-                effects.add(point, reach * (.45f + .5f * column) * (1 - puff * .08f), column, 0, .35f * alpha,
-                      seed + 97 + puff * 37, look, Vector3.Zero);
-            }
-        }
+        GpuDestruction.cloud(effects, look, base.x, base.y, base.z, height, reach, seconds, seed, !fall.span());
         int landings = Math.max(2, Math.round(MAX_PUFFS * share));
         for (Puff puff : puffs.subList(0, Math.min(landings, puffs.size()))) {
             float age = (seconds - puff.born()) / PUFF_SECONDS;

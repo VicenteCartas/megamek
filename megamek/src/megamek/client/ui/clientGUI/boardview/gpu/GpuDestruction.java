@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -80,13 +79,17 @@ final class GpuDestruction implements Disposable {
     private static final float TREE_FALL_SECONDS = 1.3f;
     /** The level of detail felled trees cast their shadows at. */
     private static final int SHADOW_LEVEL = 1;
+    /** A cloud of dust lasts this long, in playback seconds: thick for the first third, then thinning away. */
+    static final float CLOUD_SECONDS = 6;
     /**
-     * Dust, in playback seconds: a surge rolls out along the ground for this long, a column rises for longer. Falls by the
-     * dozen (a strike) raise one cloud per {@link #CLOUD_HEXES} hexes square, at most {@link #MAX_CLOUDS} of them.
+     * The falls raise one cloud per {@link #CLOUD_HEXES} hexes square; falls of its square that start within
+     * {@link #JOIN_SECONDS} of a cloud's first belong to it. At most {@link #MAX_CLOUDS} hang at once: under a strike
+     * the squares that fall later raise none, rather than take a standing cloud away.
      */
-    private static final float SURGE_SECONDS = 2.6f, COLUMN_SECONDS = 4.5f;
-    private static final int ALONE = 8, CLOUD_HEXES = 4, MAX_CLOUDS = 24;
-    private static final GpuExplosionEffects.Look DUST = new GpuExplosionEffects.Look(-1, 0, .15f);
+    private static final int CLOUD_HEXES = 4, MAX_CLOUDS = 48;
+    private static final float JOIN_SECONDS = 1;
+    /** Pale, a little warm, concrete and plaster dust. */
+    static final GpuExplosionEffects.Look DUST = new GpuExplosionEffects.Look(-1, 0, .15f);
 
     /** The fall's numbers as GLSL constants, so that the shader and {@link #settles} agree. */
     static String defines() {
@@ -128,6 +131,8 @@ final class GpuDestruction implements Disposable {
         float lead, spread;
         /** No structure falls here: its hex's rubble waits for the old path's pieces to land (#landed). */
         boolean rubbleOnly;
+        /** A cloud holds its dust (#raise). */
+        boolean dusty;
         /** Where the trees an attack broke stood (#breakTrees): their chunks' stands leave them out. */
         Set<Long> stood = Set.of();
 
@@ -166,6 +171,26 @@ final class GpuDestruction implements Disposable {
     /** Counts the changes of which hexes are taken: a chunk snapshot of another count may draw them wrongly. */
     private int revision;
     private float clock, gravity = GRAVITY;
+    private final List<Cloud> clouds = new ArrayList<>();
+
+    /**
+     * The dust over the falls of one square of hexes, from the first of them on. It outlives their piles: a pile has
+     * sunk long before its dust has cleared.
+     */
+    private static final class Cloud {
+        final float x, y, floor, height, reach;
+        final int seed;
+        float seconds;
+
+        Cloud(float x, float y, float floor, float height, float reach, int seed) {
+            this.x = x;
+            this.y = y;
+            this.floor = floor;
+            this.height = height;
+            this.reach = reach;
+            this.seed = seed;
+        }
+    }
     /** The board's size in hexes: past its edge nothing lands (tree-instances.glsl). */
     private int columns, rows;
 
@@ -430,6 +455,9 @@ final class GpuDestruction implements Disposable {
             changed = true;
             revision++;
         }
+        for (Cloud cloud : clouds) { cloud.seconds += Math.max(0, seconds); }
+        clouds.removeIf(cloud -> cloud.seconds >= CLOUD_SECONDS);
+        raise();
         if (isEmpty()) { clock = 0; }
         publish();
     }
@@ -451,82 +479,74 @@ final class GpuDestruction implements Disposable {
         falls.clear();
         groves.clear();
         shattered.clear();
+        clouds.clear();
         clock = 0;
         publish();
     }
 
     /**
-     * The dust of the structures giving way, as their pieces start to move: a surge rolling out along the ground from
-     * their feet and a column rising from their wreck. Falls by the dozen share clouds a few hexes across, each from its
-     * first fall over all of them, so that a city's dust stays within the effects' volumes.
+     * A cloud for every square of hexes in which a structure has just given way, over all its structures giving way
+     * with it: a building of many hexes, or a city's under a strike, raises few clouds, each drawn once.
      */
-    void dust(GpuExplosionEffects effects) {
-        List<Fall> started = new ArrayList<>();
-        // The old path's collapses raise their own dust (GpuCollapse).
-        for (Fall fall : falls.values()) { if (clock >= fall.start && !fall.rubbleOnly) { started.add(fall); } }
-        if (started.isEmpty()) { return; }
+    private void raise() {
+        Map<Long, List<Fall>> squares = new LinkedHashMap<>();
+        for (Fall fall : falls.values()) {
+            // The old path's collapses raise their own dust (GpuCollapse).
+            if (!fall.dusty && !fall.rubbleOnly && clock >= fall.start) { squares.put(square(fall), new ArrayList<>()); }
+        }
+        if (squares.isEmpty()) { return; }
+        for (Fall fall : falls.values()) {
+            List<Fall> members = squares.get(square(fall));
+            if (members != null && !fall.dusty && !fall.rubbleOnly && fall.start <= clock + JOIN_SECONDS) { members.add(fall); }
+        }
         float hex = BoardGeometry.height() * .5f;
-        if (started.size() <= ALONE) {
-            for (Fall fall : started) {
-                cloud(effects, fall.texels[4], fall.texels[5], fall.bounds.min.z, fall.bounds.getDepth(), hex,
-                      clock - fall.start, fall.slot, started.size());
-            }
-            return;
-        }
-        Map<Long, List<Fall>> cells = new LinkedHashMap<>();
-        for (Fall fall : started) {
-            long key = (long) Math.floorDiv(fall.coords.getX(), CLOUD_HEXES) << 32
-                  | Math.floorDiv(fall.coords.getY(), CLOUD_HEXES) & 0xffffffffL;
-            cells.computeIfAbsent(key, ignored -> new ArrayList<>()).add(fall);
-        }
-        List<List<Fall>> clouds = new ArrayList<>(cells.values());
-        clouds.sort(Comparator.comparingDouble(cell -> cell.stream().mapToDouble(fall -> fall.start).min().orElse(0)));
-        int count = Math.min(MAX_CLOUDS, clouds.size());
-        for (List<Fall> cell : clouds.subList(0, count)) {
-            float x = 0, y = 0, floor = Float.MAX_VALUE, height = 0, first = NEVER;
-            for (Fall fall : cell) {
-                x += fall.texels[4] / cell.size();
-                y += fall.texels[5] / cell.size();
+        for (List<Fall> members : squares.values()) {
+            float x = 0, y = 0, floor = Float.MAX_VALUE, height = 0;
+            for (Fall fall : members) {
+                fall.dusty = true;
+                x += fall.texels[4] / members.size();
+                y += fall.texels[5] / members.size();
                 floor = Math.min(floor, fall.bounds.min.z);
                 height = Math.max(height, fall.bounds.getDepth());
-                first = Math.min(first, fall.start);
             }
-            float reach = hex * Math.min(CLOUD_HEXES, 1 + (float) Math.sqrt(cell.size()));
-            cloud(effects, x, y, floor, height, reach, clock - first, cell.getFirst().slot, count);
+            if (clouds.size() < MAX_CLOUDS) {
+                clouds.add(new Cloud(x, y, floor, height, hex * Math.min(CLOUD_HEXES, (float) Math.sqrt(members.size())),
+                      members.getFirst().slot));
+            }
         }
     }
 
-    /** One cloud: its surge from around ({@code x}, {@code y}) at {@code floor}, its column up to about {@code height}. */
-    private static void cloud(GpuExplosionEffects effects, float x, float y, float floor, float height, float reach,
-          float seconds, int seed, int clouds) {
-        float share = Math.min(1, 4f / Math.max(clouds, 1));
-        var point = new Vector3();
-        var axis = new Vector3();
-        float surge = seconds / SURGE_SECONDS;
-        if (surge < 1) {
-            float spread = 1 - (float) Math.exp(-surge * 3.5f);
-            int puffs = Math.max(5, Math.round(10 * share));
-            for (int puff = 0; puff < puffs; puff++) {
-                float bearing = puff * MathUtils.PI2 / puffs + GpuArtilleryBlast.random(seed, puff) * .4f;
-                float out = reach * (.7f + 1.1f * spread * MathUtils.lerp(.6f, 1.2f, GpuArtilleryBlast.random(seed, puff + 20)));
-                float radius = reach * .35f * (.6f + .9f * surge) * MathUtils.lerp(.7f, 1.3f, GpuArtilleryBlast.random(seed, puff + 40));
-                point.set(x + MathUtils.cos(bearing) * out, y + MathUtils.sin(bearing) * out, floor + reach * .1f);
-                // Drawn out around the ring, so neighbouring puffs merge into one sheet of dust rolling outward.
-                axis.set(-MathUtils.sin(bearing), MathUtils.cos(bearing), 0).scl(1.1f);
-                effects.add(point, radius, surge, 0, .45f * GpuArtilleryBlast.fadeOut(surge, .35f), seed + puff * 31, DUST, axis);
-            }
+    private static long square(Fall fall) {
+        return (long) Math.floorDiv(fall.coords.getX(), CLOUD_HEXES) << 32
+              | Math.floorDiv(fall.coords.getY(), CLOUD_HEXES) & 0xffffffffL;
+    }
+
+    /** The dust of the structures that gave way, this frame. */
+    void dust(GpuExplosionEffects effects) {
+        for (Cloud cloud : clouds) {
+            cloud(effects, DUST, cloud.x, cloud.y, cloud.floor, cloud.height, cloud.reach, cloud.seconds, cloud.seed, true);
         }
-        float column = seconds / COLUMN_SECONDS;
-        if (column < 1) {
-            float alpha = MathUtils.clamp(seconds / .5f, 0, 1) * GpuArtilleryBlast.fadeOut(column, .45f);
-            for (int puff = 0, puffs = Math.max(2, Math.round(4 * share)); puff < puffs; puff++) {
-                float bearing = puff * 2.1f + GpuArtilleryBlast.random(seed, puff + 60);
-                point.set(x + MathUtils.cos(bearing) * reach * .3f, y + MathUtils.sin(bearing) * reach * .3f,
-                      floor + height * (.2f + puff * .22f) + reach * column * .8f);
-                effects.add(point, reach * (.45f + .5f * column) * (1 - puff * .08f), column, 0, .35f * alpha,
-                      seed + 97 + puff * 37, DUST, Vector3.Zero);
-            }
-        }
+    }
+
+    /**
+     * The dust of a structure {@code reach} across at its foot and {@code height} tall, {@code seconds} after it gave
+     * way at ({@code x}, {@code y}, {@code floor}), as one volume (GpuExplosionEffects#addCloud). With {@code surges},
+     * its surge runs out along the ground, fast at first, to two and a half times the foot, thickening as it takes in
+     * air; a column climbs over the wreck to about the structure's height while the pieces come down, then drifts up.
+     */
+    static void cloud(GpuExplosionEffects effects, GpuExplosionEffects.Look look, float x, float y, float floor,
+          float height, float reach, float seconds, int seed, boolean surges) {
+        float life = seconds / CLOUD_SECONDS;
+        if (life >= 1) { return; }
+        float spread = 1 - (float) Math.exp(-seconds * 1.35f);
+        float rise = MathUtils.clamp(seconds / 1.5f, 0, 1);
+        rise = rise * rise * (3 - 2 * rise);
+        // Thick while the structure comes down and its surge runs out, then thinning steadily until it has cleared.
+        float thin = GpuArtilleryBlast.fadeOut(life, .3f);
+        effects.addCloud(new Vector3(x, y, floor), surges ? reach * (.9f + 1.5f * spread) : 0, reach * (.3f + .3f * spread),
+              reach * (.8f + .5f * life), height * (.3f + .45f * rise) + reach * .6f * life,
+              (float) Math.pow(Math.max(1, reach / (BoardGeometry.height() * .5f)), .75), life,
+              MathUtils.clamp(seconds / .25f, 0, 1) * thin * thin, seed, look);
     }
 
     /** The falling structures' and felled trees' bounds, standing; empty without any. */

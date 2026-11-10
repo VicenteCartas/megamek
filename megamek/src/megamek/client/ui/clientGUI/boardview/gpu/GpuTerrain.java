@@ -8505,7 +8505,7 @@ final class GpuTerrain implements Disposable {
         List<java.util.function.Consumer<GpuExplosionEffects>> result = new ArrayList<>();
         int count = collapsing.size();
         for (Collapsing fall : collapsing) { result.add(effects -> fall.collapse().explosions(effects, count)); }
-        if (!destruction.isEmpty()) { result.add(destruction::dust); }
+        result.add(destruction::dust);
         return result;
     }
 

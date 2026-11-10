@@ -248,7 +248,8 @@ class GpuArtilleryBlastSmokeTest {
         profiler.enable();
         try {
             volumes.render(camera);
-            assertEquals(1, profiler.getDrawCalls(), "The XY-visible flat volume must reach the draw call");
+            assertEquals(2, profiler.getDrawCalls(),
+                  "The XY-visible flat volume must reach its draw call, and its layer the scene");
         } finally {
             profiler.disable();
         }

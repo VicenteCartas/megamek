@@ -15,7 +15,6 @@ import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
-import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
@@ -39,10 +38,10 @@ final class GpuTerrainEffects implements Disposable {
     private List<BoardScene.Tile> tiles;
     private int boardId = Integer.MIN_VALUE;
     private int revision = -1;
-    private Mesh mesh, quad;
-    private ShaderProgram shader, composite;
+    private final GpuEffectLayer layer = new GpuEffectLayer();
+    private Mesh mesh;
+    private ShaderProgram shader;
     private Texture noise;
-    private FrameBuffer buffer;
     private final int[] lodCounts = new int[3];
     private int drawCalls;
 
@@ -109,7 +108,7 @@ final class GpuTerrainEffects implements Disposable {
     int drawCalls() { return drawCalls; }
 
     /** Borrow only this frame's clipped opacity; an empty/offscreen field must not outline units using stale smoke. */
-    Texture opacityTexture() { return drawCalls == 0 || buffer == null ? null : buffer.getColorBufferTexture(); }
+    Texture opacityTexture() { return drawCalls == 0 ? null : layer.texture(); }
 
     /** Uses the existing three-level board-prop thresholds/hysteresis; geometry and gameplay do not change with LOD. */
     static int lod(float pixels, int previous) { return TreeLod.level(TreeLod.PROPS, pixels, previous); }
@@ -135,17 +134,8 @@ final class GpuTerrainEffects implements Disposable {
         visible.sort(BACK_TO_FRONT);
         prepare();
         Texture opaqueDepth = depth.capture();
-        int width = Math.max(1, (depth.width + 1) / 2), height = Math.max(1, (depth.height + 1) / 2);
-        if (buffer == null || buffer.getWidth() != width || buffer.getHeight() != height) {
-            if (buffer != null) { buffer.dispose(); }
-            // Integrate and upsample premultiplied linear radiance without clipping the emissive flame.
-            buffer = GpuHeatGlow.buffer(width, height);
-            buffer.getColorBufferTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
-        }
         try {
-            buffer.begin();
-            Gdx.gl.glClearColor(0, 0, 0, 0);
-            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+            layer.begin(depth);
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
             Gdx.gl.glDepthMask(false);
             Gdx.gl.glEnable(GL20.GL_BLEND);
@@ -159,7 +149,7 @@ final class GpuTerrainEffects implements Disposable {
             shader.setUniformi("u_noise", 1);
             shader.setUniformMatrix("u_projView", camera.combined);
             shader.setUniformMatrix("u_inverseProjView", camera.invProjectionView);
-            shader.setUniformf("u_size", width, height);
+            shader.setUniformf("u_size", layer.width(), layer.height());
             shader.setUniformf("u_wind", motion.wind);
             shader.setUniformf("u_offset", motion.offset);
             shader.setUniformf("u_light", light.r, light.g, light.b);
@@ -172,17 +162,7 @@ final class GpuTerrainEffects implements Disposable {
                 mesh.render(shader, GL20.GL_TRIANGLES, 0, count * 36);
                 drawCalls++;
             }
-            depth.restoreTarget();
-            Gdx.gl.glDisable(GL20.GL_CULL_FACE);
-            buffer.getColorBufferTexture().bind(1);
-            opaqueDepth.bind(0);
-            composite.bind();
-            composite.setUniformi("u_depth", 0);
-            composite.setUniformi("u_effect", 1);
-            composite.setUniformf("u_size", width, height);
-            composite.setUniformf("u_viewport", depth.x, depth.y, depth.width, depth.height);
-            composite.setUniformMatrix("u_inverseProjView", camera.invProjectionView);
-            quad.render(composite, GL20.GL_TRIANGLES);
+            layer.end(depth, opaqueDepth, camera);
             drawCalls++;
         } finally {
             depth.restoreTarget();
@@ -225,8 +205,7 @@ final class GpuTerrainEffects implements Disposable {
         try {
             shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU terrain fire/smoke",
                   GpuShaderSource.read("terrain-effects.vert"), GpuEffectBatch.fragment("terrain-effects.frag")), next -> shader = next);
-            composite = GpuShaderManager.program(() -> GpuAtmosphere.shader("terrain-effects-composite.frag"), next -> composite = next);
-            quad = GpuAtmosphere.screenQuad();
+            layer.prepare();
             noise = GpuAtmosphere.noise();
             mesh = new Mesh(false, BATCH_SIZE * 8, BATCH_SIZE * 36, VertexAttribute.Position(),
                   new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_origin"),
@@ -243,11 +222,9 @@ final class GpuTerrainEffects implements Disposable {
     @Override
     public void dispose() {
         if (mesh != null) { mesh.dispose(); mesh = null; }
-        if (quad != null) { quad.dispose(); quad = null; }
         if (shader != null) { GpuShaderManager.dispose(shader); shader = null; }
-        if (composite != null) { GpuShaderManager.dispose(composite); composite = null; }
         if (noise != null) { noise.dispose(); noise = null; }
-        if (buffer != null) { buffer.dispose(); buffer = null; }
+        layer.dispose();
         sources.clear(); visible.clear(); tiles = null; motion.clear();
     }
 }

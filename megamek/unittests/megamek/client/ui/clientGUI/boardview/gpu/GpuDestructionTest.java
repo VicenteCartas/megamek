@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -96,6 +97,31 @@ class GpuDestructionTest {
         run(destruction, GpuDestruction.REST_SECONDS + GpuDestruction.SINK_SECONDS);
         assertFalse(destruction.taken(HEX), "Its chunk draws it again");
         assertTrue(destruction.isEmpty());
+    }
+
+    /** Neighbouring falls raise one cloud of dust between them, and it hangs on after their piles have sunk. */
+    @Test
+    void neighbouringFallsShareOneCloudThatOutlivesTheirPiles() {
+        var destruction = taken();
+        var neighbour = new Coords(HEX.getX(), HEX.getY() + 1);
+        destruction.take(neighbour, new Array<Renderable>(), Set.of(),
+              new BoundingBox(new Vector3(-30, 40, 0), new Vector3(30, 100, 90)), 0, 0, new Vector2(), 0);
+        destruction.start(HEX, 0);
+        destruction.start(neighbour, .2f);
+        destruction.committed(at -> false, (at, trees) -> true);
+        var effects = new GpuExplosionEffects();
+        run(destruction, .5f);
+        destruction.dust(effects);
+        assertEquals(1, effects.size(), "One cloud for both");
+        run(destruction, 4.5f);
+        assertTrue(destruction.isEmpty(), "Both piles have sunk");
+        effects.begin();
+        destruction.dust(effects);
+        assertEquals(1, effects.size(), "Their dust still hangs there");
+        run(destruction, GpuDestruction.CLOUD_SECONDS);
+        effects.begin();
+        destruction.dust(effects);
+        assertEquals(0, effects.size(), "It has cleared");
     }
 
     /** The terrain may show the rubble before the structure gives way (its transition still framing): it sinks after. */

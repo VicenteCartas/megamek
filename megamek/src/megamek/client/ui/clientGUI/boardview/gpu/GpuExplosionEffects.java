@@ -17,9 +17,15 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 
-/** Bounded, depth-clipped fire/smoke volumes. Owns its reusable coverage mesh; the caller owns the attack clock. */
+/**
+ * Bounded, depth-clipped fire/smoke volumes, drawn at half resolution ({@link GpuEffectLayer}); those too small on
+ * screen for that (sparks, thrown debris) are drawn sharp over them. Owns its reusable coverage mesh; the caller owns
+ * the attack clock.
+ */
 final class GpuExplosionEffects implements Disposable {
     static final int CAPACITY = 512;
+    /** A volume with a radius under this many scene pixels is drawn sharp, at the scene's resolution. */
+    private static final float SHARP_PIXELS = 12;
     private static final Comparator<Volume> BACK_TO_FRONT = Comparator.comparingDouble((Volume v) -> v.depth).reversed();
     private final Volume[] volumes = new Volume[CAPACITY];
     /** A fireball's light: hotter than a burning hex's. */
@@ -30,14 +36,20 @@ final class GpuExplosionEffects implements Disposable {
     private final Vector3 wind = new Vector3(0, 1, 0);
     private final Vector3 sun = new Vector3(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS).direction()).scl(-1);
     private final GpuEffectDepth ownDepth = new GpuEffectDepth();
+    private final GpuEffectLayer layer = new GpuEffectLayer();
     private ShaderProgram shader;
     private Mesh proxy;
+    private Texture noise;
     private int count;
 
     private static final class Volume {
         final Vector3 center = new Vector3();
         final Vector3 axis = new Vector3();
         float radius, age, fire, alpha, seed, depth, stretch, elongation;
+        /** A dust cloud's surge front, surge height, column radius and column height, in radii; zero for a round volume. */
+        final float[] cloud = new float[4];
+        float grain;
+        boolean visible, sharp;
         Look look = Look.PLAIN;
     }
 
@@ -124,10 +136,29 @@ final class GpuExplosionEffects implements Disposable {
         add(center, radius, age, fire, alpha, seed, look, Vector3.Z, MathUtils.clamp(height, .1f, 1) - 1);
     }
 
+    /**
+     * A structure's dust as one volume standing on the ground at {@code foot}: a surge spread out to {@code front}
+     * from there (0 for none) and {@code surge} thick, tallest at its rolling front, and a column {@code column} across
+     * and {@code top} tall over the foot. Its billows are round whatever its proportions and grow with it: a tenth
+     * of its radius deep, and {@code grain} times finer (a cloud over many hexes billows no larger than one over one).
+     */
+    void addCloud(Vector3 foot, float front, float surge, float column, float top, float grain, float age, float alpha,
+          int seed, Look look) {
+        // Room for the front's lobes and the billows standing out of both shapes.
+        float radius = 1.45f * Math.max(front, column), height = Math.max(front > 0 ? surge : 0, top) + .16f * radius;
+        Volume volume = add(foot, radius, age, 0, alpha, seed, look, Vector3.Z, height / radius - 1);
+        if (volume == null) { return; }
+        volume.cloud[0] = front / radius;
+        volume.cloud[1] = surge / radius;
+        volume.cloud[2] = column / radius;
+        volume.cloud[3] = top / radius;
+        volume.grain = grain;
+    }
+
     /** One volume drawn out along the unit {@code axis} by {@code elongation}: above 0 stretches, below 0 squashes. */
-    private void add(Vector3 center, float radius, float age, float fire, float alpha, int seed, Look look,
+    private Volume add(Vector3 center, float radius, float age, float fire, float alpha, int seed, Look look,
           Vector3 axis, float elongation) {
-        if (count == CAPACITY || radius <= 0 || alpha <= 0) { return; }
+        if (count == CAPACITY || radius <= 0 || alpha <= 0) { return null; }
         Volume volume = volumes[count];
         if (volume == null) { volume = new Volume(); volumes[count] = volume; }
         volume.radius = radius;
@@ -142,7 +173,10 @@ final class GpuExplosionEffects implements Disposable {
         volume.look = look;
         volume.elongation = elongation;
         volume.axis.set(axis);
+        Arrays.fill(volume.cloud, 0);
+        volume.grain = 0;
         count++;
+        return volume;
     }
 
     /** Links its program now (GpuBattleView's warm-up), not at the first blast in play. */
@@ -150,6 +184,8 @@ final class GpuExplosionEffects implements Disposable {
         if (shader != null) { return; }
         shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU explosion",
               GpuShaderSource.read("explosion.vert"), GpuEffectBatch.fragment("explosion.frag")), next -> shader = next);
+        layer.prepare();
+        noise = GpuAtmosphere.noise();
         // The same unit cube bounds every analytic volume. Allocate/upload once, then move it with uniforms.
         proxy = new Mesh(true, 8, 36, VertexAttribute.Position());
         proxy.setVertices(new float[] {
@@ -170,37 +206,38 @@ final class GpuExplosionEffects implements Disposable {
         if (count == 0) { return; }
         prepare();
         Texture depth = snapshot.capture();
-        depth.bind(0);
-        for (int i = 0; i < count; i++) { volumes[i].depth = volumes[i].center.dot(camera.direction); }
+        int soft = 0, sharp = 0;
+        for (int i = 0; i < count; i++) {
+            Volume volume = volumes[i];
+            volume.depth = volume.center.dot(camera.direction);
+            float reach = volume.radius * (1 + volume.stretch) * (1 + Math.max(0, volume.elongation));
+            volume.visible = camera.frustum.sphereInFrustum(volume.center, reach);
+            volume.sharp = volume.radius * BoardCamera.pixelsPerUnit(camera, volume.center) < SHARP_PIXELS;
+            if (volume.visible && volume.sharp) { sharp++; } else if (volume.visible) { soft++; }
+        }
+        if (soft + sharp == 0) { return; }
         Arrays.sort(volumes, 0, count, BACK_TO_FRONT);
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         Gdx.gl.glDepthMask(false);
-        Gdx.gl.glEnable(GL20.GL_CULL_FACE);
-        // Back faces cover the volume even when the free-flight camera is inside its proxy.
-        Gdx.gl.glCullFace(GL20.GL_FRONT);
         Gdx.gl.glEnable(GL20.GL_BLEND);
         Gdx.gl.glBlendFunc(GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA);
+        // Back faces cover the volume even when the free-flight camera is inside its proxy.
+        Gdx.gl.glCullFace(GL20.GL_FRONT);
         try {
             shader.bind();
             shader.setUniformMatrix("u_projView", camera.combined);
             shader.setUniformMatrix("u_inverseProjView", camera.invProjectionView);
-            shader.setUniformf("u_viewport", snapshot.x, snapshot.y, snapshot.width, snapshot.height);
             shader.setUniformf("u_light", light.r, light.g, light.b);
             shader.setUniformf("u_sun", sun);
             shader.setUniformf("u_wind", wind);
             shader.setUniformi("u_depth", 0);
-            for (int i = 0; i < count; i++) {
-                Volume volume = volumes[i];
-                float reach = volume.radius * (1 + volume.stretch) * (1 + Math.max(0, volume.elongation));
-                if (!camera.frustum.sphereInFrustum(volume.center, reach)) { continue; }
-                shader.setUniformf("u_centerRadius", volume.center.x, volume.center.y, volume.center.z, volume.radius);
-                shader.setUniformf("u_stretch", volume.stretch);
-                shader.setUniformf("u_effect", volume.age, volume.fire, volume.alpha, volume.seed);
-                shader.setUniformf("u_axis", volume.axis.x, volume.axis.y, volume.axis.z, volume.elongation);
-                shader.setUniformf("u_look", volume.look.soot(), volume.look.ember(), volume.look.dust(),
-                      volume.look.violence());
-                proxy.render(shader, GL20.GL_TRIANGLES);
+            shader.setUniformi("u_noise", 2);
+            if (soft > 0) {
+                layer.begin(snapshot);
+                draw(false, depth, 0, 0, layer.width(), layer.height());
+                layer.end(snapshot, depth, camera);
             }
+            if (sharp > 0) { draw(true, depth, snapshot.x, snapshot.y, snapshot.width, snapshot.height); }
         } finally {
             Gdx.gl.glDepthMask(true);
             Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
@@ -209,13 +246,41 @@ final class GpuExplosionEffects implements Disposable {
             Gdx.gl.glDisable(GL20.GL_CULL_FACE);
             Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
             Gdx.gl.glDisable(GL20.GL_BLEND);
+            Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
+        }
+    }
+
+    /**
+     * The visible volumes of one kind, back to front, into the bound target, whose viewport is given. Binds its inputs
+     * itself: the layer's buffer and its drawing leave their own textures and program bound.
+     */
+    private void draw(boolean sharp, Texture depth, int x, int y, int width, int height) {
+        noise.bind(2);
+        depth.bind(0);
+        shader.bind();
+        shader.setUniformf("u_viewport", x, y, width, height);
+        Gdx.gl.glEnable(GL20.GL_CULL_FACE);
+        for (int i = 0; i < count; i++) {
+            Volume volume = volumes[i];
+            if (!volume.visible || volume.sharp != sharp) { continue; }
+            shader.setUniformf("u_centerRadius", volume.center.x, volume.center.y, volume.center.z, volume.radius);
+            shader.setUniformf("u_stretch", volume.stretch);
+            shader.setUniformf("u_effect", volume.age, volume.fire, volume.alpha, volume.seed);
+            shader.setUniformf("u_axis", volume.axis.x, volume.axis.y, volume.axis.z, volume.elongation);
+            shader.setUniformf("u_look", volume.look.soot(), volume.look.ember(), volume.look.dust(),
+                  volume.look.violence());
+            shader.setUniformf("u_cloud", volume.cloud[0], volume.cloud[1], volume.cloud[2], volume.cloud[3]);
+            shader.setUniformf("u_grain", volume.grain);
+            proxy.render(shader, GL20.GL_TRIANGLES);
         }
     }
 
     @Override
     public void dispose() {
         ownDepth.dispose();
+        layer.dispose();
         if (proxy != null) { proxy.dispose(); proxy = null; }
+        if (noise != null) { noise.dispose(); noise = null; }
         if (shader != null) { GpuShaderManager.dispose(shader); shader = null; }
         begin();
     }
