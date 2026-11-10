@@ -220,6 +220,30 @@ class BattleMenuCardsSmokeTest {
         });
     }
 
+    /** About over the battle: the native card with the version and the legal notice's links, which Close closes. */
+    @Test
+    void aboutShowsOverTheBattle() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs cards = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            Queue<Runnable> gl = new ConcurrentLinkedQueue<>();
+            GpuBattleTools tools = new GpuBattleTools(mock(ClientGUI.class), gl::add, () -> false, () -> cards);
+
+            tools.about();
+            for (Runnable work = gl.poll(); work != null; work = gl.poll()) {
+                work.run();
+            }
+            ui.draw();
+            assertTrue(cards.isOpen(), "About shows over the battle");
+            find(ui, "about-card");
+            for (String link : List.of("about-rules", "about-wiki", "about-discord", "about-callout")) {
+                find(ui, link);
+            }
+            click(ui, find(ui, "about-close"));
+            assertFalse(cards.isOpen());
+            cards.dispose();
+        });
+    }
+
     private static void flushSwing() {
         try {
             SwingUtilities.invokeAndWait(() -> { });

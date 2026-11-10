@@ -556,7 +556,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
             @Override
             public void about() {
-                window.runMenuItem(ClientGUI.HELP_ABOUT);
+                nativeDialog(LobbyNativeDialogs::about);
             }
         };
     }

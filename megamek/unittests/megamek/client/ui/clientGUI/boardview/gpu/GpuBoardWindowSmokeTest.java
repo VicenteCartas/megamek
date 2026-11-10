@@ -1413,11 +1413,11 @@ class GpuBoardWindowSmokeTest {
                 GpuTestSupport.onSwing(() -> { ui.view().centerOnHex(position); return null; });
                 await(() -> onGl(() -> unitIsCentered(fixture)));
                 assertTrue(GpuTestSupport.onSwing(() -> ui.frame().isDisplayable()), "Switching must preserve the original client");
-                // The Swing window is hidden, so an allowed client dialog, here the About box, must be raised above
+                // The Swing window is hidden, so an allowed client dialog, here the bug report, must be raised above
                 // the native window.
                 JDialog probe = GpuTestSupport.onSwing(() -> {
                     JDialog dialog = new JOptionPane("GPU dialog probe").createDialog(ui.frame(),
-                          Messages.getString("about.title", megamek.MMConstants.PROJECT_NAME));
+                          new megamek.client.ui.BugReportMessages().get("title"));
                     dialog.setModal(false);
                     dialog.setVisible(true);
                     return dialog;

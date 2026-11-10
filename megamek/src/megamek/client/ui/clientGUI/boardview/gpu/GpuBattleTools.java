@@ -299,6 +299,11 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
         open(dialogs -> dialogs.novaNetworks(form));
     }
 
+    /** Shows About MegaMek. */
+    void about() {
+        open(LobbyNativeDialogs::about);
+    }
+
     // ---- The Game Master's cards ----
 
     private LobbyPromptViews.Edt edtFor(String what) {

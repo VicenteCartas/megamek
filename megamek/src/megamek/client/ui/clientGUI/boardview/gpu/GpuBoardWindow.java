@@ -998,8 +998,6 @@ public final class GpuBoardWindow {
         return List.of(
               // D11: the exit's save question
               Messages.getString("ClientGUI.gameSaveFirst"),
-              // R6: About
-              Messages.getString("about.title", megamek.MMConstants.PROJECT_NAME),
               // R6: the bug report, and the result of its package (a file the player saves, user item 21)
               bugReport.get("title"), bugReport.get("package.result.title"),
               // User item 21: the version check of the unit file a game master reinforces from
@@ -1497,6 +1495,15 @@ public final class GpuBoardWindow {
         GpuBattleTools tools = battleTools(gui);
         if (tools != null) {
             tools.novaNetworks();
+        }
+        return tools != null;
+    }
+
+    /** EDT: shows About MegaMek natively over this client's battle window; false as above. */
+    public static boolean showAbout(ClientGUI gui) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.about();
         }
         return tools != null;
     }

@@ -47,6 +47,7 @@ import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
+import megamek.MMConstants;
 import megamek.client.ui.Base64Image;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.BugReportDialog;
@@ -62,7 +63,6 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuTurretFacingRoutingTest.Turr
 import megamek.client.ui.dialogs.BotCommands.HexTargetPicker;
 import megamek.client.ui.dialogs.ChoiceDialog;
 import megamek.client.ui.dialogs.ConfirmDialog;
-import megamek.client.ui.dialogs.MMAboutDialog;
 import megamek.client.ui.dialogs.MMDialogs.MMNarrativeStoryDialog;
 import megamek.client.ui.dialogs.PlayerListDialog;
 import megamek.client.ui.dialogs.SliderDialog;
@@ -545,11 +545,7 @@ class GpuSwingDialogGateTest {
                 return null;
             });
             gate.present();
-            // About and the bug report (R6)
-            assertTrue(gate.raised(() -> {
-                new MMAboutDialog(frame).show();
-                return null;
-            }, MESSAGE_BOX), "R6: About");
+            // The bug report (R6)
             assertTrue(gate.raised(() -> {
                 new BugReportDialog(frame, null).show();
                 return null;
@@ -608,6 +604,13 @@ class GpuSwingDialogGateTest {
                 return null;
             }, MESSAGE_BOX), "A message box the user did not keep is not raised");
             assertFalse(gate.raised(() -> {
+                JDialog box = new JOptionPane("About").createDialog(frame,
+                      Messages.getString("about.title", MMConstants.PROJECT_NAME));
+                box.setModal(false);
+                box.setVisible(true);
+                return null;
+            }, MESSAGE_BOX), "About is native over the battle, so its Swing box is not raised");
+            assertFalse(gate.raised(() -> {
                 JDialog box = new JOptionPane("No title").createDialog(frame, null);
                 box.setModal(false);
                 box.setVisible(true);
@@ -616,7 +619,8 @@ class GpuSwingDialogGateTest {
             assertEquals(List.of("A Swing dialog outside the allowlist opened over the battle window: "
                   + "javax.swing.JDialog \"Gate probe\"", "A Swing dialog outside the allowlist opened over the battle "
                   + "window: javax.swing.JDialog \"Load by Crane\"", "A Swing dialog outside the allowlist opened over "
-                  + "the battle window: javax.swing.JDialog \"null\""), gate.errors);
+                  + "the battle window: javax.swing.JDialog \"About MegaMek\"", "A Swing dialog outside the allowlist "
+                  + "opened over the battle window: javax.swing.JDialog \"null\""), gate.errors);
 
             // While the window closes, the client's prompts fall back to Swing, raised. While it starts they wait for
             // it (GpuDialogRoutingTest).

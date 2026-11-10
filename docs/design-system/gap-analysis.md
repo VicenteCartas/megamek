@@ -308,8 +308,8 @@ Done so far, in short:
   footers, the libGDX start screen (G1 to G6: the menu, Host, Connect, Load game, the scenario browser and the
   briefing) and its follow-ups, and the libGDX lobby (L0 to L18) with its review rounds. The lobby opens no Swing
   dialog except Client Settings and the startup-failure fallback. On the board, the Game Master's tools, the
-  reinforcements, Edit Bots, the portrait chooser, Network information, the Nova network view and the battle menu's
-  dialogs are native; the accessibility window is gone. The unit cache's
+  reinforcements, Edit Bots, the portrait chooser, Network information, the Nova network view, About and the battle
+  menu's dialogs are native; the accessibility window is gone. The unit cache's
   progress, Refresh and Rebuild are a native Unit cache page under the start screen's Tools (#58), and the Swing
   loading window no longer opens at startup.
 
@@ -318,7 +318,7 @@ Still open:
 1. The board's remaining Swing dialogs, the `SWING_DIALOGS` allowlist in `GpuBoardWindow` (R6/U2), by size of the
    port:
    - Big: Client Settings (`CommonSettingsDialog`, about 4,900 lines, several PRs; the lobby's gear and the map
-     editor open it too), and the map editor's About.
+     editor open it too).
    - Developer only: the conditions editor behind the Tuning utility (`PlanetaryConditionsDialog`).
 2. Live checks: a real MekHQ game, a network reconnect, a password-protected game and a second human player in a
    second MegaMek window. The system file dialog on macOS and Linux hasn't been tried on a real machine yet; step

@@ -120,6 +120,17 @@ class GpuMapMenuSmokeTest {
                         assertFalse(GpuBoardTestUi.shown(panel));
                         assertFalse(menu.isChecked());
                         checkViewMenu(view, source, editing, output);
+                        // Menu → About opens the native About card, not the Swing box; Close returns to the map.
+                        GpuBoardTestUi.click("utility-menu"); settle(view, source);
+                        GpuBoardTestUi.click("/helpAbout"); settle(view, source);
+                        assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("about-card")), "About is native");
+                        assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("about-wiki")));
+                        assertFalse(GpuBoardTestUi.shown(panel), "About replaces the Menu");
+                        GpuBoardTestUi.capture(new File(output, editing ? "editor-about.png" : "preview-about.png"));
+                        GpuBoardTestUi.click("about-close"); settle(view, source);
+                        assertFalse(GpuBoardTestUi.shown(stage.getRoot().findActor("about-card")));
+                        assertTrue(java.util.Arrays.stream(java.awt.Window.getWindows()).noneMatch(java.awt.Window::isShowing),
+                              "no Swing About box opened");
                         if (editing) { checkEditorEntries(view, source, output); }
                         GpuBoardTestUi.click("utility-menu"); settle(view, source);
                         if (editing) {
