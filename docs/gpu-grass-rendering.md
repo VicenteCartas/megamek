@@ -223,7 +223,9 @@ out with them. The tufts' blades stand up and thin out as a bank rim's do (100 t
 Meadow, sward and tussock blades are lit by a normal the vertex stage gives them: their ground's (its slope rides in
 the low seven bits of a root's rank fraction, `GpuGroundCover.slopeCode`), tilted a quarter each blade's own way, or a
 tussock's mound. Lit by their own faces, blades peppered a meadow with near-black pixels and stood out bright on banks
-turned from the sun. A meadow's blade is a pixel wide at its root or more. Rim blades and crops keep their own faces.
+turned from the sun. The fragment stage keeps that normal on the viewer's side (`terrain-vegetation.frag`): at the lowest
+tilt a blade tilted away would face away from the camera and reflect no sun. A meadow's blade is a pixel wide at its
+root or more. Rim blades and crops keep their own faces.
 
 A planter asks the biome coverage of thousands of points in one hex: `BoardBiome.Coverage` looks the nine hexes of
 its stencil up once per hex (4,096 tundra points: 1.20 ms per point, 0.78 ms per hex, same sums), and level tundra
