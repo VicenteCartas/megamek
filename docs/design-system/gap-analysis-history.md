@@ -1319,7 +1319,7 @@ The open items below were copied to the gap analysis and are tracked there; this
            work for libGDX (see the open list).
          - All three left the allowlist; the Swing `NetworkInformationDialog` stays for the lounge. Covered by
            `NetworkInformationFormTest`, `NovaNetworkFormTest`, `GpuSwingDialogGateTest` and
-           `NetworkCardsSmokeTest`.
+           `NetworkCardsSmokeTest`, and both cards were tried by hand in a game.
        - The "Save First?" question when leaving a battle is native since #39.
        - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
          thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser
