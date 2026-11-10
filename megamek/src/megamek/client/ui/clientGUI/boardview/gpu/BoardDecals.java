@@ -358,10 +358,17 @@ final class BoardDecals {
     private static List<BoardSurface.Face> project(Vector3 anchor, Area hex, List<BoardSurface.Face> ground,
           List<BoardSurface.Face> raised) {
         List<Receiver> receivers = new ArrayList<>();
+        var reach = hex.getBounds2D();
         for (var faces : List.of(raised, ground)) {
             for (var face : faces) {
                 Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
                 if (normal.z <= EPSILON) { continue; }
+                // A face whose bounds lie apart from the clip's shares no area with it: most of a roof, under a small decal.
+                Vector3 a = face.a(), b = face.b(), c = face.c();
+                if (Math.max(a.x, Math.max(b.x, c.x)) < reach.getMinX() || Math.min(a.x, Math.min(b.x, c.x)) > reach.getMaxX()
+                      || Math.max(a.y, Math.max(b.y, c.y)) < reach.getMinY() || Math.min(a.y, Math.min(b.y, c.y)) > reach.getMaxY()) {
+                    continue;
+                }
                 Area footprint = area(List.of(face.a(), face.b(), face.c()));
                 footprint.intersect(hex);
                 if (!footprint.isEmpty()) {

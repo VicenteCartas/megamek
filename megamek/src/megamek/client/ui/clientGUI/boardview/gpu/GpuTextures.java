@@ -63,6 +63,50 @@ final class GpuTextures<K> implements Disposable {
     }
     private final List<Pages> retired = new ArrayList<>();
     private TextureAtlas publishedColor;
+    /** The images {@link #prepack} packed and their slots' names, until the update that uploads them. */
+    private Map<K, BoardScene.Pixels> prepacked;
+    private Map<BoardScene.Pixels, String> prepackedNames;
+
+    /** What a new atlas's pages must hold: its images' area with their margins, and the largest image each way. */
+    private record Extent(long area, int width, int height) {
+        static Extent of(Set<BoardScene.Pixels> unique) {
+            return new Extent(unique.stream().mapToLong(GpuTextures::area).sum(),
+                  unique.stream().mapToInt(BoardScene.Pixels::width).max().orElse(0),
+                  unique.stream().mapToInt(BoardScene.Pixels::height).max().orElse(0));
+        }
+
+        PixmapPacker packer() {
+            int side = 128;
+            while (side < 2048 && side * (long) side < area * 1.3) { side *= 2; }
+            // Guillotine packing reserves two outer margins AND one margin on each packed rectangle.
+            return new PixmapPacker(Math.max(side, width + 3 * ATLAS_BLEED), Math.max(side, height + 3 * ATLAS_BLEED),
+                  Pixmap.Format.RGBA8888, ATLAS_BLEED, true);
+        }
+    }
+
+    /**
+     * Packs a new atlas's first images into its pages, which draws nothing and so may run on any thread: a city chunk's
+     * road masks are a fifth of a second of blits. The update with this same map then only uploads the pages; any other
+     * update packs as if this had not run. Whoever never updates it disposes it.
+     */
+    GpuTextures<K> prepack(Map<K, BoardScene.Pixels> images) {
+        packer = Extent.of(new HashSet<>(images.values())).packer();
+        prepackedNames = packed(images);
+        prepacked = images;
+        return this;
+    }
+
+    /** The images of {@link #prepack}, for the update that takes them; null without any. */
+    Map<K, BoardScene.Pixels> prepacked() { return prepacked; }
+
+    /** Packs the images no slot holds yet, each once, in the map's order: each one's slot name. */
+    private Map<BoardScene.Pixels, String> packed(Map<K, BoardScene.Pixels> images) {
+        Map<BoardScene.Pixels, String> names = new LinkedHashMap<>();
+        images.forEach((key, pixels) -> {
+            if (!slots.containsKey(pixels) && !names.containsKey(pixels)) { names.put(pixels, pack(pixels)); }
+        });
+        return names;
+    }
 
     /** Terrain keeps old atlas pages alive until all meshes borrowing them have been retired. */
     void retainReplacedPages() { retainReplaced = true; }
@@ -114,6 +158,9 @@ final class GpuTextures<K> implements Disposable {
 
     /** Keys whose UVs or texture pages changed; unchanged meshes can keep their existing atlas references. */
     Set<K> updateRegions(Map<K, BoardScene.Pixels> images) {
+        // Other images than those packed ahead: as a new atlas.
+        boolean taken = prepacked != null && prepacked == images;
+        if (prepacked != null && !taken) { dispose(); }
         if (images.isEmpty()) {
             Set<K> changed = Set.copyOf(entries.keySet());
             replacePages();
@@ -166,30 +213,23 @@ final class GpuTextures<K> implements Disposable {
         }
         Map<K, Entry> before = new HashMap<>(entries);
         Set<BoardScene.Pixels> unique = new HashSet<>(images.values());
-        long area = unique.stream().mapToLong(GpuTextures::area).sum();
+        Extent extent = Extent.of(unique);
+        long area = extent.area();
         long addedArea = unique.stream().filter(pixels -> !slots.containsKey(pixels))
               .mapToLong(GpuTextures::area).sum();
-        int imageWidth = unique.stream().mapToInt(BoardScene.Pixels::width).max().orElse(0);
-        int imageHeight = unique.stream().mapToInt(BoardScene.Pixels::height).max().orElse(0);
         // Append new artwork without moving any live slot. Compact only when discarded artwork would more
         // than double the live storage (with one page of headroom), or the page size must change.
         boolean repack = atlas == null
-              || imageWidth + 3 * ATLAS_BLEED > packer.getPageWidth()
-              || imageHeight + 3 * ATLAS_BLEED > packer.getPageHeight()
+              || extent.width() + 3 * ATLAS_BLEED > packer.getPageWidth()
+              || extent.height() + 3 * ATLAS_BLEED > packer.getPageHeight()
               || packedArea + addedArea > Math.max(2 * area, (long) packer.getPageWidth() * packer.getPageHeight());
-        if (repack) {
+        if (repack && !taken) {
             replacePages();
-            int side = 128;
-            while (side < 2048 && side * (long) side < area * 1.3) { side *= 2; }
-            // Guillotine packing reserves two outer margins AND one margin on each packed rectangle.
-            int width = Math.max(side, imageWidth + 3 * ATLAS_BLEED);
-            int height = Math.max(side, imageHeight + 3 * ATLAS_BLEED);
-            packer = new PixmapPacker(width, height, Pixmap.Format.RGBA8888, ATLAS_BLEED, true);
+            packer = extent.packer();
         }
-        Map<BoardScene.Pixels, String> names = new LinkedHashMap<>();
-        images.forEach((key, pixels) -> {
-            if (!slots.containsKey(pixels) && !names.containsKey(pixels)) { names.put(pixels, pack(pixels)); }
-        });
+        Map<BoardScene.Pixels, String> names = taken ? prepackedNames : packed(images);
+        prepacked = null;
+        prepackedNames = null;
         if (!names.isEmpty()) {
             atlas = atlas(packer, atlas, names.values());
             names.forEach((pixels, name) -> index(pixels, name, atlas.findRegion(name)));
@@ -425,5 +465,7 @@ final class GpuTextures<K> implements Disposable {
         slotCount = 0;
         packedArea = 0;
         liveArea = 0;
+        prepacked = null;
+        prepackedNames = null;
     }
 }

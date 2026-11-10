@@ -390,9 +390,26 @@ class GpuBattleView extends ApplicationAdapter {
         return shapes;
     }
 
+    /** A loading frame that took longer than this built a slice of the board (GpuTerrain#refine): the next follows at once. */
+    private static final long WORKING_FRAME_NANOS = 4_000_000;
+    /** The frames a second of a loading stage with nothing to do yet: the workers still prepare, or a program links. */
+    private static final int WAITING_FPS = 60;
+    private long frameStarted;
+
+    /**
+     * The loading stage's frames are not held for the monitor's refresh: each builds a slice of the board, and waiting
+     * for the next refresh after every slice was a fifth of a city board's load ({@link #drawLoadingStage} paces them).
+     * The board's frames follow the Display page's VSync again.
+     */
+    private void pace(boolean loading) {
+        Gdx.graphics.setVSync(!loading && (tuning == null ? GpuBoardWindow.DEFAULT_VSYNC : tuning.vsync()));
+        if (!loading) { Gdx.graphics.setForegroundFPS(0); }
+    }
+
     private void createLoadingStage() {
         GpuGlsl.presenting(false);
         if (loadingStage != null) { return; }
+        pace(true);
         if (theme == null && loadingTheme == null) { loadingTheme = GpuBoardSkin.forScene(); }
         var skin = theme != null ? theme.skin : loadingTheme.skin;
         loadingStage = new Stage(new ScreenViewport(), new SpriteBatch(1000, sprites()));
@@ -408,6 +425,8 @@ class GpuBattleView extends ApplicationAdapter {
 
     /** The loading screen at the HUD's display scale, read each frame since a monitor change keeps the window size. */
     private void drawLoadingStage() {
+        // A frame that only waited leaves the cores to the workers until the next one is due.
+        Gdx.graphics.setForegroundFPS(System.nanoTime() - frameStarted > WORKING_FRAME_NANOS ? 0 : WAITING_FPS);
         if (Gdx.graphics.getWidth() <= 0 || Gdx.graphics.getHeight() <= 0) { return; }
         // The native loading window shows before the first map, and its UI scale preference, arrives.
         float preference = source == null ? 1 : source.uiPreferences().scale();
@@ -718,6 +737,7 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     private void renderFrame(TerrainSettings.Scope settings) {
+        frameStarted = System.nanoTime();
         if (source == null) {
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
             loadingPanel.message(loadingMessage);
@@ -858,6 +878,7 @@ class GpuBattleView extends ApplicationAdapter {
         }
         boolean hidden = warmUp != WarmUp.DONE;
         if (!hidden && loadingStage != null) {
+            pace(false);
             loadingStage.dispose();
             loadingStage.getBatch().dispose();
             loadingStage = null;
@@ -3823,6 +3844,7 @@ class GpuBattleView extends ApplicationAdapter {
         BoardQuality.current = BoardQuality.HIGH;
         GpuGlsl.presenting(false);
         if (loadingStage != null) {
+            pace(false);
             loadingStage.dispose();
             loadingStage.getBatch().dispose();
             if (loadingTheme != null) { loadingTheme.release(); }

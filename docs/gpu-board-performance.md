@@ -555,6 +555,42 @@ both camera poses are under `work/citadel-fps/board-cut-final-view-1/` and
 `work/citadel-fps/board-cut-view-2/`; test results are in
 `work/citadel-fps/board-cut-final-tests.log`.
 
+## Board loading: where the time goes (2026-11-10)
+
+A load is the board's file and scene, the view's renderers, the terrain build, then the hidden frames that link what
+the first views draw. Profiled with a wall-clock sampler of the render thread (`handoff/board-load/harness2`), programs
+cached, RTX 4070 and Iris Xe, `48x48.board` (a city) and `16x17 Fire And Ice 2`:
+
+- **The terrain build is two thirds of a city board's load, and the render thread is its limit**: it collects each
+  chunk's hexes one after another (`ChunkBuild.collectUntil`) while the workers wait. Of 24.6 s on the RTX 4070 it
+  worked 22 s: kit buildings 8.2 s (their storeys' outlines 4.9 s, floor meshes 1.4 s, the kits 1.5 s), model textures
+  3 s (mostly waits for their decodes), the chunks' road mask atlases 2.2 s, the board's shader programs 2.7 s,
+  decal projection 1.3 s, and 2.2 s waiting for the monitor's refresh between slices (7.6 of 36.9 s on the Iris Xe).
+- **A small board with relief is limited by its workers**: Fire and Ice 2's 272 hexes take 43 thread-seconds on eight
+  workers (roads cut out of the ground 16 s, walls 7 s, plants 8 s), about 7 s, then 3 s of collection.
+- **Family programs**, where four fresh ones link behind the loading stage: 7-42 s a load on the RTX 4070 (docs/gpu-shaders.md).
+- **Nothing cached**: Fire and Ice 2's generic programs take 22-25 s on the RTX 4070 beside the build, and 122 s on
+  the Iris Xe, where the link helper links them one at a time.
+
+What the build does about it:
+
+- A chunk's kit building storeys work out on the common pool, all at once, before its hexes are collected
+  (`GpuBuilding.assembleAhead`); the render thread takes them as it reaches each building.
+- Loading frames are not held for the monitor's refresh (`GpuBattleView.pace`): a frame that built a slice is followed
+  at once, one that only waited by the next at 60 a second. A new board's slice is 16 ms.
+- A new chunk's road masks pack into their atlas's pages on the worker that prepared it (`Prepared.packed`).
+- Whoever joins pooled work that no pool thread has taken runs it (`GpuAssets.joined`).
+- A decal is projected only on the faces whose bounds reach it.
+
+Board load without the harness's own start-up and window, family programs off, medians of alternating loads: 48x48
+on the RTX 4070 28.2 to 25.4 s (terrain build 19.1 to 15.6 s; three rounds), on the Iris Xe 31.5 to 27.3 s (21.2 to
+16.8 s; two rounds). Fire and Ice 2 13.6 to 13.5 s. Fixed-light captures of both boards at three zooms are the same
+pixels.
+
+Still on the render thread for a city chunk: kit floor meshes (libGDX's mesh builders share static scratch state, so
+they cannot run beside the render thread's own), model texture decodes started only when a model is first drawn,
+decal projection, and the kits' own meshes.
+
 ## Preparation and replacement
 
 `BoardSource` publishes immutable scene/frame data. `GpuTerrain` captures that
@@ -1181,7 +1217,8 @@ A Classic build prepares each hex's tileset column on the terrain workers (`GpuT
 art in the update plan's texture pass; it builds no relief, sculpted material, water or lava field, wave simulation,
 plant, road, biome map or ground cover, and its chunks have one level of detail, so the camera never refines them.
 Enhanced builds no Classic data (no tileset decals, sprites or column art). A switch either way is a full rebuild
-behind the loading stage; it gets the opening's 8 ms upload slice per frame instead of camera refinement's 2 ms.
+behind the loading stage; it gets an 8 ms upload slice per frame (a new board's frames 16 ms) instead of camera
+refinement's 2 ms.
 The Tactical View hides fluff at draw time (`GpuTerrain.setFluffHidden`): the 3D prop caches and their pages stay,
 and each chunk's few kept props are packed once on the view's first draw (`Chunk#keptProps`). Recaching every chunk's
 props with the keep rule instead (the design's first plan) cost about 1 s more on entering the view on Valencia

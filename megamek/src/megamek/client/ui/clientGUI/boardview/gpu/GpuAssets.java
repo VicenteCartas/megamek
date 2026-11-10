@@ -752,9 +752,34 @@ final class GpuAssets implements Disposable {
 
     /**
      * Work on the common pool, so at most its parallelism runs at once; without at least two of its threads (where
-     * supplyAsync's default would start a thread per task) the work runs at once, on the calling thread.
+     * supplyAsync's default would start a thread per task) the work runs at once, on the calling thread. Whoever asks
+     * for the result ({@link #joined}) before a pool thread took the work runs it itself: at a load the pool is busy
+     * with long work (material packs, model files), and the render thread would wait behind all of it for a few
+     * milliseconds of its own.
      */
-    static <T> CompletableFuture<T> pooled(Supplier<T> work) { return CompletableFuture.supplyAsync(work, pool()); }
+    static <T> CompletableFuture<T> pooled(Supplier<T> work) {
+        Pooled<T> task = new Pooled<>(work);
+        pool().execute(task);
+        return task;
+    }
+
+    /** {@link #pooled} work: run once, by the pool or by the thread that joins it first. */
+    private static final class Pooled<T> extends CompletableFuture<T> implements Runnable {
+        private final Supplier<T> work;
+        private final java.util.concurrent.atomic.AtomicBoolean taken = new java.util.concurrent.atomic.AtomicBoolean();
+
+        Pooled(Supplier<T> work) { this.work = work; }
+
+        @Override
+        public void run() {
+            if (isDone() || !taken.compareAndSet(false, true)) { return; }
+            try {
+                complete(work.get());
+            } catch (Throwable failure) {
+                completeExceptionally(failure);
+            }
+        }
+    }
 
     /** {@link #pooled}'s executor. */
     private static Executor pool() {
@@ -763,6 +788,7 @@ final class GpuAssets implements Disposable {
 
     /** The result of {@link #pooled} work, or the work's own failure. */
     static <T> T joined(CompletableFuture<T> work) {
+        if (work instanceof Pooled<T> task) { task.run(); }
         try {
             return work.join();
         } catch (CompletionException failure) {
@@ -1526,6 +1552,16 @@ final class GpuAssets implements Disposable {
     GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed,
           megamek.common.board.BuildingInteriors interiors, boolean stepped, float footprintScale, int[] corners,
           List<KitDoors.Cut> doors) {
+        return building(asset, levels, reach, seed, interiors, stepped, footprintScale, corners, doors, false);
+    }
+
+    /**
+     * {@code ahead}: only starts working out the assembly's storeys on the common pool, for the call that will ask for
+     * it ({@link GpuBuilding#assembleAhead}), and returns null.
+     */
+    GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed,
+          megamek.common.board.BuildingInteriors interiors, boolean stepped, float footprintScale, int[] corners,
+          List<KitDoors.Cut> doors, boolean ahead) {
         if (!asset.startsWith("buildings/") || BoardWall.supports(asset)) { return null; }
         File file = TilesetScenery.customBuildingFile(asset);
         // A kit that cannot load is reported under its own name; the caller then draws the asset's model, or its box.
@@ -1533,8 +1569,13 @@ final class GpuAssets implements Disposable {
         if (!isFile(file)) { return null; }
         if (unloadable.containsKey(kit)) { missing(kit, unloadable.get(kit)); return null; }
         try {
-            return buildings.computeIfAbsent(GpuBuilding.kit(asset, footprintScale), key -> new GpuBuilding(key, this::createModel))
-                  .assemble(levels, reach, seed, interiors, stepped, corners, doors);
+            GpuBuilding building = buildings.computeIfAbsent(GpuBuilding.kit(asset, footprintScale),
+                  key -> new GpuBuilding(key, this::createModel));
+            if (ahead) {
+                building.assembleAhead(levels, reach, seed, interiors, stepped, corners, doors);
+                return null;
+            }
+            return building.assemble(levels, reach, seed, interiors, stepped, corners, doors);
         } catch (RuntimeException failure) {
             missing(kit, reason(failure));
             return null;

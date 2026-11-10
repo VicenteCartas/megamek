@@ -64,6 +64,10 @@ class GpuAssetReloadSmokeTest {
         Files.createDirectories(blueprint.getParent());
         Files.copy(data.toPath().resolve("board-editor/blueprint.json"), blueprint);
         var failure = new AtomicReference<Throwable>();
+        // The reload must bring every program back. Family programs arrive beside the frames, some after the check
+        // (GpuLinkHelper), so this board draws with its generic programs alone.
+        String families = System.getProperty(GpuFamilyPrograms.PROPERTY);
+        System.setProperty(GpuFamilyPrograms.PROPERTY, "false");
         Configuration.setImagesDir(images);
         Configuration.setFontsDir(fonts);
         Configuration.setDataDir(directory.toFile());
@@ -393,6 +397,8 @@ class GpuAssetReloadSmokeTest {
             }, GpuBoardWindow.configuration(false));
             if (failure.get() != null) { throw new AssertionError("Asset/shader reload failed", failure.get()); }
         } finally {
+            if (families == null) { System.clearProperty(GpuFamilyPrograms.PROPERTY); }
+            else { System.setProperty(GpuFamilyPrograms.PROPERTY, families); }
             Configuration.setDataDir(data);
             Configuration.setImagesDir(images);
             Configuration.setFontsDir(fonts);

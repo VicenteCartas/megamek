@@ -443,7 +443,8 @@ final class GpuGlsl {
 
         private Linked take(GpuShaderManager.Sources source) {
             GpuLinkHelper helper = helper();
-            if (helper != null) {
+            // Where the driver links in parallel, what a load waits for links here, several at once (optionalOnly).
+            if (helper != null && (optional || !helper.optionalOnly())) {
                 Linked linked = elsewhere(helper, source);
                 if (linked != null) { return linked; }
             } else if (optional && (programCache == null || !programCache.has(key(source)))) {

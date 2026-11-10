@@ -1182,7 +1182,42 @@ final class GpuTerrain implements Disposable {
           Map<Coords, Map<BoardSurface.Side, List<BoardSurface.Face>>> walls, Set<Coords> reused,
           Map<Coords, List<BoardDecals.Stamp>> paint, boolean paintOnly,
           Map<GpuAuthoredBuilding.Layout, GpuAuthoredBuilding.Prepared> authored,
-          Map<Coords, BoardSurface> plantSupports) { }
+          Map<Coords, BoardSurface> plantSupports, GpuTextures<BoardScene.Pixels> roadMasks) {
+        Prepared(Map<Coords, BoardSurface> surfaces, GpuWaterShader.Field.Prepared water, GpuWaterShader.Field.Prepared lava,
+              Map<Coords, BoardTacticalGeometry.Surface> topography, Map<Coords, BoardPlants> plants,
+              Map<Coords, SculptPlan> sculpts, Map<Coords, BoardFlow.Current> currents, Map<Coords, List<RoadPatch>> roads,
+              Map<Coords, BoardBridge.Deck> bridges, Map<Coords, BoardBridge.Shape> bridgeShapes,
+              Map<Coords, Map<BoardSurface.Side, List<BoardSurface.Face>>> walls, Set<Coords> reused,
+              Map<Coords, List<BoardDecals.Stamp>> paint, boolean paintOnly,
+              Map<GpuAuthoredBuilding.Layout, GpuAuthoredBuilding.Prepared> authored, Map<Coords, BoardSurface> plantSupports) {
+            this(surfaces, water, lava, topography, plants, sculpts, currents, roads, bridges, bridgeShapes, walls, reused, paint,
+                  paintOnly, authored, plantSupports, null);
+        }
+
+        /** The masks of these roads' patches, each once: a chunk's road mask atlas ({@link Chunk#roadMasks}). */
+        static Map<BoardScene.Pixels, BoardScene.Pixels> roadMasks(Map<Coords, List<RoadPatch>> roads) {
+            Map<BoardScene.Pixels, BoardScene.Pixels> masks = new HashMap<>();
+            roads.values().forEach(patches -> patches.forEach(p -> masks.put(p.mask().pixels(), p.mask().pixels())));
+            return masks;
+        }
+
+        /**
+         * With a new chunk's road masks packed into their atlas's pages, on the worker that prepared it: its build only
+         * uploads them (ChunkBuild). A chunk that reuses hexes packs their masks with its own, there. Whoever takes this
+         * builds the chunk or calls {@link #discard}.
+         */
+        Prepared packed() {
+            var images = reused.isEmpty() ? roadMasks(roads) : Map.<BoardScene.Pixels, BoardScene.Pixels>of();
+            return images.isEmpty() ? this : new Prepared(surfaces, water, lava, topography, plants, sculpts, currents, roads,
+                  bridges, bridgeShapes, walls, reused, paint, paintOnly, authored, plantSupports,
+                  new GpuTextures<BoardScene.Pixels>().prepack(images));
+        }
+
+        /** Never built into a chunk (a job a newer request passed): frees the road masks packed ahead. Any thread. */
+        void discard() {
+            if (roadMasks != null) { roadMasks.dispose(); }
+        }
+    }
     record RoadPatch(GpuRoads.Patch patch, GpuRoads.MaskData mask,
           List<BoardTacticalGeometry.Triangle> triangles, boolean flat, BoardScene.Tile source) { }
     /** {@code columns}: the Classic graphics' build ({@link #setColumns}). */
@@ -3147,11 +3182,12 @@ final class GpuTerrain implements Disposable {
                   () -> cacheChunks(camera));
         }
         // While opening/replacing a board or switching the graphics (both behind the loading stage), use more of the
-        // loading frame for uploads instead of stretching each chunk's handoffs over several frames. An editor change
+        // loading frame for uploads instead of stretching each chunk's handoffs over several frames: a new board's
+        // frames, which nothing else draws in and no monitor refresh holds (GpuBattleView#pace), the most. An editor change
         // gets a larger bounded slice so each small edit does not wait dozens of frames (its collection and upload take
         // about 60 ms of render-thread time, a handful of frames at this slice); ordinary camera refinement keeps the
         // two-millisecond budget.
-        long deadline = System.nanoTime() + (coverScene == null ? 8_000_000
+        long deadline = System.nanoTime() + (coverScene == null ? 16_000_000
               : editing && (requested != null || rebuild != null) ? 12_000_000
               : installedColumns != columns || atlasColumns != columns ? 8_000_000 : 2_000_000);
         drainRetired(deadline);
@@ -3229,6 +3265,8 @@ final class GpuTerrain implements Disposable {
                 }
             } else if (job.build() != null) {
                 retiredChunks.add(job.build().chunk);
+            } else {
+                job.surfaces().thenAccept(Prepared::discard);
             }
         }
         if (detailJob != null) {
@@ -3276,6 +3314,12 @@ final class GpuTerrain implements Disposable {
             }
         }
         return refineChunks(camera);
+    }
+
+    /** Frees what a job the terrain closes with holds: its chunk under construction, or what its workers prepare for one. */
+    private static void discard(DetailJob job) {
+        if (job.build() != null) { job.build().chunk.dispose(); }
+        else { job.surfaces().thenAccept(Prepared::discard); }
     }
 
     /** A chunk the camera wants at another detail: refinements first, the largest first, then the nearest. */
@@ -3457,7 +3501,7 @@ final class GpuTerrain implements Disposable {
                           : onlyPaint ? preparePaint(scene, x, y, bottom, buildLod, paintSurfaces, paint, repainted,
                           () -> checkBuild(generation, stale))
                           : prepare(scene, x, y, bottom, buildLod, flow, settings, reuse, waterShapes,
-                          () -> checkBuild(generation, stale), progress, roadMaskData, paint, paintSurfaces)), detailWorker),
+                          () -> checkBuild(generation, stale), progress, roadMaskData, paint, paintSurfaces).packed()), detailWorker),
               null, null, progress, stale);
         // The job in a render-thread stage keeps it; this one waits its turn (advanceBuild).
         if (detailJob == null) { detailJob = job; } else { pending.add(job); }
@@ -4622,6 +4666,36 @@ final class GpuTerrain implements Disposable {
      * A hex's features: its buildings, structures, bridges, trees, scatter and placed objects, and its paint. A Classic
      * build keeps those {@link #columnFeature} names; both use the same road/rail carrier and generated deck shapes.
      */
+    /**
+     * The kit assembly {@code feature} draws on {@code tile}, or null without one. {@code ahead}: only starts its
+     * storeys on the common pool ({@link GpuBuilding#assembleAhead}).
+     */
+    private GpuBuilding.Assembly kitAssembly(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature, boolean ahead) {
+        if (BoardIndustrial.supports(feature) || feature.decoration() != null) { return null; }
+        boolean building = feature.kind() == BoardScene.FeatureKind.BUILDING;
+        int levels = Math.round(feature.height());
+        return assets.building(feature.asset(), levels, ConnectedKit.reach(scene, tile, levels), GpuBuilding.seed(tile, feature),
+              building && !BoardWall.building(tile.cover(), feature) ? tile.cover().interiors() : BuildingInteriors.NO,
+              HexAppearance.steppedBuilding(tile.appearance()), feature.footprintScale(), ConnectedKit.corners(scene, tile),
+              building ? KitDoors.cuts(scene, tile, feature) : List.of(), ahead);
+    }
+
+    /**
+     * Before a new chunk's hexes are collected one by one: the storeys of the kit buildings they will ask for
+     * (collectFeatures) start on the common pool, all at once. A chunk that replaces one (an edit, another level of
+     * detail) finds nearly all of its assemblies built; a Classic chunk and a route preview collect as before.
+     */
+    private void assembleAhead(ChunkBuild build) {
+        if (build.source != null || build.preview != null || build.chunk.columns) { return; }
+        for (int index = 0; index < build.width * build.height; index++) {
+            BoardScene.Tile tile = build.scene.tile(new Coords(build.x + index / build.height, build.y + index % build.height));
+            for (BoardScene.Feature feature : BoardMultiHexBuilding.withTrees(build.scene, tile,
+                  BoardFeatures.fittedControls(build.scene, tile))) {
+                if (feature.kind() == BoardScene.FeatureKind.BUILDING) { kitAssembly(build.scene, tile, feature, true); }
+            }
+        }
+    }
+
     private void collectFeatures(ChunkBuild build, BoardScene.Tile tile, BoardSurface surface, GroundView ground) {
         BoardScene scene = build.scene;
         Prepared prepared = build.prepared;
@@ -4707,11 +4781,7 @@ final class GpuTerrain implements Disposable {
             boolean wallBuilding = BoardWall.building(tile.cover(), feature);
             var wallLayout = BoardWall.supports(feature.asset()) ? BoardWall.layout(scene, tile, feature) : null;
             var multiHexLayout = BoardMultiHexBuilding.supports(feature.asset()) ? BoardMultiHexBuilding.layout(scene, tile, feature) : null;
-            GpuBuilding.Assembly building = generatedIndustrial || feature.decoration() != null ? null : assets.building(feature.asset(), Math.round(feature.height()),
-                  ConnectedKit.reach(scene, tile, Math.round(feature.height())), GpuBuilding.seed(tile, feature),
-                  feature.kind() == BoardScene.FeatureKind.BUILDING && !wallBuilding ? tile.cover().interiors() : BuildingInteriors.NO,
-                  HexAppearance.steppedBuilding(tile.appearance()), feature.footprintScale(), ConnectedKit.corners(scene, tile),
-                  feature.kind() == BoardScene.FeatureKind.BUILDING ? KitDoors.cuts(scene, tile, feature) : List.of());
+            GpuBuilding.Assembly building = kitAssembly(scene, tile, feature, false);
             // A placed object draws the same way in every view: one shared mesh per model and level (GpuAssets#slotted),
             // its colours passed per placement, its parts instanced (Chunk#cacheDecorations). Rail and maglev routes keep
             // their own route caching. What a rail owns (its buffer stops) is drawn as an object but never edited as one.
@@ -5357,8 +5427,9 @@ final class GpuTerrain implements Disposable {
             chunk.charts.keep(source == null ? null : source.charts, prepared.reused());
             chunk.paintOnlyUpdate = prepared.paintOnly();
             if (chunk.paintOnlyUpdate) { progress.begin("paint", width * height); return; }
-            Map<BoardScene.Pixels, BoardScene.Pixels> masks = new HashMap<>();
-            prepared.roads().values().forEach(patches -> patches.forEach(p -> masks.put(p.mask().pixels(), p.mask().pixels())));
+            GpuTextures<BoardScene.Pixels> packed = prepared.roadMasks();
+            Map<BoardScene.Pixels, BoardScene.Pixels> masks = packed != null ? packed.prepacked()
+                  : Prepared.roadMasks(prepared.roads());
             if (source != null) {
                 for (Coords coords : prepared.reused()) {
                     for (TileRange range : source.tileMeshes.get(coords).ranges) {
@@ -5376,7 +5447,12 @@ final class GpuTerrain implements Disposable {
                 // uploading a city chunk's masks again takes tens of milliseconds of the frame it starts in.
                 if (source != null && source.roadMasks != null && source.roadMasks.holds(masks.keySet())) {
                     chunk.roadMasks = source.roadMasks.share();
-                } else { chunk.roadMasks.update(masks); }
+                    if (packed != null) { packed.dispose(); }
+                } else {
+                    // Packed ahead (Prepared#packed): this only uploads its pages.
+                    if (packed != null) { chunk.roadMasks = packed; }
+                    chunk.roadMasks.update(masks);
+                }
                 progress.advance();
             } catch (RuntimeException | Error failure) {
                 chunk.dispose();
@@ -5389,6 +5465,7 @@ final class GpuTerrain implements Disposable {
         }
 
         boolean collectUntil(long deadline) {
+            if (collected == 0 && !chunk.paintOnlyUpdate) { assembleAhead(this); }
             do {
                 Coords coords = new Coords(x + collected / height, y + collected % height);
                 layers.forEach(layer -> layer.owner = coords);
@@ -10744,11 +10821,11 @@ final class GpuTerrain implements Disposable {
         retiredChunks.forEach(Chunk::dispose);
         retiredChunks.clear();
         if (rebuild != null) { rebuild.replacements.values().forEach(Chunk::dispose); }
-        for (DetailJob job : pending) { if (job.build() != null) { job.build().chunk.dispose(); } }
+        for (DetailJob job : pending) { discard(job); }
         pending.clear();
         rebuild = null;
         requested = null;
-        if (detailJob != null && detailJob.build() != null) { detailJob.build().chunk.dispose(); }
+        if (detailJob != null) { discard(detailJob); }
         detailJob = null;
         detailCache.values().forEach(Chunk::dispose);
         detailCache.clear();

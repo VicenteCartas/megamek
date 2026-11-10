@@ -1194,6 +1194,9 @@ final class GpuBoardTuning {
 
     boolean terrainCache() { return terrainCache.isChecked(); }
 
+    /** The Display page's VSync choice, which the window follows while a board shows (GpuBattleView#pace). */
+    boolean vsync() { return vsync.isChecked(); }
+
     boolean terrainCacheDebug() { return terrainCacheDebug.isChecked(); }
 
     /** The current renderer, resolved on the render thread so an asset reload cannot leave a disposed cache here. */

@@ -42,7 +42,10 @@ import org.lwjgl.system.windows.WinBase;
  */
 final class GpuLinkHelper {
     private static final MMLogger LOGGER = MMLogger.create(GpuLinkHelper.class);
-    /** {@code -Dmegamek.gpu.linkHelper=false} keeps links in the game's process; {@code true} also uses it beside the parallel compiler. */
+    /**
+     * {@code -Dmegamek.gpu.linkHelper=false} keeps links in the game's process; {@code true} gives it every program
+     * also where the driver links in parallel, which by default gives it only the optional ones ({@link #optionalOnly}).
+     */
     static final String PROPERTY = "megamek.gpu.linkHelper";
     private static final long START_NANOS = 60_000_000_000L, JOB_NANOS = 300_000_000_000L, IDLE_NANOS = 60_000_000_000L;
     /** Helpers that may die before this ends, and binaries of one program the driver may reject before the helper leaves it be. */
@@ -58,6 +61,7 @@ final class GpuLinkHelper {
     private final Path directory;
     private final String driver;
     private final int major, minor;
+    private final boolean optionalOnly;
     /** Guards the queues; required programs (behind loading, an editor's) go before optional ones (family programs). */
     private final Object lock = new Object();
     private final ArrayDeque<Job> required = new ArrayDeque<>(), optional = new ArrayDeque<>();
@@ -71,7 +75,8 @@ final class GpuLinkHelper {
     private volatile Process process;
     private Thread thread;
 
-    private GpuLinkHelper(GpuProgramCache cache, int major, int minor) {
+    private GpuLinkHelper(GpuProgramCache cache, int major, int minor, boolean optionalOnly) {
+        this.optionalOnly = optionalOnly;
         this.cache = cache;
         directory = cache.directory();
         driver = cache.driver();
@@ -79,12 +84,20 @@ final class GpuLinkHelper {
         this.minor = minor;
     }
 
-    /** The helper for this context, or null: no cache to leave binaries in, the driver links in parallel, or the property. */
+    /** The helper for this context, or null: no cache to leave binaries in, or the property. */
     static GpuLinkHelper open(GpuProgramCache cache, int major, int minor, boolean parallelCompiler) {
         String wanted = System.getProperty(PROPERTY, "");
-        boolean use = wanted.isEmpty() ? !parallelCompiler : Boolean.parseBoolean(wanted);
-        return use && cache != null && launcher() != null ? new GpuLinkHelper(cache, major, minor) : null;
+        boolean use = wanted.isEmpty() || Boolean.parseBoolean(wanted);
+        return use && cache != null && launcher() != null
+              ? new GpuLinkHelper(cache, major, minor, parallelCompiler && wanted.isEmpty()) : null;
     }
+
+    /**
+     * Whether it links only the optional programs (family programs): where the driver links in parallel, the programs a
+     * load waits for link in the game's process, several at once, which one helper would link one after another. The
+     * family programs, which nothing waits for, would still keep the loading stage up for as long as they link there.
+     */
+    boolean optionalOnly() { return optionalOnly; }
 
     /** Whether its binaries reach this cache: tests replace the cache. */
     boolean serves(GpuProgramCache cache) {

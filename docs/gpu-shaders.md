@@ -266,8 +266,17 @@ waits for the generic programs and for family programs the cache holds. Every ot
 with no `FRESH` limit, and arrives beside the frames, one a frame within the frame's budget for links. A generic program
 draws the same pixels meanwhile. Nothing optional links in the game's process: if the helper ends, those stay generic
 until the next load. A required program links there only when its binary can't reach the game, because the cache can't be
-written or the driver keeps rejecting it. Drivers with the parallel compiler and drivers without binary formats keep
-their own paths; `-Dmegamek.gpu.linkHelper` overrides the choice.
+written or the driver keeps rejecting it. A driver without binary formats keeps its own path.
+
+Where the driver links in parallel (NVIDIA), the programs a load waits for link in the game's process, several at
+once: one helper would link them one after another (Fire and Ice 2, nothing cached: 66 s of links against 22). Only
+the family programs go to the helper there. Linked in the game's process, four of them kept the loading stage up for
+30-42 s on each of a board's first loads: the driver reports such a link complete, then holds the link status query
+for about 2.4 s a program and the program's first draw for up to 20 s. From the helper their binaries load without
+either. RTX 4070, Fire and Ice 2, nothing cached, without / with the helper for family programs: the board shows
+after 38.4 / 32.5 s, and 23 family programs arrive over the next 150 s of play; a frame that adopts one takes
+26-59 ms, one took 155 ms. `-Dmegamek.gpu.linkHelper=false` keeps every link in the game's process, `=true` gives the
+helper every program.
 
 Iris Xe, 1080p, Medium, nothing cached, without / with the helper: Fenland loads in 118 / 72 s, then all ten family
 programs arrive 30 s later (four of ten without, and 59.6 / 51.3 ms a settled frame); Fire and Ice 2 loads in 185 / 168 s,
