@@ -179,16 +179,17 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
      * ({@code woods} 0 for none, 1 light, 2 heavy, 3 ultra) and a structure: its {@code structure} kind (a building's
      * type 1-5, {@link #FUEL_TANK} or {@link #INDUSTRIAL}, 0 for none), the hexsides it continues across
      * ({@code exits}, MegaMek directions), its current construction factor (the hex tooltip's rule: the board's
-     * building, else the hex's own CF; 0 for industry), pristine map CF for wall appearance, and height in levels.
+     * building, else the hex's own CF; 0 for industry), a wall's weight, which decides its look ({@code wallWeight},
+     * {@link megamek.common.board.TilesetScenery#buildingWeight}; 0 for no wall), and height in levels.
      */
-    record Cover(int woods, boolean jungle, int structure, int exits, int cf, int pristineCF, int height,
+    record Cover(int woods, boolean jungle, int structure, int exits, int cf, int wallWeight, int height,
           megamek.common.board.BuildingInteriors interiors, megamek.common.board.BuildingVolumes.Reference reference) {
         Cover {
             if (!GpuTerrain.VISIBLE_BUILDING_INTERIORS) { interiors = megamek.common.board.BuildingInteriors.NO; }
         }
 
-        Cover(int woods, boolean jungle, int structure, int exits, int cf, int pristineCF, int height) {
-            this(woods, jungle, structure, exits, cf, pristineCF, height, megamek.common.board.BuildingInteriors.YES, null);
+        Cover(int woods, boolean jungle, int structure, int exits, int cf, int wallWeight, int height) {
+            this(woods, jungle, structure, exits, cf, wallWeight, height, megamek.common.board.BuildingInteriors.YES, null);
         }
         static final int FUEL_TANK = 6;
         static final int INDUSTRIAL = 7;
@@ -201,7 +202,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                 return new Cover(woods, jungle, hex.terrainLevel(Terrains.BUILDING),
                       hex.getTerrain(Terrains.BUILDING).getExits() & 63,
                       building == null ? hex.terrainLevel(Terrains.BLDG_CF) : building.getCurrentCF(coords),
-                      hex.terrainLevel(Terrains.BLDG_CF),
+                      hex.terrainLevel(Terrains.BUILDING) == megamek.common.enums.BuildingType.WALL.getTypeValue()
+                            ? megamek.common.board.TilesetScenery.buildingWeight(hex) : 0,
                       hex.terrainLevel(Terrains.BLDG_ELEV), megamek.common.board.BuildingInteriors.resolve(hex), hex.getBuildingReference());
             }
             if (hex.containsTerrain(Terrains.FUEL_TANK)) {

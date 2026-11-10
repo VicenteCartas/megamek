@@ -108,7 +108,7 @@ class GpuHexGridTest {
         assertEquals(GpuHexGrid.BUILDING + 1, hall >> 6, "A medium building");
         assertEquals(63 & ~(1 << 3), hall & 63, "outlined except where it continues into its annex");
         assertEquals(63 & ~1, GpuHexGrid.area(scene, scene.tile(ANNEX)) & 63);
-        assertEquals(new BoardScene.Cover(0, false, 2, 1 << 3, 40, 40, 2), scene.tile(HALL).cover(),
+        assertEquals(new BoardScene.Cover(0, false, 2, 1 << 3, 40, 0, 2), scene.tile(HALL).cover(),
               "The captured cover: type, exits, the hex's CF without a game building, height");
         assertEquals(0, GpuHexGrid.area(scene, scene.tile(new Coords(6, 5))), "Plain ground has none");
     }

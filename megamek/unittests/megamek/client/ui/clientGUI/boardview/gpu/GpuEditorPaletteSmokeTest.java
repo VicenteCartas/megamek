@@ -164,12 +164,12 @@ class GpuEditorPaletteSmokeTest {
                   }
                   if (!GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))) { return false; }
                   GpuBoardTestUi.capture(new File(OUTPUT, "buildings.png"));
-                  search(root, "tree");
+                  search(root, "trees");
                   return true;
               },
               (view, source, root) -> {
                   for (String category : List.of("ground-water", "vegetation", "transportation")) {
-                      assertNotNull(root.findActor("editor-section-" + category), "tree in " + category);
+                      assertNotNull(root.findActor("editor-section-" + category), "trees in " + category);
                   }
                   assertNull(root.findActor("editor-section-buildings"));
                   assertNotNull(root.findActor("editor-library-rough/felled-trees"));

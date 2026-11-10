@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class TilesetSceneryFilesTest {
-    private static final String ASSET = "buildings/saxarba/test/hall_12";
+    private static final String ASSET = "buildings/test/hall";
 
     @Test
     void retiredTilesetModelsCannotOverrideTheModularWeightAndClass(@TempDir Path root) throws Exception {
@@ -55,8 +55,7 @@ class TilesetSceneryFilesTest {
             prepare(root);
             Configuration.setDataDir(root.toFile());
             TilesetScenery.reload();
-            Path exact = root.resolve("models/buildings/test/hall_12.glb");
-            Path design = root.resolve("models/buildings/test/hall.glb");
+            Path exact = root.resolve("models/buildings/test/hall.glb");
             Path generated = root.resolve("models/buildings/test/hall.json");
             Files.createDirectories(exact.getParent());
             Hex hex = new Hex(0, "building:1", "");
@@ -86,14 +85,11 @@ class TilesetSceneryFilesTest {
             assertEquals(ASSET + "@second", TilesetScenery.structureModels(offices).get(Terrains.BUILDING));
             assertEquals(ASSET, TilesetScenery.structureModels(new Hex(0, "building:1;bldg_class:1", "")).get(Terrains.BUILDING),
                   "Its first variant offers none");
-            Files.writeString(design, "design");
-            TilesetScenery.reload();
-            assertEquals(design.toFile(), TilesetScenery.customBuildingFile(ASSET));
-            assertFalse(TilesetScenery.generatedKit(ASSET));
             Files.writeString(exact, "exact");
             TilesetScenery.reload();
             assertEquals(exact.toFile(), TilesetScenery.customBuildingFile(ASSET));
-            Files.delete(exact); Files.delete(design); Files.delete(generated);
+            assertFalse(TilesetScenery.generatedKit(ASSET));
+            Files.delete(exact); Files.delete(generated);
             TilesetScenery.reload();
             assertFalse(TilesetScenery.structureModels(hex).containsKey(Terrains.BUILDING));
             Path legacy = root.resolve("models/board/" + ASSET + ".glb");
@@ -121,7 +117,7 @@ class TilesetSceneryFilesTest {
             assertTrue(TilesetScenery.generatedKit(ASSET));
             Configuration.setDataDir(second.toFile());
             assertFalse(TilesetScenery.generatedKit(ASSET));
-            assertEquals(second.resolve("models/buildings/test/hall_12.glb").toFile(),
+            assertEquals(second.resolve("models/buildings/test/hall.glb").toFile(),
                   TilesetScenery.customBuildingFile(ASSET));
             Configuration.setDataDir(first.toFile());
             assertTrue(TilesetScenery.generatedKit(ASSET));

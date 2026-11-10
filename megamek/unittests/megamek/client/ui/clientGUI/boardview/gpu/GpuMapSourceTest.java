@@ -99,7 +99,6 @@ class GpuMapSourceTest {
                 source.editorCommand(new Command(Action.TERRAIN, "bldg_cf", "11"), generation);
                 var after = source.takeFrame().scene().tile(at);
                 assertEquals(150, board.getBuildingAt(at).getCurrentCF(at), "Map edits leave gameplay objects untouched");
-                assertEquals(11, after.cover().pristineCF());
                 assertEquals(BoardWall.Family.LIGHT, BoardWall.family(after));
                 assertFalse(before.sameGeometry(after));
                 source.editorCommand(new Command(Action.UNDO), generation);

@@ -166,7 +166,7 @@ class BoardWallTest {
 
     @Test
     void fortressBodyMatchesTheRoadWidthAndItsArmorHasRealProjection() {
-        var solid = BoardWall.triangles(BoardWall.layout("buildings/wall-9", 1, 90));
+        var solid = BoardWall.triangles(BoardWall.layout("buildings/wall-9", 1, BoardWall.Family.HEAVY));
         var full = new BoundingBox().inf();
         solid.forEach(full::ext);
         assertTrue(full.getWidth() > 2 * HexTile.ROAD_HALF_WIDTH + 6
@@ -288,10 +288,20 @@ class BoardWallTest {
     @ParameterizedTest
     @CsvSource({ "1,CIVILIAN", "10,CIVILIAN", "11,LIGHT", "15,LIGHT", "16,MEDIUM", "40,MEDIUM",
           "41,HEAVY", "90,HEAVY", "91,HARDENED", "150,HARDENED", "151,CASTLE_BRIAN", "500,CASTLE_BRIAN" })
-    void capturedWallUsesCfBoundaries(int cf, BoardWall.Family expected) {
+    void aLegacyWallTakesTheWeightItsCfBelongsTo(int cf, BoardWall.Family expected) {
         Board board = board(cf);
+        assertTrue(board.getHex(ORIGIN).containsTerrain(Terrains.BLDG_WEIGHT), "The conversion gives the wall its weight");
         var tile = BoardTiles.captureAll(board).getFirst();
         assertEquals(expected, layout(tile).family());
+    }
+
+    @ParameterizedTest
+    @CsvSource({ "0,120,CIVILIAN", "1,10,LIGHT", "2,15,MEDIUM", "3,15,HEAVY", "4,151,HARDENED", "5,15,CASTLE_BRIAN" })
+    void aWallsWeightDecidesItsLookWhateverItsCf(int weight, int cf, BoardWall.Family expected) {
+        Board board = new Board();
+        board.newData(1, 1, new Hex[] { new Hex(0,
+              "building:5:0;bldg_weight:" + weight + ";bldg_elev:2;bldg_cf:" + cf + ";bldg_basement_type:1", "") }, null);
+        assertEquals(expected, layout(BoardTiles.captureAll(board).getFirst()).family());
     }
 
     @Test
@@ -305,7 +315,6 @@ class BoardWallTest {
             board.updateBuilding(received.getBuildingAt(ORIGIN));
             var after = BoardTiles.captureAll(board).getFirst();
             assertEquals(remaining, after.cover().cf(), "Gameplay still tracks damage normally");
-            assertEquals(151, after.cover().pristineCF());
             assertEquals(layout(before), layout(after), "Damage across every tier retains the original model");
             assertTrue(before.sameGeometry(after));
         }
@@ -344,14 +353,14 @@ class BoardWallTest {
 
     @Test
     void eachFamilyAssemblesBothLodsWithEmbeddedMaterialsAndFullHeightLayers() {
-        for (int cf : new int[] { 10, 15, 40, 90, 150, 151 }) {
+        for (BoardWall.Family family : BoardWall.Family.values()) {
             for (int exits : new int[] { 0, 9, 63 }) {
                 int previous = Integer.MAX_VALUE;
                 for (int lod = 0; lod < BoardWall.LODS; lod++) {
-                    var model = (RigidGlb.Data) BoardWall.model(BoardWall.layout("buildings/wall-" + exits, 3, cf), lod);
+                    var model = (RigidGlb.Data) BoardWall.model(BoardWall.layout("buildings/wall-" + exits, 3, family), lod);
                     assertFalse(model.images.isEmpty());
                     assertEquals(model.materials.size, model.surfaces.size());
-                    if (cf == 10) { assertFalse(model.alphaTests.isEmpty(), "Civilian wire cutouts retain their masks"); }
+                    if (family == BoardWall.Family.CIVILIAN) { assertFalse(model.alphaTests.isEmpty(), "Civilian wire cutouts retain their masks"); }
                     int indices = 0;
                     for (var mesh : model.meshes) {
                         for (var part : mesh.parts) { indices += part.indices.length; }
@@ -367,7 +376,7 @@ class BoardWallTest {
                             assertEquals(18, high - low, .001f, "Base and floors retain their authored height");
                         }
                     }
-                    assertTrue(indices < previous, "Both authored LODs must be loaded for CF " + cf);
+                    assertTrue(indices < previous, "Both authored LODs must be loaded for " + family);
                     previous = indices;
                 }
             }

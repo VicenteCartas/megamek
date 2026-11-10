@@ -159,11 +159,7 @@ public final class TilesetScenery {
         return result;
     }
 
-    /**
-     * New kits use family/name paths; the selected legacy asset keeps its tileset provenance for fallback. A kit named
-     * for the design alone stands for every exit value of its per-combination keys ({@code ..._NN}): its connection
-     * pieces follow the hex's exits.
-     */
+    /** New kits use family/name paths; the selected legacy asset keeps its tileset provenance for fallback. */
     public static File customBuildingFile(String asset) {
         return buildingFile(asset).custom();
     }
@@ -218,22 +214,56 @@ public final class TilesetScenery {
     }
 
     /**
-     * The standard modular kit is determined by gameplay class and weight, independently of height and connections:
-     * {@code buildings/standard/<class>-<weight>}, an ordinary building's class written {@code building}.
+     * The standard modular kit is determined by gameplay class and weight ({@link #buildingWeight}), independently of
+     * height and connections: {@code buildings/standard/<class>-<weight>}, an ordinary building's class written
+     * {@code building}.
      */
     public static String genericBuilding(Hex hex) {
         if (!hex.containsTerrain(Terrains.BUILDING)) { return null; }
         if (hex.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue()) {
             return "buildings/wall-" + (hex.getTerrain(Terrains.BUILDING).getExits() & 63);
         }
-        String weight = switch (hex.terrainLevel(Terrains.BUILDING)) {
+        String name = className(hex.terrainLevel(Terrains.BLDG_CLASS));
+        return "buildings/standard/" + (name == null ? "building" : name) + "-" + weight(buildingWeight(hex));
+    }
+
+    /** A fuel tank's kit is determined by its weight alone; its connection pieces follow the hex's exits. */
+    public static String genericFuelTank(Hex hex) {
+        return hex.containsTerrain(Terrains.FUEL_TANK)
+              ? "buildings/fuel_tanks/fuel_tank_" + weight(hex.terrainLevel(Terrains.FUEL_TANK)) : null;
+    }
+
+    /** The weight of {@code hex}'s building or wall ({@link #buildingWeight(int, Hex)} for its {@code building} type). */
+    public static int buildingWeight(Hex hex) { return buildingWeight(hex.terrainLevel(Terrains.BUILDING), hex); }
+
+    /**
+     * The weight of a building or wall of {@code type} (its {@code building} level) on {@code hex}: 0 civilian, 1 light,
+     * 2 medium, 3 heavy, 4 hardened, 5 Castle Brian. The rules know the four in the middle ({@link #rulesWeight}), and a
+     * building's type is its weight as they see it: a civilian or Castle Brian building says so in its
+     * {@code bldg_weight}, any other has its type's weight. A wall's type is Wall, so its weight is its
+     * {@code bldg_weight}; a wall without one (a legacy board's) has the weight its construction factor belongs to.
+     */
+    public static int buildingWeight(int type, Hex hex) {
+        boolean wall = type == BuildingType.WALL.getTypeValue();
+        int stored = hex.terrainLevel(Terrains.BLDG_WEIGHT);
+        if (hex.containsTerrain(Terrains.BLDG_WEIGHT) && (wall || rulesWeight(stored) == type)) { return stored; }
+        if (!wall) { return type; }
+        int cf = hex.terrainLevel(Terrains.BLDG_CF);
+        return cf <= 10 ? 0 : cf <= 15 ? 1 : cf <= 40 ? 2 : cf <= 90 ? 3 : cf <= 150 ? 4 : 5;
+    }
+
+    /** The weight the rules give a building of {@code weight}: light for a civilian one, hardened for a Castle Brian. */
+    public static int rulesWeight(int weight) { return Math.clamp(weight, 1, 4); }
+
+    private static String weight(int weight) {
+        return switch (weight) {
+            case 0 -> "civilian";
             case 2 -> "medium";
             case 3 -> "heavy";
             case 4 -> "hard";
+            case 5 -> "castle-brian";
             default -> "light";
         };
-        String name = className(hex.terrainLevel(Terrains.BLDG_CLASS));
-        return "buildings/standard/" + (name == null ? "building" : name) + "-" + weight;
     }
 
     private static BuildingFile buildingFile(String asset) {
@@ -253,16 +283,12 @@ public final class TilesetScenery {
 
     private static BuildingFile buildingFile(File root, String asset) {
         String relative = asset.substring("buildings/".length()).replaceFirst("@.*$", "");
-        if (relative.startsWith("saxarba/")) { relative = relative.substring("saxarba/".length()); }
         File exact = new File(root, "models/buildings/" + relative + ".glb");
-        File design = new File(root, "models/buildings/" + relative.replaceFirst("_[0-9]{2}$", "") + ".glb");
-        // A kit generated from its JSON spec stands for both its footprints (the asset's -square names the Square one),
-        // all its variants (@ and a variant's name, kitVariant) and, as the design does, every exit value.
-        File generated = new File(root, "models/buildings/"
-              + relative.replaceFirst("-square$", "").replaceFirst("_[0-9]{2}$", "") + ".json");
+        // A kit generated from its JSON spec stands for both its footprints (the asset's -square names the Square one)
+        // and all its variants (@ and a variant's name, kitVariant).
+        File generated = new File(root, "models/buildings/" + relative.replaceFirst("-square$", "") + ".json");
         boolean exists = exact.isFile();
         File custom = exact;
-        if (!exists && !design.equals(exact) && design.isFile()) { custom = design; exists = true; }
         if (!exists && generated.isFile()) { custom = generated; exists = true; }
         boolean legacy = new File(root, "models/board/" + asset + ".glb").isFile();
         return new BuildingFile(custom, exists, legacy);
@@ -418,8 +444,9 @@ public final class TilesetScenery {
     }
 
     /**
-     * The hex's structure models by structure terrain: a designed building's or fuel tank's model, else its tileset entry;
-     * only models that exist for that structure ({@link BoardGenerator#exists}, or a custom kit).
+     * The hex's structure models by structure terrain: a designed building's or fuel tank's model, else the kit for its
+     * weight ({@link #genericBuilding}, {@link #genericFuelTank}), else its tileset entry; only models that exist for that
+     * structure ({@link BoardGenerator#exists}, or a custom kit).
      */
     public static Map<Integer, String> structureModels(Hex hex) {
         return structureModels(hex, buildingConnected(hex, null, null));
@@ -445,6 +472,8 @@ public final class TilesetScenery {
         // displace the modular kit merely because a retired GLB still exists in a user's data directory.
         if (generic != null && (BoardGenerator.exists(generic, Terrains.BUILDING)
               || buildingFile(generic).customExists())) { models.putIfAbsent(Terrains.BUILDING, generic); }
+        String tank = genericFuelTank(hex);
+        if (tank != null && buildingFile(tank).customExists()) { models.putIfAbsent(Terrains.FUEL_TANK, tank); }
         if (hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL)) {
             List<TilesetMatcher.Pick> images = new ArrayList<>(appearanceLayers(definitions, hex, false));
             images.add(definitions.select(hex).base());

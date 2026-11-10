@@ -154,7 +154,7 @@ class BoardObstaclesTest {
     }
 
     private static final Coords CENTER = new Coords(2, 2);
-    private static final String TANK = "buildings/saxarba/fuel_tanks/fuel_tank_hard_15";
+    private static final String TANK = "buildings/fuel_tanks/fuel_tank_hard";
 
     @Test
     void entireScatterFootprintClearsSolidWhileCourtyardsAndOtherLevelsRemainOpen() {

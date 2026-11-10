@@ -182,7 +182,8 @@ class BoardComponentsTest {
                 var first = json.path("hexes").get(0);
                 var building = first.path("components").path("building");
                 assertEquals(weight == 5 ? "wall" : "building", building.path("type").asText());
-                assertEquals(List.of("light", "medium", "heavy", "hardened").get(Math.min(4, weight) - 1), building.path("weight").asText());
+                // A wall without a weight takes the one its CF belongs to: 90 is heavy.
+                assertEquals(List.of("light", "medium", "heavy", "hardened", "heavy").get(weight - 1), building.path("weight").asText());
                 assertEquals(List.of("standard", "hangar", "fortress", "gunEmplacement").get(buildingClass), building.path("class").asText());
                 assertEquals(90, building.path("cf").intValue());
                 assertEquals("none", building.path("basement").asText());
@@ -190,7 +191,7 @@ class BoardComponentsTest {
                 Board loaded = BoardFile.readNative(saved, true);
                 for (int y = 0; y < 2; y++) {
                     Hex expected = source.getHex(0, y).duplicate();
-                    if (weight == 5) { expected.addTerrain(new Terrain(Terrains.BLDG_WEIGHT, 4)); }
+                    if (weight == 5) { expected.addTerrain(new Terrain(Terrains.BLDG_WEIGHT, 3)); }
                     assertEquals(BoardFile.hexNode(expected), BoardFile.hexNode(loaded.getHex(0, y)));
                 }
                 assertEquals(saved, encode(loaded));
@@ -199,14 +200,14 @@ class BoardComponentsTest {
     }
 
     @Test void wallWeightRoundTripsWithoutGrantingInteriorsOrBasements() throws Exception {
-        for (int weight = 1; weight <= 4; weight++) {
+        for (int weight = 0; weight <= 5; weight++) {
             Board source = Board.createEmptyBoard(1, 1);
             source.setHex(0, 0, new Hex(0, "building:5:0;bldg_weight:" + weight
                   + ";bldg_cf:40;bldg_elev:2;bldg_interiors:1;bldg_basement_type:6;bldg_base_collapsed:1", ""));
             String saved = encode(source);
             var component = JSON.readTree(saved).path("hexes").get(0).path("components").path("building");
             assertEquals("wall", component.path("type").asText());
-            assertEquals(List.of("light", "medium", "heavy", "hardened").get(weight - 1), component.path("weight").asText());
+            assertEquals(List.of("civilian", "light", "medium", "heavy", "hardened", "castleBrian").get(weight), component.path("weight").asText());
             for (boolean visuals : List.of(false, true)) {
                 Hex loaded = BoardFile.readNative(saved, visuals).getHex(0, 0);
                 assertEquals(weight, loaded.terrainLevel(Terrains.BLDG_WEIGHT));
@@ -214,6 +215,38 @@ class BoardComponentsTest {
                 assertEquals(1, loaded.terrainLevel(Terrains.BLDG_BASEMENT_TYPE));
                 assertFalse(loaded.containsTerrain(Terrains.BLDG_BASE_COLLAPSED));
             }
+        }
+    }
+
+    @Test void aCivilianOrCastleBrianBuildingKeepsItsWeightAndIsLightOrHardenedToTheRules() throws Exception {
+        for (int weight : new int[] { 0, 5 }) {
+            Board source = Board.createEmptyBoard(1, 1);
+            int type = weight == 0 ? 1 : 4;
+            source.setHex(0, 0, new Hex(0, "building:" + type + ":0;bldg_weight:" + weight + ";bldg_cf:40;bldg_elev:2", ""));
+            String saved = encode(source);
+            var component = JSON.readTree(saved).path("hexes").get(0).path("components").path("building");
+            assertEquals("building", component.path("type").asText());
+            assertEquals(weight == 0 ? "civilian" : "castleBrian", component.path("weight").asText());
+            Hex loaded = BoardFile.readNative(saved, true).getHex(0, 0);
+            assertEquals(type, loaded.terrainLevel(Terrains.BUILDING));
+            assertEquals(weight, TilesetScenery.buildingWeight(loaded));
+            assertEquals("buildings/standard/building-" + (weight == 0 ? "civilian" : "castle-brian"), TilesetScenery.genericBuilding(loaded));
+        }
+        // A weight that does not fit the type is not the building's: the type decides.
+        Hex stale = new Hex(0, "building:2:0;bldg_weight:0;bldg_cf:40;bldg_elev:2", "");
+        assertEquals(2, TilesetScenery.buildingWeight(stale));
+    }
+
+    @Test void rubbleStoresWhatFellApartFromItsWeight() throws Exception {
+        List<String> expected = List.of("{\"type\":\"building\",\"weight\":\"light\"}", "{\"type\":\"building\",\"weight\":\"medium\"}",
+              "{\"type\":\"building\",\"weight\":\"heavy\"}", "{\"type\":\"building\",\"weight\":\"hardened\"}",
+              "{\"type\":\"wall\"}", "{\"type\":\"ultra\"}");
+        for (int level = 1; level <= 6; level++) {
+            Board source = Board.createEmptyBoard(1, 1);
+            source.setHex(0, 0, new Hex(0, "rubble:" + level, ""));
+            String saved = encode(source);
+            assertEquals(JSON.readTree(expected.get(level - 1)), JSON.readTree(saved).path("hexes").get(0).path("components").path("rubble"));
+            assertEquals(level, BoardFile.readNative(saved, true).getHex(0, 0).terrainLevel(Terrains.RUBBLE));
         }
     }
 

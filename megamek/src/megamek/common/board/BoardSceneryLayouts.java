@@ -1076,7 +1076,8 @@ public final class BoardSceneryLayouts {
     /**
      * A legacy board's terrain aliases, which the rules read only as present: pavement 4 (the old Runway, its corner
      * designs with their typed exits included) is pavement 1, every pavement level from 5 up is the plaza, 3, and mud 2 is
-     * mud 1. Pavement's exits are derived again; mud keeps its own.
+     * mud 1. Pavement's exits are derived again; mud keeps its own. A wall, which a legacy board gives no weight, gets
+     * the one its construction factor belongs to ({@link TilesetScenery#buildingWeight}).
      */
     private static void aliases(Board board, List<Coords> hexes) {
         Map<BoardLocation, Hex> fixed = new HashMap<>();
@@ -1085,8 +1086,11 @@ public final class BoardSceneryLayouts {
             int pavement = hex.terrainLevel(Terrains.PAVEMENT);
             Terrain mud = hex.getTerrain(Terrains.MUD);
             boolean muddy = mud != null && mud.getLevel() == 2;
-            if (pavement < 4 && !muddy) { continue; }
+            boolean wall = hex.terrainLevel(Terrains.BUILDING) == megamek.common.enums.BuildingType.WALL.getTypeValue()
+                  && !hex.containsTerrain(Terrains.BLDG_WEIGHT);
+            if (pavement < 4 && !muddy && !wall) { continue; }
             Hex next = replacement(hex);
+            if (wall) { next.addTerrain(new Terrain(Terrains.BLDG_WEIGHT, TilesetScenery.buildingWeight(hex))); }
             if (pavement >= 4) { next.addTerrain(new Terrain(Terrains.PAVEMENT, pavement == 4 ? 1 : 3)); }
             if (muddy) { next.addTerrain(new Terrain(Terrains.MUD, 1, mud.hasExitsSpecified(), mud.getExits())); }
             fixed.put(BoardLocation.of(at, board.getBoardId()), next);

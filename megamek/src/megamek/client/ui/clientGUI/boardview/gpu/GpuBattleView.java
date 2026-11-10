@@ -704,6 +704,8 @@ class GpuBattleView extends ApplicationAdapter {
                         BoardObstacles.reload();
                         GpuShaderSource.forget();
                         BoardDecals.reload();
+                        // The editor draws its cards again from the reloaded assets.
+                        GpuEditorThumbnail.clearCache();
                         BoardBridgeFooting.reload();
                         createSceneRenderers();
                         cameraTerrainRevision = -1;

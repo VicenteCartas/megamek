@@ -33,8 +33,8 @@ final class BoardComponents {
         fields(result, "building", "type=building", "cf=bldg_cf", "height=bldg_elev", "class=bldg_class",
               "basement=bldg_basement_type", "armor=bldg_armor", "basementCollapsed=bldg_base_collapsed", "legacyArt=bldg_fluff",
               "interiors=bldg_interiors");
-        fields(result, "bridge", "type=bridge", "cf=bridge_cf", "height=bridge_elev", "mud=bridge_mud");
-        fields(result, "fuelTank", "type=fuel_tank", "cf=fuel_tank_cf", "height=fuel_tank_elev", "magnitude=fuel_tank_magn");
+        fields(result, "bridge", "weight=bridge", "cf=bridge_cf", "height=bridge_elev", "mud=bridge_mud");
+        fields(result, "fuelTank", "weight=fuel_tank", "cf=fuel_tank_cf", "height=fuel_tank_elev", "magnitude=fuel_tank_magn");
         fields(result, "road", "type=road", "legacyArt=road_fluff");
         fields(result, "bridgeRoad", "type=bridge_road");
         fields(result, "rail", "type=rail");
@@ -77,8 +77,9 @@ final class BoardComponents {
     /** Values with game-defined names. Unknown numeric values survive editor repair and legacy imports unchanged. */
     private static List<String> names(int terrain) {
         return switch (terrain) {
-            case Terrains.BUILDING -> List.of("", "light", "medium", "heavy", "hardened");
-            case Terrains.BRIDGE, Terrains.FUEL_TANK -> List.of("", "light", "medium", "heavy", "hardened", "wall");
+            case Terrains.BUILDING, Terrains.BRIDGE, Terrains.FUEL_TANK -> List.of("", "light", "medium", "heavy", "hardened");
+            // A building's or wall's weight (TilesetScenery#buildingWeight).
+            case Terrains.BLDG_WEIGHT -> List.of("civilian", "light", "medium", "heavy", "hardened", "castleBrian");
             case Terrains.BLDG_CLASS -> List.of("standard", "hangar", "fortress", "gunEmplacement");
             case Terrains.BLDG_INTERIORS -> List.of("default", "yes", "noFloors", "no");
             case Terrains.BLDG_BASEMENT_TYPE -> List.of("unknown", "none", "twoDeepFeet", "oneDeepFeet",
@@ -87,7 +88,6 @@ final class BoardComponents {
             case Terrains.RAIL, Terrains.BRIDGE_RAIL -> List.of("", "rail", "maglev");
             case Terrains.WOODS, Terrains.JUNGLE -> List.of("", "light", "heavy", "ultra");
             case Terrains.ROUGH -> List.of("", "normal", "ultra");
-            case Terrains.RUBBLE -> List.of("", "light", "medium", "heavy", "hardened", "wall", "ultra");
             default -> List.of();
         };
     }
@@ -121,9 +121,15 @@ final class BoardComponents {
                 if (field.terrain() == Terrains.BUILDING) {
                     boolean wall = level == BuildingType.WALL.getTypeValue();
                     component.put("type", wall ? "wall" : "building");
-                    int weight = wall ? (hex.containsTerrain(Terrains.BLDG_WEIGHT) ? hex.terrainLevel(Terrains.BLDG_WEIGHT) : 4) : level;
-                    if (weight > 0 && weight < 5) { component.put("weight", names.get(weight)); }
+                    var weights = names(Terrains.BLDG_WEIGHT);
+                    int weight = TilesetScenery.buildingWeight(level, hex);
+                    if (weight >= 0 && weight < weights.size()) { component.put("weight", weights.get(weight)); }
                     else { component.put("weight", weight); }
+                }
+                // Rubble is what fell: a building of a weight (levels 1 to 4), a wall (5) or ultra rubble (6).
+                else if (field.terrain() == Terrains.RUBBLE && level >= 1 && level <= 6) {
+                    component.put("type", level == 5 ? "wall" : level == 6 ? "ultra" : "building");
+                    if (level < 5) { component.put("weight", names(Terrains.BUILDING).get(level)); }
                 }
                 else if (level >= 0 && level < names.size() && !names.get(level).isEmpty()) { component.put(field.name(), names.get(level)); }
                 else { component.put(field.name(), level); }
@@ -196,10 +202,17 @@ final class BoardComponents {
                 int level;
                 if (field.terrain() == Terrains.BUILDING) {
                     int weight = value(component.path("weight").isMissingNode() ? JsonNodeFactory.instance.textNode("light")
-                          : component.get("weight"), Terrains.BUILDING, "building.weight");
+                          : component.get("weight"), Terrains.BLDG_WEIGHT, "building.weight");
                     boolean wall = component.path("type").asText().equals("wall");
-                    level = wall ? BuildingType.WALL.getTypeValue() : weight;
-                    if (wall) { hex.addTerrain(new Terrain(Terrains.BLDG_WEIGHT, weight)); }
+                    // A building's type is its weight as the rules know it; a number past the weights is a type of its own.
+                    level = wall ? BuildingType.WALL.getTypeValue() : weight <= 5 ? TilesetScenery.rulesWeight(weight) : weight;
+                    if (wall || level != weight) { hex.addTerrain(new Terrain(Terrains.BLDG_WEIGHT, weight)); }
+                } else if (field.terrain() == Terrains.RUBBLE && component.get("type").isTextual()) {
+                    String type = component.get("type").textValue();
+                    require(List.of("building", "wall", "ultra").contains(type), "Unknown value for rubble.type: " + type);
+                    level = type.equals("wall") ? 5 : type.equals("ultra") ? 6
+                          : value(component.path("weight").isMissingNode() ? JsonNodeFactory.instance.textNode("light")
+                                : component.get("weight"), Terrains.BUILDING, "rubble.weight");
                 } else { level = value(component.get(field.name()), field.terrain(), owner + "." + field.name()); }
                 int exits = raw ? integer(legacy.get(field.name()), owner + ".legacyExits." + field.name())
                       : connections ? directions(component.get(field.connections()), owner + "." + field.connections()) : 0;

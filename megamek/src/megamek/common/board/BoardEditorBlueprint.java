@@ -45,19 +45,18 @@ public final class BoardEditorBlueprint {
     public record Preset(String id, String label, String terrain, List<String> sections, List<String> settings,
           Map<Integer, String> hexes) { }
     /**
-     * {@code pieces}: a model per structure weight and exits ({@link #model}) for a look that names no single asset;
+     * {@code pieces}: a model per structure weight ({@link #model}) for a look that names no single asset;
      * {@code skin}: the scenery a vegetation look draws in place of its trees, or null.
      */
     public record Variant(String id, String label, String owner, String selectors, String asset, String thumbnail,
           String material, boolean blend, List<String> sections, String family, String pieces, Skin skin) {
-        /** The model this design shows on {@code hex}: its asset, else its pieces for the structure's weight and exits ("" if none). */
+        /** The model this design shows on {@code hex}: its asset, else its pieces for the structure's weight ("" if none). */
         public String model(Hex hex) {
             Terrain structure = hex.getAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK);
             if (!asset.isBlank() || pieces.isBlank() || structure == null || structure.getLevel() < 1 || structure.getLevel() > WEIGHTS.size()) {
                 return asset;
             }
-            return pieces.replace("{weight}", WEIGHTS.get(structure.getLevel() - 1))
-                  .replace("{nn}", String.format(Locale.ROOT, "%02d", structure.getExits()));
+            return pieces.replace("{weight}", WEIGHTS.get(structure.getLevel() - 1));
         }
     }
     /**
@@ -506,6 +505,7 @@ public final class BoardEditorBlueprint {
 
     public List<Component> components() { return components; }
     public List<Variant> variants(String owner) { return variants.values().stream().filter(v -> v.owner().equals(owner)).toList(); }
+    public List<Variant> variants() { return List.copyOf(variants.values()); }
     public Variant variant(String id) { return variants.get(id); }
     public List<Asset> assets() { return List.copyOf(assets.values()); }
     public Asset asset(String id) { return assets.get(id); }

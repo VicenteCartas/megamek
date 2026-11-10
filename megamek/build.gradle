@@ -461,7 +461,7 @@ tasks.register('stageData', Sync) {
     group = 'build'
     from("${mmDataDir}/data") {
         include "models/**/*.*"
-        include "board-editor/**/*.json"
+        include "board-editor/**/*.*"
         suiteDataRules.MegaMek.loose.each { pattern -> include pattern }
     }
     into mmDataOut
@@ -1035,6 +1035,18 @@ tasks.register('convertPaperdolls', JavaExec) {
     mainClass = 'megamek.utilities.PaperdollConverter'
     args "${mmDataDir}/tools/paperdolls/src", "${mmDataDir}/data/images/paperdolls",
           "${mmDataDir}/tools/paperdolls/review"
+}
+
+// Needs a desktop OpenGL context. Run it after changing a model the board editor's palette shows.
+tasks.register('bakeEditorThumbnails', JavaExec) {
+    mustRunAfter(stageDataFiles)
+    description = "Draws the board editor's palette thumbnails into mm-data (data/board-editor/thumbnails)"
+    group = 'utility'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'megamek.client.ui.clientGUI.boardview.gpu.GpuEditorThumbnail'
+    jvmArgs = mmJvmOptions
+    systemProperty 'java.awt.headless', 'false'
+    args "${mmDataDir}/data/board-editor/thumbnails"
 }
 
 tasks.register('boardsTagger', JavaExec) {

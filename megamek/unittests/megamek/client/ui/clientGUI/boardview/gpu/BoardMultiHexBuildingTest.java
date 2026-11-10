@@ -932,7 +932,7 @@ class BoardMultiHexBuildingTest {
                 if (heights.containsKey(next) && !apart.contains(Set.of(coords, next))) { exits |= 1 << direction; }
             }
             boolean standing = heights.containsKey(coords) && !fallen.contains(coords);
-            var cover = standing ? new BoardScene.Cover(0, false, 3, exits, 90, 90, heights.get(coords)) : BoardScene.Cover.NONE;
+            var cover = standing ? new BoardScene.Cover(0, false, 3, exits, 90, 0, heights.get(coords)) : BoardScene.Cover.NONE;
             var features = standing ? List.of(new BoardScene.Feature(asset, 0, 0, 0, 1, heights.get(coords), 0,
                   BoardScene.FeatureKind.BUILDING)) : List.<BoardScene.Feature>of();
             int rail = 0;

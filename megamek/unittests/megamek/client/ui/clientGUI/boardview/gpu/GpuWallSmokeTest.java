@@ -194,12 +194,13 @@ class GpuWallSmokeTest {
         GpuReviewFrame.save(new File(output, "cf-families-top.png"));
 
         var assets = (GpuAssets) GpuTestSupport.field(terrain, "assets");
-        var civilian = assets.wallLevels(BoardWall.layout("buildings/wall-9", 2, 10));
-        var castle = assets.wallLevels(BoardWall.layout("buildings/wall-9", 2, 151));
+        var civilian = assets.wallLevels(BoardWall.layout("buildings/wall-9", 2, BoardWall.Family.CIVILIAN));
+        var castle = assets.wallLevels(BoardWall.layout("buildings/wall-9", 2, BoardWall.Family.CASTLE_BRIAN));
         assertNotSame(civilian, castle, "The cache distinguishes identical layouts from different families");
-        assertSame(castle, assets.wallLevels(BoardWall.layout("buildings/wall-9", 2, 200)));
+        assertSame(castle, assets.wallLevels(BoardWall.layout("buildings/wall-9", 2, BoardWall.Family.CASTLE_BRIAN)));
         Coords edited = new Coords(11, 3);
         var changedHex = board.getHex(edited).duplicate();
+        changedHex.addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.BLDG_WEIGHT, 0));
         changedHex.addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.BLDG_CF, 10));
         board.setHex(edited, changedHex);
         var changed = captured(board);
@@ -211,7 +212,7 @@ class GpuWallSmokeTest {
             for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
                 if (edited.equals(GpuTestSupport.field(prop, "coords"))) {
                     assertSame(civilian.getFirst(), GpuTestSupport.field(prop, "pickingModel"),
-                          "A CF-only edit replaces the installed draw and picking model");
+                          "A weight edit replaces the installed draw and picking model");
                     replaced = true;
                 }
             }

@@ -84,6 +84,9 @@ final class GpuEditorModelPreviews implements Disposable {
     /** The previews still to draw. */
     int pending() { return queue.size() + (current == null ? 0 : 1); }
 
+    /** Borrowed: the preview drawn for {@code target}; null while there is none (GpuEditorThumbnail). */
+    FrameBuffer drawn(Image target) { return images.get(target); }
+
     void update() {
         queue.removeIf(request -> request.target().getStage() == null);
         images.entrySet().removeIf(entry -> {

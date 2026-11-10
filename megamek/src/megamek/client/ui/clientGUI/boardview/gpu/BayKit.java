@@ -949,13 +949,14 @@ final class BayKit {
      */
     private static boolean turned(Spec spec) { return spec.fittings() == null && spec.roof().vault() == null; }
 
-    /** How far a piece's column reaches each side of its middle line: half a hexside, or a lone hex's half width. */
+    /**
+     * How far a piece's column reaches each side of its middle line: half a hexside, or a lone hex's half width, out to
+     * its side corners, so its vault spans the whole outline and its slanted walls rise to it as gables.
+     */
     private static double halfSpan(KitOutline.Piece piece) {
         double half = 0;
         if (piece.direction() == null && !piece.tags().contains("-link-")) {
-            for (var wall : piece.walls()) {
-                if (Math.abs(normal(wall.p(), wall.q())[1]) > .9) { half = Math.max(half, Math.max(Math.abs(wall.p()[0]), Math.abs(wall.q()[0]))); }
-            }
+            for (var wall : piece.walls()) { half = Math.max(half, Math.max(Math.abs(wall.p()[0]), Math.abs(wall.q()[0]))); }
         }
         return half > 0 ? half : KitOutline.A;
     }

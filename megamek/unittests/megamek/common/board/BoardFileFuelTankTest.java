@@ -18,7 +18,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFileFuelTankTest {
     @ParameterizedTest
-    @ValueSource(strings = { "building/tank-farm", "buildings/saxarba/fuel_tanks/fuel_tank_light_08", "asset" })
+    @ValueSource(strings = { "building/tank-farm", "fuel-tank/light", "asset" })
     void oldTankDesignsKeepTheirStoredBuildingTerrainAndVisuals(String design) throws Exception {
         Board board = Board.createEmptyBoard(1, 3);
         board.setNativeFormat(true);
@@ -26,7 +26,7 @@ class BoardFileFuelTankTest {
         Hex light = new Hex(2, "building:1:8;bldg_cf:15;bldg_elev:3;bldg_basement_type:1;bldg_armor:10", "grass");
         Hex medium = new Hex(2, "building:2:1;bldg_cf:40;bldg_elev:2", "grass");
         HexAppearance appearance = design.equals("asset")
-              ? new HexAppearance(null, "buildings/saxarba/fuel_tanks/fuel_tank_light_08", null, null)
+              ? new HexAppearance(null, "buildings/fuel_tanks/fuel_tank_light", null, null)
               : new HexAppearance(design, null, null, null);
         light.setAppearance(Map.of("building", appearance));
         medium.setAppearance(Map.of("building", new HexAppearance("building/tank-farm", null, null, null)));
@@ -47,7 +47,7 @@ class BoardFileFuelTankTest {
             assertEquals(BoardFile.hexNode(board.getHex(at)), BoardFile.hexNode(loaded.getHex(at)),
                   "Loading preserves terrain, appearance and object placements");
         }
-        assertEquals(Map.of(Terrains.BUILDING, "buildings/saxarba/fuel_tanks/fuel_tank_light_08"),
+        assertEquals(Map.of(Terrains.BUILDING, "buildings/fuel_tanks/fuel_tank_light"),
               TilesetScenery.structureModels(loaded.getHex(first)), "The stored tank artwork still resolves on building terrain");
         output.reset();
         BoardFile.write(loaded, output);

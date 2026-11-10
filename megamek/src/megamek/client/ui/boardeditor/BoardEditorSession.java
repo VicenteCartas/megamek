@@ -2529,7 +2529,7 @@ public final class BoardEditorSession {
             var component = blueprint.component(key);
             var field = component.fields().stream().filter(BoardEditorBlueprint.Field::height).findFirst().orElseThrow();
             // A structure whose own terrain differs from its height field joins its neighbours through that terrain's exits.
-            String structure = component.fields().getFirst().terrain();
+            String structure = component.present().getFirst();
             List<Coords> cells = component.category().equals("Structures") && !structure.equals(field.terrain())
                   ? structure(selected, Terrains.getType(structure)) : List.of(selected);
             for (Coords cell : cells) {
@@ -3542,7 +3542,16 @@ public final class BoardEditorSession {
         Hex next = paintTemplate.duplicate();
         // An empty value removes an optional field the card offers (Water's Current: None).
         if (target.startsWith("terrain:") && value.isEmpty()) { next.removeTerrain(Terrains.getType(target.substring(8))); }
-        else if (target.startsWith("terrain:")) { setTerrain(next, target.substring(8), Integer.parseInt(value), false); }
+        else if (target.startsWith("terrain:")) {
+            setTerrain(next, target.substring(8), Integer.parseInt(value), false);
+            // A building or wall card is its class and weight: a card's brush given another of either is that card's.
+            var cards = blueprint.component("building").presets();
+            if (List.of("building", "bldg_weight", "bldg_class").contains(target.substring(8))
+                  && cards.stream().anyMatch(card -> brushKey.equals("building/" + card.id()))) {
+                var card = cards.stream().filter(preset -> sameCard(new Hex(0, preset.terrain(), ""), next)).findFirst().orElse(null);
+                if (card != null) { chooseBrush("building", card.id()); return; }
+            }
+        }
         else if (target.startsWith("variant:")) { setVariant(next, target.substring(8), value); }
         else if (target.startsWith("rotation:")) {
             rotate(next, target.substring(9), value, TilesetScenery.buildingConnected(next, null, null));
@@ -3578,6 +3587,14 @@ public final class BoardEditorSession {
             BuildingInteriors.set(next, BuildingInteriors.forAuthored(object, BuildingInteriors.choice(next)));
         }
         paintTemplate = next;
+    }
+
+    /** Whether two building hexes are the same palette card: both walls or both buildings of one class, of one weight. */
+    private static boolean sameCard(Hex card, Hex hex) {
+        int wall = BuildingType.WALL.getTypeValue();
+        return (card.terrainLevel(Terrains.BUILDING) == wall) == (hex.terrainLevel(Terrains.BUILDING) == wall)
+              && Math.max(0, card.terrainLevel(Terrains.BLDG_CLASS)) == Math.max(0, hex.terrainLevel(Terrains.BLDG_CLASS))
+              && TilesetScenery.buildingWeight(card) == TilesetScenery.buildingWeight(hex);
     }
 
     private void sampleBrush() {
@@ -4275,6 +4292,15 @@ public final class BoardEditorSession {
         if (type == Terrains.BUILDING && (hex.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue()
               || value == BuildingType.WALL.getTypeValue())) { return; }
         if (type == Terrains.BLDG_ELEV && hex.getBuildingReference() != null) { return; }
+        if (type == Terrains.BLDG_WEIGHT) {
+            require(value >= 0 && value <= 5, "Unknown weight " + value);
+            // A building's type is its weight as the rules know it: only a civilian or Castle Brian one stores its own.
+            if (hex.containsTerrain(Terrains.BUILDING) && hex.terrainLevel(Terrains.BUILDING) != BuildingType.WALL.getTypeValue()) {
+                setTerrain(hex, "building", TilesetScenery.rulesWeight(value), colony);
+                if (TilesetScenery.rulesWeight(value) != value) { hex.addTerrain(new Terrain(type, value)); }
+                return;
+            }
+        }
         Terrain old = hex.getTerrain(type);
         // A new industrial elevator's shaft reaches at least the surface and carries 100 t, the old editor's default. A new
         // deployment zone is zone 1 at level 0, as the old editor wrote it (its level is never read).
@@ -4288,6 +4314,7 @@ public final class BoardEditorSession {
             require(candidate.isValid(errors), String.join("\n", errors));
         }
         hex.addTerrain(next);
+        if (type == Terrains.BUILDING) { hex.removeTerrain(Terrains.BLDG_WEIGHT); }
         if (type == Terrains.WOODS || type == Terrains.JUNGLE) {
             hex.removeTerrain(type == Terrains.WOODS ? Terrains.JUNGLE : Terrains.WOODS);
             // Keep the low-canopy option; choose a valid normal canopy through the shared Hex rules.

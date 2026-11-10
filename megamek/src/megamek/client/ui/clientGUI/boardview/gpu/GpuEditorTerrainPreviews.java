@@ -55,16 +55,32 @@ final class GpuEditorTerrainPreviews implements Disposable {
         add(new Sample(stamp.theme(), "ground", "", stamp), target);
     }
 
+    /** A category's tile: the Theme category shows its theme's sample, the others their icon hex as a hex stamp. */
+    void add(BoardEditorBlueprint.Category category, Image target) {
+        if (category.themes() != null) { add(category.icon().getTheme(), "", "", target); }
+        else { add(BoardEditorSession.hexStamp("icon/" + category.id(), category.icon()), target); }
+    }
+
     private void add(Sample sample, Image target) {
-        cache.values().forEach(value -> value.targets().remove(target));
-        queue.values().forEach(targets -> targets.remove(target));
+        remove(target);
         Cached ready = cache.get(sample);
         if (ready != null) { assign(target, ready.buffer()); ready.targets().add(target); }
         else { queue.computeIfAbsent(sample, ignored -> new ArrayList<>()).add(target); }
     }
 
+    /** Forgets the sample {@code target} shows or waits for: it shows another picture now. */
+    void remove(Image target) {
+        cache.values().forEach(value -> value.targets().remove(target));
+        queue.values().forEach(targets -> targets.remove(target));
+    }
+
     /** The samples still to draw. */
     int pending() { return queue.size(); }
+
+    /** Borrowed: the sample drawn for {@code target}; null while there is none (GpuEditorThumbnail). */
+    FrameBuffer drawn(Image target) {
+        return cache.values().stream().filter(value -> value.targets().contains(target)).map(Cached::buffer).findFirst().orElse(null);
+    }
 
     /**
      * No waiting on the UI thread, and at most one completed image per frame. The samples draw with {@code board}'s

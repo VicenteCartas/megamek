@@ -30,19 +30,14 @@ final class BoardWall {
         Family(String folder) { this.folder = folder; }
     }
 
-    /** Pristine map CF, unaffected by damage. CF 150 belongs to hardened; Castle Brian starts at 151. */
-    static Family family(int cf) {
-        if (cf <= 10) { return Family.CIVILIAN; }
-        if (cf <= 15) { return Family.LIGHT; }
-        if (cf <= 40) { return Family.MEDIUM; }
-        if (cf <= 90) { return Family.HEAVY; }
-        if (cf <= 150) { return Family.HARDENED; }
-        return Family.CASTLE_BRIAN;
+    /** A wall's look is its weight's ({@link megamek.common.board.TilesetScenery#buildingWeight}): 0 civilian to 5 Castle Brian. */
+    static Family family(int weight) {
+        return Family.values()[Math.clamp(weight, 0, Family.values().length - 1)];
     }
 
     /** Only generated walls change geometry when an edit crosses a family boundary; model overrides stay authored. */
     static Family family(BoardScene.Tile tile) {
-        return tile.features().stream().anyMatch(feature -> supports(feature.asset())) ? family(tile.cover().pristineCF()) : null;
+        return tile.features().stream().anyMatch(feature -> supports(feature.asset())) ? family(tile.cover().wallWeight()) : null;
     }
 
     static boolean supports(String asset) {
@@ -70,16 +65,16 @@ final class BoardWall {
     }
 
     static Layout layout(String asset, int height) {
-        return layout(asset, height, 0);
+        return layout(asset, height, Family.CIVILIAN);
     }
 
-    static Layout layout(String asset, int height, int cf) {
+    static Layout layout(String asset, int height, Family family) {
         int levels = Math.max(1, height);
-        return new Layout(asset, family(cf), levels, java.util.Collections.nCopies(6, levels));
+        return new Layout(asset, family, levels, java.util.Collections.nCopies(6, levels));
     }
 
     static Layout layout(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
-        Layout own = layout(feature.asset(), Math.round(feature.height()), tile.cover().pristineCF());
+        Layout own = layout(feature.asset(), Math.round(feature.height()), family(tile.cover().wallWeight()));
         List<Integer> arms = new ArrayList<>(own.arms());
         int exits = exits(feature.asset());
         for (int direction = 0; direction < 6; direction++) {

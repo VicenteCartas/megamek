@@ -450,7 +450,8 @@ class GpuBoardSourceTest {
                 hex.addTerrain(new Terrain(Terrains.BUILDING, 4, true, 0));
                 hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, 4));
                 hex.addTerrain(new Terrain(Terrains.BLDG_CF, 100));
-                hex.addTerrain(new Terrain(Terrains.FUEL_TANK, 2, true, 0));
+                // A tank with a connection: its kit follows its weight, whatever its exits.
+                hex.addTerrain(new Terrain(Terrains.FUEL_TANK, 2, true, 4));
                 hex.addTerrain(new Terrain(Terrains.FUEL_TANK_ELEV, 2));
                 hex.addTerrain(new Terrain(Terrains.FUEL_TANK_CF, 40));
                 hex.addTerrain(new Terrain(Terrains.FUEL_TANK_MAGN, 100));
@@ -463,7 +464,7 @@ class GpuBoardSourceTest {
                 assertTrue(tile.detailedGround(), "Modeled structures must preserve native ground in theme: " + theme);
                 assertTrue(tile.features().stream().anyMatch(feature -> HARDENED_KIT.equals(feature.asset())
                       && feature.height() == 4 && feature.kind() == BoardScene.FeatureKind.BUILDING));
-                assertTrue(tile.features().stream().anyMatch(feature -> feature.asset().contains("/fuel_tanks/fuel_tank_medium_")
+                assertTrue(tile.features().stream().anyMatch(feature -> feature.asset().equals("buildings/fuel_tanks/fuel_tank_medium")
                       && feature.height() == 2 && feature.kind() == BoardScene.FeatureKind.FUEL_TANK));
                 assertTrue(tile.features().stream().anyMatch(feature -> feature.asset().contains("/misc/heavy_industrial_")
                       && feature.height() == 3 && feature.kind() == BoardScene.FeatureKind.INDUSTRIAL));

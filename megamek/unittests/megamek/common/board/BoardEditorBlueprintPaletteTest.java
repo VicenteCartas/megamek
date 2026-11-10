@@ -188,29 +188,31 @@ class BoardEditorBlueprintPaletteTest {
         assertEquals("buildings/multihex/dome", TilesetScenery.structureModels(sealed).get(Terrains.BUILDING));
         assertEquals(BuildingInteriors.NO, BuildingInteriors.resolve(sealed));
         for (int weight = 1; weight <= 4; weight++) {
-            for (int exits = 0; exits < 64; exits++) {
-                String model = BLUEPRINT.variant("building/tank-farm").model(new Hex(0, "fuel_tank:" + weight + ":" + exits, ""));
-                assertTrue(TilesetScenery.customBuildingFile(model).isFile(), model);
-            }
+            String model = BLUEPRINT.variant("building/tank-farm").model(new Hex(0, "fuel_tank:" + weight + ":9", ""));
+            assertTrue(TilesetScenery.customBuildingFile(model).isFile(), model);
         }
     }
 
     @Test
-    void eachBuildingClassHasFourWeightCardsAndWallsHaveTheirOwnSixCards() {
+    void buildingClassesAndWallsHaveACardPerWeight() {
         var editor = new megamek.client.ui.boardeditor.BoardEditorSession();
         int[] classes = { 0, 2, 1, 3 };
         List<String> sections = List.of("standard", "fortresses", "hangars", "gun-emplacements");
         for (int family = 0; family < sections.size(); family++) {
             var cards = section("buildings/" + sections.get(family)).cards();
-            assertEquals(List.of("Light", "Medium", "Heavy", "Hardened"), cards.stream().map(BoardEditorBlueprint.Card::label).toList());
-            for (int weight = 1; weight <= 4; weight++) {
-                var entry = cards.get(weight - 1).members().getFirst();
+            assertEquals(List.of("Civilian", "Light", "Medium", "Heavy", "Hardened", "Castle Brian"),
+                  cards.stream().map(BoardEditorBlueprint.Card::label).toList());
+            for (int weight = 0; weight <= 5; weight++) {
+                var entry = cards.get(weight).members().getFirst();
                 editor.command(new megamek.client.ui.boardeditor.BoardEditorSession.Command(
                       megamek.client.ui.boardeditor.BoardEditorSession.Action.CHOOSE_BRUSH, "building", entry.preset().id()), null);
                 Coords at = new Coords(weight * 2, family * 2);
                 editor.pointer(at, 0, 0, false); editor.finishStroke();
                 Hex painted = editor.board().getHex(at);
-                assertEquals(weight, painted.terrainLevel(Terrains.BUILDING));
+                assertEquals(TilesetScenery.rulesWeight(weight), painted.terrainLevel(Terrains.BUILDING));
+                assertEquals(weight, TilesetScenery.buildingWeight(painted));
+                assertTrue(new java.io.File(megamek.common.Configuration.dataDir(), "models/" + TilesetScenery.genericBuilding(painted) + ".json")
+                      .isFile(), "Every class and weight has its kit: " + TilesetScenery.genericBuilding(painted));
                 assertEquals(classes[family], painted.terrainLevel(Terrains.BLDG_CLASS));
             }
         }

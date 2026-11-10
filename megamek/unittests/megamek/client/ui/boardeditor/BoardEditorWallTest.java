@@ -38,6 +38,43 @@ class BoardEditorWallTest {
     }
 
     @Test
+    void aBuildingsWeightSetsTheTypeTheRulesKnowAndOnlyCivilianAndCastleBrianKeepTheirOwn() {
+        var session = new BoardEditorSession();
+        send(session, Action.CHOOSE_BRUSH, "building", "default");
+        send(session, Action.BRUSH_VALUE, "terrain:bldg_weight", "0");
+        session.pointer(CENTER, 0, 0, false); session.finishStroke();
+        Hex civilian = session.board().getHex(CENTER);
+        assertEquals(1, civilian.terrainLevel(Terrains.BUILDING), "Light to the rules");
+        assertEquals(0, civilian.terrainLevel(Terrains.BLDG_WEIGHT));
+        send(session, Action.TERRAIN, "bldg_weight", "5");
+        assertEquals(4, session.board().getHex(CENTER).terrainLevel(Terrains.BUILDING), "Hardened to the rules");
+        assertEquals(5, session.board().getHex(CENTER).terrainLevel(Terrains.BLDG_WEIGHT));
+        send(session, Action.TERRAIN, "bldg_weight", "3");
+        assertEquals(3, session.board().getHex(CENTER).terrainLevel(Terrains.BUILDING));
+        assertFalse(session.board().getHex(CENTER).containsTerrain(Terrains.BLDG_WEIGHT), "Heavy is its type alone");
+    }
+
+    @Test
+    void aCardsBrushGivenAnotherWeightOrClassIsThatCardsBrush() {
+        var session = new BoardEditorSession();
+        send(session, Action.CHOOSE_BRUSH, "building", "wall-castle-brian");
+        send(session, Action.BRUSH_VALUE, "terrain:bldg_weight", "2");
+        var medium = session.snapshot().activeBrush();
+        assertEquals("building/wall-medium", medium.key());
+        assertEquals("Medium", medium.label());
+        assertEquals(40, medium.property("bldg_cf").value(), "With the card's own values");
+        send(session, Action.CHOOSE_BRUSH, "building", "default");
+        send(session, Action.BRUSH_VALUE, "terrain:bldg_class", "1");
+        send(session, Action.BRUSH_VALUE, "terrain:bldg_weight", "5");
+        assertEquals("building/hangar-castle-brian", session.snapshot().activeBrush().key());
+        // A design's brush is no weight card: it keeps its design.
+        send(session, Action.CHOOSE_BRUSH, "building", "building/frontier");
+        send(session, Action.BRUSH_VALUE, "terrain:bldg_weight", "3");
+        assertEquals("building/frontier", session.snapshot().activeBrush().key());
+        assertEquals(3, session.snapshot().activeBrush().property("building").value());
+    }
+
+    @Test
     void pathsJoinInAllDirectionsAndSaveAndUndoAsOneStroke() throws Exception {
         for (int direction = 0; direction < 6; direction++) {
             var session = wallBrush();

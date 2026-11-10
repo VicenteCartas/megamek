@@ -7,6 +7,7 @@ import static megamek.common.board.BoardEditorBlueprint.themeLabel;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -16,6 +17,7 @@ import java.util.function.Supplier;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.assets.AssetManager;
+import com.badlogic.gdx.assets.loaders.TextureLoader;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.MathUtils;
@@ -70,7 +72,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
      * view this wide when open, and its one-line bar at most this wide when collapsed. When the board area is narrower
      * than an open side view beside a full Brush panel, the side view starts collapsed.
      */
-    private static final float BRUSH_WIDTH = 340, SIDE_WIDTH = 380, SIDE_BAR_WIDTH = 300;
+    private static final float BRUSH_WIDTH = 470, SIDE_WIDTH = 380, SIDE_BAR_WIDTH = 300;
     /** The smallest Layers or Edit region of the right column. */
     private static final float SPLIT_MIN = 60;
     /** Layers take their natural height up to this share of the right column until the divider is dragged. */
@@ -209,6 +211,11 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private record Loading(Image image, Label label) { }
     private final List<Preview> previews = new ArrayList<>();
     private final List<Loading> loading = new ArrayList<>();
+    /** The cards drawn now, by their image: the ids their pictures are kept under once drawn (GpuEditorThumbnail). */
+    private final Map<Image, String> drawing = new HashMap<>();
+    /** A picture file shows as a drawn sample does. */
+    private static final TextureLoader.TextureParameter SMOOTH = new TextureLoader.TextureParameter();
+    static { SMOOTH.minFilter = SMOOTH.magFilter = Texture.TextureFilter.Linear; }
     private final List<UiButton> tools = new ArrayList<>();
     private final UiButton undo, redo;
     /**
@@ -354,9 +361,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         tiles.top(); tiles.defaults().growX().uniformX().minWidth(0).height(98).padBottom(6);
         for (var category : blueprint.categories()) {
             Image icon = new Image();
-            // The Theme tile shows its theme's sample; the others render their icon hex as a hex stamp.
-            if (category.themes() != null) { samples.add(category.icon().getTheme(), "", "", icon); }
-            else { samples.add(BoardEditorSession.hexStamp("icon/" + category.id(), category.icon()), icon); }
+            draw(GpuEditorThumbnail.category(category.id()), icon, () -> samples.add(category, icon));
             String id = category.id();
             UiButton tile = visualCard(categoryName(id), icon, 66, () -> show(new Page(id, null, null)));
             tile.setName("editor-category-" + id);
@@ -756,6 +761,14 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             models.update();
             junctions.update();
             samples.update(terrain.get());
+            // A card drawn now leaves its picture for the next time it shows.
+            drawing.entrySet().removeIf(card -> {
+                Image image = card.getKey();
+                if (!"Ready".equals(image.getUserObject())) { return image.getStage() == null; }
+                var drawn = models.drawn(image) != null ? models.drawn(image) : samples.drawn(image);
+                if (drawn != null) { GpuEditorThumbnail.cache(card.getValue(), drawn); }
+                return true;
+            });
         }
         showPreparing();
         stage.getViewport().apply();
@@ -1103,7 +1116,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             card.setUserObject(members.stream().map(BoardEditorBlueprint.Entry::key).collect(java.util.stream.Collectors.toSet()));
         } else if (tile.theme() != null) {
             String theme = tile.theme();
-            samples.add(theme, "", "", preview);
+            sample(theme, "", "", preview);
             card = visualCard(themeLabel(theme), preview, 70, () -> send(Action.CHOOSE_BRUSH, "theme", theme));
             card.setName("editor-library-theme/" + theme); card.setUserObject(java.util.Set.of(BoardEditorSession.THEME_BRUSH + theme));
         } else {
@@ -1159,20 +1172,39 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
 
     /** An entry's preview: a preset's sample, a design's, an object's model or decal, or a stamp's thumbnail. */
     private void preview(BoardEditorBlueprint.Entry entry, Image image) {
-        if (entry.preset() != null) { samples.add(libraryTheme, entry.owner(), "preset:" + entry.preset().id(), image); }
+        if (entry.preset() != null) { sample(libraryTheme, entry.owner(), "preset:" + entry.preset().id(), image); }
         else if (entry.variant() != null) { preview(entry.variant(), image); }
         else if (!entry.asset().thumbnail().isEmpty()) { thumbnail(entry.asset().thumbnail(), image); }
-        else if (entry.asset().kind().equals("prop")) { models.add(entry.asset().model(), entry.asset().colours(), image); }
-        else { thumbnail(BoardDecalArt.image(entry.asset().id()), image); }
+        else if (!model(GpuEditorThumbnail.of(entry.asset()), image)) { thumbnail(BoardDecalArt.image(entry.asset().id()), image); }
     }
 
     /** A design's preview: its thumbnail, else its model, else (a generated building's too) its sample. */
     private void preview(BoardEditorBlueprint.Variant variant, Image image) {
         if (!variant.thumbnail().isEmpty()) { thumbnail(variant.thumbnail(), image); }
-        else if (!variant.asset().isEmpty() && !BoardMultiHexBuilding.supports(variant.asset())) {
-            models.add(variant.asset(), image);
-        }
-        else { samples.add(libraryTheme, variant.owner(), variant.id(), image); }
+        else if (!model(GpuEditorThumbnail.of(variant), image)) { sample(libraryTheme, variant.owner(), variant.id(), image); }
+    }
+
+    /** A model card's preview; false for no model card (null). */
+    private boolean model(GpuEditorThumbnail card, Image image) {
+        if (card == null) { return false; }
+        draw(card.id(), image, () -> models.add(card.asset(), card.colours(), image));
+        return true;
+    }
+
+    /** A sample card's preview: a theme's, or a component's in a theme (GpuEditorThumbnail.sample). */
+    private void sample(String theme, String component, String look, Image image) {
+        draw(GpuEditorThumbnail.sample(theme, component, look), image, () -> samples.add(theme, component, look, image));
+    }
+
+    /**
+     * The picture of the card named {@code id}: the shipped one, else the one kept when the card was first drawn; with
+     * neither, {@code live} draws the card now and update() keeps its picture.
+     */
+    private void draw(String id, Image image, Runnable live) {
+        // An image that showed another card (a theme choice's face) drops that card's picture.
+        previews.removeIf(preview -> preview.image() == image); samples.remove(image);
+        java.io.File picture = GpuEditorThumbnail.picture(id);
+        if (picture != null) { drawing.remove(image); thumbnail(picture, image); } else { live.run(); drawing.put(image, id); }
     }
 
     private void thumbnail(String relative, Image image) {
@@ -1182,7 +1214,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private void thumbnail(java.io.File source, Image image) {
         String file = source.getAbsolutePath();
         if (source.isFile()) {
-            if (!thumbnails.contains(file)) { thumbnails.load(file, Texture.class); }
+            if (!thumbnails.contains(file)) { thumbnails.load(file, Texture.class, SMOOTH); }
             previews.add(new Preview(image, file));
         } else { image.setUserObject(UiKit.text("BoardEditor.noPreview")); }
     }
@@ -1260,9 +1292,10 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         List<String> settings = entry == null || entry.preset() == null ? List.of() : entry.preset().settings();
         boolean wall = brush.property("building") != null && brush.property("building").value() == 5;
         for (var field : brush.sampledHex() != null ? List.<BoardEditorBlueprint.Field>of() : definition.fields()) {
-            if (wall && field.terrain().equals("building")) {
-                var weight = brush.property("bldg_weight");
-                controls.add(wallWeight(weight == null ? 4 : weight.value(), chosen -> send(Action.BRUSH_VALUE, "terrain:bldg_weight", chosen)));
+            if (field.terrain().equals("building") && brush.property("building") != null) {
+                Table row = buildingWeight(brush.property("building"), brush.property("bldg_weight"),
+                      chosen -> send(Action.BRUSH_VALUE, "terrain:bldg_weight", chosen));
+                row.setName("editor-brush-terrain:bldg_weight"); controls.add(row);
                 continue;
             }
             if (wallField(field.terrain(), wall)) { continue; }
@@ -1271,7 +1304,14 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             if (!field.brush() || value == null && !offered || brush.way() && field.terrain().equals("bridge_elev")) { continue; }
             String target = "terrain:" + field.terrain();
             if (field.choices().isEmpty()) {
-                if (value != null) { controls.add(brushNumber(field.label(), value.value(), field.min(), field.max(), field.step(), Action.BRUSH_VALUE, target)); }
+                if (value != null) {
+                    // A construction factor is "CF" here, as the game writes it; its tooltip has the full name.
+                    boolean factor = field.terrain().endsWith("_cf");
+                    UiNumber number = brushNumber(factor ? UiKit.text("BoardEditor.cf") : field.label(), value.value(), field.min(), field.max(),
+                          field.step(), Action.BRUSH_VALUE, target);
+                    if (factor) { ui.tip(number).getActor().setText(field.label()); }
+                    controls.add(number);
+                }
                 continue;
             }
             List<Option> options = new ArrayList<>();
@@ -1508,7 +1548,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         // The owner's default look first, then its designs.
         String owner = designOwner, standard = UiKit.text("BoardEditor.defaultDesign");
         List<GalleryCard> cards = new ArrayList<>();
-        cards.add(new GalleryCard(standard, standard, image -> samples.add(libraryTheme, owner, "", image), () -> send(Action.VARIANT, owner, "")));
+        cards.add(new GalleryCard(standard, standard, image -> sample(libraryTheme, owner, "", image), () -> send(Action.VARIANT, owner, "")));
         for (var design : designVariants(owner)) {
             cards.add(new GalleryCard(design.label(), design.label() + " " + design.id(), image -> preview(design, image),
                   () -> send(Action.VARIANT, owner, design.id())));
@@ -1760,7 +1800,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             String designId = variant == null ? blueprint.variants(definition.id()).stream()
                   .filter(v -> style != null && !v.material().isEmpty() && v.material().equals(style.material()))
                   .map(BoardEditorBlueprint.Variant::id).findFirst().orElse("") : variant.id();
-            Image design = new Image(); samples.add(snapshot.theme(), definition.id(), designId, design);
+            Image design = new Image(); sample(snapshot.theme(), definition.id(), designId, design);
             Table visual = new Table(); visual.defaults().growX().minWidth(0);
             visual.add(ui.caption(UiKit.text("BoardEditor.visualDesign"))).left().padBottom(5).row();
             visual.add(visualCard(variant == null || !designVariants(definition.id()).contains(variant) ? UiKit.text("BoardEditor.defaultDesign")
@@ -2220,26 +2260,36 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
 
     private static boolean wallField(String field, boolean wall) {
-        return field.equals("bldg_weight") || wall && List.of("building", "bldg_class", "bldg_basement_type", "bldg_base_collapsed", "bldg_interiors").contains(field);
+        return field.equals("bldg_weight") || wall && List.of("bldg_class", "bldg_basement_type", "bldg_base_collapsed", "bldg_interiors").contains(field);
     }
 
-    private Table wallWeight(int weight, Consumer<String> choose) {
-        var field = blueprint.component("building").fields().stream().filter(f -> f.terrain().equals("building")).findFirst().orElseThrow();
-        var options = field.choices().stream().map(c -> new Option(c.label(), Integer.toString(c.value()))).toList();
-        return choice(field.label(), options.get(weight - 1).label(), options, choose);
+    /**
+     * The Weight row of a building or wall: the six weights of {@code bldg_weight} (Civilian to Castle Brian). A building
+     * holds one only when it is Civilian or Castle Brian, else its type is its weight; a wall without one is Hardened
+     * ({@link megamek.common.board.TilesetScenery#buildingWeight}).
+     */
+    private Table buildingWeight(BoardEditorSession.Property building, BoardEditorSession.Property stored, Consumer<String> choose) {
+        var field = blueprint.component("building").fields().stream().filter(f -> f.terrain().equals("bldg_weight")).findFirst().orElseThrow();
+        int weight = stored != null ? stored.value() : building.value() == 5 ? 4 : building.value();
+        String current = field.choices().stream().filter(c -> c.value() == weight).map(BoardEditorBlueprint.Choice::label)
+              .findFirst().orElse(UiKit.text("BoardEditor.value", Integer.toString(weight)));
+        return choice(field.label(), current, field.choices().stream().map(c -> new Option(c.label(), Integer.toString(c.value()))).toList(), choose);
     }
 
     private void field(BoardEditorBlueprint.Field field) {
         boolean wall = snapshot.property("building") != null && snapshot.property("building").value() == 5;
-        if (wallField(field.terrain(), wall)) {
-            if (field.terrain().equals("building")) {
-                var weight = snapshot.property("bldg_weight");
-                detail.add(wallWeight(weight == null ? 4 : weight.value(), chosen -> send(Action.TERRAIN, "bldg_weight", chosen))).growX().row();
-                edges("building");
-            }
+        if (field.terrain().equals("building") && snapshot.property("building") != null) {
+            detail.add(buildingWeight(snapshot.property("building"), snapshot.property("bldg_weight"),
+                  chosen -> send(Action.TERRAIN, "bldg_weight", chosen))).growX().row();
+            edges("building");
+            if (snapshot.joinedSides().containsKey("building")) { connectedSides("building"); }
             return;
         }
-        var value = snapshot.property(field.terrain());
+        if (wallField(field.terrain(), wall)) { return; }
+        var held = snapshot.property(field.terrain());
+        // A building without a class is a standard one: its Class row is always there.
+        var value = held == null && field.terrain().equals("bldg_class")
+              ? new BoardEditorSession.Property("bldg_class", megamek.common.units.IBuilding.STANDARD, 0, false) : held;
         if (field.terrain().contains("fluff") || field.terrain().equals("cliff_top") || field.terrain().equals("bldg_interiors")) { return; }
         if (field.terrain().equals("bldg_elev") && snapshot.buildingReference() != null) {
             if (value != null) { text(UiKit.text("BoardEditor.derivedBuildingHeight", Integer.toString(value.value()))); }
@@ -2266,7 +2316,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
                 sample.addTerrain(new megamek.common.units.Terrain(type, choice.value(), shown != null && shown.hasExitsSpecified(),
                       shown == null ? 0 : shown.getExits()));
                 sample.setAppearance(Map.of(owner.id(), new megamek.common.board.HexAppearance(null, null, choice.material(), null)));
-                samples.add(BoardEditorSession.hexStamp(owner.id() + "/" + field.terrain() + "/" + choice.value(), sample), image);
+                String key = owner.id() + "/" + field.terrain() + "/" + choice.value();
+                draw(GpuEditorThumbnail.sample(snapshot.theme(), owner.id(), "choice/" + field.terrain() + "/" + choice.value()), image,
+                      () -> samples.add(BoardEditorSession.hexStamp(key, sample), image));
                 UiButton card = visualCard(choice.label(), image, 48, () -> send(Action.TERRAIN, field.terrain(), Integer.toString(choice.value())));
                 card.setName("editor-surface-" + choice.value()); card.pressed(value.value() == choice.value()); cards.addActor(card);
             }
@@ -2713,13 +2765,13 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private Table themeChoice(String label, String selected, Consumer<String> commit) {
         Table row = new Table(); row.defaults().growX();
         row.add(ui.caption(label)).left().padBottom(5).row();
-        Image preview = new Image(); samples.add(selected, "", "", preview);
+        Image preview = new Image(); sample(selected, "", "", preview);
         String[] value = { selected };
         UiButton face = visualCard(themeLabel(selected), preview, 64, () -> { });
         face.setName("editor-choice-" + label);
         onChange(face, () -> openThemes(value[0], next -> {
             value[0] = next; face.setText(themeLabel(next));
-            preview.setDrawable(null); preview.setUserObject(null); samples.add(next, "", "", preview); commit.accept(next);
+            preview.setDrawable(null); preview.setUserObject(null); sample(next, "", "", preview); commit.accept(next);
         }));
         row.add(face).minWidth(0); return row;
     }
@@ -2733,7 +2785,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         themeCards.clearChildren();
         var themes = themeOptions().stream().filter(option -> option.label().toLowerCase(Locale.ROOT).contains(themeQuery)).toList();
         for (var theme : themes) {
-            Image preview = new Image(); samples.add(theme.id(), "", "", preview);
+            Image preview = new Image(); sample(theme.id(), "", "", preview);
             preview.setName("editor-theme-preview-" + theme.id());
             UiButton card = visualCard(theme.label() + (theme.id().equals(selectedTheme) ? "  ✓" : ""), preview, 84, () -> {
                 Consumer<String> commit = themeCommit; closeThemes(); if (commit != null) { commit.accept(theme.id()); }

@@ -48,6 +48,7 @@ build/
 /megamek/mmconf/searches/*.json
 /megamek/mmconf/recent-advanced-searches.json
 /megamek/mmconf/gpu-program-cache/
+/megamek/mmconf/board-editor-thumbnails/
 
 # UserData
 megamek/userdata/**
