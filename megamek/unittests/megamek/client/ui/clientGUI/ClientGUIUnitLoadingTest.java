@@ -28,7 +28,6 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
 import megamek.client.ui.dialogs.randomArmy.RandomArmyDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
-import megamek.client.ui.dialogs.unitSelectorDialogs.MegaMekUnitSelectorDialog;
 import megamek.client.ui.util.MegaMekController;
 import megamek.common.Player;
 import megamek.common.enums.GamePhase;
@@ -80,8 +79,7 @@ class ClientGUIUnitLoadingTest {
                     assertTrue(inspector.constructed().isEmpty());
                     assertTrue(inspectorDialog.constructed().isEmpty());
                     assertTrue(Arrays.stream(gui.getFrame().getOwnedWindows())
-                          .noneMatch(window -> (window instanceof MegaMekUnitSelectorDialog)
-                                || (window instanceof RandomArmyDialog)));
+                          .noneMatch(window -> window instanceof RandomArmyDialog));
                     verify(cache, never()).getAllMeks();
                 } finally {
                     gui.die();

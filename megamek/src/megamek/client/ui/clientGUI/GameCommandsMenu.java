@@ -172,6 +172,8 @@ public class GameCommandsMenu {
             // units, because units handed to a player who cannot deploy are stranded
             popup.add(createPlayerSetupItem());
             popup.addSeparator();
+            popup.add(createClientActionItem("CommonMenuBar.fileUnitsReinforceRequisition",
+                  ClientGUI.FILE_UNITS_REINFORCE_REQUISITION));
             popup.add(createClientActionItem("CommonMenuBar.fileUnitsReinforce",
                   ClientGUI.FILE_UNITS_REINFORCE));
             popup.add(createClientActionItem("CommonMenuBar.fileUnitsReinforceRAT",

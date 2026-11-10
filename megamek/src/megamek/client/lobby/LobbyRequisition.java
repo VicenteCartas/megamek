@@ -12,6 +12,7 @@ import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.UnitRecipients;
 import megamek.common.Player;
 import megamek.common.eras.Era;
+import megamek.common.eras.Eras;
 import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
 import megamek.common.preference.PreferenceManager;
@@ -66,16 +67,43 @@ public record LobbyRequisition(RequisitionCatalog.Rules rules, List<Recipient> r
      */
     public static LobbyRequisition of(Game game, @Nullable Player local, Set<String> localBotNames,
           List<RequisitionCatalog.YearSpan> eras) {
+        return of(game, local, localBotNames, eras, false, null);
+    }
+
+    /**
+     * Reads the Requisition's part of a game under way, for a Game Master's reinforcements: players on no team are not
+     * offered, as their units could never deploy, unless {@code requested} names them because a Game Master just put
+     * them on one. Call it on the thread that changes the game.
+     *
+     * @param localBotNames the names of the bots running on this machine
+     * @param requested     the player the units were asked for, or null
+     */
+    public static LobbyRequisition inGame(Game game, @Nullable Player local, Set<String> localBotNames,
+          List<RequisitionCatalog.YearSpan> eras, @Nullable Player requested) {
+        return of(game, local, localBotNames, eras, true, requested);
+    }
+
+    private static LobbyRequisition of(Game game, @Nullable Player local, Set<String> localBotNames,
+          List<RequisitionCatalog.YearSpan> eras, boolean inGame, @Nullable Player requested) {
         List<Recipient> recipients = new ArrayList<>();
         if (local != null) {
-            for (Player player : UnitRecipients.availableTo(local, game.getPlayersList(), localBotNames, false,
-                  null)) {
+            for (Player player : UnitRecipients.availableTo(local, game.getPlayersList(), localBotNames, inGame,
+                  requested)) {
                 recipients.add(new Recipient(player.getId(), player.getName(), player.getId() == local.getId(),
                       player.isBot(), camouflageKey(player.getCamouflage())));
             }
         }
         return new LobbyRequisition(RequisitionCatalog.Rules.of(game.getOptions()), recipients,
               PreferenceManager.getClientPreferences().useAverageSkills(), eras);
+    }
+
+    /** The shipped eras of the BattleTech timeline as year spans, oldest first; none when they cannot be read. */
+    public static List<RequisitionCatalog.YearSpan> knownEras() {
+        try {
+            return spans(Eras.getEras());
+        } catch (RuntimeException failure) {
+            return List.of();
+        }
     }
 
     /** The eras of {@code eras} as year spans, oldest first; the first starts at year 0, the last runs on. */

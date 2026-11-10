@@ -61,7 +61,8 @@ import megamek.server.commands.ClientServerCommand;
 
 /**
  * The lobby's native views that the battle's menus open over the battle window, instead of their Swing dialogs: the
- * game options to read, the player settings, the Game Master's random reinforcements and the help. They show as the
+ * game options to read, the player settings, the Game Master's random reinforcements and the Requisition, and the
+ * help. They show as the
  * battle's own cards ({@link GpuBattleView#cards}) on its HUD, which takes no board input meanwhile.
  * <p>
  * Swing thread unless a method says otherwise.
@@ -79,6 +80,8 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
     private @Nullable LobbyGameMasterViews.VoteCard voteCard;
     private @Nullable LobbyGameMaster shownVote;
     private @Nullable GpuHexBrushPanel brushPanel;
+    /** The Requisition while it shows over the battle. */
+    private @Nullable GpuBattleRequisition requisition;
 
     /**
      * @param gpu     runs work on the GPU thread
@@ -296,7 +299,26 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
               gui.getClient().getLocalPlayerNumber(), player);
         Consumer<Player> fromGenerator = tools::randomArmy;
         open(dialogs -> dialogs.playerSetup(setup, edtFor("player setup"), gui.getClient()::sendChat,
-              gui::reinforceFromFile, fromGenerator));
+              this::requisition, gui::reinforceFromFile, fromGenerator));
+    }
+
+    /**
+     * Opens the Requisition over the battle, its units going to {@code player} when they may, or to the first player
+     * offered; when it shows already, it turns to {@code player}. Its units arrive as reinforcements next round.
+     */
+    void requisition(@Nullable Player player) {
+        if (requisition != null) {
+            requisition.retarget(player);
+            return;
+        }
+        GpuBattleRequisition.Snapshot snapshot = GpuBattleRequisition.snapshot(gui, player);
+        GpuBattleRequisition opened = new GpuBattleRequisition(gui, gpu, closing, tools, player, gone -> {
+            if (requisition == gone) {
+                requisition = null;
+            }
+        });
+        requisition = opened;
+        gpu.accept(() -> opened.open(cards.get(), snapshot));
     }
 
     /** Puts up, changes or takes away the building in a hex. */

@@ -983,7 +983,7 @@ inspector is created only when requested with the Legacy 2D board and renders th
 - The frame carries no Swing overlay layers, so each toast shows once, in the native stack.
 - **Allowlist.** `GpuBoardWindow.allowedOverBattle(Dialog)` decides which Swing dialogs may still show over the
   presented window: the classes in `GpuBoardWindow.SWING_DIALOGS` (the Menu's settings and tools, the Game Master
-  editors, the reinforcement selector, the accessibility window, the Nova network view, unit cache loading, Readme and
+  editors, the accessibility window, the Nova network view, unit cache loading, Readme and
   Help and the planetary conditions editor), file choosers, a game master's
   choice of the player to reinforce, and the message boxes the user kept, known by their titles: the exit's save
   question, About, the bug report and its package result, and a reinforcement file's version check. A dialog that

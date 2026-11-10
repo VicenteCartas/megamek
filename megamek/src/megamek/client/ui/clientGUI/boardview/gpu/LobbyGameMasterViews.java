@@ -308,11 +308,13 @@ final class LobbyGameMasterViews {
      * each Reinforce button applies, then hands the player over to a way of giving them units. Applying closes the
      * card first, so the card a reinforcement opens is not closed with it.
      *
+     * @param fromCatalogue on the Swing thread: gives the player units picked from the Requisition's catalogue
      * @param fromFile      on the Swing thread: gives the player units from a file
      * @param fromGenerator on the Swing thread: gives the player units from the force generator
      */
     static void playerSetup(UiKit kit, UiDialog dialog, GameMasterPlayerSetup setup, LobbyPromptViews.Edt edt,
-          Consumer<String> chat, Consumer<Player> fromFile, Consumer<Player> fromGenerator, Runnable close) {
+          Consumer<String> chat, Consumer<Player> fromCatalogue, Consumer<Player> fromFile,
+          Consumer<Player> fromGenerator, Runnable close) {
         Table body = dialog.body();
         body.top().left().defaults().left().growX();
         List<String> players = setup.playerNames();
@@ -338,6 +340,9 @@ final class LobbyGameMasterViews {
         Label status = text(kit, "", "body", "text.primary");
         status.setName("setup-status");
         body.add(status).padTop(space("sm")).row();
+        UiButton fromCatalogueButton = kit.button("button-secondary", null,
+              Messages.getString("GameMasterPlayerSetupDialog.reinforceFromRequisition"), null);
+        fromCatalogueButton.setName("setup-reinforce-requisition");
         UiButton fromFileButton = kit.button("button-secondary", null,
               Messages.getString("GameMasterPlayerSetupDialog.reinforceFromFile"), null);
         fromFileButton.setName("setup-reinforce-file");
@@ -346,7 +351,8 @@ final class LobbyGameMasterViews {
         fromGeneratorButton.setName("setup-reinforce-generator");
         Table reinforce = new Table();
         reinforce.defaults().left().growX();
-        reinforce.add(fromFileButton).row();
+        reinforce.add(fromCatalogueButton).row();
+        reinforce.add(fromFileButton).padTop(space("xs")).row();
         reinforce.add(fromGeneratorButton).padTop(space("xs")).row();
         body.add(reinforce).padTop(space("md")).row();
         UiButton apply = dialog.primary(Messages.getString("GameMasterPlayerSetupDialog.apply"), () -> {
@@ -356,18 +362,22 @@ final class LobbyGameMasterViews {
         apply.setName("setup-apply");
         tip(kit, apply, "GameMasterPlayerSetupDialog.apply.tooltip");
         dialog.cancelButton(Messages.getString("Close")).setName("setup-close");
+        UiKit.onChange(fromCatalogueButton, () -> reinforce(setup, edt, chat, fromCatalogue, close));
         UiKit.onChange(fromFileButton, () -> reinforce(setup, edt, chat, fromFile, close));
         UiKit.onChange(fromGeneratorButton, () -> reinforce(setup, edt, chat, fromGenerator, close));
+        TextTooltip catalogueTip = kit.tip(fromCatalogueButton, true);
         TextTooltip fileTip = kit.tip(fromFileButton, true);
         TextTooltip generatorTip = kit.tip(fromGeneratorButton, true);
         Runnable refresh = () -> {
             status.setText(GpuBoardWindow.plainText(setup.status()));
             apply.setDisabled(setup.problem() != null || setup.chosenPlayer() == null);
             boolean may = setup.mayReinforce();
+            fromCatalogueButton.setDisabled(!may);
             fromFileButton.setDisabled(!may);
             fromGeneratorButton.setDisabled(!may);
             String reinforceTip = Messages.getString(may ? "GameMasterPlayerSetupDialog.reinforce.tooltip"
                   : "GameMasterPlayerSetupDialog.reinforce.notYet");
+            catalogueTip.getActor().setText(reinforceTip);
             fileTip.getActor().setText(reinforceTip);
             generatorTip.getActor().setText(reinforceTip);
         };

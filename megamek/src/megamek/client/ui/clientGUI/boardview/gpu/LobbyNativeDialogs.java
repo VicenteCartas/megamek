@@ -30,7 +30,9 @@ import megamek.client.lobby.GameMasterUnitTools;
 import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.HelpDocument;
 import megamek.client.lobby.LanceRoleForm;
+import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyGameMaster;
+import megamek.client.lobby.LobbyRequisition;
 import megamek.client.lobby.MapNoteForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
@@ -85,6 +87,9 @@ final class LobbyNativeDialogs {
     private static final float CAMO_CHROME = 320;
     private static final float CAMO_MIN_GRID = 240;
     private static final float CAMO_MAX_GRID = 560;
+    /** What the Requisition's card takes besides its view: the title bar and the footer, with their gaps. */
+    private static final float REQUISITION_CHROME = 140;
+    private static final float REQUISITION_MIN_HEIGHT = 360;
     private ExecutorService pictures;
     /** The dialogs that show, the top one first, each with what to do once it has closed. */
     private final Deque<Open> open = new ArrayDeque<>();
@@ -97,6 +102,7 @@ final class LobbyNativeDialogs {
     private LobbyRandomMapView randomMapView;
     private LobbyVictoryView victoryView;
     private LobbyRandomArmyView randomArmyView;
+    private LobbyRequisitionPanel requisitionView;
     private LobbyCrewToolsView crewView;
     private LobbyReadoutView readoutView;
     private LobbyDocumentView documentView;
@@ -262,6 +268,32 @@ final class LobbyNativeDialogs {
               bodyWidth(dialog, OPTIONS_WIDTH), sprites, host, this::close);
         show(dialog);
         return randomArmyView;
+    }
+
+    /**
+     * Opens the Requisition as a card over the battle, for a Game Master's reinforcements: as wide as the game options
+     * and as tall as the window allows. {@code requisition} and {@code forces} are what it opens on; {@code closed}
+     * runs once it has closed, after the view gave back its pictures.
+     */
+    LobbyRequisitionPanel requisition(LobbyRequisitionPanel.Actions actions, Function<String, Drawable> sprites,
+          LobbyRequisition requisition, LobbyForces forces, Runnable closed) {
+        LobbyRequisitionPanel view = new LobbyRequisitionPanel(kit, actions, sprites, motion);
+        UiDialog dialog = begin(Messages.getString("Lobby.requisition.title"), OPTIONS_WIDTH, false, () -> {
+            view.dispose();
+            if (requisitionView == view) {
+                requisitionView = null;
+            }
+            closed.run();
+        });
+        requisitionView = view;
+        view.show(requisition, forces);
+        float space = DesignTokens.shipped().space().get("xxxl");
+        float height = Math.max(REQUISITION_MIN_HEIGHT, stage.getHeight() - 2 * space - REQUISITION_CHROME);
+        dialog.body().add(view.body()).width(bodyWidth(dialog, OPTIONS_WIDTH)).height(height);
+        dialog.primary(Messages.getString("Close"), this::close);
+        show(dialog);
+        view.opened(forces);
+        return view;
     }
 
     /** Opens the random skills. */
@@ -435,9 +467,9 @@ final class LobbyNativeDialogs {
 
     /** A player's team and deployment zone over whatever shows, with the ways to hand them units. */
     UiDialog playerSetup(GameMasterPlayerSetup setup, LobbyPromptViews.Edt edt, Consumer<String> chat,
-          Consumer<Player> fromFile, Consumer<Player> fromGenerator) {
+          Consumer<Player> fromCatalogue, Consumer<Player> fromFile, Consumer<Player> fromGenerator) {
         UiDialog dialog = begin(Messages.getString("GameMasterPlayerSetupDialog.title"), "dialog.md", true, () -> { });
-        LobbyGameMasterViews.playerSetup(kit, dialog, setup, edt, chat, fromFile, fromGenerator,
+        LobbyGameMasterViews.playerSetup(kit, dialog, setup, edt, chat, fromCatalogue, fromFile, fromGenerator,
               () -> closeDialog(dialog));
         show(dialog);
         return dialog;
@@ -923,6 +955,10 @@ final class LobbyNativeDialogs {
 
     @Nullable LobbyRandomArmyView randomArmyView() {
         return randomArmyView;
+    }
+
+    @Nullable LobbyRequisitionPanel requisitionView() {
+        return requisitionView;
     }
 
     @Nullable LobbyCrewToolsView crewView() {

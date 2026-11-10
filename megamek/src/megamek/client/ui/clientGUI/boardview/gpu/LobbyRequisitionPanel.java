@@ -119,6 +119,14 @@ final class LobbyRequisitionPanel {
         /** Takes the unit {@code id} back out of the game. */
         void remove(int id);
 
+        /**
+         * Whether added units can be taken back with their chip's ×: in the lobby, not once they are reinforcements
+         * of a game under way.
+         */
+        default boolean undoable() {
+            return true;
+        }
+
         /** Draws the sprites of {@code units} in the background. */
         void sprites(List<MekSummary> units);
 
@@ -461,6 +469,7 @@ final class LobbyRequisitionPanel {
         UiKit.onChange(add, this::add);
         totals = kit.typeLabel("", "small", "text.secondary");
         addedChips.space(space("xs")).wrap(false);
+        addedChips.setName("lobby-requisition-added");
         body.add(strip()).growX().pad(space("sm"), space("md"), space("md"), space("md")).row();
         refreshFilters();
         refreshAdd();
@@ -2106,7 +2115,12 @@ final class LobbyRequisitionPanel {
               : Messages.getString("Lobby.requisition.totals", sum.units(),
               NumberFormat.getIntegerInstance().format(sum.bv()), RequisitionRow.tons(sum.tons())));
         addedChips.clearChildren();
+        boolean undoable = actions.undoable();
         for (LobbyUnit unit : added) {
+            if (!undoable) {
+                addedChips.addActor(kit.chip(unit.name(), UiKit.Tone.NORMAL));
+                continue;
+            }
             Button chip = kit.actingChip(unit.name(), UiKit.Tone.NORMAL);
             float icon = size("icon.sm");
             chip.add(kit.icon("close", icon, UiTheme.tokenColor("text.secondary"))).size(icon).padLeft(space("xs"));

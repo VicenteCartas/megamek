@@ -32,6 +32,7 @@ import java.util.function.Consumer;
 import megamek.client.AbstractClient;
 import megamek.client.Client;
 import megamek.common.Player;
+import megamek.common.enums.GamePhase;
 import megamek.common.force.Force;
 import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
@@ -430,6 +431,36 @@ class LobbyCommandsTest {
     void nothingToAddSendsNothing() {
         assertNull(commands.addUnits(List.of(), bot, RequisitionSkills.initial(false)));
         verify(client, never()).sendAddEntity(anyList());
+    }
+
+    @Test
+    void unitsAddedInTheLoungeKeepTheirDeployment() {
+        withoutGeneratedNames(() -> {
+            game.setPhase(GamePhase.LOUNGE);
+            Entity unit = crewedUnit();
+
+            commands.addUnits(List.of(unit), null, RequisitionSkills.initial(false));
+
+            verify(unit).setOwner(local);
+            verify(unit, never()).setDeployRound(anyInt());
+        });
+    }
+
+    @Test
+    void unitsAddedDuringTheGameArriveAsReinforcementsNextRound() {
+        withoutGeneratedNames(() -> {
+            game.setPhase(GamePhase.MOVEMENT);
+            game.setRoundCount(3);
+            Entity unit = crewedUnit();
+
+            commands.addUnits(List.of(unit), bot, RequisitionSkills.initial(false));
+
+            verify(unit).setOwner(bot);
+            verify(unit).setDeployRound(4);
+            verify(unit).setDone(true);
+            verify(unit).setUnloaded(true);
+            verify(client).sendAddEntity(List.of(unit));
+        });
     }
 
     @Test

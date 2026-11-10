@@ -189,8 +189,6 @@ public final class GpuBoardWindow {
           megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog.class,
           // R6: Network information
           megamek.client.ui.dialogs.buttonDialogs.NetworkInformationDialog.class,
-          // U2: the reinforcement selector
-          megamek.client.ui.dialogs.unitSelectorDialogs.MegaMekUnitSelectorDialog.class,
           // U2: the accessibility window
           megamek.client.ui.dialogs.AccessibilityDialog.class,
           // U2: the Nova network view
@@ -1553,6 +1551,18 @@ public final class GpuBoardWindow {
         GpuBattleTools tools = battleTools(gui);
         if (tools != null) {
             tools.playerSetup(player);
+        }
+        return tools != null;
+    }
+
+    /**
+     * EDT: shows the Requisition natively over this client's battle window, its units going to {@code player} (or the
+     * first player offered) as reinforcements next round; false as above.
+     */
+    public static boolean showRequisition(ClientGUI gui, @Nullable Player player) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.requisition(player);
         }
         return tools != null;
     }
