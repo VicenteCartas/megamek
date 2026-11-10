@@ -58,8 +58,9 @@ final class BayKit {
     /**
      * A roof that spans its hall, as a hangar's does, in place of the flat slab: a hexside wide, it rises {@code rise}
      * over the roof's height in the {@code shape} of a {@code gable}, a shallow {@code bow} (a circle's segment, a
-     * bowstring roof) or an {@code arch} (half an ellipse, a barrel vault), in {@code segments} facets a side per level
-     * of detail (the last for any further). It follows the hall ({@link #barrels}): a Square hex's runs north to south
+     * bowstring roof), an {@code arch} (half an ellipse, a barrel vault) or {@code plates} (a bow of flat plates, their
+     * edges hard), in {@code segments} facets a side per level of detail (the last for any further). It follows the
+     * hall ({@link #barrels}): a Square hex's runs north to south
      * along its column, so a column's hexes share one roof and columns side by side meet in valleys; an Angled hex's
      * runs out along each of its links, the roofs of two links meeting in a valley (but level at the crown where the
      * hexes across both are one building with it: a wide hall's roof is one roof), and turns round its unlinked sides in
@@ -81,12 +82,12 @@ final class BayKit {
             return switch (shape) {
                 case "gable" -> rise * (1 - t);
                 case "arch" -> rise * Math.sqrt(1 - t * t);
-                case "bow" -> {
+                case "bow", "plates" -> {
                     // A circle through both eaves and the crown.
                     double radius = (half * half + rise * rise) / (2 * rise);
                     yield Math.sqrt(radius * radius - x * x) - (radius - rise);
                 }
-                default -> throw new IllegalArgumentException("a vault's shape is gable, bow or arch, not " + shape);
+                default -> throw new IllegalArgumentException("a vault's shape is gable, bow, arch or plates, not " + shape);
             };
         }
     }
@@ -231,10 +232,10 @@ final class BayKit {
         boolean fills = !role.startsWith("roof") && !piece.tags().endsWith("-cap") && joined(spec, role, lod);
         if (fills) { putFill(result, "-fill", fill(spec, modelled, role, piece, 0, lod, square)); }
         boolean jointed = spec.modules().values().stream().flatMap(List::stream).anyMatch(run -> run.joints() != null);
-        // A storey's sills, where another storey stands on it (ConnectedKit places a fill).
+        // A storey's sills, where the storey standing on it closes links it keeps (ConnectedKit places them).
         GeneratedMesh sill = role.startsWith("roof") || fills || square || piece.tags().endsWith("-cap") ? null : sill(spec, piece);
         boolean sills = sill != null && !sill.parts.isEmpty();
-        if (sills) { result.put("-fill", sill); }
+        if (sills) { result.put("-sill", sill); }
         // A roof's corner linked both ways and closed one way: its edge turns an inside corner there (ConnectedKit#VALLEY).
         boolean turns = role.startsWith("roof") && !square && !seamed && !jointed && spec.roof().vault() == null
               && piece.direction() != null && piece.walls().isEmpty() && Integer.bitCount(links) == 2;
@@ -246,7 +247,7 @@ final class BayKit {
                   square, footprintScale, fitting, layout, halfLength));
             if (lit) { GeneratedKit.lights(result, "-closed-" + closed, closedPiece, facet, deck, lod); }
             if (fills) { putFill(result, "-closed-" + closed + "-fill", fill(spec, modelled, role, closedPiece, closed, lod, square)); }
-            if (sills) { result.put("-closed-" + closed + "-fill", sill); }
+            if (sills) { result.put("-closed-" + closed + "-sill", sill); }
             if (turns && Integer.bitCount(closed) == 1) {
                 result.put("-closed-" + closed + "-valley", module(spec, modelled, role, KitOutline.inward(closedPiece, true), closed,
                       lod, square, footprintScale, fitting, layout, halfLength));
@@ -1039,7 +1040,7 @@ final class BayKit {
         for (int i = 0; i < polygon.size(); i++) { area += KitOutline.cross(polygon.get(i), polygon.get((i + 1) % polygon.size())); }
         List<double[]> outline = area > 0 ? polygon : polygon.reversed();
         float[] tint = vault.tint() == null ? new float[] { 1, 1, 1 } : vault.tint();
-        boolean smooth = !vault.shape().equals("gable");
+        boolean smooth = vault.shape().equals("bow") || vault.shape().equals("arch");
         for (Barrel barrel : barrels) {
             double[][] lines = facets(vault, barrel.half(), lod);
             double[] cs = lines[0], zs = lines[1], girth = lines[2], axis = barrel.axis();

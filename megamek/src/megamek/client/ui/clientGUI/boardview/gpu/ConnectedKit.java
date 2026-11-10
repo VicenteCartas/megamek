@@ -53,7 +53,7 @@ final class ConnectedKit {
     private static final Pattern NODE = Pattern.compile(
           ".*-(base|floor|top|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)(-bend|-cap|-closed-[1-9][0-9]*|-notch-[1-9][0-9]*)?");
     private static final Pattern TAG = Pattern.compile("-(link|end)-(" + DIRECTION + ")");
-    private static final Pattern JUNCTION = Pattern.compile(".*-(junction-[0-9]+|fill|crown|closed-[1-9][0-9]*-(?:valley|wall)|aol(-[0-5])?)");
+    private static final Pattern JUNCTION = Pattern.compile(".*-(junction-[0-9]+|fill|sill|crown|closed-[1-9][0-9]*-(?:valley|wall)|aol(-[0-5])?)");
     /**
      * In {@link #junctions}' roof row: the corner lies inside the building, where this hex and both hexes round it
      * stand to this roof's height and all connect. A roof corner piece linked both ways then draws as its
@@ -120,7 +120,7 @@ final class ConnectedKit {
         // Terrain workers read kit metadata concurrently; libGDX's cached Array iterator is shared.
         for (int index = 0; index < data.nodes.size; index++) {
             var node = data.nodes.get(index);
-            // A corner piece's junction twins and a piece's fill are placed with what they belong to, not chosen as pieces.
+            // A corner piece's junction twins and a piece's fill and sill are placed with what they belong to, not chosen as pieces.
             if (JUNCTION.matcher(node.id).matches()) { continue; }
             require(!node.id.matches(".*\\.[0-9]{3}"), "Rename Blender's duplicate suffix: " + node.id);
             var match = NODE.matcher(node.id);
@@ -664,6 +664,13 @@ final class ConnectedKit {
                     if (holds && level < height - 1 && ids.contains(fill)) {
                         result.add(new Placement(fill, role, level, placement(level * GpuBuilding.LEVEL_HEIGHT - ground.get(role),
                               turn + steps), fill + "@" + turn + "/" + role + "-at-" + level + "/"));
+                    }
+                    // A storey takes its sills where the one standing on it closes links it keeps itself (BayKit#sill).
+                    String sill = piece == null ? null : piece.node() + "-sill";
+                    if (holds && level < height - 1 && ids.contains(sill)
+                          && (piece.links() & turn(connected[level] & ~connected[level + 1], -turn)) != 0) {
+                        result.add(new Placement(sill, role, level, placement(level * GpuBuilding.LEVEL_HEIGHT - ground.get(role),
+                              turn + steps), sill + "@" + turn + "/" + role + "-at-" + level + "/"));
                     }
                     before = holds;
                 }
