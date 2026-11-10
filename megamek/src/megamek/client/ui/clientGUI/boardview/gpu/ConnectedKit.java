@@ -51,7 +51,7 @@ final class ConnectedKit {
     static final List<String> DIRECTIONS = List.of("n", "ne", "se", "s", "sw", "nw");
     private static final String DIRECTION = "(?:ne|nw|se|sw|n|s)";
     private static final Pattern NODE = Pattern.compile(
-          ".*-(base|floor|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)(-bend|-cap|-closed-[1-9][0-9]*|-notch-[1-9][0-9]*)?");
+          ".*-(base|floor|top|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)(-bend|-cap|-closed-[1-9][0-9]*|-notch-[1-9][0-9]*)?");
     private static final Pattern TAG = Pattern.compile("-(link|end)-(" + DIRECTION + ")");
     private static final Pattern JUNCTION = Pattern.compile(".*-(junction-[0-9]+|fill|crown|closed-[1-9][0-9]*-(?:valley|wall)|aol(-[0-5])?)");
     /**
@@ -124,7 +124,7 @@ final class ConnectedKit {
             if (JUNCTION.matcher(node.id).matches()) { continue; }
             require(!node.id.matches(".*\\.[0-9]{3}"), "Rename Blender's duplicate suffix: " + node.id);
             var match = NODE.matcher(node.id);
-            require(match.matches(), "Expected -baseN, -floorN or -roofN, then -link-<dir> or -end-<dir> tags: " + node.id);
+            require(match.matches(), "Expected -baseN, -floorN, -topN or -roofN, then -link-<dir> or -end-<dir> tags: " + node.id);
             require(node.parts != null && (node.parts.length > 0 || "-cap".equals(match.group(4)))
                   && (node.children == null || node.children.length == 0),
                   "Building modules must be mesh nodes: " + node.id);

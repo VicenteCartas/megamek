@@ -44,11 +44,17 @@ final class HabitatKit {
      * above the ground ({@code windows} lit or dim, shifted along by a fraction of a repeat); the roofs' fittings per
      * footprint (hatch and vent pieces, laid out at x, y); with {@code aol}, aviation obstruction lights on the roofs'
      * convex corners ({@link GeneratedKit#lights}); its large doors' look ({@code door}, {@link KitDoors.Style}; a plain
-     * steel door without).
+     * steel door without); with {@code vault}, a roof that spans the hall ({@link BayKit.Vault}) in place of the flat roof
+     * with its rim, pier tops and fittings.
      */
     record Spec(String name, String style, Map<String, String> materials, String pieces, double cornerRadius, int cornerSegments, Parapet parapet,
                 Eave eave, Skirt skirt, Uprights piers, Uprights tops, Uprights footings, Lone lone, List<Storey> storeys,
-                Fittings fittings, boolean aol, KitDoors.Style door) { }
+                Fittings fittings, boolean aol, KitDoors.Style door, BayKit.Vault vault) {
+        /** The roof that spans the hall ({@code vault}; null: the flat roof), in the roof's material. */
+        BayKit.Slab hall() {
+            return vault == null ? null : new BayKit.Slab(materials.get("roof"), 18, 0, new double[] { 0 }, false, aol, vault);
+        }
+    }
 
     record Parapet(double height, double width) { }
 
@@ -123,6 +129,11 @@ final class HabitatKit {
                 }
             }
             Map<String, GeneratedMesh> result = new LinkedHashMap<>();
+            // A vault's corner inside the building keeps its crown, as a bays kit's (ConnectedKit#CROWN).
+            if (roof && spec.vault() != null && !square && piece.direction() != null && piece.walls().isEmpty()
+                  && Integer.bitCount(KitOutline.links(piece)) == 2) {
+                result.put("-crown", BayKit.crown(spec.hall(), piece, lod, z0));
+            }
             for (var twin : twins.entrySet()) {
                 var outline = twin.getValue();
                 Plating plating = square ? new Plating(0, 0, null) : plating(outline, twin.getKey().equals("-bend"));
@@ -375,6 +386,11 @@ final class HabitatKit {
           Layout layout, boolean square, Plating plating, float footprintScale) {
         var geometry = new GeneratedMesh();
         List<Pier> piers = new ArrayList<>();
+        if (spec.vault() != null) {
+            // A hall's roof spans it: no plating, rim, pier tops or fittings.
+            BayKit.hall(geometry, spec.hall(), piece, square, z0, lod);
+            return new Laid(geometry, piers);
+        }
         String roof = material(spec, "roof"), wallMaterial = material(spec, "wall");
         double radius = eave(spec);
         int segments = spec.eave() == null ? 0 : spec.eave().segments(lod);

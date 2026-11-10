@@ -299,8 +299,11 @@ public final class TilesetScenery {
         return names.isEmpty() ? null : names.getFirst();
     }
 
-    /** A generated kit's spec, read for its variants' names while the file is unchanged ({@link #kitVariants}). */
-    private record Variants(long modified, long length, List<String> names) { }
+    /**
+     * A generated kit's spec, read for its variants' names, and those that offer a roof that spans their hall, while
+     * the file is unchanged ({@link #kitVariants}, {@link #kitVaults}).
+     */
+    private record Variants(long modified, long length, List<String> names, List<String> vaults) { }
 
     private static final Map<File, Variants> VARIANTS = new ConcurrentHashMap<>();
 
@@ -308,24 +311,55 @@ public final class TilesetScenery {
      * The names of the variants a generated kit's JSON spec lists, in its order (the first is the default); empty for
      * any other asset (null: none) or a spec that cannot be read.
      */
-    public static List<String> kitVariants(String asset) {
-        if (asset == null || !asset.startsWith("buildings/") || !generatedKit(asset)) { return List.of(); }
+    public static List<String> kitVariants(String asset) { return variants(asset).names(); }
+
+    /**
+     * The variants of a generated kit that offer a roof that spans their hall beside their flat one (the spec's
+     * {@code vaulted}): a building chooses between the two ({@link HexAppearance.Roof}).
+     */
+    public static List<String> kitVaults(String asset) { return variants(asset).vaults(); }
+
+    /** Marks a kit's asset, after its variant's name, as drawn under that variant's roof that spans its hall. */
+    public static final String VAULTED = "~vaulted";
+
+    /**
+     * Whether a building of {@code buildingClass} draws its kit's vaulted roof: a hangar, unless it {@code stored} a flat
+     * one. Any other building keeps its variant's own roof.
+     */
+    public static boolean vaulted(HexAppearance.Roof stored, int buildingClass) {
+        return buildingClass == IBuilding.HANGAR && stored != HexAppearance.Roof.FLAT;
+    }
+
+    /** {@link #kitVariant} for {@code variant}, under its vaulted roof where that is asked for and the variant has one. */
+    public static String roofed(String asset, String variant, boolean vaulted) {
+        String drawn = kitVariant(asset, variant);
+        if (!vaulted || variant == null || !kitVaults(asset).contains(variant)) { return drawn; }
+        return (drawn.contains("@") ? drawn : drawn + "@" + variant) + VAULTED;
+    }
+
+    private static final Variants NO_VARIANTS = new Variants(0, 0, List.of(), List.of());
+
+    private static Variants variants(String asset) {
+        if (asset == null || !asset.startsWith("buildings/") || !generatedKit(asset)) { return NO_VARIANTS; }
         File spec = customBuildingFile(asset).getAbsoluteFile();
         long modified = spec.lastModified(), length = spec.length();
         Variants known = VARIANTS.get(spec);
         if (known == null || known.modified() != modified || known.length() != length) {
-            List<String> names = new ArrayList<>();
+            List<String> names = new ArrayList<>(), vaults = new ArrayList<>();
             try {
                 for (var variant : new com.fasterxml.jackson.databind.ObjectMapper().readTree(spec)) {
-                    if (variant.hasNonNull("name")) { names.add(variant.get("name").asText()); }
+                    if (variant.hasNonNull("name")) {
+                        names.add(variant.get("name").asText());
+                        if (variant.hasNonNull("vaulted")) { vaults.add(variant.get("name").asText()); }
+                    }
                 }
             } catch (IOException failure) {
                 LOGGER.warn("Cannot read the variants of {}: {}", spec, failure.getMessage());
             }
-            known = new Variants(modified, length, List.copyOf(names));
+            known = new Variants(modified, length, List.copyOf(names), List.copyOf(vaults));
             VARIANTS.put(spec, known);
         }
-        return known.names();
+        return known;
     }
 
     /**
@@ -426,8 +460,9 @@ public final class TilesetScenery {
         if (connected && singleHexBuilding(models.get(Terrains.BUILDING))) { models.put(Terrains.BUILDING, generic); }
         models.computeIfPresent(Terrains.BUILDING, (terrain, asset) -> {
             String kit = footprint(asset, HexAppearance.footprint(hex.getAppearance()));
-            return kitVariant(kit, drawnVariant(HexAppearance.kitVariant(hex.getAppearance()), kitVariants(kit),
-                  hex.terrainLevel(Terrains.BLDG_CLASS)));
+            int buildingClass = hex.terrainLevel(Terrains.BLDG_CLASS);
+            return roofed(kit, drawnVariant(HexAppearance.kitVariant(hex.getAppearance()), kitVariants(kit), buildingClass),
+                  vaulted(HexAppearance.roof(hex.getAppearance()), buildingClass));
         });
         // Walls are a supported building type without legacy building art. The renderer generates their solid mesh.
         if (hex.terrainLevel(Terrains.BUILDING) == megamek.common.enums.BuildingType.WALL.getTypeValue()) {

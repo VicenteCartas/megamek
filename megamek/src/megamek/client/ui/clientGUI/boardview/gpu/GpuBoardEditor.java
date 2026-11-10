@@ -1796,6 +1796,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             } else {
             buildingFootprint();
             buildingVariant();
+            buildingRoof();
             buildingDoors();
             if (!snapshot.buildingConnected()) {
                 if (!snapshot.kitVariants().isEmpty()) {
@@ -1992,6 +1993,23 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
               names, buildingClass == null ? 0 : buildingClass.value());
         choose(UiKit.text("BoardEditor.kitVariant"), drawn,
               names.stream().map(name -> new Option(name, name)).toList(), name -> send(Action.KIT_VARIANT, name));
+    }
+
+    /**
+     * A hangar's roof ({@link megamek.common.board.HexAppearance.Roof}) where its kit's variant offers one that spans its
+     * hall beside its flat one: vaulted until told otherwise; a choice sets the whole connected building. Shown for a
+     * building of the hangar class alone: any other keeps its variant's roof.
+     */
+    private void buildingRoof() {
+        var buildingClass = snapshot.property("bldg_class");
+        int value = buildingClass == null ? 0 : buildingClass.value();
+        String drawn = megamek.common.board.TilesetScenery.drawnVariant(megamek.common.board.HexAppearance.kitVariant(snapshot.appearance()),
+              snapshot.kitVariants(), value);
+        if (value != megamek.common.units.IBuilding.HANGAR || drawn == null || !snapshot.kitVaults().contains(drawn)) { return; }
+        boolean vaulted = megamek.common.board.TilesetScenery.vaulted(megamek.common.board.HexAppearance.roof(snapshot.appearance()), value);
+        choose(UiKit.text("BoardEditor.buildingRoof"), vaulted ? "vaulted" : "flat",
+              List.of(new Option(UiKit.text("BoardEditor.buildingRoof.vaulted"), "vaulted"),
+                    new Option(UiKit.text("BoardEditor.buildingRoof.flat"), "flat")), id -> send(Action.BUILDING_ROOF, id));
     }
 
     /**

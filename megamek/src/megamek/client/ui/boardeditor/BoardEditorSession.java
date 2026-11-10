@@ -123,6 +123,11 @@ public final class BoardEditorSession {
          */
         KIT_VARIANT,
         /**
+         * Gives the selected hangar's whole connected structure one roof where its kit's variant offers two (value:
+         * {@code vaulted} or {@code flat}, {@link HexAppearance.Roof}) in one undo step.
+         */
+        BUILDING_ROOF,
+        /**
          * Gives the selected building hex a large door, as a hangar has them, on one hexside (target: the side, 0 north,
          * clockwise; value: its height in levels, 0 for none; {@link HexAppearance#doors}).
          */
@@ -267,7 +272,7 @@ public final class BoardEditorSession {
           String object, String message, int width, int height, Brush activeBrush, List<Selection> selection,
           List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<HexIssue> issues,
           List<Level> levels, List<String> tags, List<String> boardComponents, boolean drawsRoutes,
-          int copies, List<String> kitVariants, boolean buildingConnected, BuildingVolumes.Reference buildingReference, int buildingInteriors,
+          int copies, List<String> kitVariants, List<String> kitVaults, boolean buildingConnected, BuildingVolumes.Reference buildingReference, int buildingInteriors,
           boolean buildingProfileAvailable, Map<String, Integer> joinedSides, List<String> destroyed, int rampSides,
           int entranceSides, boolean laneRun, List<Integer> exitFrom, int apronSides, LaneJunction junction) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
@@ -523,6 +528,7 @@ public final class BoardEditorSession {
               selectionGroups(), groupSizes(hex), issueList, levels(hex), board().getTags().stream().sorted().toList(),
               boardComponents(), drawsRoutes(),
               copies.values().stream().mapToInt(Integer::intValue).sum(), hex == null ? List.of() : kitVariants(hex),
+              hex == null ? List.of() : kitVaults(hex),
               TilesetScenery.buildingConnected(hex, selected, board()::getHex), hex == null ? null : hex.getBuildingReference(),
               building == null ? 0 : BuildingInteriors.choice(building).ordinal(),
               TilesetScenery.buildingProfileAvailable(hex, selected, board()::getHex), joinedSides(), destroyed(hex),
@@ -1025,6 +1031,16 @@ public final class BoardEditorSession {
                           "Choose one of the building's variants.");
                     for (Coords cell : structure(selected, Terrains.BUILDING)) {
                         change(cell, hex -> kitVariant(hex, command.value()));
+                    }
+                    if (!continuousEdit) { finishStroke(); }
+                }
+                case BUILDING_ROOF -> {
+                    require(selected != null && board().getHex(selected).containsTerrain(Terrains.BUILDING),
+                          Messages.getString("BoardEditor.selectBuildingFirst"));
+                    require(List.of("vaulted", "flat").contains(command.value()), "Choose a vaulted or a flat roof.");
+                    var roof = HexAppearance.of(command.value().equals("vaulted") ? HexAppearance.Roof.VAULTED : HexAppearance.Roof.FLAT);
+                    for (Coords cell : structure(selected, Terrains.BUILDING)) {
+                        change(cell, hex -> appearance(hex, "roof", roof));
                     }
                     if (!continuousEdit) { finishStroke(); }
                 }
@@ -3319,6 +3335,13 @@ public final class BoardEditorSession {
                     TilesetScenery.buildingConnected(hex, hex.getCoords(), board()::getHex)).get(Terrains.BUILDING)) : List.of();
     }
 
+    /** Those of {@link #kitVariants} that offer a roof that spans their hall beside the flat one ({@link TilesetScenery#kitVaults}). */
+    private List<String> kitVaults(Hex hex) {
+        return hex.containsTerrain(Terrains.BUILDING)
+              ? TilesetScenery.kitVaults(TilesetScenery.structureModels(hex,
+                    TilesetScenery.buildingConnected(hex, hex.getCoords(), board()::getHex)).get(Terrains.BUILDING)) : List.of();
+    }
+
     /** Stores the kit variant {@code name} in {@code hex}'s appearance ({@link HexAppearance#kitVariant}); null: none. */
     private static void kitVariant(Hex hex, String name) {
         Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
@@ -3764,7 +3787,7 @@ public final class BoardEditorSession {
         var appearance = new LinkedHashMap<>(hex.getAppearance());
         appearance.remove(definition.id());
         if (definition.id().equals("building")) {
-            appearance.keySet().removeAll(Set.of("footprint", "kitVariant", "buildingProfile", "doors"));
+            appearance.keySet().removeAll(Set.of("footprint", "kitVariant", "buildingProfile", "doors", "roof"));
             hex.setBuildingReference(null);
         }
         hex.setAppearance(appearance);
@@ -4097,9 +4120,17 @@ public final class BoardEditorSession {
                 colours.merge(design == null ? BoardDecoration.Colours.NONE : design.colours(), 1, Integer::sum);
             });
             var tint = java.util.Collections.max(colours.entrySet(), Map.Entry.comparingByValue()).getKey();
+            // One roof too: the commoner of the stored choices, none where most store none.
+            Map<String, Integer> roofs = new LinkedHashMap<>();
+            building.stream().filter(changed.negate()).forEach(cell -> {
+                var stored = board().getHex(cell).getAppearance().get("roof");
+                roofs.merge(stored == null ? "" : stored.variant(), 1, Integer::sum);
+            });
+            String roof = java.util.Collections.max(roofs.entrySet(), Map.Entry.comparingByValue()).getKey();
             building.forEach(cell -> change(cell, hex -> {
                 footprint(hex, joined);
                 kitVariant(hex, variant.isEmpty() ? null : variant);
+                appearance(hex, "roof", roof.isEmpty() ? null : new HexAppearance(roof, null, null, null));
                 appearance(hex, "building", HexAppearance.withColours(hex.getAppearance().get("building"), tint));
             }));
         }

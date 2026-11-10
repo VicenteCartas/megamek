@@ -52,6 +52,14 @@ class GpuBuildingTest {
     }
 
     @Test
+    void theStoreyUnderTheRoofIsAKitsTopModuleWhereItHasOne() {
+        var parts = roles(modules("kit-base0", "kit-floor0", "kit-top0", "kit-roof0"));
+        assertEquals(List.of("base0", "floor0", "floor0", "top0", "roof0"), GpuBuilding.select(parts, 4, 41));
+        assertEquals(List.of("base0", "top0", "roof0"), GpuBuilding.select(parts, 2, 41));
+        assertEquals(List.of("base0", "roof0"), GpuBuilding.select(parts, 1, 41), "One level is the base alone");
+    }
+
+    @Test
     void variantNumbersDoNotNeedToStartAtZero() {
         var parts = roles(modules("kit-base4", "kit-floor7", "kit-roof3"));
         assertEquals(List.of("base4", "floor7", "roof3"), GpuBuilding.select(parts, 2, 41));

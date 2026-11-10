@@ -61,7 +61,7 @@ public record HexAppearance(String variant, String asset, String material, Doubl
     }
     public static final Set<String> OWNERS = Set.of("ground", "road", "building", "pavement", "fuelTank",
           "vegetation", "rough", "bridge", "bridgeRoad", "rail", "bridgeRail", "scorch", "footprint", "kitVariant", "buildingProfile",
-          "water", "fortification", "doors");
+          "water", "fortification", "doors", "roof");
     /** Per-hex upper storeys step back above shorter neighbours; absent means keep the ground footprint. */
     public static final HexAppearance STEPPED_BUILDING = new HexAppearance("building/stepped", null, null, null);
 
@@ -341,6 +341,24 @@ public record HexAppearance(String variant, String asset, String material, Doubl
     /** The appearance that stores the kit variant {@code name}; null for none. */
     public static HexAppearance ofKitVariant(String name) {
         return name == null ? null : new HexAppearance(name, null, null, null);
+    }
+
+    /**
+     * A hangar's roof (owner {@code "roof"}), where its generated kit's variant offers one that spans its hall
+     * ({@link TilesetScenery#kitVaults}): vaulted (as none) or flat ({@link TilesetScenery#vaulted}). A building of
+     * another class keeps its variant's own roof whatever it stores. Cosmetic. A connected building has one.
+     */
+    public enum Roof { VAULTED, FLAT }
+
+    public static Roof roof(Map<String, HexAppearance> appearance) {
+        HexAppearance stored = appearance.get("roof");
+        String variant = stored == null ? null : stored.variant();
+        return "roof/vaulted".equals(variant) ? Roof.VAULTED : "roof/flat".equals(variant) ? Roof.FLAT : null;
+    }
+
+    /** The appearance that stores {@code roof}; null for none. */
+    public static HexAppearance of(Roof roof) {
+        return roof == null ? null : new HexAppearance(roof == Roof.VAULTED ? "roof/vaulted" : "roof/flat", null, null, null);
     }
 
     private static final String DOORS = "doors/";

@@ -18,8 +18,10 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.math.Matrix4;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import megamek.common.Configuration;
 import megamek.common.board.HexAppearance;
+import megamek.common.board.TilesetScenery;
 
 /**
  * A connected building kit generated from its JSON spec ({@code models/buildings/<kit>/<kit>.json}) in place of a GLB:
@@ -50,7 +52,9 @@ final class GeneratedKit {
         String key = spec.getAbsolutePath() + (square ? "#square" : "") + "@" + variant + ":" + footprintScale;
         return KITS.computeIfAbsent(key, ignored -> new BoardKit<>(() -> {
             try {
-                JsonNode chosen = variant(JSON.readTree(spec), variant);
+                boolean vaulted = variant != null && variant.endsWith(TilesetScenery.VAULTED);
+                JsonNode chosen = roofed(variant(JSON.readTree(spec),
+                      vaulted ? variant.substring(0, variant.length() - TilesetScenery.VAULTED.length()) : variant), vaulted);
                 if (!chosen.path("pieces").isTextual()) { throw new IllegalArgumentException("a variant names its pieces GLB"); }
                 var modelled = RigidGlb.loadLods(new FileHandle(new File(spec.getParentFile(), chosen.path("pieces").asText())),
                       new File(Configuration.dataDir(), "models").toPath());
@@ -100,6 +104,28 @@ final class GeneratedKit {
           int cornerSegments, List<ModelData> modelled) {
         return new KitDoors.Frame(square, bandEnd, footprintScale, cornerRadius, cornerSegments,
               door == null ? KitDoors.Style.DEFAULT : door.resolved(), modelled);
+    }
+
+    /**
+     * {@code variant} under one of its roofs: its flat one as it stands, or, {@code vaulted}, the one that spans its
+     * hall: the fields of its {@code vaulted} object in place of its own (its {@code modules} role by role; a null
+     * takes a field away).
+     */
+    private static JsonNode roofed(JsonNode variant, boolean vaulted) {
+        if (!variant.has("vaulted")) { return variant; }
+        ObjectNode result = variant.deepCopy();
+        JsonNode other = result.remove("vaulted");
+        if (!vaulted) { return result; }
+        other.fields().forEachRemaining(field -> {
+            if (field.getValue().isNull()) {
+                result.remove(field.getKey());
+            } else if (field.getKey().equals("modules")) {
+                result.withObject("/modules").setAll((ObjectNode) field.getValue());
+            } else {
+                result.set(field.getKey(), field.getValue());
+            }
+        });
+        return result;
     }
 
     /** The spec's variant named {@code name}, else its first; their names distinct, each a valid appearance key. */

@@ -151,7 +151,7 @@ final class BoardComponents {
 
     private static void buildingAppearance(ObjectNode component, JsonNode appearances) {
         if (!component.has("appearance") && !appearances.has("footprint") && !appearances.has("kitVariant")
-              && !appearances.has("buildingProfile") && !appearances.has("doors")) { return; }
+              && !appearances.has("buildingProfile") && !appearances.has("doors") && !appearances.has("roof")) { return; }
         ObjectNode style = component.withObject("/appearance");
         if (appearances.has("doors")) {
             // Each door's height in levels by its hexside (HexAppearance#doors).
@@ -167,6 +167,7 @@ final class BoardComponents {
             style.put("footprint", footprint.substring("footprint/".length()));
         }
         if (appearances.has("kitVariant")) { style.set("kitVariant", appearances.get("kitVariant").get("variant")); }
+        if (appearances.has("roof")) { style.put("roof", appearances.get("roof").path("variant").asText().substring("roof/".length())); }
         if (appearances.has("buildingProfile")) { style.put("profile", "stepped"); }
     }
 
@@ -259,6 +260,11 @@ final class BoardComponents {
         if (variant != null) {
             require(variant.isTextual(), "building.appearance.kitVariant must be a string");
             appearances.putObject("kitVariant").set("variant", variant);
+        }
+        JsonNode roof = style.remove("roof");
+        if (roof != null) {
+            require(roof.isTextual() && List.of("vaulted", "flat").contains(roof.asText()), "building.appearance.roof must be vaulted or flat");
+            appearances.putObject("roof").put("variant", "roof/" + roof.asText());
         }
     }
 

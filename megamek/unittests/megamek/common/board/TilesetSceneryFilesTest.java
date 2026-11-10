@@ -70,6 +70,22 @@ class TilesetSceneryFilesTest {
             assertEquals(ASSET, TilesetScenery.structureModels(hex).get(Terrains.BUILDING));
             assertEquals(generated.toFile(), TilesetScenery.customBuildingFile(ASSET + "-square@second"));
             assertEquals(List.of("first", "second"), TilesetScenery.kitVariants(ASSET));
+            // A hangar draws a variant's vaulted roof where it offers one, unless it chooses the flat one; no other building does.
+            Files.writeString(generated, "[{\"name\":\"first\"},{\"name\":\"second\",\"vaulted\":{}}]");
+            TilesetScenery.reload();
+            assertEquals(List.of("second"), TilesetScenery.kitVaults(ASSET));
+            Hex hangar = new Hex(0, "building:1;bldg_class:1", "");
+            hangar.setAppearance(java.util.Map.of("kitVariant", megamek.common.board.HexAppearance.ofKitVariant("second")));
+            assertEquals(ASSET + "@second" + TilesetScenery.VAULTED, TilesetScenery.structureModels(hangar).get(Terrains.BUILDING));
+            hangar.setAppearance(java.util.Map.of("kitVariant", megamek.common.board.HexAppearance.ofKitVariant("second"),
+                  "roof", megamek.common.board.HexAppearance.of(megamek.common.board.HexAppearance.Roof.FLAT)));
+            assertEquals(ASSET + "@second", TilesetScenery.structureModels(hangar).get(Terrains.BUILDING));
+            Hex offices = new Hex(0, "building:1", "");
+            offices.setAppearance(java.util.Map.of("kitVariant", megamek.common.board.HexAppearance.ofKitVariant("second"),
+                  "roof", megamek.common.board.HexAppearance.of(megamek.common.board.HexAppearance.Roof.VAULTED)));
+            assertEquals(ASSET + "@second", TilesetScenery.structureModels(offices).get(Terrains.BUILDING));
+            assertEquals(ASSET, TilesetScenery.structureModels(new Hex(0, "building:1;bldg_class:1", "")).get(Terrains.BUILDING),
+                  "Its first variant offers none");
             Files.writeString(design, "design");
             TilesetScenery.reload();
             assertEquals(design.toFile(), TilesetScenery.customBuildingFile(ASSET));

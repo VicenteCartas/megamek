@@ -253,7 +253,8 @@ class BoardComponentsTest {
         var colours = new BoardDecoration.Colours(List.of("#72949B"));
         hex.setAppearance(Map.of("building", new HexAppearance(null, oldPath, null, null, colours, 45),
               "footprint", HexAppearance.SQUARE, "kitVariant", HexAppearance.ofKitVariant("parapet"),
-              "doors", HexAppearance.ofDoors(new int[] { 2, 0, 1, 0, 0, 0 })));
+              "doors", HexAppearance.ofDoors(new int[] { 2, 0, 1, 0, 0, 0 }),
+              "roof", HexAppearance.of(HexAppearance.Roof.FLAT)));
         source.setHex(0, 0, hex);
         String saved;
         try (var ids = mockStatic(BoardModelIds.class)) {
@@ -266,6 +267,7 @@ class BoardComponentsTest {
         assertEquals("square", style.path("footprint").asText());
         assertEquals("parapet", style.path("kitVariant").asText());
         assertEquals(JSON.readTree("{\"n\":2,\"se\":1}"), style.path("doors"));
+        assertEquals("flat", style.path("roof").asText());
         assertEquals(JSON.readTree("[\"#72949b\"]"), style.path("colours"));
         try (var ids = mockStatic(BoardModelIds.class)) {
             ids.when(() -> BoardModelIds.path(uid, oldPath)).thenReturn(movedPath);
@@ -276,6 +278,7 @@ class BoardComponentsTest {
             assertEquals(HexAppearance.SQUARE, read.get("footprint"));
             assertEquals("parapet", HexAppearance.kitVariant(read));
             assertArrayEquals(new int[] { 2, 0, 1, 0, 0, 0 }, HexAppearance.doors(read));
+            assertEquals(HexAppearance.Roof.FLAT, HexAppearance.roof(read));
         }
     }
 

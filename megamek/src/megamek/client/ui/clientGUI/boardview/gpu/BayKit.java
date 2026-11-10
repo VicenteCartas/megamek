@@ -266,7 +266,7 @@ final class BayKit {
         // A vault's corner linked both ways, where the hexes round it are one building: no valley (ConnectedKit#CROWN).
         if (role.startsWith("roof") && spec.roof().vault() != null && !square && piece.direction() != null && piece.walls().isEmpty()
               && Integer.bitCount(KitOutline.links(piece)) == 2) {
-            result.put("-crown", crown(spec.roof(), piece, lod));
+            result.put("-crown", crown(spec.roof(), piece, lod, spec.roof().height(lod) - .02));
         }
         // A storey's other junctions at the corner, held by its corner piece linked both ways (ConnectedKit places them).
         List<Run> runs = spec.modules().get(role);
@@ -1023,6 +1023,16 @@ final class BayKit {
      * {@code barrels} over its own part: its facets between the eaves, level outside them, sheeting textured along it
      * and round its girth, a dark underside, and its ribs.
      */
+    /**
+     * {@code slab}'s vault over a whole {@code piece} from {@code base}, every wall of it filled up to the vault: a hall's
+     * roof for a kit that lays its own walls (HabitatKit).
+     */
+    static void hall(GeneratedMesh result, Slab slab, KitOutline.Piece piece, boolean square, double base, int lod) {
+        List<Barrel> barrels = barrels(square, piece);
+        for (var polygon : piece.polygons()) { vault(result, slab, polygon, base, barrels, lod); }
+        for (var wall : piece.walls()) { gable(result, slab.vault(), wall, base, barrels, lod); }
+    }
+
     private static void vault(GeneratedMesh result, Slab slab, List<double[]> polygon, double base, List<Barrel> barrels, int lod) {
         Vault vault = slab.vault();
         double area = 0;
@@ -1071,10 +1081,10 @@ final class BayKit {
      * A vault's corner piece inside a building, level at its crown: where three hexes of a building meet, their roofs
      * are one roof, not three that fall into a valley between them.
      */
-    private static GeneratedMesh crown(Slab slab, KitOutline.Piece piece, int lod) {
+    static GeneratedMesh crown(Slab slab, KitOutline.Piece piece, int lod, double base) {
         Vault vault = slab.vault();
         float[] tint = vault.tint() == null ? new float[] { 1, 1, 1 } : vault.tint();
-        double z = slab.height(lod) - .02 + vault.rise();
+        double z = base + vault.rise();
         var result = new GeneratedMesh();
         for (var polygon : piece.polygons()) {
             double area = 0;

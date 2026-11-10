@@ -35,7 +35,7 @@ import megamek.logging.MMLogger;
 /** Authored, invisible GLB volumes. Shared by placement, gameplay-height baking and interior geometry; no GPU access. */
 public final class BuildingVolumes {
     public static final double LEVEL = 18;
-    private static final Pattern ROLE = Pattern.compile("(?:.*-)?(base|floor|level|roof)([0-9]+)$");
+    private static final Pattern ROLE = Pattern.compile("(?:.*-)?(base|floor|level|top|roof)([0-9]+)$");
     private static final MMLogger LOGGER = MMLogger.create(BuildingVolumes.class);
     private static final Map<File, Definition> CACHE = new ConcurrentHashMap<>();
     private static final Definition NONE = new Definition(Map.of(), List.of());
@@ -94,7 +94,12 @@ public final class BuildingVolumes {
         }
     }
 
-    /** The same deterministic module choice used by ordinary connected kits and authored multi-hex buildings. */
+    /**
+     * The same deterministic module choice used by ordinary connected kits and authored multi-hex buildings: a base,
+     * a floor for each storey above it, a roof. Where the kit has {@code top} modules, the storey under the roof is one
+     * of those instead of a floor: its windows' heads, an attic, whatever ends a wall under its eave. A building of one
+     * level is its base alone.
+     */
     public static List<String> select(Set<String> roles, int levels, long seed) {
         var random = new SplittableRandom(seed);
         Function<String, String> pick = prefix -> {
@@ -104,7 +109,8 @@ public final class BuildingVolumes {
         String roof = pick.apply("roof");
         List<String> result = new ArrayList<>();
         result.add(pick.apply("base"));
-        for (int i = 1; i < levels; i++) { result.add(pick.apply("floor")); }
+        boolean topped = roles.stream().anyMatch(role -> role.startsWith("top"));
+        for (int i = 1; i < levels; i++) { result.add(pick.apply(topped && i == levels - 1 ? "top" : "floor")); }
         result.add(roof);
         return List.copyOf(result);
     }
