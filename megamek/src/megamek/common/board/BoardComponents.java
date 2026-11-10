@@ -160,12 +160,16 @@ final class BoardComponents {
               && !appearances.has("buildingProfile") && !appearances.has("doors") && !appearances.has("roof")) { return; }
         ObjectNode style = component.withObject("/appearance");
         if (appearances.has("doors")) {
-            // Each door's height in levels by its hexside (HexAppearance#doors).
-            int[] heights = HexAppearance.doors(Map.of("doors",
-                  new HexAppearance(appearances.get("doors").path("variant").asText(), null, null, null)));
+            // Each door's height in levels by its hexside, and the link group of those that have one
+            // (HexAppearance#doors, #doorLinks).
+            var stored = Map.of("doors", new HexAppearance(appearances.get("doors").path("variant").asText(), null, null, null));
+            int[] heights = HexAppearance.doors(stored), groups = HexAppearance.doorLinks(stored);
             ObjectNode doors = style.putObject("doors");
             for (int side = 0; side < 6; side++) {
                 if (heights[side] > 0) { doors.put(DIRECTIONS.get(side), heights[side]); }
+            }
+            for (int side = 0; side < 6; side++) {
+                if (heights[side] > 0 && groups[side] > 0) { style.withObject("/doorLinks").put(DIRECTIONS.get(side), groups[side]); }
             }
         }
         if (appearances.has("footprint")) {
@@ -266,7 +270,18 @@ final class BoardComponents {
                 heights[side] = integer(door.getValue(), "building.appearance.doors." + door.getKey());
                 require(heights[side] >= 1, "building.appearance.doors." + door.getKey() + " must be at least one level");
             });
-            HexAppearance stored = HexAppearance.ofDoors(heights);
+            int[] groups = new int[6];
+            JsonNode links = style.remove("doorLinks");
+            if (links != null) {
+                require(links.isObject(), "building.appearance.doorLinks must be an object of link groups by direction");
+                links.fields().forEachRemaining(link -> {
+                    int side = DIRECTIONS.indexOf(link.getKey());
+                    require(side >= 0 && heights[side] > 0, "building.appearance.doorLinks names no door: " + link.getKey());
+                    groups[side] = integer(link.getValue(), "building.appearance.doorLinks." + link.getKey());
+                    require(groups[side] >= 1, "building.appearance.doorLinks." + link.getKey() + " must be a group from 1 up");
+                });
+            }
+            HexAppearance stored = HexAppearance.ofDoors(heights, groups);
             if (stored != null) { appearances.putObject("doors").put("variant", stored.variant()); }
         }
         JsonNode variant = style.remove("kitVariant");

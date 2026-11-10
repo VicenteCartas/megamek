@@ -166,6 +166,16 @@ final class UnitPlayback {
         return false;
     }
 
+    /**
+     * Whether structures are coming down and the next act waiting brings more down: a collapse that began while another
+     * played (#mergeCollapse joins only those still waiting) follows it at once, as one brought down in the editor
+     * right after another.
+     */
+    private boolean collapsesOn() {
+        return active instanceof BoardScene.TileTransition falling && falling.changes().isEmpty()
+              && pending.peekFirst() instanceof BoardScene.TileTransition next && next.changes().isEmpty();
+    }
+
     void advance(double seconds, UnitMotion.Speed speed) {
         advance(seconds, speed, ignored -> true);
     }
@@ -238,6 +248,8 @@ final class UnitPlayback {
             }
             if (!completed) {
                 if (!cameraReady.test(this)) { return; }
+                // Shown for a frame, its structures are falling: the next ones give way now.
+                if (collapsesOn() && combatSeconds > 0) { combatDuration = combatSeconds; }
                 UnitMotion motion = active instanceof BoardScene.Movement ? motions.get(active.entityId()) : null;
                 double left = active instanceof BoardScene.AttachmentChange ? UnitAttachmentMotion.DURATION - attachment.seconds
                       : conversion != null ? UnitConversion.DURATION_SECONDS - conversion.seconds
@@ -288,7 +300,7 @@ final class UnitPlayback {
                 }
                 applySceneUpdates();
                 hold = attacks.stream().anyMatch(UnitAttack::death) ? DEATH_HOLD_SECONDS
-                      : pending.peekFirst() instanceof BoardScene.AttachmentChange
+                      : collapsesOn() || pending.peekFirst() instanceof BoardScene.AttachmentChange
                       || active instanceof BoardScene.AttachmentChange && pending.peekFirst() instanceof BoardScene.Movement
                       || pending.peekFirst() instanceof BoardScene.Combat next
                             && (next.result().kind() == megamek.common.ResolvedAttack.Kind.BRUSH_OFF

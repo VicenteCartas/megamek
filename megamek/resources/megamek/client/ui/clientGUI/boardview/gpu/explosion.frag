@@ -15,9 +15,9 @@ uniform vec4 u_axis;
 // Palette beyond the plain fireball: soot darkens the smoke (below zero it pales toward dust that scatters the light),
 // ember keeps fire glowing inside it for longer and dust browns it like thrown earth. All zero is the plain fireball.
 uniform vec4 u_look;
-// A dust cloud's surge front, surge thickness, column radius and column height, in radii; zero for a round volume.
+// A dust cloud's front, thickness there, column radius and top, in radii; zero for a round volume.
 uniform vec4 u_cloud;
-// How many times finer than a tenth of its radius a dust cloud's billows are: those of a wide cloud are no larger.
+// How many of a dust cloud's billows fit in two sevenths of its radius: they are sized by the hex, not the cloud.
 uniform float u_grain;
 uniform vec4 u_viewport;
 uniform mat4 u_inverseProjView;
@@ -37,26 +37,28 @@ float turbulence(vec3 p) {
     return noise(p) * 0.57 + noise(p * 2.03 + 13.7) * 0.29 + noise(p * 4.11 + 31.3) * 0.14;
 }
 
-// A structure's dust, standing on the ground in a flattened volume: a surge along the ground, thickest at its rolling
-// front, whose reach differs by bearing, joined to a dome over the wreck. Out of both stand bulbs as tall as they are
-// wide, with creases between them, and smaller ones on those: they are sampled in the volume's radii, not its squashed
-// space, so they are round, grow as the cloud spreads and climb as it ages. Returns the density, how open to the sky
-// the place is (out of a crease, up the cloud), and how far around it, in radii, is certainly empty. Without fine,
-// the bulbs alone, of a round front: the short light rays' density.
+// A structure's dust, standing on the ground in a flattened volume: one mound, as thick as its surge out to its
+// front, whose reach differs by bearing, and rising smoothly to its top over the wreck. Out of it stand bulbs as tall
+// as they are wide, with creases between them, and smaller ones on those: they are sampled in the volume's radii, not
+// its squashed space, so they are round, grow as the cloud spreads and climb as it ages. Returns the density, how open
+// to the sky the place is (out of a crease, up the cloud), and how far around it, in radii, is certainly empty.
+// Without fine, the bulbs alone, of a round front: the short light rays' density.
 vec3 cloud(vec3 p, bool fine) {
     vec3 at = vec3(p.xy, p.z * (1.0 + u_axis.w));
     float reach = length(at.xy);
-    // How far outside the dome and the surge, in radii.
-    float outside = (length(vec3(at.xy / u_cloud.z, at.z / u_cloud.w)) - 1.0) * min(u_cloud.z, u_cloud.w);
-    if (u_cloud.x > 0.0 && reach < u_cloud.x * 1.22 + 0.15 && abs(at.z) < u_cloud.y + 0.15) {
-        float front = u_cloud.x * (fine
-              ? 0.72 + 0.5 * noise(vec3(at.xy / max(reach, 0.001) * 1.3 + u_effect.w, u_effect.w)) : 0.97);
-        float thickness = u_cloud.y * mix(0.5, 1.0, smoothstep(0.3, 0.8, reach / front));
-        outside = min(outside, length(vec2(max(reach - front + thickness, 0.0), at.z)) - thickness);
-    }
-    // Further out than the bulbs stand out of the shape: empty, without their fetches.
-    outside *= u_grain;
-    if (outside >= 0.149) return vec3(0.0, 0.0, (outside - 0.149) / u_grain);
+    // Clear of the widest front and of the top by more than the bulbs stand out: empty, without a fetch.
+    float clear = max(reach - u_cloud.x * 1.22, abs(at.z) - u_cloud.w) - 0.149 / u_grain;
+    if (clear > 0.0) return vec3(0.0, 0.0, clear);
+    float front = u_cloud.x * (fine
+          ? 0.78 + 0.44 * noise(vec3(at.xy / max(reach, 0.001) * 1.3 + u_effect.w, u_effect.w)) : 1.0);
+    float column = reach / u_cloud.z;
+    float thickness = u_cloud.y + (u_cloud.w - u_cloud.y) * exp(-2.0 * column * column);
+    // A round edge as deep as the surge is thick.
+    float rim = min(u_cloud.y, front);
+    float outside = u_grain
+          * (length(vec2(max(reach - front + rim, 0.0), max(abs(at.z) - thickness + rim, 0.0))) - rim);
+    // Half that far is certainly empty: the mound is steep over the wreck.
+    if (outside >= 0.149) return vec3(0.0, 0.0, 0.5 * (outside - 0.149) / u_grain);
     vec3 drift = vec3(u_effect.w, u_effect.w * 0.7, -u_effect.x);
     vec3 flow = at * u_grain;
     // Round tops, sharp creases.
@@ -70,8 +72,8 @@ vec3 cloud(vec3 p, bool fine) {
     float tiny = abs(2.0 * noise(flow * 19.0 + drift * 4.0 + bulb * 1.7) - 1.0);
     // Crisp while it is young, soft as it thins.
     float body = 1.0 - smoothstep(-mix(0.008, 0.08, u_effect.x), 0.0, outside - (tiny - 0.4) * 0.025);
-    float open = mix(0.78, 1.0, bulb) * mix(0.86, 1.0, small) * mix(0.92, 1.0, tiny)
-          * mix(0.88, 1.0, clamp(at.z / max(u_cloud.y, u_cloud.w), 0.0, 1.0));
+    float open = mix(0.68, 1.0, bulb) * mix(0.82, 1.0, small) * mix(0.9, 1.0, tiny)
+          * mix(0.88, 1.0, clamp(at.z / u_cloud.w, 0.0, 1.0));
     return vec3(body, open, 0.0);
 }
 
@@ -149,10 +151,11 @@ void main() {
     vec3 radiance = vec3(0.0);
     if (u_cloud.z > 0.0) {
         // A dust cloud: strides through the air around it, fine steps where the ray meets it, so that its billows
-        // keep their edges, and longer ones as it goes dark inside. Its light rays keep the sun's own bearing through
-        // the flattened volume and are as short as its bulbs are deep.
+        // keep their edges, and longer ones as it goes dark inside. Its light rays are as short as its bulbs are deep
+        // and lean from the sun's bearing toward the sky, whose light and the dust's own keep a low sun from leaving
+        // a flat top dark.
         float fine = 0.01 / u_grain;
-        vec3 sun = volumeVector(u_sun) * 0.6 / u_grain;
+        vec3 sun = volumeVector(normalize(u_sun + vec3(0.0, 0.0, 0.35))) * 0.6 / u_grain;
         // Radii covered per unit of the ray.
         float pace = length(vec3(direction.xy, direction.z * (1.0 + u_axis.w)));
         float t = nearT + jitter * fine / pace;

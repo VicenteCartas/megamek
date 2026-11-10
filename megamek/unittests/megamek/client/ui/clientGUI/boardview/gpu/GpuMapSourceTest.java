@@ -152,6 +152,35 @@ class GpuMapSourceTest {
         });
     }
 
+    /** A hex destroyed while another comes down gives way at once: it does not wait for the first one's act to end. */
+    @Test
+    void aHexDestroyedWhileAnotherFallsGivesWayAtOnce() throws Exception {
+        onEdt(() -> {
+            var editor = new BoardEditorSession();
+            Board board = new Board();
+            board.newData(2, 1, new Hex[] { new Hex(0, "bldg_elev:3;building:2:0;bldg_cf:40", ""),
+                  new Hex(0, "bldg_elev:3;building:2:0;bldg_cf:40", "") }, null);
+            editor.game().setBoard(board);
+            try (var source = new GpuMapSource(editor.game(), null, editor)) {
+                long generation = source.takeFrame().boardGeneration();
+                var playback = new UnitPlayback();
+                for (int hex = 0; hex < 2; hex++) {
+                    source.editorCommand(new Command(Action.SELECT_AT, hex + ",0", ""), generation);
+                    source.takeFrame();
+                    source.editorCommand(new Command(Action.DESTROYED, "", "true"), generation);
+                    var destroyed = source.takeFrame();
+                    playback.accept(destroyed.timeline(), destroyed.scene(), ignored -> false);
+                    // The first one's act has been shown for a frame, its structure taken for its pieces
+                    // (GpuTerrain#presentFalls), when the second arrives.
+                    playback.advance(1 / 60.0, UnitMotion.Speed.NORMAL);
+                    assertSame(destroyed.timeline().getFirst(), playback.transition(),
+                          "Hex " + hex + " gives way in the frame after it was destroyed");
+                }
+            }
+            return null;
+        });
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     void printCapturesEveryLabelWithoutChangingTheViewOrDocument(boolean editing) throws Exception {

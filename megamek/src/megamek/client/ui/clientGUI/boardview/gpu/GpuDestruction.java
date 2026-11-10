@@ -60,7 +60,7 @@ final class GpuDestruction implements Disposable {
     /** Standard gravity on the table, and how fast a piece on the ground loses its speed and its spin, per second. */
     static final float GRAVITY = 450, GROUND_DRAG = 24, GROUND_SPIN_DRAG = 16;
     /** A pile rests this long once the terrain shows the rubble under it, then sinks into it over SINK_SECONDS. */
-    static final float REST_SECONDS = 1.5f, SINK_SECONDS = .6f;
+    static final float REST_SECONDS = .75f, SINK_SECONDS = .6f;
     /**
      * The rubble the rules leave rises out of the ground over this long (#rubble), from as its last pieces touch down,
      * RISE_LEAD before its pile has settled (#settles): not before its pieces are down (user, 2026-11-09).
@@ -79,8 +79,11 @@ final class GpuDestruction implements Disposable {
     private static final float TREE_FALL_SECONDS = 1.3f;
     /** The level of detail felled trees cast their shadows at. */
     private static final int SHADOW_LEVEL = 1;
-    /** A cloud of dust lasts this long, in playback seconds: thick for the first third, then thinning away. */
-    static final float CLOUD_SECONDS = 6;
+    /**
+     * A cloud of dust lasts this long, in playback seconds, which at the 1x speed are two of the player's each
+     * (UnitMotion.Speed): thick for its first quarter, then thinning away.
+     */
+    static final float CLOUD_SECONDS = 3;
     /**
      * The falls raise one cloud per {@link #CLOUD_HEXES} hexes square; falls of its square that start within
      * {@link #JOIN_SECONDS} of a cloud's first belong to it. At most {@link #MAX_CLOUDS} hang at once: under a strike
@@ -530,9 +533,10 @@ final class GpuDestruction implements Disposable {
 
     /**
      * The dust of a structure {@code reach} across at its foot and {@code height} tall, {@code seconds} after it gave
-     * way at ({@code x}, {@code y}, {@code floor}), as one volume (GpuExplosionEffects#addCloud). With {@code surges},
-     * its surge runs out along the ground, fast at first, to two and a half times the foot, thickening as it takes in
-     * air; a column climbs over the wreck to about the structure's height while the pieces come down, then drifts up.
+     * way at ({@code x}, {@code y}, {@code floor}), as one mound (GpuExplosionEffects#addCloud): tallest over the wreck,
+     * where it climbs towards the structure's height while the pieces come down, as far as its foot's width allows,
+     * and with {@code surges} run out along the ground, fast at first, to half as far again as the foot. A span's is
+     * its column alone.
      */
     static void cloud(GpuExplosionEffects effects, GpuExplosionEffects.Look look, float x, float y, float floor,
           float height, float reach, float seconds, int seed, boolean surges) {
@@ -541,11 +545,16 @@ final class GpuDestruction implements Disposable {
         float spread = 1 - (float) Math.exp(-seconds * 1.35f);
         float rise = MathUtils.clamp(seconds / 1.5f, 0, 1);
         rise = rise * rise * (3 - 2 * rise);
+        float column = reach * (.8f + .4f * life);
+        float front = surges ? reach * (.85f + .55f * spread) : column, widest = reach * (surges ? 1.4f : 1.2f);
+        float surge = Math.min(surges ? reach * (.3f + .3f * spread) : reach * .2f, height * .6f);
+        // No taller than about its width: over one hex of a tall structure it is a mound, not a spire.
+        float top = Math.max(surge, Math.min(height * (.3f + .45f * rise), reach * 1.2f) + reach * .4f * life);
+        // Billows about a hex wide once it has spread, whatever its size; they grow with it.
+        float bulb = reach / (float) Math.pow(Math.max(1, reach / (BoardGeometry.height() * .5f)), .75) * front / widest;
         // Thick while the structure comes down and its surge runs out, then thinning steadily until it has cleared.
-        float thin = GpuArtilleryBlast.fadeOut(life, .3f);
-        effects.addCloud(new Vector3(x, y, floor), surges ? reach * (.9f + 1.5f * spread) : 0, reach * (.3f + .3f * spread),
-              reach * (.8f + .5f * life), height * (.3f + .45f * rise) + reach * .6f * life,
-              (float) Math.pow(Math.max(1, reach / (BoardGeometry.height() * .5f)), .75), life,
+        float thin = GpuArtilleryBlast.fadeOut(life, .25f);
+        effects.addCloud(new Vector3(x, y, floor), front, surge, column, top, bulb, life,
               MathUtils.clamp(seconds / .25f, 0, 1) * thin * thin, seed, look);
     }
 

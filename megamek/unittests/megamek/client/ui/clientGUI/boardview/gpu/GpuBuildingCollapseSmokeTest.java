@@ -43,10 +43,10 @@ import org.junit.jupiter.api.Test;
 class GpuBuildingCollapseSmokeTest {
     private static final float FRAME = 1 / 60f;
     /**
-     * Frames after the swap the review captures, at 1x: the fall over about .3 to 3 real seconds, then its pile on the
-     * rubble risen under it, and sinking into it.
+     * Frames after the swap the review captures, at 1x (120 to a playback second): the fall over about .3 to 2 real
+     * seconds, then its pile on the rubble risen under it, until just before it sinks into it.
      */
-    private static final int[] CAPTURES = { 0, 18, 36, 54, 78, 108, 150, 200, 260, 330, 380 };
+    private static final int[] CAPTURES = { 0, 18, 36, 54, 78, 108, 130, 150, 170, 195, 220 };
 
     /**
      * A structure brought down at {@code at} and, in the same capture, at {@code more}; with {@code woods}, its woods

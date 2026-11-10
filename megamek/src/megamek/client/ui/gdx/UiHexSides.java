@@ -25,6 +25,8 @@ public final class UiHexSides extends WidgetGroup {
     private final Vector2[] corners = new Vector2[6];
     private final float[] band = new float[20];
     private int selected;
+    /** Corners at which two chosen sides are drawn apart: bit s for the corner after side s, clockwise. */
+    private int parted;
     private int hover = -1;
     private UiTheme.PickerStyle colors;
     private final UiKit ui;
@@ -60,6 +62,11 @@ public final class UiHexSides extends WidgetGroup {
     }
 
     public void selected(int mask) { selected = mask; }
+    /**
+     * Draws chosen sides apart at these corners (bit s: the corner between side s and the next, clockwise), where
+     * chosen sides side by side otherwise run on as one band: doors that are not one opening, say.
+     */
+    public UiHexSides parted(int corners) { parted = corners; return this; }
     public int selected() { return selected; }
 
     /** Draws the hex in the skin's {@link UiTheme.PickerStyle} {@code name}: default (hud-v3) or token. */
@@ -114,6 +121,12 @@ public final class UiHexSides extends WidgetGroup {
             Vector2 a = corners[side], b = corners[(side + 1) % 6];
             boolean chosen = (selected & (1 << side)) != 0;
             Color color = chosen ? colors.accent : hover == side ? colors.hover : colors.line;
+            if (chosen && (parted & (1 << (side + 5) % 6 | 1 << side)) != 0) {
+                // Short of a corner it is parted at.
+                Vector2 start = (parted & 1 << (side + 5) % 6) != 0 ? new Vector2(a).lerp(b, .14f) : a;
+                b = (parted & 1 << side) != 0 ? new Vector2(b).lerp(a, .14f) : b;
+                a = start;
+            }
             if (chosen || hover == side) {
                 float packed = Color.toFloatBits(color.r, color.g, color.b, alpha * (hover == side ? .28f : .16f));
                 point(0, cx + a.x * .86f, cy + a.y * .86f, packed);

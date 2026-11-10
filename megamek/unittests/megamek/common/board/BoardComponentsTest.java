@@ -286,7 +286,7 @@ class BoardComponentsTest {
         var colours = new BoardDecoration.Colours(List.of("#72949B"));
         hex.setAppearance(Map.of("building", new HexAppearance(null, oldPath, null, null, colours, 45),
               "footprint", HexAppearance.SQUARE, "kitVariant", HexAppearance.ofKitVariant("parapet"),
-              "doors", HexAppearance.ofDoors(new int[] { 2, 0, 1, 0, 0, 0 }),
+              "doors", HexAppearance.ofDoors(new int[] { 2, 2, 1, 0, 0, 0 }, new int[] { 4, 4, 0, 0, 0, 0 }),
               "roof", HexAppearance.of(HexAppearance.Roof.FLAT)));
         source.setHex(0, 0, hex);
         String saved;
@@ -299,7 +299,8 @@ class BoardComponentsTest {
         assertEquals(45, style.path("rotation").intValue());
         assertEquals("square", style.path("footprint").asText());
         assertEquals("parapet", style.path("kitVariant").asText());
-        assertEquals(JSON.readTree("{\"n\":2,\"se\":1}"), style.path("doors"));
+        assertEquals(JSON.readTree("{\"n\":2,\"ne\":2,\"se\":1}"), style.path("doors"));
+        assertEquals(JSON.readTree("{\"n\":4,\"ne\":4}"), style.path("doorLinks"), "The linked doors' group");
         assertEquals("flat", style.path("roof").asText());
         assertEquals(JSON.readTree("[\"#72949b\"]"), style.path("colours"));
         try (var ids = mockStatic(BoardModelIds.class)) {
@@ -310,7 +311,8 @@ class BoardComponentsTest {
             assertEquals(45, read.get("building").rotation());
             assertEquals(HexAppearance.SQUARE, read.get("footprint"));
             assertEquals("parapet", HexAppearance.kitVariant(read));
-            assertArrayEquals(new int[] { 2, 0, 1, 0, 0, 0 }, HexAppearance.doors(read));
+            assertArrayEquals(new int[] { 2, 2, 1, 0, 0, 0 }, HexAppearance.doors(read));
+            assertArrayEquals(new int[] { 4, 4, 0, 0, 0, 0 }, HexAppearance.doorLinks(read));
             assertEquals(HexAppearance.Roof.FLAT, HexAppearance.roof(read));
         }
     }

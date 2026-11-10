@@ -37,6 +37,7 @@ import megamek.common.board.BoardBillboard;
 import megamek.common.board.BoardConnectivityCheck;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
+import megamek.common.board.BoardDoors;
 import megamek.common.board.BoardFile;
 import megamek.common.board.BoardGenerator;
 import megamek.common.board.BoardSceneryLayouts;
@@ -128,10 +129,16 @@ public final class BoardEditorSession {
          */
         BUILDING_ROOF,
         /**
-         * Gives the selected building hex a large door, as a hangar has them, on one hexside (target: the side, 0 north,
-         * clockwise; value: its height in levels, 0 for none; {@link HexAppearance#doors}).
+         * Gives a building hex a large door, as a hangar has them, on one hexside (target: the side, 0 north, clockwise,
+         * of the selected hex, or "x,y,side" for a hex of its building; value: its height in levels, 0 for none;
+         * {@link HexAppearance#doors}). A linked door's whole opening takes the height ({@link BoardDoors}).
          */
         BUILDING_DOOR,
+        /**
+         * Links two doors of the selected building that meet at a corner into one opening, or parts them there (target:
+         * "x,y,side;x,y,side"; value: true or false). Linked, they take the lower of their heights.
+         */
+        BUILDING_DOOR_LINK,
         /**
          * Changes the board, not a hex (target: "arena" with value true/false, "tag" or "untag" with a manual
          * tag, "autotags"); see {@link #boardSetting(String, String)}. Not an undo step: the control is its own undo.
@@ -206,6 +213,24 @@ public final class BoardEditorSession {
         public String code() { return new Terrain(Terrains.getType(terrain), value, explicit, exits).toString(); }
     }
     public record Selection(Coords coords, String object) { }
+
+    /**
+     * The selected building's large doors, for its designer: every hexside of its hexes that has a wall (the building
+     * does not continue across it), with its door's height (0: none) and link group, and the pairs of doors that
+     * meet at a corner, linked or not ({@link BoardDoors}).
+     */
+    public record Doors(List<Side> sides, List<Joint> joints) {
+        public static final Doors NONE = new Doors(List.of(), List.of());
+
+        /** {@code storeys}: the hex's height in levels, as high as its door may be. */
+        public record Side(Coords hex, int side, int height, int group, int storeys) {
+            public String target() { return hex.getX() + "," + hex.getY() + "," + side; }
+        }
+
+        public record Joint(Coords hex, int side, Coords otherHex, int otherSide, boolean linked) {
+            public String target() { return hex.getX() + "," + hex.getY() + "," + side + ";" + otherHex.getX() + "," + otherHex.getY() + "," + otherSide; }
+        }
+    }
     /** How a box or a Ctrl-click changes the selection: replace it, add to it (Shift) or remove from it (Ctrl). */
     public enum SelectMode { REPLACE, ADD, REMOVE }
     /**
@@ -275,7 +300,7 @@ public final class BoardEditorSession {
           List<Level> levels, List<String> tags, List<String> boardComponents, boolean drawsRoutes,
           int copies, List<String> kitVariants, List<String> kitVaults, String kitDrawn, boolean buildingConnected, BuildingVolumes.Reference buildingReference, int buildingInteriors,
           boolean buildingProfileAvailable, Map<String, Integer> joinedSides, List<String> destroyed, int rampSides,
-          int entranceSides, boolean laneRun, List<Integer> exitFrom, int apronSides, LaneJunction junction) {
+          int entranceSides, boolean laneRun, List<Integer> exitFrom, int apronSides, LaneJunction junction, Doors doors) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
         public boolean arena() { return tags.contains(BoardClassifier.ARENA_TAG); }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
@@ -537,7 +562,7 @@ public final class BoardEditorSession {
                     : SingleLane.joined(hex, selected, this::hexAt) & SingleLane.arms(hex, selected, this::hexAt, roadExits(hex)),
               hex == null ? 0 : entrances(hex), hex != null && SingleLane.run(this::hexAt, selected, -1) != null,
               exitFrom(hex), hex == null ? 0 : SingleLane.aprons(hex, selected, this::hexAt, roadExits(hex)),
-              hex == null ? null : SingleLane.junction(hex, selected, this::hexAt));
+              hex == null ? null : SingleLane.junction(hex, selected, this::hexAt), doors(hex));
     }
 
     /**
@@ -1048,16 +1073,27 @@ public final class BoardEditorSession {
                 case BUILDING_DOOR -> {
                     require(selected != null && board().getHex(selected).containsTerrain(Terrains.BUILDING),
                           Messages.getString("BoardEditor.selectBuildingFirst"));
-                    int side = Integer.parseInt(command.target()), height = (int) Math.round(Double.parseDouble(command.value()));
-                    require(side >= 0 && side < 6 && height >= 0, "A door stands on one of the six hexsides.");
-                    require(height == 0 || !board().getHex(selected).containsTerrainExit(Terrains.BUILDING, side),
+                    List<Coords> cells = structure(selected, Terrains.BUILDING);
+                    var door = door(command.target().contains(",") ? command.target() : selected.getX() + "," + selected.getY() + ","
+                          + command.target(), cells);
+                    int height = (int) Math.round(Double.parseDouble(command.value()));
+                    require(height >= 0, "A door is at least one level high.");
+                    require(height == 0 || !board().getHex(door.hex()).containsTerrainExit(Terrains.BUILDING, door.side()),
                           Messages.getString("BoardEditor.doorNeedsWall"));
-                    edit(hex -> {
-                        int[] doors = HexAppearance.doors(hex.getAppearance());
-                        doors[side] = Math.min(height, Math.max(1, hex.terrainLevel(Terrains.BLDG_ELEV)));
-                        appearance(hex, "doors", HexAppearance.ofDoors(doors));
-                    });
-                    if (!continuousEdit) { finishStroke(); }
+                    var plan = doorPlan(cells);
+                    plan.set(door, height, cell -> board().getHex(cell).terrainLevel(Terrains.BLDG_ELEV));
+                    store(plan, cells);
+                }
+                case BUILDING_DOOR_LINK -> {
+                    require(selected != null && board().getHex(selected).containsTerrain(Terrains.BUILDING),
+                          Messages.getString("BoardEditor.selectBuildingFirst"));
+                    List<Coords> cells = structure(selected, Terrains.BUILDING);
+                    String[] ends = command.target().split(";");
+                    require(ends.length == 2, "A link joins two doors.");
+                    var plan = doorPlan(cells);
+                    if (Boolean.parseBoolean(command.value())) { plan.link(door(ends[0], cells), door(ends[1], cells)); }
+                    else { plan.unlink(door(ends[0], cells), door(ends[1], cells)); }
+                    store(plan, cells);
                 }
                 case DESTROYED -> {
                     require(selected != null, Messages.getString("BoardEditor.selectHexFirst"));
@@ -1751,6 +1787,51 @@ public final class BoardEditorSession {
             RailRoute.lay(hex, deck, exits, RailRoute.layout(exits, laid | RailRoute.pieces(sides)),
                   RailRoute.kind(paintTemplate.getDecorations().getFirst()));
         }
+    }
+
+    /** The hexside "x,y,side" names, of one of the building's {@code cells}. */
+    private static BoardDoors.Door door(String text, List<Coords> cells) {
+        String[] parts = text.split(",");
+        require(parts.length == 3, "A door is named by its hex and side.");
+        var door = new BoardDoors.Door(new Coords(Integer.parseInt(parts[0].trim()), Integer.parseInt(parts[1].trim())),
+              Integer.parseInt(parts[2].trim()));
+        require(door.side() >= 0 && door.side() < 6 && cells.contains(door.hex()), "A door stands on a hexside of the selected building.");
+        return door;
+    }
+
+    private BoardDoors.Plan doorPlan(List<Coords> cells) {
+        return new BoardDoors.Plan(cells, cell -> board().getHex(cell).getAppearance());
+    }
+
+    /** Writes the building's doors back to its hexes, in one undo step. */
+    private void store(BoardDoors.Plan plan, List<Coords> cells) {
+        for (Coords cell : cells) { change(cell, hex -> appearance(hex, "doors", plan.stored(cell))); }
+        if (!continuousEdit) { finishStroke(); }
+    }
+
+    /**
+     * The selected building's doors for its designer ({@link Doors}): of a hangar, or of any building that has a door;
+     * {@link Doors#NONE} otherwise.
+     */
+    private Doors doors(Hex hex) {
+        if (hex == null || selected == null || !hex.containsTerrain(Terrains.BUILDING)) { return Doors.NONE; }
+        List<Coords> cells = structure(selected, Terrains.BUILDING);
+        var plan = doorPlan(cells);
+        if (plan.doors().isEmpty() && hex.terrainLevel(Terrains.BLDG_CLASS) != megamek.common.units.IBuilding.HANGAR) { return Doors.NONE; }
+        List<Doors.Side> sides = new ArrayList<>();
+        for (Coords cell : cells) {
+            Hex each = board().getHex(cell);
+            for (int side = 0; side < 6; side++) {
+                if (each.containsTerrainExit(Terrains.BUILDING, side)) { continue; }
+                var door = new BoardDoors.Door(cell, side);
+                sides.add(new Doors.Side(cell, side, plan.height(door), plan.group(door), Math.max(1, each.terrainLevel(Terrains.BLDG_ELEV))));
+            }
+        }
+        List<Doors.Joint> joints = new ArrayList<>();
+        for (BoardDoors.Door[] joint : plan.joints()) {
+            joints.add(new Doors.Joint(joint[0].hex(), joint[0].side(), joint[1].hex(), joint[1].side(), plan.linked(joint[0], joint[1])));
+        }
+        return new Doors(List.copyOf(sides), List.copyOf(joints));
     }
 
     private static void appearance(Hex hex, String owner, HexAppearance value) {

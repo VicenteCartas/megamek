@@ -1788,16 +1788,17 @@ public class BoardUtilities {
                     }
                 }
                 // A building's large doors move to their sides' new places.
-                int[] doors = HexAppearance.doors(appearance);
-                int[] flipped = new int[6];
+                int[] doors = HexAppearance.doors(appearance), links = HexAppearance.doorLinks(appearance);
+                int[] flipped = new int[6], flippedLinks = new int[6];
                 for (int side = 0; side < 6; side++) {
                     if (doors[side] > 0) {
                         Terrain door = new Terrain(Terrains.BUILDING, 1, true, 1 << side);
                         door.flipExits(horiz, vert);
                         flipped[Integer.numberOfTrailingZeros(door.getExits())] = doors[side];
+                        flippedLinks[Integer.numberOfTrailingZeros(door.getExits())] = links[side];
                     }
                 }
-                if (!java.util.Arrays.equals(doors, flipped)) { appearance.put("doors", HexAppearance.ofDoors(flipped)); }
+                if (!java.util.Arrays.equals(doors, flipped)) { appearance.put("doors", HexAppearance.ofDoors(flipped, flippedLinks)); }
                 if (!appearance.equals(hex.getAppearance())) { hex.setAppearance(appearance); }
                 int nx = horiz ? width - x - 1 : x, ny = vert ? height - y - 1 : y;
                 transformed[ny * width + nx] = hex;

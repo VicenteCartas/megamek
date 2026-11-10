@@ -1206,6 +1206,19 @@ class GpuBattleView extends ApplicationAdapter {
         frames++;
     }
 
+    /**
+     * Links the programs of combat's effects: a board's loading stage, with hex fire and smoke and splashes only where
+     * the board has them (null for none), and the shader warm-up ahead of any board, all of them (GpuShaderWarmup).
+     */
+    static void prepareEffects(GpuAttackEffects attack, GpuDesignators designators, GpuTerrainEffects fire,
+          GpuWaterImpacts splashes, GpuJumpJets jets) {
+        attack.prepare();
+        designators.prepare();
+        if (fire != null) { fire.prepare(); }
+        if (splashes != null) { splashes.prepare(); }
+        jets.prepare();
+    }
+
     /** Covers this frame, drawn for its programs alone, with the loading stage and readies the next one (WarmUp). */
     private void warmUp(boolean detailChanged) {
         switch (warmUp) {
@@ -1215,11 +1228,9 @@ class GpuBattleView extends ApplicationAdapter {
                 // with the flamers that carry them; star shells, ECM fields, the deployment tint and fire or smoke a
                 // board gains later, which last while they show, when they first appear.
                 GpuGlsl.offscreen(() -> {
-                    attackEffects.prepare();
-                    designators.prepare();
-                    if (scene.tiles().stream().anyMatch(tile -> tile.fireSmoke().present())) { terrainEffects.prepare(); }
-                    if (terrain.hasWater()) { waterImpacts.prepare(); }
-                    jumpJets.prepare();
+                    prepareEffects(attackEffects, designators,
+                          scene.tiles().stream().anyMatch(tile -> tile.fireSmoke().present()) ? terrainEffects : null,
+                          terrain.hasWater() ? waterImpacts : null, jumpJets);
                     atmosphere.prepare();
                     terrain.prepareEffects();
                 });

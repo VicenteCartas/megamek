@@ -22,8 +22,9 @@ import megamek.common.board.HexAppearance;
  * stands in the wall of its hex's footprint towards its hexside, as high as its levels less a lintel. Where a hex has
  * doors its kit pieces are merged into a mesh of its own, cut open over each door ({@link #model}), and the door is
  * generated there from the kit variant's {@link Style}: a frame (jambs where the door ends, a header across), a leaf of
- * horizontal panels set back in it, and a threshold. Doors of one height side by side along a straight wall, in one hex
- * or two, are one wide door: jambs stand only at its ends, each hex's part a leaf of its own.
+ * horizontal panels set back in it, and a threshold. Linked doors ({@link HexAppearance#doorLinks}) side by side along
+ * a straight wall, in one hex or two, are one wide door: jambs stand only at its ends, each hex's part a leaf of its
+ * own. Doors that are not linked, and linked ones that meet at a bend of the wall, each keep their jambs.
  */
 final class KitDoors {
     private static final float[] WHITE = { 1, 1, 1 }, SEAM = { .16f, .16f, .17f };
@@ -94,8 +95,11 @@ final class KitDoors {
     record Frame(boolean square, double bandEnd, float scale, double cornerRadius, int cornerSegments, Style style,
           List<ModelData> modelled) { }
 
-    /** A door's part of a hex's wall, from p to q with the building on its left; whether each end is a corner of the wall. */
-    record Slice(double[] p, double[] q, int levels, boolean cornerStart, boolean cornerEnd) {
+    /**
+     * A door's part of a hex's wall, from p to q with the building on its left; its link {@code group} (0: none);
+     * whether each end is a corner of the wall.
+     */
+    record Slice(double[] p, double[] q, int levels, int group, boolean cornerStart, boolean cornerEnd) {
         double length() { return Math.hypot(q[0] - p[0], q[1] - p[1]); }
     }
 
@@ -129,7 +133,7 @@ final class KitDoors {
         return false;
     }
 
-    /** Whether a door of {@code slice}'s height goes straight on from its start or end: in its own hex, or the next. */
+    /** Whether a door linked to {@code slice} goes straight on from its start or end: in its own hex, or the next. */
     private static boolean goesOn(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature, Slice slice,
           boolean forward, Map<Coords, List<Slice>> known) {
         double[] at = forward ? slice.q() : slice.p(), u = direction(slice);
@@ -149,7 +153,8 @@ final class KitDoors {
     private static boolean meets(List<Slice> others, Slice slice, double[] at, double[] u, boolean forward, double dx, double dy) {
         for (Slice other : others) {
             double[] end = forward ? other.p() : other.q(), v = direction(other);
-            if (other != slice && other.levels() == slice.levels() && u[0] * v[0] + u[1] * v[1] > .999
+            if (other != slice && slice.group() > 0 && other.group() == slice.group() && other.levels() == slice.levels()
+                  && u[0] * v[0] + u[1] * v[1] > .999
                   && Math.hypot(end[0] + dx - at[0], end[1] + dy - at[1]) < TOUCH) { return true; }
         }
         return false;
@@ -161,7 +166,7 @@ final class KitDoors {
     }
 
     /** A hex's kit building, or null: no placed object, wall or structure of another kind. */
-    private static BoardScene.Feature building(BoardScene.Tile tile) {
+    static BoardScene.Feature building(BoardScene.Tile tile) {
         for (var feature : tile.features()) {
             if (feature.kind() == BoardScene.FeatureKind.BUILDING && feature.decoration() == null) { return feature; }
         }
@@ -177,7 +182,7 @@ final class KitDoors {
             int storeys = Math.max(1, Math.round(feature.height())), mask = 0;
             int[] reach = ConnectedKit.reach(scene, tile, storeys);
             for (int side = 0; side < 6; side++) { if (reach[side] > 0) { mask |= 1 << side; } }
-            return slices(frame, mask, heights, storeys);
+            return slices(frame, mask, heights, HexAppearance.doorLinks(tile.appearance()), storeys);
         });
     }
 
@@ -198,9 +203,9 @@ final class KitDoors {
      * The door of each hexside with a height in {@code heights} that {@code mask} (the hex's connections) leaves a wall
      * on: the longest straight stretch of the footprint's walls within the hexside's sixth of the hex (the wall most
      * towards it, then the one clockwise, where two are as long); with a remainder of its wall no longer than
-     * {@link #SHORT} beside it, that too.
+     * {@link #SHORT} beside it, that too. {@code groups}: each door's link group.
      */
-    static List<Slice> slices(Frame frame, int mask, int[] heights, int storeys) {
+    static List<Slice> slices(Frame frame, int mask, int[] heights, int[] groups, int storeys) {
         List<double[][]> runs = null;
         List<Slice> result = new ArrayList<>();
         for (int side = 0; side < 6; side++) {
@@ -239,7 +244,7 @@ final class KitDoors {
             if (best == null) { continue; }
             double[] p = KitOutline.lerp(best[0], best[1], from), q = KitOutline.lerp(best[0], best[1], to);
             // A wall that ends on the hex's outline goes on in the next hex: no corner.
-            result.add(new Slice(p, q, Math.min(heights[side], storeys), from == 0 && KitOutline.insideHex(p[0], p[1]) > TOUCH * H,
+            result.add(new Slice(p, q, Math.min(heights[side], storeys), groups[side], from == 0 && KitOutline.insideHex(p[0], p[1]) > TOUCH * H,
                   to == 1 && KitOutline.insideHex(q[0], q[1]) > TOUCH * H));
         }
         return result;

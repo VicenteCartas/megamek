@@ -26,7 +26,7 @@ class KitDoorsTest {
 
     @Test
     void aLoneSquareHexsNorthDoorTakesItsWholeNorthWall() {
-        var slices = KitDoors.slices(square().doors(), 0, new int[] { 3, 0, 0, 0, 0, 0 }, 5);
+        var slices = KitDoors.slices(square().doors(), 0, new int[] { 3, 0, 0, 0, 0, 0 }, new int[6], 5);
         assertEquals(1, slices.size());
         var door = slices.getFirst();
         // Along the wall with the building on its left: the north wall runs east to west.
@@ -39,7 +39,7 @@ class KitDoorsTest {
     @Test
     void aColumnsEastDoorsAreTheHalvesOfItsWallAndADoorIsNoHigherThanItsHex() {
         int north = 1, south = 1 << 3;
-        var slices = KitDoors.slices(square().doors(), north | south, new int[] { 2, 9, 9, 0, 0, 0 }, 4);
+        var slices = KitDoors.slices(square().doors(), north | south, new int[] { 2, 9, 9, 0, 0, 0 }, new int[6], 4);
         // The north side continues the building: no wall, no door.
         assertEquals(2, slices.size());
         var northEast = slices.get(0);

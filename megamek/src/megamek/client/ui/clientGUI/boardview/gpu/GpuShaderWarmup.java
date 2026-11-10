@@ -35,6 +35,7 @@ import javax.swing.SwingUtilities;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
+import com.badlogic.gdx.utils.Disposable;
 import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
@@ -52,7 +53,8 @@ import org.lwjgl.system.Platform;
  * Links a board's costliest programs, its terrain's, before any board opens. While the window shows a menu (the start
  * screen, the lobby), a process of its own ({@link #main}) prepares boards' terrain as a board's loading stage does and
  * leaves the binaries in the program cache, where a game's loading stage, the lobby's map preview and the editor take
- * them in a few milliseconds each. First the boards likely next ({@link #prepare}): the last one shown, the lobby's, a
+ * them in a few milliseconds each. First combat's effects, which every game links (GpuBattleView#prepareEffects), in
+ * a second or so; then the boards likely next ({@link #prepare}): the last one shown, the lobby's, a
  * scenario's. Then one sample board per theme, which holds every component, preset and look of the editor's blueprint,
  * for every lighting configuration a board can have ({@link Lighting}). All with the saved Display settings. Nothing
  * links in the game's process, so no frame waits for it.
@@ -64,8 +66,8 @@ import org.lwjgl.system.Platform;
  * <p>
  * Each board's family programs (GpuFamilyPrograms), the blends' above all, are prepared with its generic ones, all of
  * them: a game builds only a few each load, or links them during play. Not prepared: programs a board finds only by
- * drawing (units, shadows, effects), which link in its loading stage as before. Without program binaries (macOS may
- * offer none) nothing is prepared.
+ * drawing (units, shadows, the atmosphere's), which link in its loading stage as before. Without program binaries
+ * (macOS may offer none) nothing is prepared.
  */
 final class GpuShaderWarmup {
     private static final MMLogger LOGGER = MMLogger.create(GpuShaderWarmup.class);
@@ -77,7 +79,7 @@ final class GpuShaderWarmup {
      */
     static final String STEPS_PROPERTY = "megamek.gpu.shaderWarmupSteps";
     /** Part of the fingerprint: raise it when the steps or what they prepare change, so a finished warm-up runs again. */
-    private static final int PLAN = 1;
+    private static final int PLAN = 2;
     private static final String READY = "READY", MISMATCH = "MISMATCH", STEP = "STEP ", DONE = "DONE", FAILED = "FAILED ";
     /** Process ends before its last step that this run accepts; then it prepares nothing more. */
     private static final int ATTEMPTS = 3;
@@ -135,8 +137,11 @@ final class GpuShaderWarmup {
         }
     }
 
-    /** A theme's sample board, or a board asked for by name with the air it has. */
+    /** A theme's sample board, or a board asked for by name with the air it has; or combat's effects. */
     private record Step(Lighting lighting, String theme, Path board, boolean vacuum, boolean weightless) {
+        /** Combat's effects, of no board or lighting: {@link Effects}. */
+        static final Step EFFECTS = new Step(null, "effects");
+
         Step(Lighting lighting, String theme) { this(lighting, theme, null, false, false); }
 
         /** A board asked for, its kind and air in its name ({@link #prepare}); null for another file. */
@@ -148,12 +153,37 @@ final class GpuShaderWarmup {
         }
 
         String id() {
-            return board != null ? "board/" + name(board) : lighting.name().toLowerCase(Locale.ROOT) + "/" + theme;
+            return board != null ? "board/" + name(board)
+                  : lighting == null ? theme : lighting.name().toLowerCase(Locale.ROOT) + "/" + theme;
         }
 
         private static String name(Path board) {
             String file = board.getFileName().toString();
             return file.substring(0, file.length() - ".board2".length());
+        }
+    }
+
+    /** A game's combat effects, made for their programs alone, and the preparation that links those off the frame. */
+    private record Effects(GpuAttackEffects attack, GpuDesignators designators, GpuTerrainEffects fire,
+          GpuWaterImpacts splashes, GpuJumpJets jets, GpuGlsl.Preparation links) implements Disposable {
+        Effects() {
+            this(new GpuAttackEffects(), new GpuDesignators(), new GpuTerrainEffects(), new GpuWaterImpacts(),
+                  new GpuJumpJets(), new GpuGlsl.Preparation());
+        }
+
+        /** Whether every program is linked; false while a link runs. */
+        boolean linked() {
+            return links.run(() -> GpuBattleView.prepareEffects(attack, designators, fire, splashes, jets));
+        }
+
+        @Override
+        public void dispose() {
+            attack.dispose();
+            designators.dispose();
+            fire.dispose();
+            splashes.dispose();
+            jets.dispose();
+            links.dispose();
         }
     }
 
@@ -806,6 +836,8 @@ final class GpuShaderWarmup {
         private GpuTerrain terrain;
         private GpuAtmosphere atmosphere;
         private GpuAmbientOcclusion occlusion;
+        /** While {@link Step#EFFECTS} links. */
+        private Effects effects;
 
         Worker(Path directory, int glsl, String fingerprint, String driver, BoardDisplaySettings display,
               BoardGraphics graphics, PrintStream answers) {
@@ -850,8 +882,12 @@ final class GpuShaderWarmup {
             }
         }
 
-        /** The next step not done: a board asked for, newest first, else the next sample board; null when none is left. */
+        /**
+         * The next step not done: combat's effects, a board asked for, newest first, else the next sample board; null
+         * when none is left.
+         */
         private Step next() throws IOException {
+            if (wanted(Step.EFFECTS)) { return Step.EFFECTS; }
             for (Path board : requests(GpuGlsl.programCache)) {
                 Step step = Step.of(board);
                 if (step != null && wanted(step)) { return step; }
@@ -886,8 +922,15 @@ final class GpuShaderWarmup {
                     begin(step);
                     return;
                 }
-                terrain.refine(null, true);
-                if (!terrain.busy() && !terrain.familiesPending()) {
+                boolean ready;
+                if (current == Step.EFFECTS) {
+                    ready = effects.linked();
+                } else {
+                    terrain.refine(null, true);
+                    ready = !terrain.busy() && !terrain.familiesPending();
+                }
+                if (ready) {
+                    if (effects != null) { effects.dispose(); effects = null; }
                     long written = GpuGlsl.programCache.unpruned();
                     finish(current, written - stored);
                     int count = GpuGlsl.programCache.stored.get();
@@ -928,6 +971,10 @@ final class GpuShaderWarmup {
         private void begin(Step step) throws IOException {
             current = step;
             started = System.nanoTime();
+            if (step == Step.EFFECTS) {
+                effects = new Effects();
+                return;
+            }
             if (step.lighting() != lighting) {
                 release();
                 lighting = step.lighting();
@@ -962,6 +1009,7 @@ final class GpuShaderWarmup {
         }
 
         private void release() {
+            if (effects != null) { effects.dispose(); effects = null; }
             if (terrain != null) { terrain.dispose(); terrain = null; }
             if (atmosphere != null) { atmosphere.dispose(); atmosphere = null; }
             if (occlusion != null) { occlusion.dispose(); occlusion = null; }

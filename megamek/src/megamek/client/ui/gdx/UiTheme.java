@@ -164,6 +164,8 @@ public final class UiTheme implements Disposable {
           Map.entry("target", 0xE1B3), Map.entry("move", 0xE569), Map.entry("group", 0xE241),
           Map.entry("orders", 0xE241), Map.entry("info", 0xE88E), Map.entry("unit", 0xE9E0),
           Map.entry("hex", 0xEB39), Map.entry("close", 0xE5CD), Map.entry("search", 0xE8B6),
+          // link, link_off: two doors of a building as one opening, or apart (the editor's building designer)
+          Map.entry("link", 0xE157), Map.entry("link-off", 0xE16F),
           Map.entry("arrow", 0xE5CC), Map.entry("lock", 0xE897), Map.entry("unlock", 0xE898), Map.entry("checkbox-off", 0xE835),
           // A password's reveal button: visibility while hidden, visibility_off while shown
           Map.entry("show", 0xE8F4), Map.entry("hide", 0xE8F5),

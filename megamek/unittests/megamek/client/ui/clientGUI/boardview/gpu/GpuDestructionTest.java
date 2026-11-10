@@ -113,8 +113,10 @@ class GpuDestructionTest {
         run(destruction, .5f);
         destruction.dust(effects);
         assertEquals(1, effects.size(), "One cloud for both");
-        run(destruction, 4.5f);
-        assertTrue(destruction.isEmpty(), "Both piles have sunk");
+        for (float elapsed = .5f; !destruction.isEmpty(); elapsed += FRAME) {
+            assertTrue(elapsed < GpuDestruction.CLOUD_SECONDS, "Both piles sink before their dust has cleared");
+            destruction.advance(FRAME, 1, 0, 0);
+        }
         effects.begin();
         destruction.dust(effects);
         assertEquals(1, effects.size(), "Their dust still hangs there");

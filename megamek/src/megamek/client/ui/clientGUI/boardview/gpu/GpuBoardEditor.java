@@ -2050,21 +2050,32 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
 
     /**
-     * A hangar's large doors ({@link megamek.common.board.HexAppearance#doors}): the hex's sides, each a door or none (a
-     * click on a side adds one as high as the building, or takes it away), and each door's height in levels. Shown for
-     * a building of the hangar class, and for any that has doors.
+     * A hangar's large doors ({@link megamek.common.board.HexAppearance#doors}) at the selected hex: its sides, each a
+     * door or none (a click on a side adds one as high as the building, or takes it away; doors that are not one
+     * opening are drawn apart), each door's height in levels, and for each pair of doors that meet at a corner, in
+     * this hex or the next, whether they are one opening ({@link megamek.common.board.BoardDoors}). The building's
+     * designer edits the same on the building itself ({@link GpuBuildingDesigner}). Shown for a building of the hangar
+     * class, and for any that has doors.
      */
     private void buildingDoors() {
+        var plan = snapshot.doors();
+        if (plan.sides().isEmpty()) { return; }
         int[] doors = megamek.common.board.HexAppearance.doors(snapshot.appearance());
-        var buildingClass = snapshot.property("bldg_class");
-        int mask = 0;
+        int mask = 0, parted = 0;
         for (int side = 0; side < 6; side++) { if (doors[side] > 0) { mask |= 1 << side; } }
-        if (mask == 0 && (buildingClass == null || buildingClass.value() != megamek.common.units.IBuilding.HANGAR)) { return; }
+        var here = plan.joints().stream().filter(joint -> joint.hex().equals(snapshot.selected())
+              || joint.otherHex().equals(snapshot.selected())).toList();
+        for (var joint : here) {
+            // Two sides of this hex, side by side: the corner after the first of them, clockwise.
+            if (!joint.linked() && joint.hex().equals(joint.otherHex())) {
+                parted |= 1 << ((joint.side() + 1) % 6 == joint.otherSide() ? joint.side() : joint.otherSide());
+            }
+        }
         var storeys = snapshot.property("bldg_elev");
         int height = storeys == null ? 1 : Math.max(1, storeys.value());
         heading(UiKit.text("BoardEditor.doors"));
         UiHexSides sides = new UiHexSides(ui, mask, side -> send(Action.BUILDING_DOOR, Integer.toString(side),
-              Integer.toString(doors[side] > 0 ? 0 : height)));
+              Integer.toString(doors[side] > 0 ? 0 : height))).parted(parted);
         sides.setName("editor-building-doors");
         ui.tip(sides).getActor().setText(UiKit.text("BoardEditor.doors.tooltip"));
         detail.add(sides).row();
@@ -2073,6 +2084,19 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
                 number(UiKit.text("BoardEditor.doorHeight", UiKit.text("BoardEditor.doorSide." + side)), Math.min(doors[side], height),
                       1, height, 1, Action.BUILDING_DOOR, Integer.toString(side));
             }
+        }
+        for (var joint : here) {
+            // This hex's door first; the other by its hex where it is another's.
+            boolean first = joint.hex().equals(snapshot.selected());
+            Coords otherHex = first ? joint.otherHex() : joint.hex();
+            int own = first ? joint.side() : joint.otherSide(), other = first ? joint.otherSide() : joint.side();
+            String name = UiKit.text("BoardEditor.doorSide." + other);
+            if (!otherHex.equals(snapshot.selected())) { name = otherHex.getBoardNum() + " " + name; }
+            choose(UiKit.text("BoardEditor.doorLink", UiKit.text("BoardEditor.doorSide." + own), name),
+                  UiKit.text(joint.linked() ? "BoardEditor.doorLink.linked" : "BoardEditor.doorLink.separate"),
+                  List.of(new Option(UiKit.text("BoardEditor.doorLink.linked"), "true"),
+                        new Option(UiKit.text("BoardEditor.doorLink.separate"), "false")),
+                  id -> send(Action.BUILDING_DOOR_LINK, joint.target(), id));
         }
     }
 

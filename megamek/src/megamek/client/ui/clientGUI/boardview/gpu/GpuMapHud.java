@@ -45,6 +45,8 @@ final class GpuMapHud implements GpuBoardHud {
     private final Stage stage;
     private final GpuBoardEditor editor;
     private final GpuEditorNorth north;
+    /** Below the editor's panels, as the north marker is: a panel over the building covers its handles. */
+    private final GpuBuildingDesigner designer;
     private final BoardSource source;
     private final BoardCamera camera;
     private final GpuBoardTuning tuningModel;
@@ -93,7 +95,11 @@ final class GpuMapHud implements GpuBoardHud {
         state = new GpuHudState(history);
         stage = new Stage(new ScreenViewport(), batch);
         north = source.isEditor() ? new GpuEditorNorth(ui) : null;
-        if (north != null) { stage.addActor(north); }
+        designer = source.isEditor() ? new GpuBuildingDesigner(ui) : null;
+        if (north != null) {
+            stage.addActor(north);
+            stage.addActor(designer);
+        }
 
         isometric = GpuUtilityBar.cameraButtons(ui, utilityRow, camera, () -> {
             if (scene != null) { camera.fit(scene, framingLeft(), framingWidth(), framingBottom(), framingTop()); }
@@ -232,6 +238,8 @@ final class GpuMapHud implements GpuBoardHud {
         } else {
             editor.update(frame.boardGeneration());
             north.update(scene, source.editorState() == null ? null : source.editorState().selected(), camera);
+            long generation = frame.boardGeneration();
+            designer.update(scene, source.editorState(), camera, command -> source.editorCommand(command, generation));
             // Keep the shared ruler in the editor's board area, clear of its columns, toolbar and corner panels.
             float left = GpuBoardEditor.LIBRARY_WIDTH + 2 * GAP;
             float right = metrics.width() - GpuBoardEditor.INSPECTOR_WIDTH - 2 * GAP;

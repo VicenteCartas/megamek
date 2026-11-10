@@ -366,34 +366,55 @@ public record HexAppearance(String variant, String asset, String material, Doubl
     /**
      * A building hex's large doors (owner {@code "doors"}), as a hangar has them: each door's height in levels from the
      * ground, by the hexside it stands on, clockwise from north; 0 for none. A door stands in the kit's wall towards
-     * its hexside; doors of one height side by side along a straight wall, in this hex or the next, are one wide door.
-     * Cosmetic for now, like the {@link Footprint}: the 3D views draw them; rules and the 2D views ignore them.
+     * its hexside. Doors that meet at a corner, in this hex or the next, are one opening when they are linked
+     * ({@link #doorLinks}, {@link BoardDoors}). Cosmetic for now, like the {@link Footprint}: the 3D views draw them;
+     * rules and the 2D views ignore them.
      */
     public static int[] doors(Map<String, HexAppearance> appearance) {
+        return doorValues(appearance, 0);
+    }
+
+    /**
+     * Each door's link group by its hexside, 0 for a door of its own: doors of one building with the same group are
+     * one opening, as {@code BuildingDesign.Door#linkGroup} of the building rules has it.
+     */
+    public static int[] doorLinks(Map<String, HexAppearance> appearance) {
+        return doorValues(appearance, 1);
+    }
+
+    /** The variant is {@code doors/} and the six heights, then, with any linked, {@code /} and the six groups. */
+    private static int[] doorValues(Map<String, HexAppearance> appearance, int part) {
         HexAppearance stored = appearance.get("doors");
         int[] result = new int[6];
         if (stored == null || stored.variant() == null || !stored.variant().startsWith(DOORS)) { return result; }
-        String[] heights = stored.variant().substring(DOORS.length()).split("-");
-        for (int side = 0; side < 6 && side < heights.length; side++) {
+        String[] parts = stored.variant().substring(DOORS.length()).split("/");
+        if (part >= parts.length) { return result; }
+        String[] values = parts[part].split("-");
+        for (int side = 0; side < 6 && side < values.length; side++) {
             try {
-                result[side] = Math.max(0, Integer.parseInt(heights[side]));
+                result[side] = Math.max(0, Integer.parseInt(values[side]));
             } catch (NumberFormatException ignored) {
-                // A height that is no number is no door.
+                // A value that is no number is no door, or no link.
             }
         }
         return result;
     }
 
-    /** The appearance that stores the door {@code heights} of the six hexsides ({@link #doors}); null for none. */
-    public static HexAppearance ofDoors(int[] heights) {
-        StringBuilder variant = new StringBuilder(DOORS);
-        boolean any = false;
+    /**
+     * The appearance that stores the door {@code heights} of the six hexsides and their link {@code groups}
+     * ({@link #doors}, {@link #doorLinks}); null for no door. A side without a door has no group.
+     */
+    public static HexAppearance ofDoors(int[] heights, int[] groups) {
+        StringBuilder variant = new StringBuilder(DOORS), links = new StringBuilder("/");
+        boolean any = false, linked = false;
         for (int side = 0; side < 6; side++) {
-            int height = Math.max(0, heights[side]);
+            int height = Math.max(0, heights[side]), group = height > 0 ? Math.max(0, groups[side]) : 0;
             any |= height > 0;
+            linked |= group > 0;
             variant.append(side == 0 ? "" : "-").append(height);
+            links.append(side == 0 ? "" : "-").append(group);
         }
-        return any ? new HexAppearance(variant.toString(), null, null, null) : null;
+        return any ? new HexAppearance(linked ? variant.append(links).toString() : variant.toString(), null, null, null) : null;
     }
 
     public static final HexAppearance EDGES_FITTED = new HexAppearance("pavement/fitted", null, null, null);

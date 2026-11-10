@@ -46,7 +46,7 @@ final class GpuExplosionEffects implements Disposable {
         final Vector3 center = new Vector3();
         final Vector3 axis = new Vector3();
         float radius, age, fire, alpha, seed, depth, stretch, elongation;
-        /** A dust cloud's surge front, surge height, column radius and column height, in radii; zero for a round volume. */
+        /** A dust cloud's front, thickness there, column radius and top, in radii; zero for a round volume. */
         final float[] cloud = new float[4];
         float grain;
         boolean visible, sharp;
@@ -137,22 +137,21 @@ final class GpuExplosionEffects implements Disposable {
     }
 
     /**
-     * A structure's dust as one volume standing on the ground at {@code foot}: a surge spread out to {@code front}
-     * from there (0 for none) and {@code surge} thick, tallest at its rolling front, and a column {@code column} across
-     * and {@code top} tall over the foot. Its billows are round whatever its proportions and grow with it: a tenth
-     * of its radius deep, and {@code grain} times finer (a cloud over many hexes billows no larger than one over one).
+     * A structure's dust as one mound standing on the ground at {@code foot}: {@code surge} thick out to its
+     * {@code front}, whose reach differs by bearing, and rising to {@code top} over the foot, {@code column} across
+     * there. Its billows are {@code bulb} wide and round whatever its proportions.
      */
-    void addCloud(Vector3 foot, float front, float surge, float column, float top, float grain, float age, float alpha,
+    void addCloud(Vector3 foot, float front, float surge, float column, float top, float bulb, float age, float alpha,
           int seed, Look look) {
-        // Room for the front's lobes and the billows standing out of both shapes.
-        float radius = 1.45f * Math.max(front, column), height = Math.max(front > 0 ? surge : 0, top) + .16f * radius;
+        // Room for the front's lobes and the billows standing out of the mound.
+        float radius = 1.22f * Math.max(front, column) + .55f * bulb, height = Math.max(surge, top) + .55f * bulb;
         Volume volume = add(foot, radius, age, 0, alpha, seed, look, Vector3.Z, height / radius - 1);
         if (volume == null) { return; }
         volume.cloud[0] = front / radius;
         volume.cloud[1] = surge / radius;
         volume.cloud[2] = column / radius;
         volume.cloud[3] = top / radius;
-        volume.grain = grain;
+        volume.grain = radius / (3.5f * bulb);
     }
 
     /** One volume drawn out along the unit {@code axis} by {@code elongation}: above 0 stretches, below 0 squashes. */
@@ -181,10 +180,11 @@ final class GpuExplosionEffects implements Disposable {
 
     /** Links its program now (GpuBattleView's warm-up), not at the first blast in play. */
     void prepare() {
+        // First, so that a link still running (the shader warm-up's) leaves nothing half made here.
+        layer.prepare();
         if (shader != null) { return; }
         shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU explosion",
               GpuShaderSource.read("explosion.vert"), GpuEffectBatch.fragment("explosion.frag")), next -> shader = next);
-        layer.prepare();
         noise = GpuAtmosphere.noise();
         // The same unit cube bounds every analytic volume. Allocate/upload once, then move it with uniforms.
         proxy = new Mesh(true, 8, 36, VertexAttribute.Position());

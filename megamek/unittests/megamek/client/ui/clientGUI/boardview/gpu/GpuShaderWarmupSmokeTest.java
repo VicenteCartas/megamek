@@ -55,6 +55,37 @@ class GpuShaderWarmupSmokeTest {
         warmThenPlay("none", BoardFile.loadSheet(GRASSLAND, false, true), true, false);
     }
 
+    /** Combat's effects alone: a game's loading stage then takes every one of their programs from the cache. */
+    @Test
+    void combatEffectsLinkAhead() throws Exception {
+        withWarmup("effects", cache -> new Menu() {
+            @Override
+            void frame(long now) {
+                if (!GpuShaderWarmup.finished() || GpuShaderWarmup.busy()) {
+                    assertTrue(now - started < WARMUP_NANOS, "The warm-up did not finish");
+                    return;
+                }
+                int stored = GpuGlsl.programCache.stored.get();
+                var attack = new GpuAttackEffects();
+                var designators = new GpuDesignators();
+                var fire = new GpuTerrainEffects();
+                var splashes = new GpuWaterImpacts();
+                var jets = new GpuJumpJets();
+                try {
+                    GpuGlsl.offscreen(() -> GpuBattleView.prepareEffects(attack, designators, fire, splashes, jets));
+                    assertEquals(stored, GpuGlsl.programCache.stored.get(), "Effect programs the game linked itself");
+                } finally {
+                    attack.dispose();
+                    designators.dispose();
+                    fire.dispose();
+                    splashes.dispose();
+                    jets.dispose();
+                }
+                Gdx.app.exit();
+            }
+        }.run());
+    }
+
     /**
      * A board drawn inside a menu (the lobby's map preview) ends the warm-up's process at once, nothing starts it while
      * boards keep drawing, and it goes on a moment after the last.
