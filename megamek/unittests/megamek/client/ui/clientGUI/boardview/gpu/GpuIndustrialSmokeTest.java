@@ -144,19 +144,17 @@ class GpuIndustrialSmokeTest {
                         var center = BoardGeometry.center(coords, 0);
                         var equipment = BoardIndustrialTest.layout(scene, coords).equipment().getFirst();
                         var unit = new ModelInstance(marker, new Vector3(center).add(0, 0, 6));
-                        for (float hover : new float[] { 0, 3 * BoardGeometry.level() }) {
-                            terrain.animate(0, List.of(unit), .15f, coords, hover);
-                            var ray = new Ray(new Vector3(center).add(equipment.x() * BoardGeometry.hexScale(),
-                                  equipment.y() * BoardGeometry.hexScale(), 400),
-                                  new Vector3(0, 0, -1));
-                            var selection = terrain.selectionHit(scene, ray);
-                            assertNotNull(selection);
-                            assertEquals(coords, selection.coords());
-                            assertEquals(400, Math.sqrt(selection.distance()), .15f, "Hover passes through machinery to ground");
-                            var physical = terrain.hit(scene, ray);
-                            assertNotNull(physical);
-                            assertTrue(physical.distance() < selection.distance() - 1, "Effects still hit the physical equipment");
-                        }
+                        terrain.animate(0, List.of(unit), .15f);
+                        var ray = new Ray(new Vector3(center).add(equipment.x() * BoardGeometry.hexScale(),
+                              equipment.y() * BoardGeometry.hexScale(), 400),
+                              new Vector3(0, 0, -1));
+                        var selection = terrain.selectionHit(scene, ray);
+                        assertNotNull(selection);
+                        assertEquals(coords, selection.coords());
+                        assertEquals(400, Math.sqrt(selection.distance()), .15f, "Hover passes through machinery to ground");
+                        var physical = terrain.hit(scene, ray);
+                        assertNotNull(physical);
+                        assertTrue(physical.distance() < selection.distance() - 1, "Effects still hit the physical equipment");
                     }
                     checkNoCutaways(terrain);
                     frame.render(terrain, camera, scene);
@@ -192,12 +190,15 @@ class GpuIndustrialSmokeTest {
             terrain.setColumns(false);
             BoardScene connected = scene(4);
             terrain.update(connected);
+            // Until the 3D terrain is installed again a pick finds nothing.
+            GpuReviewFrame.settle(terrain, null, connected, camera);
             var port = BoardIndustrialTest.layout(connected, SITES.getFirst()).ports().getFirst();
             var joint = BoardGeometry.center(SITES.getFirst(), 0).add(port.x() - port.dx() * .5f, port.y() - port.dy() * .5f, 0);
             var ray = new Ray(joint.add(0, 0, 400), new Vector3(0, 0, -1));
             float before = terrain.hit(connected, ray).distance();
             BoardScene isolated = scene(4, false);
             terrain.update(isolated);
+            GpuReviewFrame.settle(terrain, null, isolated, camera);
             assertTrue(terrain.hit(isolated, ray).distance() > before + 1,
                   "Removing a neighbor rebuilds the surviving installation without its connecting pipe");
         } finally {
@@ -215,11 +216,9 @@ class GpuIndustrialSmokeTest {
             for (Object prop : (List<?>) GpuTestSupport.field(chunk, "cutaways")) {
                 count++;
                 assertTrue((boolean) GpuTestSupport.field(prop, "industrial"));
-                assertNull(GpuTestSupport.field(prop, "hoverOpaque"));
                 var instance = (ModelInstance) GpuTestSupport.field(prop, "instance");
                 for (var material : instance.materials) {
                     assertFalse(material.has(BlendingAttribute.Type));
-                    assertFalse(material.has(GpuBuildingCutaway.TYPE));
                 }
                 assertNull(GpuTestSupport.field(prop, "building"));
             }

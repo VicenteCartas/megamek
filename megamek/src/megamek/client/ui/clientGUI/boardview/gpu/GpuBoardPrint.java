@@ -234,7 +234,7 @@ final class GpuBoardPrint implements Disposable {
         BoardScene scene = terrain.presentation(request.scene());
         // A draw whose program still links skips this tile (GpuShaderProvider): it is drawn again next frame.
         int skipped = GpuShaderProvider.unlinkedDraws();
-        // No hover cutaway, editor selection, trace image or HUD belongs to a printed board.
+        // No cutaway, editor selection, trace image or HUD belongs to a printed board.
         terrain.animate(0, List.of(), 1);
         terrain.renderShadows(List.of());
         atmosphere.setPrintTile(x, y, width, height, printWidth, printHeight);

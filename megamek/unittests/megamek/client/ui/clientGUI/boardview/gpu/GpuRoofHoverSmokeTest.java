@@ -77,8 +77,6 @@ class GpuRoofHoverSmokeTest {
         var camera = view.boardCamera.camera;
         var bounds = terrain.roofBounds(CENTER);
         var input = (InputProcessor) field(view, "boardInput");
-        var floor = GpuBattleView.class.getDeclaredMethod("hoverFloorZ");
-        floor.setAccessible(true);
         float roofZ = 5 * BoardGeometry.level();
         int checked = 0, wrong = 0;
         float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
@@ -102,15 +100,11 @@ class GpuRoofHoverSmokeTest {
                 low = Math.min(low, (float) field(view, "hoverZ"));
                 high = Math.max(high, (float) field(view, "hoverZ"));
                 checked++;
-                if ((float) floor.invoke(view) != roofZ) { wrong++; }
+                if (GpuLosResult.pointedLevel((float) field(view, "hoverZ")) * BoardGeometry.level() != roofZ) { wrong++; }
             }
         }
         assertTrue(checked > 20, "Sweep must cover the visible roof");
         assertEquals(0, wrong, "Every roof point must select the roof, hit range=" + low + ".." + high);
-        terrain.animate(0, List.of(), .5f, CENTER, (float) floor.invoke(view));
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            assertTrue(((java.util.Set<?>) field(chunk, "faded")).isEmpty(), "Hovering the roof keeps every storey opaque");
-        }
     }
 
     private static void set(GpuBattleView view, String name, Object value) throws Exception {

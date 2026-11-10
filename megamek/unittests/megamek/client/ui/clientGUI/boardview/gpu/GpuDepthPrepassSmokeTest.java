@@ -61,7 +61,7 @@ import org.junit.jupiter.api.io.TempDir;
  * scars over pre-passed ground), the 40 by 40 forest at noon: canopy cards overlapping with different holes,
  * depth-quantised far away where impostors stand, mipmapped close, oblique in free flight, and the 16 by 17 City
  * (Skyscraper) at noon (fitted, middle, far out where its building shells draw without twins; in the middle view
- * buildings whole, a hovered storey, a unit inside, whole again). Also: the colour draws keep
+ * buildings whole, a unit inside, whole again). Also: the colour draws keep
  * their order, the Tactical View and the Classic columns draw no pre-pass, shader edits of the twins fall back safely
  * (checkShaderEdits), and on the stages the driver compiled every twin's vertex stage is its program's, a cutout twin's
  * fragment stage is its program's with the early return, the vertex stage declares the alpha test's inputs invariant,
@@ -570,9 +570,9 @@ class GpuDepthPrepassSmokeTest {
     }
 
     /**
-     * Buildings as hover and occupancy fade them (GpuTerrain.animate), at the building of three or more storeys nearest
-     * the view's centre: a hovered storey, a unit inside, then whole again. Faded storeys blend and stay out of the
-     * pre-pass; every other draw must still match.
+     * Buildings as occupancy fades them (GpuTerrain.animate), at the building of three or more storeys nearest the
+     * view's centre: a unit inside, then whole again. A faded building blends and stays out of the pre-pass; every other
+     * draw must still match.
      */
     private static void checkBuildings(String name, GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera,
           BoardScene scene, View view, GpuStageTimings timings, StringBuilder report, int[] drawn) throws Exception {
@@ -584,10 +584,8 @@ class GpuDepthPrepassSmokeTest {
         GpuCalibrationScenes.settle(terrain, frame, camera, scene);
         try {
             ModelInstance unit = new ModelInstance(box, BoardGeometry.center(tile.coords(), tile.elevation() + 1));
-            for (String state : List.of("hovered", "occupied", "whole again")) {
-                terrain.animate(0, state.equals("occupied") ? List.of(unit) : List.of(),
-                      GpuTerrain.DEFAULT_BUILDING_OPACITY, state.equals("hovered") ? tile.coords() : null,
-                      (tile.elevation() + 1) * BoardGeometry.level());
+            for (String state : List.of("occupied", "whole again")) {
+                terrain.animate(0, state.equals("occupied") ? List.of(unit) : List.of(), GpuTerrain.DEFAULT_BUILDING_OPACITY);
                 GpuCalibrationScenes.settle(terrain, frame, camera, scene);
                 int faded = 0;
                 for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {

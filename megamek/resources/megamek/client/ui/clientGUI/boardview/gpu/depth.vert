@@ -1,6 +1,6 @@
 #version 330 core
 // libGDX 1.14.2's DepthShader vertex stage (Apache License 2.0), converted to core-profile GLSL: shadow
-// casters, the wireframe view and unit outlines. GpuTreeInstances inserts instancing, GpuBuildingCutaway cutaways.
+// casters, the wireframe view and unit outlines. GpuTreeInstances inserts instancing.
 in vec3 a_position;
 uniform mat4 u_projViewWorldTrans;
 

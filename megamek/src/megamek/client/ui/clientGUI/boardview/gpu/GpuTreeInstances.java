@@ -823,25 +823,18 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             protected Shader createShader(Renderable renderable) {
                 boolean instanced = instanced(renderable);
                 DepthShader.Config chosen = instanced ? trees : plain;
-                boolean cutaway = renderable.material.has(GpuBuildingCutaway.TYPE);
                 // A tree impostor's quad turns toward the light and shows its frames (impostor-sample.glsl).
                 boolean impostor = instanced && GpuTerrain.impostor(renderable.material);
                 String vertex = instanced ? trees.vertexShader : plainVertex;
-                String fragment = plainFragment;
-                if (cutaway) {
-                    vertex = GpuBuildingCutaway.depthVertex(vertex, instanced);
-                    fragment = "in float v_buildingHeight;\n" + GpuBuildingCutaway.depthFragment(fragment, "v_buildingHeight");
-                }
                 DepthShader result = new DepthShader(renderable, chosen, GpuGlsl.compile("GPU shadow depth",
                       DepthShader.createPrefix(renderable, chosen) + (impostor ? "#define impostorFlag\n" : ""),
-                      vertex, fragment)) {
+                      vertex, plainFragment)) {
                     @Override
                     public boolean canRender(Renderable other) {
-                        return instanced(other) == instanced && other.material.has(GpuBuildingCutaway.TYPE) == cutaway
+                        return instanced(other) == instanced
                               && (instanced && GpuTerrain.impostor(other.material)) == impostor && super.canRender(other);
                     }
                 };
-                GpuBuildingCutaway.register(result);
                 GpuShadowLight.register(result);
                 registerPiece(result);
                 tables.accept(result);

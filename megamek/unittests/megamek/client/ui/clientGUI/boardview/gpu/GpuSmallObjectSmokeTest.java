@@ -112,7 +112,7 @@ class GpuSmallObjectSmokeTest {
                     checkHysteresis(terrain, camera, profiler, 2 * car);
                     checkShadowRedraws(terrain, camera, profiler, 2 * car);
                     checkOccupiedSmallChunk(terrain, camera, profiler);
-                    checkHoveredBuilding(terrain, camera, profiler, car);
+                    checkOccupiedBuilding(terrain, camera, profiler, car);
                     checkPins(terrain, scene, camera, profiler, car);
                     zoom(camera, 9);
                     camera.setPerspective(true);
@@ -203,14 +203,16 @@ class GpuSmallObjectSmokeTest {
         } finally { box.dispose(); }
     }
 
-    /** The faded car on a hovered building's roof follows the rule in the transparent pass. */
-    private static void checkHoveredBuilding(GpuTerrain game, BoardCamera camera, GLProfiler profiler, int car) {
+    /** The faded car on the roof of a building with a unit inside follows the rule in the transparent pass. */
+    private static void checkOccupiedBuilding(GpuTerrain game, BoardCamera camera, GLProfiler profiler, int car) {
+        var occupant = GpuTestSupport.occupant(ROOF);
         zoom(camera, 9);
-        game.animate(0, List.of(), .5f, ROOF, 0);
+        game.animate(0, List.of(occupant), .5f);
+        occupant.model.dispose();
         assertEquals(car, hiddenTransparent(game, camera, profiler), "The faded roof car hides at 9 px");
         zoom(camera, 14);
         assertEquals(0, hiddenTransparent(game, camera, profiler), "and fades as before at 14 px");
-        game.animate(0, List.of(), .5f, null, Float.NaN);
+        game.animate(0, List.of(), .5f);
     }
 
     /** Selected or hovered objects draw and pick at every zoom; pins never enter the shadow map. */

@@ -79,7 +79,7 @@ class GpuShadingNormalSmokeTest {
                             boolean baseline = Boolean.getBoolean("megamek.gpu.grazingBaseline");
                             mathematicalBoundary(baseline);
                             if (!baseline) { mappedModel(manager); terrainSurfaces(manager); }
-                            proxyAngles(manager, baseline); cutawaySurface(baseline);
+                            proxyAngles(manager, baseline);
                             if (Boolean.getBoolean("megamek.gpu.proxyClumps")) { clumpFrames(manager); }
                         }
                         catch (Throwable error) { failure.set(error); }
@@ -1330,86 +1330,4 @@ class GpuShadingNormalSmokeTest {
     }
 
     private static String fileHash(java.nio.file.Path path) throws Exception { return bytesHash(java.nio.file.Files.readAllBytes(path)); }
-
-    /** Complementary real material clips preserve alpha-tested coverage and the original depth. */
-    private static void cutawaySurface(boolean baseline) throws Exception {
-        var destination = java.nio.file.Path.of(System.getProperty("megamek.gpu.screenshots"), "grazing-cutaway");
-        assertTrue(java.nio.file.Files.notExists(destination), "Preserve previous cutaway evidence");
-        java.nio.file.Files.createDirectories(destination);
-        var preview = new GpuTerrain();
-        var field = GpuTerrain.class.getDeclaredField("batch"); field.setAccessible(true);
-        ModelBatch batch = (ModelBatch) field.get(preview);
-        preview.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0,
-              BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)));
-        var environment = new Environment();
-        for (var attribute : preview.environment()) { environment.set(attribute); }
-        Texture normal = normalTexture();
-        var artwork = new Pixmap(8, 8, Pixmap.Format.RGBA8888);
-        for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++) {
-            artwork.drawPixel(x, y, (x + y) % 3 == 0 ? 0 : 0x709541ff);
-        }
-        Texture color;
-        try { color = new Texture(artwork); } finally { artwork.dispose(); }
-        var model = surfacePlate(new Material("leaf", TextureAttribute.createDiffuse(color),
-              TextureAttribute.createNormal(normal), IntAttribute.createCullFace(GL20.GL_NONE),
-              new com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1),
-              com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute.createAlphaTest(.5f)), false);
-        var foliage = GpuTerrain.class.getDeclaredMethod("foliage", com.badlogic.gdx.graphics.g3d.Model.class);
-        foliage.setAccessible(true); foliage.invoke(null, model);
-        var instance = tilted(model);
-        var camera = new OrthographicCamera(100, 100);
-        camera.position.set(90, 30, 130); camera.up.set(Vector3.Y); camera.lookAt(Vector3.Zero);
-        camera.near = 1; camera.far = 500; camera.update();
-        Runnable draw = () -> { batch.begin(camera); batch.render(instance, environment); batch.end(); };
-        try (var output = new GpuSceneTestOutput(128, 128)) {
-            var frames = new java.util.ArrayList<ProxyFrame>();
-            for (String mode : new String[] { "whole", "inside", "outside" }) {
-                for (Material material : instance.materials) {
-                    material.remove(GpuBuildingCutaway.TYPE);
-                    if (!mode.equals("whole")) { material.set(new GpuBuildingCutaway(-5, 5, mode.equals("inside"))); }
-                }
-                specimenFrame(output, preview, camera, draw);
-                ProxyFrame frame = specimenFrame(output, preview, camera, draw);
-                org.junit.jupiter.api.Assertions.assertArrayEquals(frame.rgba(),
-                      specimenFrame(output, preview, camera, draw).rgba(), "Frozen clipped material");
-                frames.add(frame); saveProxy(output, destination.resolve(mode + ".png"));
-            }
-            int whole = 0, inside = 0, outside = 0;
-            double maximumColorDifference = 0;
-            byte[] mask = new byte[128 * 128];
-            for (int p = 0; p < mask.length; p++) {
-                boolean w = frames.get(0).depth()[p] < 1, i = frames.get(1).depth()[p] < 1;
-                boolean o = frames.get(2).depth()[p] < 1;
-                assertTrue(!(i && o), "Complementary clips cannot double-own a pixel");
-                assertEquals(w, i || o, "Clips retain the complete alpha-tested silhouette");
-                if (!w) { continue; }
-                whole++; mask[p] = 1;
-                if (i) { inside++; } else { outside++; }
-                ProxyFrame part = frames.get(i ? 1 : 2);
-                assertEquals(frames.get(0).depth()[p], part.depth()[p], 0, "Clip retains geometric depth");
-                for (int c = 0; c < 3; c++) {
-                    float expected = frames.get(0).rgba()[p * 4 + c], actual = part.rgba()[p * 4 + c];
-                    maximumColorDifference = Math.max(maximumColorDifference, Math.abs(expected - actual));
-                    if (!baseline) {
-                        // Independent final half-float conversion in two compiled variants can select adjacent values.
-                        double step = Math.max(Math.scalb(1.0, Math.getExponent(Math.max(expected, actual)) - 10),
-                              Math.scalb(1.0, -19));
-                        assertEquals(expected, actual, step * 2, "Late color clip preserves the mapped material frame");
-                    }
-                }
-            }
-            assertTrue(whole > 100 && inside > 100 && outside > 100, "Both real cutaway portions must be visible");
-            var report = new java.util.LinkedHashMap<String, Object>();
-            report.put("baseline", baseline); report.put("whole", whole); report.put("inside", inside);
-            report.put("outside", outside); report.put("coveredDepthMaskSha256", bytesHash(mask));
-            report.put("maximumColorDifference", maximumColorDifference); report.put("camera", camera.combined.val.clone());
-            report.put("scope", "Actual alpha-tested mapped foliage provider plus actual building color-cutaway wrapper. "
-                  + "Complementary coverage/depth are asserted in both versions; repaired mapped color consistency only after repair. "
-                  + "Existing building and vertical-scar integration separately exercise real building/depth/scar assembly.");
-            new com.fasterxml.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter()
-                  .writeValue(destination.resolve("review.json").toFile(), report);
-            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-        } finally { model.dispose(); color.dispose(); normal.dispose(); preview.dispose(); }
-    }
-
 }

@@ -308,12 +308,14 @@ class GpuVerticalScarsSmokeTest {
             assertTrue(differences(clean, pixels()) > 100, "The native model material must display the wall scar");
             GpuReviewFrame.save(new File(output, "building-ac20.png"));
             int masks = terrain.surfaceScars().tileCount();
-            terrain.animate(0, List.of(), .2f, at, BoardGeometry.level() * 2);
+            var occupant = GpuTestSupport.occupant(at);
+            terrain.animate(0, List.of(occupant), .2f);
+            occupant.model.dispose();
             frame.render(terrain, camera, scene);
             int[] cutaway = pixels();
             terrain.setCombatScars(false); frame.render(terrain, camera, scene);
-            assertEquals(0, differences(cutaway, pixels()), "An opened storey must not retain an opaque floating scar");
-            terrain.animate(0, List.of(), .2f, null, Float.NaN);
+            assertEquals(0, differences(cutaway, pixels()), "A building faded around its unit must not retain an opaque floating scar");
+            terrain.animate(0, List.of(), .2f);
             terrain.setCombatScars(true);
             for (int i = 0; i < 4; i++) { frame.render(terrain, camera, scene); }
             assertEquals(masks, terrain.surfaceScars().tileCount(), "Cutaways retain the stored scar images");

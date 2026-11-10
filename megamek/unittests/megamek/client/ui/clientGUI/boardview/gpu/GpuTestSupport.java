@@ -7,7 +7,12 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
 import javax.swing.SwingUtilities;
 
+import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.g3d.Material;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import megamek.common.Configuration;
+import megamek.common.board.Coords;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
@@ -40,6 +45,15 @@ final class GpuTestSupport {
         } catch (ReflectiveOperationException e) {
             throw new AssertionError(name, e);
         }
+    }
+
+    /**
+     * A unit's stand-in on the ground of a hex at level 0, for {@link GpuTerrain#animate}: a building around it turns
+     * see-through. The caller disposes its model.
+     */
+    static ModelInstance occupant(Coords at) {
+        var box = new ModelBuilder().createBox(4, 4, 12, new Material(), VertexAttributes.Usage.Position);
+        return new ModelInstance(box, BoardGeometry.center(at, 0).add(0, 0, 6));
     }
 
     private static Field declared(Object owner, String name) throws NoSuchFieldException {

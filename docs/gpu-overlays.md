@@ -182,17 +182,10 @@ anonymous sensor symbol and from the flat sprite fallback for a missing 3D asset
 
 ## Building cutaways and see-through outlines
 
-A visible unit overlapping a non-tree prop's bounds can fade that prop.
-Hovering a building wall opens only the storey immediately above the highlighted floor plane.
-Its walls use the same opacity as unit-occupied buildings, while its supporting floor and struts remain opaque; other storeys and the roof
-keep their normal appearance. Both cameras use the same snapped height and original picking mesh,
-so opening a wall cannot move the hit to a different floor. Roof hover does not open a cutaway.
-The hover opening also works during unit cutaways, with its supporting floor kept opaque.
-Moving away restores the building unless a unit still requires it to remain faded.
+A visible unit overlapping a non-tree prop's bounds can fade that prop. Hovering opens nothing.
 `GpuTerrain` uses animated bounds, so movement and flight height affect occupancy.
-Walls use the chosen building opacity; interior struts and floors at or below the lowest visible
-occupant remain opaque. Upper floors fade with an opacity one quarter of the way from the wall
-opacity to fully opaque. Moving between floors updates the existing render caches without rebuilding geometry.
+Walls use the chosen building opacity; interior struts remain opaque. All of the hex's floors fade
+together, with an opacity one quarter of the way from the wall opacity to fully opaque.
 Faded surfaces stop writing camera depth, while buildings retain their full
 solid shadows. Leaving the prop restores its ordinary opacity/depth state.
 This is a bounds-based presentation effect, not physical collision.

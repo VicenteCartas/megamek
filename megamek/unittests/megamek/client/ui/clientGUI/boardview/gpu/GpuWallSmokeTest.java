@@ -60,7 +60,7 @@ class GpuWallSmokeTest {
                         frame.prepare(terrain, camera, scene);
                         GpuReviewFrame.settle(terrain, null, scene, camera);
                         assertTrue(terrain.ready(scene));
-                        terrain.animate(0, List.of(), .2f, center, BoardGeometry.level());
+                        terrain.animate(0, List.of(), .2f);
                         for (Coords coords : walls.keySet()) {
                             Vector3 start = BoardGeometry.center(coords, 4).add(.3f, .2f, 40);
                             var ray = new Ray(start, new Vector3(0, 0, -1));
@@ -75,8 +75,6 @@ class GpuWallSmokeTest {
                         for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
                             assertTrue(((List<?>) GpuTestSupport.field(chunk, "struts")).isEmpty(),
                                   "A solid wall has no fabricated building floors or interior struts");
-                            assertNull(GpuTestSupport.field(chunk, "hoverCoords"),
-                                  "Ground beside a wall is not an interior floor to cut away");
                         }
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, classic ? "classic.png" : "enhanced.png"));

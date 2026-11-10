@@ -1075,10 +1075,9 @@ class GpuBattleView extends ApplicationAdapter {
                 occupants.remove(unitInstances.get(unit.id() + ":" + unit.part()));
             }
         }
-        // An occupied or hovered building fades. In the Tactical View, whose ground layer marks its roof, an occupied one
-        // goes altogether, so no token is covered, and hovering opens none.
-        terrain.animate(Gdx.graphics.getDeltaTime(), occupants, boardCamera.tactical() ? 0 : tuning.buildingOpacity(),
-              boardCamera.tactical() || hudUnderPointer() ? null : hovered, hoverFloorZ());
+        // An occupied building fades. In the Tactical View, whose ground layer marks its roof, it goes altogether, so no
+        // token is covered.
+        terrain.animate(Gdx.graphics.getDeltaTime(), occupants, boardCamera.tactical() ? 0 : tuning.buildingOpacity());
         editorPreview.prepare(scene, terrain, ghosts());
         renderStage("geometry shadows");
         // The Tactical View's icons cast nothing.
@@ -2801,11 +2800,6 @@ class GpuBattleView extends ApplicationAdapter {
     /** The camera zoom of {@code notches} of the mouse wheel, on the board and on the minimap. */
     static float wheelZoom(float notches) {
         return (float) Math.pow(1.12, notches);
-    }
-
-    /** The level of the walkable surface under the pointer ({@link GpuTerrain#walkableHit}), NaN without one. */
-    private float hoverFloorZ() {
-        return Float.isNaN(hoverZ) ? Float.NaN : GpuLosResult.pointedLevel(hoverZ) * BoardGeometry.level();
     }
 
     /**

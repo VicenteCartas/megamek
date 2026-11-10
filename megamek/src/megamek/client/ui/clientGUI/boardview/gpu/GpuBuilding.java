@@ -10,8 +10,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.g3d.Model;
@@ -58,24 +56,21 @@ final class GpuBuilding implements Disposable {
     private boolean junctions;
     // Per piece in its authored frame: near for picking and roof outlines, far for wall sections.
     private final Map<String, List<Vector3>> triangles = new HashMap<>();
-    private final Map<String, List<Vector3>> farTriangles = new ConcurrentHashMap<>();
+    private final Map<String, List<Vector3>> farTriangles = new HashMap<>();
     private final Map<String, BoundingBox> bounds = new HashMap<>();
     // Per roof piece in its authored frame: its own surface (Assembly#roof); filled on the render thread as asked for.
     private final Map<String, List<Vector3>> decks = new HashMap<>();
     // Per piece and slab height in its authored frame: its wall faces beside a floor slab there (faces).
-    private final Map<String, Faces> faces = new ConcurrentHashMap<>();
+    private final Map<String, Faces> faces = new HashMap<>();
     // Per piece in its authored frame: its floor cap (cap).
-    private final Map<String, List<Vector3>> caps = new ConcurrentHashMap<>();
+    private final Map<String, List<Vector3>> caps = new HashMap<>();
     // Per placement of the pieces that shape a storey: its floor (storey).
-    private final Map<String, GpuBuildingInterior.Storey> storeys = new ConcurrentHashMap<>();
+    private final Map<String, GpuBuildingInterior.Storey> storeys = new HashMap<>();
     // Per roof piece's placement on the plan: the outline it covers (roof).
-    private final Map<String, Area> roofs = new ConcurrentHashMap<>();
+    private final Map<String, Area> roofs = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
-    /**
-     * Storeys of assemblies a chunk is about to ask for, working out on the common pool ({@link #assembleAhead}); each
-     * taken once. They read the outline maps above, which are therefore concurrent, and no mesh.
-     */
-    private final Map<Recipe, CompletableFuture<List<GpuBuildingInterior.Storey>>> ahead = new HashMap<>();
+    // Per assembly whose interior was asked for (Assembly#interior): its model, one for all of the same storeys.
+    private final Map<Assembly, Model> shown = new java.util.IdentityHashMap<>();
     // Per assembly: its near instance's box in its own frame (Assembly#bounds).
     private final Map<Assembly, BoundingBox> instanceBounds = new java.util.IdentityHashMap<>();
 
@@ -91,7 +86,17 @@ final class GpuBuilding implements Disposable {
      * No expanded Model is cached: each level of detail places the shared kit's nodes ({@link #instance}). A hex with
      * doors is the exception: its pieces are cut open, so it owns a model per level ({@code doored}, else null).
      */
-    record Assembly(Recipe recipe, List<ConnectedKit.Placement> near, Model interior, GpuBuilding kit, List<Model> doored) {
+    record Assembly(Recipe recipe, List<ConnectedKit.Placement> near, GpuBuilding kit, List<Model> doored) {
+        /**
+         * Its floors and struts, worked out and built when first asked for, then kept: a hex shows them only while a unit
+         * stands in it or it stands open, and a city's would be hundreds of megabytes built for nothing. Null without
+         * interiors ({@link megamek.common.board.BuildingInteriors#NO}).
+         */
+        Model interior() { return kit.interior(this); }
+
+        /** {@link #interior()} if it was asked for already, else null: asking never builds it. */
+        Model builtInterior() { return kit.shown.get(this); }
+
         int lodCount() { return kit.models.size(); }
         Model model(int lod) { return doored == null ? kit.models.get(lod) : doored.get(lod); }
         ModelInstance instance(int lod) {
@@ -201,45 +206,31 @@ final class GpuBuilding implements Disposable {
     /** {@code doors}: the hex's large doors ({@link KitDoors#cuts}), which only a generated kit draws. */
     Assembly assemble(int levels, int[] reach, long seed, BuildingInteriors policy, boolean stepped, int[] corners,
           List<KitDoors.Cut> doors) {
-        return assemblies.computeIfAbsent(recipe(levels, reach, seed, policy, stepped, corners, doors), key -> {
-            var near = placements(key, 0);
-            List<Model> doored = key.doors().isEmpty() ? null : doored(key, near);
-            if (policy == BuildingInteriors.NO) { return new Assembly(key, near, null, this, doored); }
-            var started = ahead.remove(key);
-            var storeys = started != null ? GpuAssets.joined(started) : volumes(key, near);
-            int floors = policy == BuildingInteriors.NO_FLOORS ? 1 : levels;
-            var footprints = storeys.stream().map(GpuBuildingInterior.Storey::triangles).toList();
-            Model interior = interiors.computeIfAbsent(new Interior(footprints, floors),
-                  ignored -> GpuBuildingInterior.buildStoreys(storeys, LEVEL_HEIGHT, floors));
-            return new Assembly(key, near, interior, this, doored);
-        });
-    }
-
-    private Recipe recipe(int levels, int[] reach, long seed, BuildingInteriors policy, boolean stepped, int[] corners,
-          List<KitDoors.Cut> doors) {
         // Pieces stand by the ground's connections where the kit caps the links above ({@link ConnectedKit#placements}).
         boolean capped = ConnectedKit.capped(kit, stepped);
         List<Integer> junctions = corners == null || !this.junctions ? List.of()
               : Arrays.stream(ConnectedKit.junctions(levels, reach, corners, capped)).boxed().toList();
-        return new Recipe(select(kit.roles(), levels, seed), Arrays.stream(reach).boxed().toList(), policy, stepped,
+        var recipe = new Recipe(select(kit.roles(), levels, seed), Arrays.stream(reach).boxed().toList(), policy, stepped,
               junctions, kit.doors() == null ? List.of() : doors);
+        return assemblies.computeIfAbsent(recipe, key -> {
+            var near = placements(key, 0);
+            return new Assembly(key, near, this, key.doors().isEmpty() ? null : doored(key, near));
+        });
     }
 
-    /**
-     * Starts working out, on the common pool, the storeys of an assembly {@link #assemble} is about to be asked for: a
-     * city's hexes ask for hundreds of assemblies, each several milliseconds of outlines, which a chunk's collection
-     * otherwise works out one after another on the render thread. The pieces' meshes are read here, on this thread.
-     */
-    void assembleAhead(int levels, int[] reach, long seed, BuildingInteriors policy, boolean stepped, int[] corners,
-          List<KitDoors.Cut> doors) {
-        if (policy == BuildingInteriors.NO) { return; }
-        Recipe recipe = recipe(levels, reach, seed, policy, stepped, corners, doors);
-        if (assemblies.containsKey(recipe) || ahead.containsKey(recipe)) { return; }
-        var near = placements(recipe, 0);
-        if (!floorCaps(near)) {
-            placements(recipe, models.size() - 1).stream().filter(piece -> !piece.role().startsWith("roof")).forEach(this::farShape);
-        }
-        ahead.put(recipe, GpuAssets.pooled(() -> volumes(recipe, near)));
+    private Model interior(Assembly assembly) {
+        Recipe recipe = assembly.recipe();
+        if (recipe.interiors() == BuildingInteriors.NO) { return null; }
+        Model known = shown.get(assembly);
+        if (known != null) { return known; }
+        var storeys = volumes(recipe, assembly.near());
+        // The recipe's modules are its levels and its roof.
+        int floors = recipe.interiors() == BuildingInteriors.NO_FLOORS ? 1 : recipe.modules().size() - 1;
+        var footprints = storeys.stream().map(GpuBuildingInterior.Storey::triangles).toList();
+        Model interior = interiors.computeIfAbsent(new Interior(footprints, floors),
+              ignored -> GpuBuildingInterior.buildStoreys(storeys, LEVEL_HEIGHT, floors));
+        shown.put(assembly, interior);
+        return interior;
     }
 
     /** A hex's own model per level of detail, its kit pieces cut open over its doors, with the doors ({@link KitDoors#model}). */
@@ -272,19 +263,11 @@ final class GpuBuilding implements Disposable {
     private List<GpuBuildingInterior.Storey> volumes(Recipe recipe, List<ConnectedKit.Placement> pieces) {
         // These caps fit behind the facade, including open connection ends. Closed panel boxes describe wall strips,
         // not rooms, so only kits without floor caps need the wall-section fallback.
-        var far = floorCaps(pieces) ? null : placements(recipe, models.size() - 1);
+        boolean floorCaps = pieces.stream().anyMatch(piece -> !piece.role().startsWith("roof") && !cap(piece).isEmpty());
+        var far = floorCaps ? null : placements(recipe, models.size() - 1);
         List<GpuBuildingInterior.Storey> result = new ArrayList<>();
         for (int level = 0; level < recipe.modules().size() - 1; level++) { result.add(storey(pieces, far, level)); }
         return List.copyOf(result);
-    }
-
-    /** Whether any of these pieces has a floor cap. It reads every piece's ({@link #cap}), so that all are at hand. */
-    private boolean floorCaps(List<ConnectedKit.Placement> pieces) {
-        boolean any = false;
-        for (var piece : pieces) {
-            if (!piece.role().startsWith("roof")) { any |= !cap(piece).isEmpty(); }
-        }
-        return any;
     }
 
     /**
@@ -311,7 +294,10 @@ final class GpuBuilding implements Disposable {
                     storey.add(GpuBuildingInterior.area(placed(piece, cap(piece))));
                     continue;
                 }
-                storey.add(GpuBuildingInterior.walls(placed(piece, farShape(piece)), (level + .5f) * LEVEL_HEIGHT));
+                var shape = farTriangles.computeIfAbsent(piece.node(),
+                      node -> GpuTerrain.triangles(List.of(models.getLast().getNode(node)),
+                            part -> !part.material.id.equals(GeneratedMesh.BUILDING_BODY)));
+                storey.add(GpuBuildingInterior.walls(placed(piece, shape), (level + .5f) * LEVEL_HEIGHT));
             }
             Area roof = new Area();
             for (var piece : pieces) {
@@ -326,12 +312,6 @@ final class GpuBuilding implements Disposable {
             // The ground floor's slab lies under the terrain.
             return GpuBuildingInterior.Storey.of(GpuBuildingInterior.triangles(level == 0 ? roof : clear(roof, top, pieces)));
         });
-    }
-
-    /** A piece's walls at the simplest level of detail in its authored frame, cached. */
-    private List<Vector3> farShape(ConnectedKit.Placement piece) {
-        return farTriangles.computeIfAbsent(piece.node(), node -> GpuTerrain.triangles(List.of(models.getLast().getNode(node)),
-              part -> !part.material.id.equals(GeneratedMesh.BUILDING_BODY)));
     }
 
     /** A piece's floor cap in its authored frame, cached. */
@@ -434,9 +414,8 @@ final class GpuBuilding implements Disposable {
             return true;
         });
         instanceBounds.keySet().removeIf(assembly -> !live.contains(assembly));
-        ahead.clear();
-        Set<Model> needed = new java.util.HashSet<>();
-        assemblies.values().forEach(assembly -> needed.add(assembly.interior()));
+        shown.keySet().removeIf(assembly -> !live.contains(assembly));
+        Set<Model> needed = new java.util.HashSet<>(shown.values());
         interiors.values().removeIf(model -> {
             if (needed.contains(model)) { return false; }
             model.dispose();
@@ -527,12 +506,12 @@ final class GpuBuilding implements Disposable {
         fragments.clear();
         interiors.values().forEach(Model::dispose);
         interiors.clear();
+        shown.clear();
         models.stream().distinct().forEach(Model::dispose);
         models.clear();
         assemblies.values().stream().filter(assembly -> assembly.doored() != null)
               .forEach(assembly -> assembly.doored().stream().distinct().forEach(Model::dispose));
         assemblies.clear();
-        ahead.clear();
         triangles.clear();
         decks.clear();
         farTriangles.clear();

@@ -290,7 +290,7 @@ transparent surfaces are excluded. At most two queued wall impacts are projected
 per frame; settled frames do no projection or image upload.
 The native wall review exercises PPC gouges and round impacts, AC/20, Long Tom,
 plasma and flames on a sculpted cliff. It also checks a building wall in both
-camera projections, opening and closing a storey cutaway, a rebuilt cliff, and
+camera projections, fading the building around a unit and back, a rebuilt cliff, and
 40 repeated hits with unchanged patch triangle and draw-call counts. Stamping
 reads and blends the existing CPU pixel buffers directly; no extra image copy is
 kept. First impacts in new areas still pay for projection, mesh and image uploads

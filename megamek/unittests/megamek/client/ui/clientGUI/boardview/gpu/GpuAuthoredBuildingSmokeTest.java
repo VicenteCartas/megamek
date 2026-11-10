@@ -161,9 +161,10 @@ class GpuAuthoredBuildingSmokeTest {
                         terrain.update(scene); selectedLod[0] = 0;
                         camera.orbit(0, -15); camera.camera.zoom = .22f;
                         camera.center(BoardGeometry.center(at, 0).add(0, 0, targetZ + 15));
-                        terrain.animate(1, List.of(), .25f, at, 6 * BoardGeometry.level());
-                        assertEquals(GpuTerrain.VISIBLE_BUILDING_INTERIORS_ON_HOVER, !faded(terrain).isEmpty(),
-                              "A hover opens the shaft to its generated interior where the hover cutaway is switched on");
+                        var occupant = GpuTestSupport.occupant(at);
+                        terrain.animate(1, List.of(occupant), .25f);
+                        occupant.model.dispose();
+                        assertFalse(faded(terrain).isEmpty(), "A unit inside opens the shaft to its generated interior");
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, "interior.png"));
                     }
@@ -400,7 +401,7 @@ class GpuAuthoredBuildingSmokeTest {
                             for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
                                 assertTrue(((java.util.Set<?>) GpuTestSupport.field(chunk, "hiddenInteriors")).isEmpty());
                                 for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
-                                    if (!Float.isNaN((float) GpuTestSupport.field(prop, "floorZ"))) { floors++; }
+                                    if ((boolean) GpuTestSupport.field(prop, "floors")) { floors++; }
                                 }
                             }
                             assertTrue(floors > 0, "Generated floors return at the released placement");
@@ -446,9 +447,10 @@ class GpuAuthoredBuildingSmokeTest {
                     terrain.update(original); terrain.animate(1, List.of());
                     frame.render(terrain, camera, original); GpuReviewFrame.save(new File(output, "debug-authored.png"));
                     for (Coords at : List.of(low, high)) {
-                        terrain.animate(1, List.of(), 0, at, BoardGeometry.level());
-                        assertEquals(GpuTerrain.VISIBLE_BUILDING_INTERIORS_ON_HOVER, !faded(terrain).isEmpty(),
-                              "Hovering inside reveals runtime floors where the hover cutaway is switched on");
+                        var occupant = GpuTestSupport.occupant(at);
+                        terrain.animate(1, List.of(occupant), 0);
+                        occupant.model.dispose();
+                        assertFalse(faded(terrain).isEmpty(), "A unit inside reveals the runtime floors");
                         frame.render(terrain, camera, original);
                         GpuReviewFrame.save(new File(output, at.equals(low) ? "debug-low-interior.png" : "debug-high-interior.png"));
                     }
@@ -485,7 +487,6 @@ class GpuAuthoredBuildingSmokeTest {
                 try {
                     BoardCamera camera = new BoardCamera(); camera.resize(1200, 900); camera.center(BoardGeometry.center(at, 3));
                     terrain.update(original); GpuReviewFrame.settle(terrain, null, original, camera);
-                    terrain.animate(1, List.of(), .25f, at, 3 * BoardGeometry.level());
                     var models = new java.util.HashSet<com.badlogic.gdx.graphics.g3d.Model>();
                     var materials = new java.util.IdentityHashMap<Material, Material>();
                     for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
@@ -510,7 +511,7 @@ class GpuAuthoredBuildingSmokeTest {
                         for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
                             var hidden = (java.util.Set<?>) GpuTestSupport.field(chunk, "hiddenInteriors");
                             for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
-                                if (!Float.isNaN((float) GpuTestSupport.field(prop, "floorZ"))) {
+                                if ((boolean) GpuTestSupport.field(prop, "floors")) {
                                     assertEquals(pose != original, hidden.contains(GpuTestSupport.<Object>field(prop, "coords")),
                                           "Moved interiors hide until fresh cuts install");
                                     assertNull(GpuTestSupport.field(prop, "previewInstance"), "Floors are not transformed on each drag event");
@@ -538,7 +539,6 @@ class GpuAuthoredBuildingSmokeTest {
                                     assertEquals(expected, actual, "Paint leaves each surface's base finish unchanged");
                                     if (!material.has(GpuBuildingPaint.TYPE)) { fixed++; }
                                 }
-                                if (GpuTestSupport.field(prop, "hoverOpaque") instanceof ModelInstance hovered) { assertPaint(hovered, tint); }
                                 // The side view requests near geometry even when the main view installed a farther LOD.
                                 var level = prop.getClass().getDeclaredMethod("level", int.class, ModelInstance.class);
                                 level.setAccessible(true);
@@ -753,24 +753,20 @@ class GpuAuthoredBuildingSmokeTest {
                     GpuReviewFrame.save(new File(output, "hpg-sensors.png"));
                     camera.camera.zoom = .5f;
                     camera.center(BoardGeometry.center(hpg, 1));
-                    terrain.animate(1, List.of(), .25f, hpg, (original.tile(hpg).cover().height() - 1) * BoardGeometry.level());
-                    assertEquals(GpuTerrain.VISIBLE_BUILDING_INTERIORS_ON_HOVER, !faded(terrain).isEmpty());
+                    // A unit inside turns the building see-through around its runtime floors; a sealed one stays shut.
+                    var occupant = GpuTestSupport.occupant(hpg);
+                    terrain.animate(1, List.of(occupant), .25f);
+                    assertFalse(faded(terrain).isEmpty());
                     frame.render(terrain, camera, original);
                     GpuReviewFrame.save(new File(output, "interior.png"));
                     terrain.update(hallScene);
-                    terrain.animate(1, List.of(), .25f, hpg, BoardGeometry.level());
-                    assertEquals(GpuTerrain.VISIBLE_BUILDING_INTERIORS_ON_HOVER, !faded(terrain).isEmpty());
-                    for (Object prop : faded(terrain)) {
-                        var instance = (com.badlogic.gdx.graphics.g3d.ModelInstance) GpuTestSupport.field(prop, "instance");
-                        var cut = instance.materials.first().get(GpuBuildingCutaway.class, GpuBuildingCutaway.TYPE);
-                        assertNotNull(cut);
-                        assertEquals(0, cut.floor);
-                        assertEquals(Float.MAX_VALUE, cut.ceiling);
-                    }
+                    terrain.animate(1, List.of(occupant), .25f);
+                    assertFalse(faded(terrain).isEmpty());
                     frame.render(terrain, camera, hallScene);
                     GpuReviewFrame.save(new File(output, "no-floors.png"));
                     terrain.update(sealedScene);
-                    terrain.animate(1, List.of(), .25f, hpg, 0);
+                    terrain.animate(1, List.of(occupant), .25f);
+                    occupant.model.dispose();
                     assertTrue(faded(terrain).isEmpty());
                     frame.render(terrain, camera, sealedScene);
                     GpuReviewFrame.save(new File(output, "no-interiors.png"));

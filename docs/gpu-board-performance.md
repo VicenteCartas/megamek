@@ -574,8 +574,8 @@ cached, RTX 4070 and Iris Xe, `48x48.board` (a city) and `16x17 Fire And Ice 2`:
 
 What the build does about it:
 
-- A chunk's kit building storeys work out on the common pool, all at once, before its hexes are collected
-  (`GpuBuilding.assembleAhead`); the render thread takes them as it reaches each building.
+- A closed kit building's floors and struts are built when a unit first stands in its hex, not at load
+  (`GpuTerrain#showInterior`); only a building that stands open, or an authored one, builds them with its chunk.
 - Loading frames are not held for the monitor's refresh (`GpuBattleView.pace`): a frame that built a slice is followed
   at once, one that only waited by the next at 60 a second. A new board's slice is 16 ms.
 - A new chunk's road masks pack into their atlas's pages on the worker that prepared it (`Prepared.packed`).
@@ -587,20 +587,22 @@ on the RTX 4070 28.2 to 25.4 s (terrain build 19.1 to 15.6 s; three rounds), on 
 16.8 s; two rounds). Fire and Ice 2 13.6 to 13.5 s. Fixed-light captures of both boards at three zooms are the same
 pixels.
 
-Still on the render thread for a city chunk, of about 13 s on the RTX 4070: kit building interiors 2.3 s (floor meshes
-1.5-2 s, waits for storeys 0.4 s), the first use of each kit 1.2 s, decal projection 1.1 s, model textures 1.5 s
-(0.6 s of it decodes, the rest uploads), the board's shader programs 1.2-2.9 s.
+Kit interiors left the load after that. Built at load, the 48x48 city's kit buildings held 343 interior models of 3,168
+floors: 13.3 million vertices, 304 MiB of vertex data and 2.3 s of the render thread, for floors drawn only in a
+building a unit stands in (a floor is about 4,200 vertices, its outline cut back at every wall face, `keepClear`).
+Built on first entry, on the RTX 4070, medians of alternating loads (four rounds, the first load discarded as a cold
+start): 48x48 26.8 to 24.8 s, terrain build 16.9 to 14.8 s, peak committed memory 5,445-5,485 to 5,060-5,108 MiB. A
+unit's first entry into a hex takes 3-24 ms of `GpuTerrain.animate` (twelve entries; 7-15 ms with the floors already
+there). Fixed-light captures of both boards at three zooms are the same pixels.
 
-The interiors are the one large item left. The 48x48 city's kit buildings hold 343 interior models of 3,168 floors:
-13.3 million vertices, 304 MiB of vertex data, each floor about 4,200 vertices because its outline is cut back at every
-wall face (`keepClear`). A floor is drawn only in a building a unit stands in or one that stands open. 1,578 of the
-floors are distinct within their model, about 1,100 over the whole board.
+Still on the render thread for a city chunk on the RTX 4070 (profiled with the interiors still built at load): the
+first use of each kit 1.2 s, decal projection 1.1 s, model textures 1.5 s (0.6 s of it decodes, the rest uploads), the
+board's shader programs 1.2-2.9 s.
 
 Tried on the same board and not kept (2026-11-10):
 - Decoding the models' images with their files, ahead of their creation: creation's waits fell from 0.6 to 0.1 s, and
   the road material arrays then waited 0.6 s behind those decodes. No gain.
-- Floor vertices added as raw floats, not `VertexInfo` objects (identical meshes): 0.8 of the time in one JVM, about
-  0.15 s of a load.
+- Floor vertices added as raw floats, not `VertexInfo` objects (identical meshes): 0.8 of the time in one JVM.
 - Six or eight sections in flight for four: terrain build 14.8 against 14.8 s over six alternating loads each. The
   render thread waits for workers mostly before the first sections arrive, which more sections at once do not hasten.
 
@@ -1138,12 +1140,10 @@ in a ten-second drag. Uploading each in a merge step of its own, apart from the
 copy or with smaller or dynamic meshes, only moved that cost to other frames:
 over-budget frames stayed at 9-16 per drag in every variant.
 
-Building hover and unit cutaways retain the chunk's complete opaque source in
-the static page. While a chunk is opened, its original ranges are hidden and its
-existing cutaway cache is drawn separately. Moving the pointer between storeys
-must not recopy the entire surrounding page. Colour, depth and shadow passes
-still use their existing cutaway rules; `GpuBuildingHoverSmokeTest` checks both
-the visible storey and the unchanged page-build count.
+Unit cutaways retain the chunk's complete opaque source in the static page.
+While a chunk is opened, its original ranges are hidden and its existing cutaway
+cache is drawn separately; `GpuSmallObjectSmokeTest` checks that occupancy
+repacks no page.
 
 Page grouping is used for orthographic rendering. Perspective keeps the original
 ranges and their projected-detail uniforms. Large meshes and ineligible material
@@ -1173,10 +1173,8 @@ This removes page-upload stalls, with a small draw-count cost for opened chunks;
 it does not establish a general FPS increase. The median of the whole view was
 slower in this pair. Native page comparisons retain identical pixels, including
 pan/cull/edit transitions. The separate `GpuRoofHoverSmokeTest` checks legacy and
-modular roof picks in both projections and confirms that roof hover leaves the
-storeys opaque. The separate modular cutaway pixel assertion in `GpuBuildingHoverSmokeTest`
-still fails on the same three pixels under both policies; its tolerance was
-not changed. The roof-selection and prop-page pixel checks pass independently.
+modular roof picks in both projections. The roof-selection and prop-page pixel
+checks pass independently.
 The measurements are recorded in `build/urban-review/frozen-old`
 and `build/urban-review/frozen-patched` (2026-10-06).
 

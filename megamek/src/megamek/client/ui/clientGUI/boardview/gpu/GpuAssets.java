@@ -1552,16 +1552,6 @@ final class GpuAssets implements Disposable {
     GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed,
           megamek.common.board.BuildingInteriors interiors, boolean stepped, float footprintScale, int[] corners,
           List<KitDoors.Cut> doors) {
-        return building(asset, levels, reach, seed, interiors, stepped, footprintScale, corners, doors, false);
-    }
-
-    /**
-     * {@code ahead}: only starts working out the assembly's storeys on the common pool, for the call that will ask for
-     * it ({@link GpuBuilding#assembleAhead}), and returns null.
-     */
-    GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed,
-          megamek.common.board.BuildingInteriors interiors, boolean stepped, float footprintScale, int[] corners,
-          List<KitDoors.Cut> doors, boolean ahead) {
         if (!asset.startsWith("buildings/") || BoardWall.supports(asset)) { return null; }
         File file = TilesetScenery.customBuildingFile(asset);
         // A kit that cannot load is reported under its own name; the caller then draws the asset's model, or its box.
@@ -1569,13 +1559,8 @@ final class GpuAssets implements Disposable {
         if (!isFile(file)) { return null; }
         if (unloadable.containsKey(kit)) { missing(kit, unloadable.get(kit)); return null; }
         try {
-            GpuBuilding building = buildings.computeIfAbsent(GpuBuilding.kit(asset, footprintScale),
-                  key -> new GpuBuilding(key, this::createModel));
-            if (ahead) {
-                building.assembleAhead(levels, reach, seed, interiors, stepped, corners, doors);
-                return null;
-            }
-            return building.assemble(levels, reach, seed, interiors, stepped, corners, doors);
+            return buildings.computeIfAbsent(GpuBuilding.kit(asset, footprintScale), key -> new GpuBuilding(key, this::createModel))
+                  .assemble(levels, reach, seed, interiors, stepped, corners, doors);
         } catch (RuntimeException failure) {
             missing(kit, reason(failure));
             return null;

@@ -55,8 +55,8 @@ class GpuSceneryColourSmokeTest {
      */
     private static final Coords MIRRORED = new Coords(12, 1), FAR = new Coords(12, 3);
     /**
-     * A two-storey building whose roof holds two recoloured cars, one mirrored (drawn in a batch of its own); hovered,
-     * they fade with the building.
+     * A two-storey building whose roof holds two recoloured cars, one mirrored (drawn in a batch of its own); with a
+     * unit inside, they fade with the building.
      */
     private static final Coords ROOF = new Coords(2, 10);
     /**
@@ -141,8 +141,8 @@ class GpuSceneryColourSmokeTest {
      * part instanced (the mirrored cars in a batch of their own) or, for a pose the instance data cannot hold, one by one,
      * none packed with the scenery, each part carrying its object's colours; the far colours draw as themselves (magenta
      * and white, not the model's red, nor the red and black of a rounding decode). The overview and a mid view draw
-     * simpler mesh levels, a close-up the near ones, and a level change and back draws as before; when the hover of the
-     * roof's building ends (its roof cars fade with it), the roof draws as before it began.
+     * simpler mesh levels, a close-up the near ones, and a level change and back draws as before; when the unit in the
+     * roof's building leaves (its roof cars fade with it), the roof draws as before it came.
      */
     @Test
     void theGameViewDrawsTheConvertedBoardsObjectsInstancedInTheirColours() throws Exception {
@@ -244,19 +244,21 @@ class GpuSceneryColourSmokeTest {
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(OUTPUT, "game-" + coords.getBoardNum() + ".png"));
                     }
-                    // The pointer on the building's top storey at the default building opacity: the roof cars fade; then
-                    // it leaves, and the roof is drawn as before.
+                    // A unit in the building at the default building opacity: the roof cars fade with it; then it leaves,
+                    // and the roof is drawn as before.
                     camera.center(BoardGeometry.center(ROOF, 2));
                     camera.update();
                     GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(OUTPUT, "game-roof-" + ROOF.getBoardNum() + ".png"));
-                    terrain.animate(0, List.of(), GpuTerrain.DEFAULT_BUILDING_OPACITY, ROOF, BoardGeometry.level());
+                    var occupant = GpuTestSupport.occupant(ROOF);
+                    terrain.animate(0, List.of(occupant), GpuTerrain.DEFAULT_BUILDING_OPACITY);
+                    occupant.model.dispose();
                     frame.render(terrain, camera, scene);
-                    GpuReviewFrame.save(new File(OUTPUT, "game-hover-" + ROOF.getBoardNum() + ".png"));
-                    terrain.animate(0, List.of(), GpuTerrain.DEFAULT_BUILDING_OPACITY, null, Float.NaN);
+                    GpuReviewFrame.save(new File(OUTPUT, "game-occupied-" + ROOF.getBoardNum() + ".png"));
+                    terrain.animate(0, List.of(), GpuTerrain.DEFAULT_BUILDING_OPACITY);
                     frame.render(terrain, camera, scene);
-                    GpuReviewFrame.save(new File(OUTPUT, "game-unhovered-" + ROOF.getBoardNum() + ".png"));
+                    GpuReviewFrame.save(new File(OUTPUT, "game-left-" + ROOF.getBoardNum() + ".png"));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally { terrain.dispose(); frame.dispose(); Gdx.app.exit(); }
@@ -278,8 +280,8 @@ class GpuSceneryColourSmokeTest {
             assertEquals(0, back[0], "The game view draws " + coords.getBoardNum() + " as before after a level change and back");
         }
         int[] restored = parity(new File(OUTPUT, "game-roof-" + ROOF.getBoardNum() + ".png"),
-              new File(OUTPUT, "game-unhovered-" + ROOF.getBoardNum() + ".png"));
-        assertEquals(0, restored[0], "The game view draws the roof as before once the hover ends");
+              new File(OUTPUT, "game-left-" + ROOF.getBoardNum() + ".png"));
+        assertEquals(0, restored[0], "The game view draws the roof as before once the unit has left");
         int[] magenta = colourClasses(new File(OUTPUT, "game-" + MIRRORED.getBoardNum() + ".png"));
         int[] white = colourClasses(new File(OUTPUT, "game-" + FAR.getBoardNum() + ".png"));
         System.out.printf("COLOUR far colours (magenta, red, white px): mirrored car %s, upright car %s%n",
@@ -595,8 +597,8 @@ class GpuSceneryColourSmokeTest {
     /**
      * A mirrored orchard tree, whose fruit only its two nearer levels hold, zoomed from its near level (LOD0) out to
      * its simplest (LOD2) and in through LOD1 again: its close-up after the round trip equals the one before (the fruit
-     * keeps the mirrored placement's culling). On a hovered building's roof the same round trip keeps the fade and
-     * cutaway on every material, the fruit's too, and the hovered close-up returns as it was. The editor's side view
+     * keeps the mirrored placement's culling). On the roof of a building with a unit inside the same
+     * round trip keeps the fade on every material, the fruit's too, and the faded close-up returns as it was. The editor's side view
      * draws the near level at any board zoom: its silhouette zoomed out equals the close-up's.
      */
     @Test
@@ -640,32 +642,33 @@ class GpuSceneryColourSmokeTest {
                     float unit = Math.max(bounds.getWidth(), bounds.getHeight()) * BoardCamera.pixelsPerUnit(camera.camera)
                           * camera.camera.zoom;
                     float near = unit / 300, simplest = unit / 12, middle = unit / 45;
+                    var occupant = GpuTestSupport.occupant(roof);
                     for (var coords : List.of(ground, roof)) {
-                        // The pointer on the roof's building, its top storey, through the whole round trip.
-                        Coords hover = coords.equals(roof) ? roof : null;
-                        camera.center(BoardGeometry.center(coords, hover == null ? 0 : 2));
-                        zoom(terrain, frame, camera, scene, near, hover);
+                        // A unit in the roof's building through the whole round trip.
+                        List<ModelInstance> units = coords.equals(roof) ? List.of(occupant) : List.of();
+                        camera.center(BoardGeometry.center(coords, units.isEmpty() ? 0 : 2));
+                        zoom(terrain, frame, camera, scene, near, units);
                         settle(terrain, frame, camera, scene);
                         GpuReviewFrame.save(new File(OUTPUT, "orchard-first-" + coords.getBoardNum() + ".png"));
-                        if (hover == null) { section(terrain, ground, bounds, "near"); }
-                        zoom(terrain, frame, camera, scene, simplest, hover);
+                        if (units.isEmpty()) { section(terrain, ground, bounds, "near"); }
+                        zoom(terrain, frame, camera, scene, simplest, units);
                         levels.add(level(terrain, coords));
-                        if (hover == null) { section(terrain, ground, bounds, "far"); }
-                        zoom(terrain, frame, camera, scene, middle, hover);
+                        if (units.isEmpty()) { section(terrain, ground, bounds, "far"); }
+                        zoom(terrain, frame, camera, scene, middle, units);
                         levels.add(level(terrain, coords));
-                        if (hover != null) {
+                        if (!units.isEmpty()) {
                             for (var material : ((com.badlogic.gdx.graphics.g3d.ModelInstance) GpuTestSupport.field(levelled(terrain, roof),
                                   "instance")).materials) {
-                                assertTrue(material.has(GpuBuildingCutaway.TYPE) && material.has(
-                                            com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute.Type),
-                                      "The hovered tree's " + material.id + " keeps its fade and cutaway");
+                                assertTrue(material.has(com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute.Type),
+                                      "The faded tree's " + material.id + " keeps its fade");
                             }
                         }
-                        zoom(terrain, frame, camera, scene, near, hover);
+                        zoom(terrain, frame, camera, scene, near, units);
                         levels.add(level(terrain, coords));
                         settle(terrain, frame, camera, scene);
                         GpuReviewFrame.save(new File(OUTPUT, "orchard-back-" + coords.getBoardNum() + ".png"));
                     }
+                    occupant.model.dispose();
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally { terrain.dispose(); frame.dispose(); Gdx.app.exit(); }
@@ -685,21 +688,21 @@ class GpuSceneryColourSmokeTest {
     }
 
     /**
-     * Zooms the camera to {@code zoom}, settles and draws a frame, the pointer on the top storey of {@code hover}'s
-     * building (null: on none), told before the frame as the board tells it every frame.
+     * Zooms the camera to {@code zoom}, settles and draws a frame with {@code units} on the board, told before the frame
+     * as the board tells them every frame.
      */
     private static void zoom(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene, float zoom,
-          Coords hover) throws Exception {
+          List<ModelInstance> units) throws Exception {
         camera.camera.zoom = zoom;
         camera.update();
         GpuReviewFrame.settle(terrain, null, scene, camera);
-        terrain.animate(0, List.of(), GpuTerrain.DEFAULT_BUILDING_OPACITY, hover, hover == null ? Float.NaN : BoardGeometry.level());
+        terrain.animate(0, units, GpuTerrain.DEFAULT_BUILDING_OPACITY);
         frame.render(terrain, camera, scene);
     }
 
     /**
      * Settled frames, the shadow map redrawn: a level change alone keeps the previous level's shadow until the next refit
-     * (updateDetail) and a zoom within the last fit's guard does not refit. After the hovered roof tree's level change the
+     * (updateDetail) and a zoom within the last fit's guard does not refit. After the faded roof tree's level change the
      * frames also took a few frames to settle (2 pixels by 2/255 on its trunk; the cause is not isolated), so the map is
      * redrawn three frames after the zoom.
      */
@@ -750,7 +753,8 @@ class GpuSceneryColourSmokeTest {
     private static Object levelled(GpuTerrain terrain, Coords coords) throws ReflectiveOperationException {
         for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
             for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
-                if (coords.equals(GpuTestSupport.field(prop, "coords")) && GpuTestSupport.field(prop, "levels") != null) { return prop; }
+                if (coords.equals(GpuTestSupport.field(prop, "coords")) && GpuTestSupport.field(prop, "decorationId") != null
+                      && GpuTestSupport.field(prop, "levels") != null) { return prop; }
             }
         }
         return null;

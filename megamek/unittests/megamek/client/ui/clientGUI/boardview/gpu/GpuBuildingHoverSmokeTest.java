@@ -18,28 +18,15 @@ import javax.swing.SwingUtilities;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Pixmap;
-import com.badlogic.gdx.graphics.PixmapIO;
-import com.badlogic.gdx.graphics.VertexAttributes;
-import com.badlogic.gdx.graphics.g3d.Material;
-import com.badlogic.gdx.graphics.g3d.ModelBatch;
-import com.badlogic.gdx.graphics.g3d.ModelInstance;
-import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
-import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
-import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.glutils.HdpiUtils;
-import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
-import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -221,9 +208,6 @@ class GpuBuildingHoverSmokeTest {
         var terrain = (GpuTerrain) field(view, "terrain");
         var ui = (GpuBoardHud) field(view, "ui");
         var camera = view.boardCamera.camera;
-        checkCutaway(terrain);
-        checkRenderedStoreys(view, terrain, ui);
-        checkModularStoreys(view, ui);
         assertTrue(scene.tile(BUILDING).text().stream().anyMatch(label -> label.text().equals("HEIGHT 5")),
               "Captured HEIGHT text includes its space");
         Vector3 center = camera.project(BoardGeometry.center(BUILDING, 3), 0, 0,
@@ -304,201 +288,4 @@ class GpuBuildingHoverSmokeTest {
         }
         return result;
     }
-
-    private static void checkCutaway(GpuTerrain terrain) throws Exception {
-        var floors = GpuModularBuildingSmokeTest.floors(terrain, BUILDING);
-        assertEquals(5, floors.size());
-        for (int level : new int[] { 0, 2, 4, 5, 1 }) {
-            terrain.animate(0, List.of(), level == 1 ? 1 : .5f, BUILDING, level * BoardGeometry.level());
-            GpuModularBuildingSmokeTest.checkInteriorCache(terrain, level < 5 && level != 1);
-            for (int floor = 0; floor < floors.size(); floor++) {
-                assertFalse(
-                      floors.get(floor).materials.first().has(BlendingAttribute.Type),
-                      "Interior hover reveals its floor; roof hover leaves the whole building opaque");
-            }
-        }
-        var unitModel = new ModelBuilder().createBox(3, 3, 3,
-              new Material(), VertexAttributes.Usage.Position);
-        try {
-            var unit = new ModelInstance(unitModel,
-                  BoardGeometry.center(BUILDING, 4).add(0, 0, 2));
-            for (boolean occupied : new boolean[] { false, true, false, true }) {
-                terrain.animate(0, occupied ? List.of(unit) : List.of(), .5f,
-                      BUILDING, 2 * BoardGeometry.level());
-                for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                    for (Object prop : (List<?>) field(chunk, "cutaways")) {
-                        if (!BUILDING.equals(field(prop, "coords")) || !Float.isNaN((float) field(prop, "floorZ"))) { continue; }
-                        assertEquals(!occupied, field(prop, "hoverOpaque") != null,
-                              "Unit arrival/departure must restore the correct opacity outside the hover opening");
-                        var shell = (ModelInstance) field(prop, "instance");
-                        for (Material material : shell.materials) {
-                            assertEquals(.5f, material.get(BlendingAttribute.class, BlendingAttribute.Type).opacity,
-                                  "Hover and unit cutaways share the chosen wall opacity");
-                            var clip = material.get(GpuBuildingCutaway.class, GpuBuildingCutaway.TYPE);
-                            assertTrue(occupied ? clip == null : clip != null && clip.inside,
-                                  "Hover fades only its storey; unit occupancy fades the whole shell");
-                        }
-                    }
-                }
-            }
-        } finally { unitModel.dispose(); }
-        terrain.animate(0, List.of(), .5f, null, Float.NaN);
-        GpuModularBuildingSmokeTest.checkInteriorCache(terrain, false);
-    }
-
-    private static void checkModularStoreys(GpuBattleView view, GpuBoardHud ui) throws Exception {
-        BoardScene scene = BoardScenes.scene(coords -> {
-            var tile = BoardScenes.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
-            var hex = new Hex(0, "building:2;bldg_elev:5;bldg_cf:40", "");
-            return new BoardScene.Tile(coords, 0, -1, false, 0, tile.surface(), null, null,
-                  coords.equals(BUILDING) ? BoardFeatures.capture(hex, coords,
-                        Map.of(Terrains.BUILDING, GpuBuildingTest.ASSET)) : List.of(),
-                  List.of(), BoardLiquid.NONE, null, true);
-        });
-        var terrain = new GpuTerrain();
-        try {
-            terrain.update(scene);
-            checkCutaway(terrain);
-            checkRenderedStoreys(view, terrain, ui);
-        } finally { terrain.dispose(); }
-    }
-
-    private static void checkRenderedStoreys(GpuBattleView view, GpuTerrain terrain, GpuBoardHud ui) throws Exception {
-        // Terrain writes scaled scene radiance; byte assertions consume the shared display conversion.
-        try (var output = new GpuSceneTestOutput()) {
-            checkRenderedStoreys(view, terrain, ui, output);
-        }
-    }
-
-    private static void checkRenderedStoreys(GpuBattleView view, GpuTerrain terrain, GpuBoardHud ui,
-          GpuSceneTestOutput output) throws Exception {
-        var camera = view.boardCamera.camera;
-        output.begin(0, 0, 0, 1);
-        HdpiUtils.glViewport(0, 0, (int) camera.viewportWidth, (int) camera.viewportHeight);
-        terrain.render(camera);
-        output.display();
-        var pages = (GpuPropBatch) field(terrain, "propBatch");
-        long pageBuilds = pages.rebuilds();
-        int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
-        var buildingBounds = terrain.roofBounds(BUILDING);
-        Pixmap baseline = Pixmap.createFromFrameBuffer(0, 0, width, height);
-        PixmapIO.writePNG(new FileHandle("build/gpu-board-review/hover-baseline.png"), baseline, -1, true);
-        var depth = BufferUtils.newFloatBuffer(width * height);
-        Gdx.gl.glReadPixels(0, 0, width, height, GL30.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, depth);
-        try {
-            for (int level : new int[] { 2, 4, 0, 5, 1, 2 }) {
-                terrain.animate(0, List.of(), level == 1 ? 1 : .5f, BUILDING, level * BoardGeometry.level());
-                output.begin(0, 0, 0, 1);
-                HdpiUtils.glViewport(0, 0, (int) camera.viewportWidth, (int) camera.viewportHeight);
-                terrain.render(camera);
-                output.display();
-                assertEquals(pageBuilds, pages.rebuilds(),
-                      "Opening/closing a building storey must not rebuild static prop pages");
-                Pixmap hiddenWalls = Pixmap.createFromFrameBuffer(0, 0, width, height);
-                // Continue the same scene/depth after its intermediate display readback; do not clear it.
-                output.scene().begin();
-                HdpiUtils.glViewport(0, 0, (int) camera.viewportWidth, (int) camera.viewportHeight);
-                terrain.renderTransparent(camera);
-                output.display();
-                Pixmap opened = Pixmap.createFromFrameBuffer(0, 0, width, height);
-                try {
-                    int changedInside = 0, visibleWalls = 0, changedRoof = 0, visibleRoof = 0;
-                    int unchangedOutside = 0, changedOutside = 0;
-                    String outsideSample = "";
-                    for (int x = 0; x < width; x += 4) {
-                        for (int y = 0; y < 0 + camera.viewportHeight; y += 4) {
-                            Vector3 point = new Vector3((x + .5f) / camera.viewportWidth * 2 - 1,
-                                  (y + .5f - 0) / camera.viewportHeight * 2 - 1,
-                                  depth.get(y * width + x) * 2 - 1).prj(camera.invProjectionView);
-                            if (!buildingBounds.contains(point) || point.z <= buildingBounds.min.z + .01f) { continue; }
-                            float z = point.z / BoardGeometry.level();
-                            if (Math.abs(z - level) < .04f || level != 4 && Math.abs(z - level - 1) < .04f) { continue; }
-                            int a = baseline.getPixel(x, y), b = opened.getPixel(x, y);
-                            int difference = Math.abs((a >>> 24) - (b >>> 24))
-                                  + Math.abs((a >>> 16 & 255) - (b >>> 16 & 255)) + Math.abs((a >>> 8 & 255) - (b >>> 8 & 255));
-                            if (level < 5 && level != 1 && z > level && (z < level + 1 || level == 4)) {
-                                int hidden = hiddenWalls.getPixel(x, y);
-                                int wallContribution = Math.abs((hidden >>> 24) - (b >>> 24))
-                                      + Math.abs((hidden >>> 16 & 255) - (b >>> 16 & 255))
-                                      + Math.abs((hidden >>> 8 & 255) - (b >>> 8 & 255));
-                                if (level == 4 && z >= 5 - .002f) {
-                                    if (difference > 10) { changedRoof++; }
-                                    if (wallContribution > 10) { visibleRoof++; }
-                                } else {
-                                    if (difference > 10) { changedInside++; }
-                                    if (wallContribution > 10) { visibleWalls++; }
-                                }
-                            } else {
-                                if (difference > 10) {
-                                    changedOutside++;
-                                    outsideSample = " at pixel " + x + "," + y + " world=" + point + " delta=" + difference;
-                                }
-                                else { unchangedOutside++; }
-                            }
-                        }
-                    }
-                    if (level == 2) {
-                        PixmapIO.writePNG(new FileHandle(
-                              "build/gpu-board-review/hover-floor-" + (camera.projection.val[Matrix4.M33] == 0) + ".png"), opened, -1, true);
-                    }
-                    if (level == 4) {
-                        PixmapIO.writePNG(new FileHandle(
-                              "build/gpu-board-review/hover-top-floor-" + (camera.projection.val[Matrix4.M33] == 0) + ".png"), opened, -1, true);
-                        assertTrue(changedRoof > 10, "Hovering the top storey must also fade the roof: " + changedRoof);
-                        assertTrue(visibleRoof > 10, "The faded roof must remain visible: " + visibleRoof);
-                    }
-                    assertTrue(unchangedOutside > 100, "Storeys outside the cutaway must remain visible: " + unchangedOutside
-                          + " unchanged, " + changedOutside + " changed, level=" + level + ", bounds=" + buildingBounds);
-                    assertEquals(0, changedOutside, "Hover must not alter walls outside the highlighted storey: " + level + outsideSample);
-                    if (level < 5 && level != 1) {
-                        assertTrue(changedInside > 10, "The highlighted storey's walls must become translucent: " + level);
-                        assertTrue(visibleWalls > 10, "Hovered walls must remain visible rather than disappearing: " + level);
-                    }
-                    if (level == 2 || level == 4) { checkDepth(view, terrain, ui); }
-                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-                } finally { opened.dispose(); hiddenWalls.dispose(); }
-            }
-        } finally {
-            baseline.dispose();
-            terrain.animate(0, List.of(), .5f, null, Float.NaN);
-        }
-    }
-
-    private static void checkDepth(GpuBattleView view, GpuTerrain terrain, GpuBoardHud ui) {
-        int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
-        var buildingBounds = terrain.roofBounds(BUILDING);
-        var colorDepth = BufferUtils.newFloatBuffer(width * height);
-        Gdx.gl.glReadPixels(0, 0, width, height, GL30.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, colorDepth);
-        var config = new DepthShader.Config();
-        config.depthBufferOnly = true;
-        config.defaultCullFace = GL20.GL_BACK;
-        var pass = new ModelBatch(GpuTreeInstances.depthProvider(config));
-        try {
-            Gdx.gl.glDepthMask(true);
-            ScreenUtils.clear(0, 0, 0, 1, true);
-            terrain.renderDepth(view.boardCamera.camera, List.of(), pass);
-            var depth = BufferUtils.newFloatBuffer(width * height);
-            Gdx.gl.glReadPixels(0, 0, width, height, GL30.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, depth);
-            int checked = 0;
-            for (int x = 450; x < 750; x += 4) {
-                for (int y = 350; y < 550; y += 4) {
-                    var camera = view.boardCamera.camera;
-                    Vector3 point = new Vector3((x + .5f) / camera.viewportWidth * 2 - 1,
-                          (y + .5f - 0) / camera.viewportHeight * 2 - 1,
-                          colorDepth.get(y * width + x) * 2 - 1).prj(camera.invProjectionView);
-                    // Ground exposed through the opening uses surface displacement only in the colour pass.
-                    if (!buildingBounds.contains(point)
-                          || point.z < 2 * BoardGeometry.level() - .1f * BoardGeometry.hexScale()) { continue; }
-                    checked++;
-                    Vector3 depthPoint = new Vector3((x + .5f) / camera.viewportWidth * 2 - 1,
-                          (y + .5f) / camera.viewportHeight * 2 - 1,
-                          depth.get(y * width + x) * 2 - 1).prj(camera.invProjectionView);
-                    assertEquals(colorDepth.get(y * width + x), depth.get(y * width + x), .00001f,
-                          "Depth must preserve the storey opening at " + point + "; depth hit " + depthPoint);
-                }
-            }
-            assertTrue(checked > 50, "Depth comparison must cover the building's visible surfaces");
-        } finally { pass.dispose(); }
-    }
-
 }
