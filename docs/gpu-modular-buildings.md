@@ -112,14 +112,14 @@ footprint is extruded through the stack height and passed to `GpuBuildingInterio
 therefore use their intersection rather than allowing full-height columns to extend outside any storey.
 Supports require their center and all four corners to lie inside the footprint. The roof cap's furniture does
 not increase occupied floor height. Generated floors and struts enter the render/depth passes only while that
-building is faded because of an occupant. Leaving, or disabling transparency, hides them again. A closed kit building's
-floors and struts are built when a unit first stands in its hex, and kept from then on (`GpuTerrain#showInterior`,
-`GpuBuilding.Assembly#interior`): a city's would be hundreds of megabytes that nothing shows. A hex's floors are one
-prop, which shows all of them or none. A building that stands open (`ConnectedKit#open`: a hex, or a hex it joins, has
-an exit with nothing connecting back, such as a collapsed neighbour) builds them with its chunk and always draws its
-floors. An authored building and a building without a kit (a generated multi-hex building, or a kit that cannot load)
-show theirs by the same rule, only while a unit stands inside; their hidden meshes are made at load, with the model's
-cut or the chunk, and neither ever counts as standing open. A floor's
+building is faded because of an occupant. Leaving, or disabling transparency, hides them again. A closed building's
+floors and struts are built when a unit first stands in its hex, and kept from then on (`GpuTerrain#showInterior`):
+a city's would be hundreds of megabytes that nothing shows. A hex's floors are one prop, which shows all of them or
+none. A building that stands open builds them with its chunk and always draws its floors: a kit building where a hex,
+or a hex it joins, has an exit with nothing connecting back, such as a collapsed neighbour (`ConnectedKit#open`); an
+authored building where a hex of it beside the hex, or beside a hex of it the hex adjoins, has collapsed
+(`GpuAuthoredBuilding#open`). Kit buildings, authored buildings and buildings without a kit (a generated multi-hex
+building, or a kit that cannot load) all go through this one path; the last kind never stands open. A floor's
 edge keeps 0.2 units off any outward wall face beside its slab (`GpuBuildingInterior#keepClear`), in kit and authored
 buildings, so it never lies on a facade or a wall's cut end and flickers through it. Each kit caches its storey outlines by the placements of the
 pieces that shape them; repeated storeys cost a lookup. They do not enter the exterior shadow pass, which retains the authored opaque shell. Occupancy cutaways

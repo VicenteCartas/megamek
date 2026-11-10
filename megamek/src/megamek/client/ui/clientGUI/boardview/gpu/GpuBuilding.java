@@ -94,9 +94,6 @@ final class GpuBuilding implements Disposable {
          */
         Model interior() { return kit.interior(this); }
 
-        /** {@link #interior()} if it was asked for already, else null: asking never builds it. */
-        Model builtInterior() { return kit.shown.get(this); }
-
         int lodCount() { return kit.models.size(); }
         Model model(int lod) { return doored == null ? kit.models.get(lod) : doored.get(lod); }
         ModelInstance instance(int lod) {

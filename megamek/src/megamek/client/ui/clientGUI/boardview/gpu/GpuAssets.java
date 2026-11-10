@@ -1631,7 +1631,7 @@ final class GpuAssets implements Disposable {
             entry.getValue().dispose(); return true;
         });
         authoredBuildings.values().removeIf(slice -> {
-            if (slice.levels().stream().anyMatch(liveModels::contains) || liveModels.contains(slice.interior())) { return false; }
+            if (slice.levels().stream().anyMatch(liveModels::contains)) { return false; }
             slice.dispose(); return true;
         });
     }

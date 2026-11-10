@@ -574,8 +574,8 @@ cached, RTX 4070 and Iris Xe, `48x48.board` (a city) and `16x17 Fire And Ice 2`:
 
 What the build does about it:
 
-- A closed kit building's floors and struts are built when a unit first stands in its hex, not at load
-  (`GpuTerrain#showInterior`); only a building that stands open, or an authored one, builds them with its chunk.
+- A closed building's floors and struts are built when a unit first stands in its hex, not at load
+  (`GpuTerrain#showInterior`), kit or authored; only a building that stands open builds them with its chunk.
 - Loading frames are not held for the monitor's refresh (`GpuBattleView.pace`): a frame that built a slice is followed
   at once, one that only waited by the next at 60 a second. A new board's slice is 16 ms.
 - A new chunk's road masks pack into their atlas's pages on the worker that prepared it (`Prepared.packed`).

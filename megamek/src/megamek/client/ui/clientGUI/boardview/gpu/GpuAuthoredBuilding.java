@@ -43,7 +43,28 @@ import megamek.common.board.TilesetScenery;
 final class GpuAuthoredBuilding {
     record Layout(Coords cell, Coords anchor, BoardDecoration object, double base, int ground, int height,
           BuildingInteriors interiors, List<Coords> members, int boardWidth, int boardHeight) { }
-    record Slice(List<Model> levels, Model interior, List<Vector3> roof) {
+    /** One hex's share: its mesh per level, its roof, and its floors and struts ({@link #interior}). */
+    static final class Slice {
+        private final List<Model> levels;
+        private final List<Vector3> roof;
+        /** Builds the interior; null without one, and once it is built. */
+        private Supplier<Model> source;
+        private Model interior;
+
+        private Slice(List<Model> levels, Supplier<Model> source, List<Vector3> roof) {
+            this.levels = levels; this.source = source; this.roof = roof;
+        }
+
+        List<Model> levels() { return levels; }
+        List<Vector3> roof() { return roof; }
+        boolean hasInterior() { return source != null || interior != null; }
+
+        /** Its floors and struts, built when first asked for and kept, as a kit's are ({@link GpuBuilding.Assembly#interior}). */
+        Model interior() {
+            if (source != null) { interior = source.get(); source = null; }
+            return interior;
+        }
+
         void dispose() { levels.stream().distinct().forEach(Model::dispose); if (interior != null) { interior.dispose(); } }
     }
     /**
@@ -232,16 +253,36 @@ final class GpuAuthoredBuilding {
 
     static Slice build(Prepared prepared, Function<ModelData, Model> upload) {
         List<Model> levels = new ArrayList<>();
-        Model interior = null;
         try {
             for (ModelData lod : prepared.levels()) { levels.add(upload.apply(lod)); }
-            if (!prepared.floors().isEmpty() || !prepared.columns().isEmpty()) { interior = interior(prepared); }
-            return new Slice(List.copyOf(levels), interior, prepared.roof());
         } catch (RuntimeException | Error failure) {
             levels.forEach(Model::dispose);
-            if (interior != null) { interior.dispose(); }
             throw failure;
         }
+        // The interior keeps what it is built from only, not the share's geometry.
+        Layout layout = prepared.layout();
+        var floors = prepared.floors();
+        var bodies = prepared.bodies();
+        var columns = prepared.columns();
+        return new Slice(List.copyOf(levels), floors.isEmpty() && columns.isEmpty() ? null
+              : () -> interior(layout, floors, bodies, columns), prepared.roof());
+    }
+
+    /**
+     * Whether the inside of a share shows from outside, as {@link ConnectedKit#open} tells of a kit building: a member
+     * beside it, or beside a member it adjoins, has collapsed, which leaves the cut between them open.
+     */
+    static boolean open(BoardScene scene, Layout layout) {
+        for (int direction = -1; direction < 6; direction++) {
+            Coords at = direction < 0 ? layout.cell() : layout.cell().translated(direction);
+            if (!layout.members().contains(at)) { continue; }
+            for (int beside = 0; beside < 6; beside++) {
+                Coords other = at.translated(beside);
+                // A collapsed member keeps its reference to the building and has no structure left.
+                if (layout.members().contains(other) && scene.tile(other).cover().structure() == 0) { return true; }
+            }
+        }
+        return false;
     }
 
     static Prepared prepare(Layout layout, List<ModelData> source) {
@@ -400,25 +441,24 @@ final class GpuAuthoredBuilding {
               List.copyOf(standing), localBounds);
     }
 
-    private static Model interior(Prepared prepared) {
-        Layout layout = prepared.layout();
+    private static Model interior(Layout layout, List<List<Vector3>> floors, List<List<Vector3>> bodies, List<Vector3> columns) {
         long attributes = VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal;
         ModelBuilder builder = new ModelBuilder(); builder.begin();
         builder.node().id = "struts";
-        if (!prepared.columns().isEmpty()) {
+        if (!columns.isEmpty()) {
             MeshPartBuilder struts = builder.part("struts", GL20.GL_TRIANGLES, attributes,
                   new Material("struts", ColorAttribute.createDiffuse(.29f, .31f, .33f, 1)));
-            for (var column : prepared.columns()) {
+            for (var column : columns) {
                 BoxShapeBuilder.build(struts, column.x, column.y, column.z, 1.6f, 1.6f, 18);
             }
         }
         builder.node().id = "floors";
         var material = new Material("floors", ColorAttribute.createDiffuse(.58f, .56f, .52f, 1));
-        for (int level = 0; level < prepared.floors().size(); level++) {
-            var triangles = prepared.floors().get(level);
+        for (int level = 0; level < floors.size(); level++) {
+            var triangles = floors.get(level);
             if (triangles.isEmpty()) { continue; }
             var floor = builder.part("floor-" + level, GL20.GL_TRIANGLES, attributes, material);
-            GpuBuildingInterior.floor(floor, triangles, prepared.bodies().get(level), floorHeight(layout, level));
+            GpuBuildingInterior.floor(floor, triangles, bodies.get(level), floorHeight(layout, level));
         }
         return builder.end();
     }

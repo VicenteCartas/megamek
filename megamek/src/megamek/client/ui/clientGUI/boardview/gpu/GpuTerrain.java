@@ -1651,8 +1651,8 @@ final class GpuTerrain implements Disposable {
         private String receiver;
         /** Its hex's interior floors, all of them as one prop ({@link #interior}). */
         private final boolean floors;
-        /** A closed kit building's shell whose floors and struts are not built yet ({@link #showInterior}). */
-        private boolean interiorPending;
+        /** A closed building's shell: what builds its floors and struts, until they are built ({@link #showInterior}). */
+        private Supplier<Model> pendingInterior;
         /** The drawn level of its mesh ({@link #detail}). */
         private int lod;
         /** The numbered parts of its model it shows, at every level ({@link BoardGroundCut#showParts}); 0 shows them all. */
@@ -2191,7 +2191,6 @@ final class GpuTerrain implements Disposable {
         boolean previewed;
         /** Stale generated interiors stay hidden while their authored shell previews a different transform. */
         final Set<Coords> hiddenInteriors = new HashSet<>();
-        final Set<Model> sharedInteriors = new HashSet<>();
         /**
          * The faded props, in the chunk's build order ({@link #cutaways}), set only where the fade changes. The blended
          * sort often cannot order them (libGDX's distance key, an int of 1000 x the squared camera distance, saturates and
@@ -2272,15 +2271,12 @@ final class GpuTerrain implements Disposable {
             sharedShadows.addAll(GpuTerrainDepth.snapshot(shared));
             opaqueMaterials(sharedShadows);
             for (Prop prop : faded) { shared.remove(prop.instance); }
+            // Every building's interior draws from its own meshes, a kit's and an authored one's alike: none is packed.
             for (InteriorStruts strut : struts) {
-                if (sharedInteriors.contains(strut.instance.model) && interiorVisible(strut.coords)
-                      && !falling.test(strut.coords)) {
-                    shared.add(strut.instance);
-                }
+                if (interiorVisible(strut.coords) && !falling.test(strut.coords)) { shared.add(strut.instance); }
             }
             for (Prop prop : cutaways) {
-                if (prop.floors && sharedInteriors.contains(prop.instance.model)
-                      && interiorFloorVisible(prop) && !faded.contains(prop) && !falling.test(prop.coords())) {
+                if (prop.floors && interiorFloorVisible(prop) && !faded.contains(prop) && !falling.test(prop.coords())) {
                     shared.add(prop.instance);
                 }
             }
@@ -2396,17 +2392,9 @@ final class GpuTerrain implements Disposable {
         /** Placed objects are never packed: {@link #cacheDecorations} draws them. */
         private void cacheProps(Array<Renderable> destination, boolean omitFaded) {
             GpuPropBatch.cache(destination, builder -> {
-                for (InteriorStruts strut : struts) {
-                    if (omitFaded && !sharedInteriors.contains(strut.instance.model)
-                          && interiorVisible(strut.coords)) {
-                        builder.add(strut.instance);
-                    }
-                }
                 for (Prop prop : cutaways) {
                     if (prop.decorationFeature != null || prop.translucent) { continue; }
-                    if (prop.building == null && !sharedInteriors.contains(prop.instance.model)
-                          && (!prop.floors || omitFaded && interiorFloorVisible(prop))
-                          && (!omitFaded || !faded.contains(prop))) {
+                    if (prop.building == null && !prop.floors && (!omitFaded || !faded.contains(prop))) {
                         builder.add(prop.instance());
                     }
                 }
@@ -4657,17 +4645,16 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * Builds a closed kit building's interior, now that a unit stands in its hex ({@link Prop#interiorPending}): after
+     * Builds a closed building's interior, now that a unit stands in its hex ({@link Prop#pendingInterior}): after
      * its shell in the chunk's order, as a building that stands open has it, so that both blend alike; at the end of
      * its hex's props, whose places scars name.
      */
     private static void showInterior(Chunk chunk, Prop shell) {
-        shell.interiorPending = false;
-        Model interior = shell.building.interior();
+        Model interior = shell.pendingInterior.get();
+        shell.pendingInterior = null;
         List<Prop> props = new ArrayList<>(1);
         List<InteriorStruts> struts = new ArrayList<>(1);
         interior(shell, interior, false, props, struts);
-        chunk.sharedInteriors.add(interior);
         chunk.props.addAll(chunk.props.indexOf(shell) + 1, props);
         chunk.cutaways.addAll(chunk.cutaways.indexOf(shell) + 1, props);
         chunk.struts.addAll(struts);
@@ -4795,7 +4782,6 @@ final class GpuTerrain implements Disposable {
                   : assets.levels(feature.asset(), BoardGroundCut.colours(tile, feature), BoardFeatures.label(tile, feature));
             Model model = levels.getFirst();
             assets.take(build.preview == null ? this : build.preview, building, model);
-            if (authored != null) { assets.take(build.preview == null ? this : build.preview, null, authored.interior()); }
             if (building == null) {
                 for (Model level : levels) {
                     if (feature.kind() == BoardScene.FeatureKind.TREE || fungus || foliageModel(level)) { foliage(level); }
@@ -5042,16 +5028,17 @@ final class GpuTerrain implements Disposable {
                 supports.add(prop);
             }
             if (feature.kind() == BoardScene.FeatureKind.BUILDING && !wallBuilding && tile.cover().interiors() != BuildingInteriors.NO
-                  && (authored == null || authored.interior() != null)) {
-                boolean open = building != null && ConnectedKit.open(scene, tile, Math.round(feature.height()));
-                // A closed kit building's interior is built when a unit first stands in its hex (animate): until then
+                  && (authored == null || authored.hasInterior())) {
+                int floors = tile.cover().interiors() == BuildingInteriors.NO_FLOORS ? 1 : Math.round(feature.height());
+                Supplier<Model> interior = authored != null ? authored::interior : building != null ? building::interior
+                      : () -> assets.interior(model, floors);
+                // A closed building's interior is built when a unit first stands in its hex (animate): until then
                 // nothing shows it, and a city's would be hundreds of megabytes of floors.
-                if (building != null && !open) {
-                    prop.interiorPending = true;
+                if (authored != null ? GpuAuthoredBuilding.open(scene, authoredLayout)
+                      : building != null && ConnectedKit.open(scene, tile, Math.round(feature.height()))) {
+                    interior(prop, interior.get(), true, chunk.props, chunk.struts);
                 } else {
-                    int floors = tile.cover().interiors() == BuildingInteriors.NO_FLOORS ? 1 : Math.round(feature.height());
-                    interior(prop, authored != null ? authored.interior() : building == null ? assets.interior(model, floors)
-                          : building.interior(), open, chunk.props, chunk.struts);
+                    prop.pendingInterior = interior;
                 }
             }
             chunk.bounds.ext(bounds);
@@ -5474,7 +5461,7 @@ final class GpuTerrain implements Disposable {
                         copy.scatter = prop.scatter;
                         copy.infrastructure = prop.infrastructure;
                         copy.openShell = prop.openShell;
-                        copy.interiorPending = prop.interiorPending;
+                        copy.pendingInterior = prop.pendingInterior;
                         copy.small = prop.small;
                         copy.decorationId = prop.decorationId;
                         copy.decorationOwner = prop.decorationOwner; copy.supportTriangles = prop.supportTriangles;
@@ -5681,8 +5668,6 @@ final class GpuTerrain implements Disposable {
             Map<Coords, BoundingBox> fungalHexes = new LinkedHashMap<>();
             for (Prop prop : chunk.props) {
                 if (prop.decorationId != null) { chunk.objectProps.computeIfAbsent(prop.decorationId, id -> new ArrayList<>(1)).add(prop); }
-                // A kit's interiors that are built draw as shared instances (cacheProps); none is built here.
-                if (prop.building != null && prop.building.builtInterior() != null) { chunk.sharedInteriors.add(prop.building.builtInterior()); }
                 if (prop.tree()) {
                     chunk.treeDiameter = Math.max(chunk.treeDiameter, prop.treeDiameter);
                     // Plain trees fill the stand below (restand); scatter keeps its own stand.
@@ -7189,7 +7174,7 @@ final class GpuTerrain implements Disposable {
             // By index: an interior built here joins the list right after its shell.
             for (int index = 0; index < chunk.cutaways.size() && !occupiedHexes.isEmpty(); index++) {
                 Prop prop = chunk.cutaways.get(index);
-                if (prop.interiorPending && occupiedHexes.contains(prop.coords())) { showInterior(chunk, prop); }
+                if (prop.pendingInterior != null && occupiedHexes.contains(prop.coords())) { showInterior(chunk, prop); }
             }
             // One fade rule for every prop: the whole hex turns see-through around its unit, the shell and the interior
             // with all its floors, and a placed object with them like a packed prop; only route markers never fade.
@@ -7582,7 +7567,7 @@ final class GpuTerrain implements Disposable {
     /** An editor board plays no scene changes, so moving lifts and an editor preview never mask one chunk together. */
     private Hidden hidden(Chunk chunk) {
         var hidden = lifts != null ? lifts.hidden(chunk) : editorRoutes == null ? Hidden.NONE : editorRoutes.hidden(chunk);
-        // Bypass the packed interior meshes immediately, without repacking them on every pointer event.
+        // Bypass the cached interior draws immediately, without caching them again on every pointer event.
         return chunk.hiddenInteriors.isEmpty() || hidden.props() ? hidden
               : new Hidden(hidden.ground(), hidden.overlays(), hidden.paint(), true);
     }

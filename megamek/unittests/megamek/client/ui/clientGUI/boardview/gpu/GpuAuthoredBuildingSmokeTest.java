@@ -397,14 +397,9 @@ class GpuAuthoredBuildingSmokeTest {
                         } else {
                             if (source.editorAuthoredGesture() || terrain.busy()
                                   || installed == ((BoardScene) GpuTestSupport.field(terrain, "coverScene")).tiles()) { return; }
-                            int floors = 0;
                             for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
                                 assertTrue(((java.util.Set<?>) GpuTestSupport.field(chunk, "hiddenInteriors")).isEmpty());
-                                for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
-                                    if ((boolean) GpuTestSupport.field(prop, "floors")) { floors++; }
-                                }
                             }
-                            assertTrue(floors > 0, "Generated floors return at the released placement");
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                             Gdx.app.exit();
                         }
@@ -455,6 +450,11 @@ class GpuAuthoredBuildingSmokeTest {
                         GpuReviewFrame.save(new File(output, at.equals(low) ? "debug-low-interior.png" : "debug-high-interior.png"));
                     }
                     terrain.update(collapsed); terrain.animate(1, List.of());
+                    boolean open = false;
+                    for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                        for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) { open |= (boolean) GpuTestSupport.field(prop, "openShell"); }
+                    }
+                    assertTrue(open, "The hex left standing beside a collapsed one shows its floors without a unit");
                     frame.render(terrain, camera, collapsed); GpuReviewFrame.save(new File(output, "debug-hex-collapsed.png"));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
@@ -487,6 +487,10 @@ class GpuAuthoredBuildingSmokeTest {
                 try {
                     BoardCamera camera = new BoardCamera(); camera.resize(1200, 900); camera.center(BoardGeometry.center(at, 3));
                     terrain.update(original); GpuReviewFrame.settle(terrain, null, original, camera);
+                    // A unit's visit builds its hex's floors, which stay once it has left.
+                    var occupant = GpuTestSupport.occupant(at); occupant.transform.translate(0, 0, 3 * BoardGeometry.level());
+                    terrain.animate(1, List.of(occupant), 0); terrain.animate(1, List.of(), 0);
+                    occupant.model.dispose();
                     var models = new java.util.HashSet<com.badlogic.gdx.graphics.g3d.Model>();
                     var materials = new java.util.IdentityHashMap<Material, Material>();
                     for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
@@ -507,11 +511,12 @@ class GpuAuthoredBuildingSmokeTest {
                         float unit = BoardGeometry.hexScale();
                         var delta = new com.badlogic.gdx.math.Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(at, next.decoration(), 3))
                               .mul(new com.badlogic.gdx.math.Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(at, start.decoration(), 3)).inv());
-                        int shares = 0, painted = 0, fixed = 0;
+                        int shares = 0, painted = 0, fixed = 0, floors = 0;
                         for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
                             var hidden = (java.util.Set<?>) GpuTestSupport.field(chunk, "hiddenInteriors");
                             for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
                                 if ((boolean) GpuTestSupport.field(prop, "floors")) {
+                                    floors++;
                                     assertEquals(pose != original, hidden.contains(GpuTestSupport.<Object>field(prop, "coords")),
                                           "Moved interiors hide until fresh cuts install");
                                     assertNull(GpuTestSupport.field(prop, "previewInstance"), "Floors are not transformed on each drag event");
@@ -547,6 +552,7 @@ class GpuAuthoredBuildingSmokeTest {
                             }
                         }
                         assertTrue(shares > 40);
+                        assertTrue(floors > 0, "The visited hex has its floors to hide");
                         // Some slices contain only unpainted dishes or equipment; the whole building has both kinds.
                         assertTrue(painted > 0, "Authored material metadata must identify its paintable surfaces");
                         assertTrue(fixed > 0, "The building must retain fixed material finishes");
