@@ -95,7 +95,17 @@ final class GpuGameMenu {
 
     private final UiKit kit;
     private final Runnable close;
-    private final Table column = new Table();
+    /** The column keeps the height of its tallest page, so the menu's frame stays put as the player changes pages. */
+    private final Table column = new Table() {
+        @Override
+        public float getPrefHeight() {
+            // A scrolling host holds the height itself (tallest()), so a short page doesn't scroll
+            return getParent() instanceof ScrollPane ? super.getPrefHeight()
+                  : Math.max(super.getPrefHeight(), tallest);
+        }
+    };
+    /** The height of the tallest page of the menu as it opened. */
+    private float tallest;
     /** The ids of the page entries from the root to the shown page; empty on the root page. */
     private final Deque<String> path = new ArrayDeque<>();
     /** The newest entry of each shown id, so an entry runs what the host showed last. */
@@ -130,6 +140,8 @@ final class GpuGameMenu {
     void open(List<List<Entry>> groups) {
         path.clear();
         shown = null;
+        tallest = 0;
+        tallest = tallest(groups, null);
         show(groups);
     }
 
@@ -166,6 +178,11 @@ final class GpuGameMenu {
         returnTo = path.removeLast();
         show(root);
         return true;
+    }
+
+    /** The height of the menu's tallest page, as it opened: what a scrolling host keeps its viewport at. */
+    float tallest() {
+        return tallest;
     }
 
     /** Whether a page other than the root shows. */
@@ -217,30 +234,12 @@ final class GpuGameMenu {
         Actor focused = stage == null ? null : stage.getKeyboardFocus();
         String focusedName = focused != null && focused.isDescendantOf(column) ? focused.getName() : null;
         column.clearChildren();
-        float gap = space("sm");
-        float group = space("lg");
+        String title = null;
         if (!path.isEmpty()) {
-            Table header = new Table();
-            UiButton backButton = kit.button("button-quiet" + UiTheme.COMPACT, "chevron-left",
-                  Messages.getString("Lobby.back"), null);
-            backButton.setName(BACK);
-            UiKit.onChange(backButton, this::back);
-            header.add(backButton).left();
             Entry opened = find(parentPage(), path.getLast());
-            String title = opened == null ? "" : opened.label();
-            header.add(kit.roleTypeLabel("title", title, "text.secondary")).expandX().right();
-            column.add(header).growX().row();
+            title = opened == null ? "" : opened.label();
         }
-        boolean first = path.isEmpty();
-        for (List<Entry> entriesOfGroup : page) {
-            boolean firstOfGroup = true;
-            for (Entry entry : entriesOfGroup) {
-                float above = first ? 0 : firstOfGroup ? group : gap;
-                column.add(control(entry)).growX().padTop(above).row();
-                first = false;
-                firstOfGroup = false;
-            }
-        }
+        fill(column, page, title);
         column.invalidateHierarchy();
         if (moved) {
             scrollTo(returnTo != null ? named(returnTo) : null);
@@ -273,6 +272,46 @@ final class GpuGameMenu {
         }
     }
 
+    /** Fills {@code table} with {@code page}'s controls in groups, under a Back header titled {@code title} if any. */
+    private void fill(Table table, List<List<Entry>> page, String title) {
+        float gap = space("sm");
+        float group = space("lg");
+        if (title != null) {
+            Table header = new Table();
+            UiButton backButton = kit.button("button-quiet" + UiTheme.COMPACT, "chevron-left",
+                  Messages.getString("Lobby.back"), null);
+            backButton.setName(BACK);
+            UiKit.onChange(backButton, this::back);
+            header.add(backButton).left();
+            header.add(kit.roleTypeLabel("title", title, "text.secondary")).expandX().right();
+            table.add(header).growX().row();
+        }
+        boolean first = title == null;
+        for (List<Entry> entriesOfGroup : page) {
+            boolean firstOfGroup = true;
+            for (Entry entry : entriesOfGroup) {
+                float above = first ? 0 : firstOfGroup ? group : gap;
+                table.add(control(entry)).growX().padTop(above).row();
+                first = false;
+                firstOfGroup = false;
+            }
+        }
+    }
+
+    /** The height of the tallest of {@code page} (titled {@code title}, null for the root) and the pages below it. */
+    private float tallest(List<List<Entry>> page, String title) {
+        Table measure = new Table();
+        fill(measure, page, title);
+        float height = measure.getPrefHeight();
+        for (List<Entry> group : page) {
+            for (Entry entry : group) {
+                if (entry.kind() == Kind.PAGE) {
+                    height = Math.max(height, tallest(entry.page(), entry.label()));
+                }
+            }
+        }
+        return height;
+    }
     private List<List<Entry>> parentPage() {
         List<List<Entry>> page = root;
         int index = 0;

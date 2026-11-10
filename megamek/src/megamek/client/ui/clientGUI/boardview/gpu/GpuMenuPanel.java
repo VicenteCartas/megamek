@@ -12,6 +12,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuGameMenu.Entry;
@@ -71,7 +72,13 @@ final class GpuMenuPanel implements GpuHud.Component {
         list.setName("menu-list");
         list.setFadeScrollBars(false);
         list.setScrollingDisabled(true, false);
-        root.add(list).grow().minHeight(0).row();
+        // The list keeps the height of the menu's tallest page, so the card stays put as the player changes pages
+        root.add(list).grow().minHeight(0).prefHeight(new Value() {
+            @Override
+            public float get(Actor context) {
+                return Math.max(list.getPrefHeight(), menu.tallest());
+            }
+        }).row();
     }
 
     @Override
