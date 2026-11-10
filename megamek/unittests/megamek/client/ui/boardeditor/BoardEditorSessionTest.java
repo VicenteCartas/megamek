@@ -911,6 +911,11 @@ class BoardEditorSessionTest {
         assertEquals(List.of(new BoardEditorSession.Selection(at, ""), new BoardEditorSession.Selection(east, "")),
               session.snapshot().selection());
 
+        session.pointer(at, 0, 0, false, null, false, "bridge"); session.finishStroke(); session.release();
+        assertEquals("bridge", session.snapshot().component(), "A click that struck the bridge selects Bridge");
+        session.pointer(east, 0, 0, false, null, false, "bridge"); session.finishStroke(); session.release();
+        assertEquals("ground", session.snapshot().component(), "A layer the hex lacks is never selected");
+
         session.board().getHex(east).setDecorations(List.of(prop("car", 0, 0)));
         click(session, east, "car", false);
         assertEquals("car", session.snapshot().object(), "A picked object keeps priority over the ground");

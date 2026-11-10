@@ -9251,8 +9251,7 @@ final class GpuTerrain implements Disposable {
         }
         for (Prop prop : editorProps(coords)) {
             if (prop.floors) { continue; }
-            String component = prop.industrial ? "industry" : "building".equals(prop.receiver) ? "building"
-                  : "bridge".equals(prop.receiver) ? "bridge" : prop.tree() ? "vegetation" : prop.structure ? "fuelTank" : "";
+            String component = component(prop);
             if ((prop.decorationId != null || !component.isEmpty())
                   && hitProp(prop, ray, point) && ray.origin.dst2(point) < nearest) {
                 nearest = ray.origin.dst2(point);
@@ -9264,6 +9263,32 @@ final class GpuTerrain implements Disposable {
             if (ground != null && ground.distance() < nearest) { result = new EditorSectionHit("", "ground"); }
         }
         return result;
+    }
+
+    /** The Layers component a drawn prop belongs to, or "" (a placed object, plain scenery). */
+    private static String component(Prop prop) {
+        return prop.industrial ? "industry" : prop.floors || "building".equals(prop.receiver) ? "building"
+              : "bridge".equals(prop.receiver) ? "bridge" : prop.tree() ? "vegetation" : prop.structure ? "fuelTank" : "";
+    }
+
+    /** A Select click's hit and the Layers component of what is drawn there. */
+    record EditorPick(BoardGeometry.Hit hit, String component) { }
+
+    /**
+     * What a Select click takes: the nearest thing drawn under the pointer, trees and industrial cover included, and the
+     * Layers component it belongs to. A liquid's surface is Water; what belongs to no component is the Ground of its
+     * hex ({@link #decorationHit} picks the placed objects themselves).
+     */
+    EditorPick editorPick(BoardScene scene, Ray ray) {
+        if (!ready(scene)) { return null; }
+        return installedSettings.call(() -> {
+            Prop[] struck = new Prop[1];
+            BoardGeometry.Hit hit = hitInstalled(presentation(scene), ray, true, false, false, Float.POSITIVE_INFINITY, false, struck);
+            if (hit == null) { return null; }
+            String component = struck[0] != null ? component(struck[0]) : hit.receiver().equals("bridge") ? "bridge"
+                  : hit.face() == null ? "water" : "ground";
+            return new EditorPick(hit, component.isEmpty() ? "ground" : component);
+        });
     }
 
     /**
@@ -9362,6 +9387,12 @@ final class GpuTerrain implements Disposable {
     /** With {@code throughWater} a see-through liquid's surface gives way to its bed ({@link BoardGeometry#hit}). */
     private BoardGeometry.Hit hitInstalled(BoardScene scene, Ray ray, boolean includeFoliage, boolean placement, boolean walkable,
           float length, boolean throughWater) {
+        return hitInstalled(scene, ray, includeFoliage, placement, walkable, length, throughWater, null);
+    }
+
+    /** {@code struck}, when given, receives the prop the returned hit lies on, or null for a bridge shape or the ground. */
+    private BoardGeometry.Hit hitInstalled(BoardScene scene, Ray ray, boolean includeFoliage, boolean placement, boolean walkable,
+          float length, boolean throughWater, Prop[] struck) {
         // The caller has selected the installed coordinate system. A source snapshot that update has not yet
         // received still uses the authoritative-snapshot fallback, as before.
         boolean finished = tiles == scene.tiles();
@@ -9394,6 +9425,7 @@ final class GpuTerrain implements Disposable {
                     result = footprint == null ? entry.getKey() : footprint.coords();
                     hardSurface = false;
                     receiver = "bridge";
+                    if (struck != null) { struck[0] = null; }
                 }
             }
             for (Prop prop : chunk.props) {
@@ -9411,6 +9443,7 @@ final class GpuTerrain implements Disposable {
                         hardSurface = prop.hardSurface;
                         receiver = prop.receiver != null ? prop.receiver
                               : prop.floors ? "building" : "ground";
+                        if (struck != null) { struck[0] = prop; }
                     }
                 }
             }
@@ -9419,8 +9452,11 @@ final class GpuTerrain implements Disposable {
         BoardGeometry.Hit groundHit = finished
               ? BoardGeometry.hit(scene, ray, candidates, floor, null, this::tacticalSurface, throughWater)
               : BoardGeometry.hit(scene, ray, scene.tiles(), BoardGeometry.floor(scene), pickingSurfaces, null, throughWater);
-        return groundHit != null && groundHit.distance() <= nearest ? groundHit
-              : result == null ? null : new BoardGeometry.Hit(result, nearest, hardSurface, receiver);
+        if (groundHit != null && groundHit.distance() <= nearest) {
+            if (struck != null) { struck[0] = null; }
+            return groundHit;
+        }
+        return result == null ? null : new BoardGeometry.Hit(result, nearest, hardSurface, receiver);
     }
 
     /** Authored helpers supply standing surfaces; visual antennas and dishes cannot become roofs. */

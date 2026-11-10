@@ -2930,7 +2930,10 @@ class GpuBattleView extends ApplicationAdapter {
                       (point.y - editorGrabY - BoardGeometry.centerY(at)) / BoardGeometry.height(), drag, editorGrab.id(), additive, gestureBoardGeneration);
                 return;
             }
-            var hit = editorHit(ray, state);
+            // Select takes what is drawn under the pointer, with its layer; the other tools their own surface.
+            boolean select = state != null && state.tool() == megamek.client.ui.boardeditor.BoardEditorSession.Tool.SELECT;
+            var pick = select ? terrain.editorPick(scene, ray) : null;
+            var hit = select ? pick == null ? null : pick.hit() : editorHit(ray, state);
             if (hit == null) {
                 if (!drag && gestureModifiers == 0) {
                     source.editorCommand(new Command(Action.CLEAR_SELECTION), gestureBoardGeneration);
@@ -2940,7 +2943,7 @@ class GpuBattleView extends ApplicationAdapter {
             // A route drawn by hand: the hover, which shows its preview, follows the drag (mouseMoved leaves it alone).
             if (drawingRoute()) { hovered = hit.coords(); hoverZ = Float.NaN; source.setHover(hovered); }
             Vector3 point = ray.getEndPoint(new Vector3(), (float) Math.sqrt(hit.distance()));
-            if (!drag && !additive && state != null && state.tool() == megamek.client.ui.boardeditor.BoardEditorSession.Tool.SELECT) {
+            if (!drag && !additive && select) {
                 editorHexGrab = hit.coords(); editorPlaneZ = point.z;
                 editorGrabX = point.x - BoardGeometry.centerX(hit.coords());
                 editorGrabY = point.y - BoardGeometry.centerY(hit.coords());
@@ -2949,11 +2952,11 @@ class GpuBattleView extends ApplicationAdapter {
             double hexY = (point.y - BoardGeometry.centerY(hit.coords())) / BoardGeometry.height();
             // A drag moves the preview's pointer too: a route stroke's next step heads where the pointer goes.
             source.editorHover(hit.coords(), hexX, hexY, hit.receiver());
-            source.editorPointer(hit.coords(), hexX, hexY, drag, null, additive, hit.receiver(),
+            source.editorPointer(hit.coords(), hexX, hexY, drag, null, additive, select ? pick.component() : hit.receiver(),
                   (gestureModifiers & InputEvent.CTRL_DOWN_MASK) != 0, gestureBoardGeneration);
         }
 
-        /** The hit a Paint, Erase or Select event along {@code ray} takes: an object brush's support, else the ground. */
+        /** The hit a Paint, Erase or Sculpt event along {@code ray} takes: an object brush's support, else the ground. */
         private BoardGeometry.Hit editorHit(com.badlogic.gdx.math.collision.Ray ray,
               megamek.client.ui.boardeditor.BoardEditorSession.Snapshot state) {
             if (state != null && state.activeBrush().way()
@@ -2991,8 +2994,8 @@ class GpuBattleView extends ApplicationAdapter {
               megamek.client.ui.boardeditor.BoardEditorSession.Snapshot state) {
             var selection = state.selection();
             if (!selection.isEmpty() && selection.getFirst().object().isEmpty()) {
-                var ground = terrain.selectionHit(scene, ray);
-                if (ground != null && selection.contains(new megamek.client.ui.boardeditor.BoardEditorSession.Selection(ground.coords(), ""))) {
+                var ground = terrain.editorPick(scene, ray);
+                if (ground != null && selection.contains(new megamek.client.ui.boardeditor.BoardEditorSession.Selection(ground.hit().coords(), ""))) {
                     return null;
                 }
             }
@@ -3055,8 +3058,8 @@ class GpuBattleView extends ApplicationAdapter {
             var ray = boardCamera.camera.getPickRay(x, y, 0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
             var object = objectPress(ray, state);
             if (object != null) { return new megamek.client.ui.boardeditor.BoardEditorSession.Selection(object.coords(), object.id()); }
-            var ground = terrain.selectionHit(scene, ray);
-            return ground == null ? null : new megamek.client.ui.boardeditor.BoardEditorSession.Selection(ground.coords(), "");
+            var ground = terrain.editorPick(scene, ray);
+            return ground == null ? null : new megamek.client.ui.boardeditor.BoardEditorSession.Selection(ground.hit().coords(), "");
         }
 
         private Coords pick(int x, int y) {

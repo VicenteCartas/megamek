@@ -41,7 +41,8 @@ import org.junit.jupiter.api.Test;
 class GpuEditorPickHandleSmokeTest {
     private static final File OUTPUT = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
     private static final Coords DECAL = new Coords(2, 4), WATER = new Coords(6, 4), CAR = new Coords(4, 5), LOT = new Coords(6, 6),
-          PAD = new Coords(2, 6), BRIDGE = new Coords(4, 2), BURIED = new Coords(6, 2);
+          PAD = new Coords(2, 6), BRIDGE = new Coords(4, 2), BURIED = new Coords(6, 2), BUILDING = new Coords(1, 1),
+          WOODS = new Coords(3, 0);
 
     @Test
     void decalsAndObjectsUnderWaterSelectAndTheHandleTurnsTheSelection() throws Exception {
@@ -50,6 +51,8 @@ class GpuEditorPickHandleSmokeTest {
             var editor = new BoardEditorSession();
             Board board = Board.createEmptyBoard(9, 9);
             board.setHex(BRIDGE, new Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:2", ""));
+            board.setHex(BUILDING, new Hex(0, "building:2;bldg_elev:2;bldg_cf:40", ""));
+            board.setHex(WOODS, new Hex(0, "woods:2;foliage_elev:2", ""));
             board.getHex(DECAL).setDecorations(List.of(new BoardDecoration("emblem", "decal", "decal/emblems/star-league",
                   null, 0, 0, 0, false, .5, BoardDecoration.Placement.ground(), 0)));
             board.getHex(PAD).setDecorations(List.of(new BoardDecoration("pad", "decal", "decal/emblems/star-league", null,
@@ -83,6 +86,7 @@ class GpuEditorPickHandleSmokeTest {
                         settle(view, source);
                         assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
                         groundSelection(view, source, session.get());
+                        struckLayer(view, source);
                         decal(view, source);
                         underWater(view, source);
                         handle(view, source, session.get());
@@ -130,9 +134,54 @@ class GpuEditorPickHandleSmokeTest {
         assertFalse(details.hasChildren(), "Clearing the selection empties the inspector");
         assertInspectorHidden();
         assertNull(GpuBoardTestUi.stage().getKeyboardFocus(), "Hiding the inspector releases its keyboard focus");
-        assertFalse(((UiButton) root.findActor("editor-component-ground")).isChecked(), "No layer remains highlighted");
+        assertNull(root.findActor("editor-component-ground"), "Without a hex, Layers lists no row");
         click(view, plain); settle(view, source);
         assertGroundSelected(source, plain);
+    }
+
+    /** A click selects the layer of what it struck: the building, the bridge, a tree; the ground beside them is Ground. */
+    private static void struckLayer(GpuBattleView view, GpuMapSource source) throws Exception {
+        GpuTerrain terrain = terrain(view);
+        BoardScene scene = (BoardScene) GpuTestSupport.field(view, "scene");
+        click(view, BUILDING); settle(view, source);
+        assertLayer(source, BUILDING, "building");
+        assertTrue(GpuBoardTestUi.texts(GpuBoardTestUi.stage().getRoot().findActor("editor-details")).contains("BUILDING"),
+              "Edit shows the building");
+        clickAt(screen(view, BoardGeometry.center(BRIDGE, 2))); settle(view, source);
+        assertLayer(source, BRIDGE, "bridge");
+        // A tree of the woods hex, found on a grid over it; the hex's ground between its trees stays Ground.
+        Vector2 tree = null, soil = null;
+        for (float dx = -.4f; dx <= .4f; dx += .05f) {
+            for (float dy = -.4f; dy <= .4f; dy += .05f) {
+                Vector2 point = screen(view, new Vector3(BoardGeometry.centerX(WOODS) + dx * BoardGeometry.width(),
+                      BoardGeometry.centerY(WOODS) + dy * BoardGeometry.height(), 0));
+                var pick = terrain.editorPick(scene, ray(view, point));
+                if (pick == null || !pick.hit().coords().equals(WOODS)) { continue; }
+                if (pick.component().equals("vegetation")) { tree = point; } else { soil = point; }
+            }
+        }
+        assertNotNull(tree, "The woods hex draws a tree to click on");
+        assertNotNull(soil, "and shows ground between its trees");
+        clickAt(onBoard(tree)); settle(view, source);
+        assertLayer(source, WOODS, "vegetation");
+        clickAt(onBoard(soil)); settle(view, source);
+        assertLayer(source, WOODS, "ground");
+        GpuBoardTestUi.capture(new File(OUTPUT, "editor-struck-layer.png"));
+    }
+
+    /** {@code point}, which no panel covers: its click reaches the board. */
+    private static Vector2 onBoard(Vector2 point) {
+        var stage = GpuBoardTestUi.stage();
+        var intercepted = stage.hit(point.x, Gdx.graphics.getHeight() - point.y, true);
+        assertTrue(intercepted == null || intercepted == stage.getRoot(), () -> "The click must reach the board: " + intercepted);
+        return point;
+    }
+
+    private static void assertLayer(GpuMapSource source, Coords coords, String component) {
+        assertEquals(List.of(new BoardEditorSession.Selection(coords, "")), source.editorState().selection());
+        assertEquals(component, source.editorState().component());
+        UiButton row = GpuBoardTestUi.stage().getRoot().findActor("editor-component-" + component);
+        assertTrue(GpuBoardTestUi.shown(row) && row.isChecked(), component + " is highlighted in Layers");
     }
 
     private static void assertInspectorHidden() {
@@ -209,6 +258,7 @@ class GpuEditorPickHandleSmokeTest {
         clickAt(open); settle(view, source);
         assertEquals(List.of(new BoardEditorSession.Selection(WATER, "")), source.editorState().selection(),
               "A click on open water selects its hex");
+        assertEquals("water", source.editorState().component(), "on its Water layer");
         clickAt(point); settle(view, source);
         assertEquals(List.of(new BoardEditorSession.Selection(WATER, "pillar")), source.editorState().selection(),
               "On its selected hex, a click through the water selects the pillar beneath it");

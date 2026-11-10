@@ -1480,7 +1480,8 @@ public final class BoardEditorSession {
 
     /**
      * {@code invert} (Ctrl at the press) swaps Sculpt's raise and lower; other tools ignore it. Paint with a rail, maglev or
-     * road brush draws the route by hand ({@link #draw}); every other event applies at once.
+     * road brush draws the route by hand ({@link #draw}); every other event applies at once. For Select, {@code receiver}
+     * is the Layers component of what the press struck.
      */
     public void pointer(Coords at, double x, double y, boolean drag, String pickedObject, boolean additive, String receiver,
           boolean invert) {
@@ -1959,7 +1960,7 @@ public final class BoardEditorSession {
         String notice = strokeNotice;
         try {
             if (tool == Tool.SELECT) {
-                selectPointer(at, x, y, drag, pickedObject, additive);
+                selectPointer(at, x, y, drag, pickedObject, additive, receiver);
             } else if (tool == Tool.SCULPT) {
                 // A fast drag also covers the hexes it skipped since the stroke's previous event.
                 var centres = drag && sculptLevel != null && selected != null ? Coords.intervening(selected, at) : List.of(at);
@@ -2335,16 +2336,23 @@ public final class BoardEditorSession {
      * A grouped object selects its whole group; pressing an item of a larger selection and releasing without a drag
      * selects that item (with its group) alone, pressing a member of a wholly selected group that way selects the member
      * alone, and while drilled in, a sibling's click selects only the sibling. Shift-click
-     * toggles; Shift drags do nothing here (the view boxes them).
+     * toggles; Shift drags do nothing here (the view boxes them). A press that hit no object selects {@code layer}, the
+     * component of what it struck (a building, a bridge, the trees, the water), where the hex has it; else the ground.
      */
-    private void selectPointer(Coords at, double x, double y, boolean drag, String object, boolean additive) {
+    private void selectPointer(Coords at, double x, double y, boolean drag, String object, boolean additive, String layer) {
         String pickedRoute = object;
         var rail = RailRoute.derived(board().getHex(at), "").stream()
               .filter(route -> route.id().equals(pickedRoute)).findFirst().orElse(null);
         if (rail != null) { object = ""; }
         Selection hit = new Selection(at, object == null ? "" : object);
-        // A board click selects the ground unless it hit an object; a prior Layers choice belongs to that inspection.
-        if (!drag && hit.object().isEmpty()) { component = rail != null && RailRoute.onDeck(rail) ? "bridge" : "ground"; }
+        // A board click selects the layer it struck unless it hit an object; a prior Layers choice belongs to that inspection.
+        if (!drag && hit.object().isEmpty()) {
+            Hex hex = board().getHex(at);
+            component = rail != null ? RailRoute.onDeck(rail) ? "bridge" : "ground"
+                  : blueprint.components().stream().filter(c -> c.id().equals(layer) && !c.present().isEmpty()
+                        && c.isPresent(name -> hex.containsTerrain(Terrains.getType(name)))).findFirst()
+                  .map(BoardEditorBlueprint.Component::id).orElse("ground");
+        }
         if (drag) { pendingDrill = null; }
         if (additive && drag) { return; }
         // Only presses need the group, so a drag's move events never consult the board's groups.
