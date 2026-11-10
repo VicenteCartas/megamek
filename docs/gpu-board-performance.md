@@ -587,9 +587,22 @@ on the RTX 4070 28.2 to 25.4 s (terrain build 19.1 to 15.6 s; three rounds), on 
 16.8 s; two rounds). Fire and Ice 2 13.6 to 13.5 s. Fixed-light captures of both boards at three zooms are the same
 pixels.
 
-Still on the render thread for a city chunk: kit floor meshes (libGDX's mesh builders share static scratch state, so
-they cannot run beside the render thread's own), model texture decodes started only when a model is first drawn,
-decal projection, and the kits' own meshes.
+Still on the render thread for a city chunk, of about 13 s on the RTX 4070: kit building interiors 2.3 s (floor meshes
+1.5-2 s, waits for storeys 0.4 s), the first use of each kit 1.2 s, decal projection 1.1 s, model textures 1.5 s
+(0.6 s of it decodes, the rest uploads), the board's shader programs 1.2-2.9 s.
+
+The interiors are the one large item left. The 48x48 city's kit buildings hold 343 interior models of 3,168 floors:
+13.3 million vertices, 304 MiB of vertex data, each floor about 4,200 vertices because its outline is cut back at every
+wall face (`keepClear`). A floor is drawn only in a building a unit stands in or one that stands open. 1,578 of the
+floors are distinct within their model, about 1,100 over the whole board.
+
+Tried on the same board and not kept (2026-11-10):
+- Decoding the models' images with their files, ahead of their creation: creation's waits fell from 0.6 to 0.1 s, and
+  the road material arrays then waited 0.6 s behind those decodes. No gain.
+- Floor vertices added as raw floats, not `VertexInfo` objects (identical meshes): 0.8 of the time in one JVM, about
+  0.15 s of a load.
+- Six or eight sections in flight for four: terrain build 14.8 against 14.8 s over six alternating loads each. The
+  render thread waits for workers mostly before the first sections arrive, which more sections at once do not hasten.
 
 ## Preparation and replacement
 
