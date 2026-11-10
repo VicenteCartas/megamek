@@ -36,6 +36,8 @@ import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyGameMaster;
 import megamek.client.lobby.LobbyRequisition;
 import megamek.client.lobby.MapNoteForm;
+import megamek.client.lobby.NetworkInformationForm;
+import megamek.client.lobby.NovaNetworkForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.PortraitCatalog;
@@ -99,6 +101,8 @@ final class LobbyNativeDialogs {
     private LobbyPlayerSettingsView settingsView;
     private LobbyBotSetupView botView;
     private LobbyEditBotsView editBotsView;
+    private LobbyNetworkInfoView networkInfoView;
+    private LobbyNovaNetworkView novaNetworkView;
     private LobbyConditionsView conditionsView;
     private LobbyGameOptionsView optionsView;
     private LobbyRandomMapView randomMapView;
@@ -233,6 +237,27 @@ final class LobbyNativeDialogs {
         editBotsView = new LobbyEditBotsView(kit, dialog, form, host, () -> closeDialog(dialog));
         show(dialog);
         return editBotsView;
+    }
+
+    /**
+     * Opens this computer's addresses and the game's host as a card over the battle, showing {@code rows} until
+     * {@link LobbyNetworkInfoView#addresses} brings the looked-up ones.
+     */
+    LobbyNetworkInfoView networkInformation(List<NetworkInformationForm.Row> rows) {
+        UiDialog dialog = begin(Messages.getString("NetworkInformation.title"), "dialog.sm", false,
+              () -> networkInfoView = null);
+        networkInfoView = new LobbyNetworkInfoView(kit, dialog, rows, () -> closeDialog(dialog));
+        show(dialog);
+        return networkInfoView;
+    }
+
+    /** Opens the Nova CEWS networks, read only, as a card over the battle. */
+    LobbyNovaNetworkView novaNetworks(NovaNetworkForm form) {
+        UiDialog dialog = begin(Messages.getString("NovaNetworkViewDialog.title"), "dialog.md", false,
+              () -> novaNetworkView = null);
+        novaNetworkView = new LobbyNovaNetworkView(kit, dialog, form, () -> closeDialog(dialog));
+        show(dialog);
+        return novaNetworkView;
     }
 
     /** Opens the planetary conditions. */
@@ -956,6 +981,14 @@ final class LobbyNativeDialogs {
 
     @Nullable LobbyEditBotsView editBotsView() {
         return editBotsView;
+    }
+
+    @Nullable LobbyNetworkInfoView networkInfoView() {
+        return networkInfoView;
+    }
+
+    @Nullable LobbyNovaNetworkView novaNetworkView() {
+        return novaNetworkView;
     }
 
     @Nullable LobbyConditionsView conditionsView() {

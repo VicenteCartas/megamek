@@ -308,7 +308,8 @@ Done so far, in short:
   footers, the libGDX start screen (G1 to G6: the menu, Host, Connect, Load game, the scenario browser and the
   briefing) and its follow-ups, and the libGDX lobby (L0 to L18) with its review rounds. The lobby opens no Swing
   dialog except Client Settings and the startup-failure fallback. On the board, the Game Master's tools, the
-  reinforcements, Edit Bots, the portrait chooser and the battle menu's dialogs are native. The unit cache's
+  reinforcements, Edit Bots, the portrait chooser, Network information, the Nova network view and the battle menu's
+  dialogs are native; the accessibility window is gone. The unit cache's
   progress, Refresh and Rebuild are a native Unit cache page under the start screen's Tools (#58), and the Swing
   loading window no longer opens at startup.
 
@@ -318,8 +319,6 @@ Still open:
    port:
    - Big: Client Settings (`CommonSettingsDialog`, about 4,900 lines, several PRs; the lobby's gear and the map
      editor open it too), and the map editor's About.
-   - Medium: the Nova network view (`NovaNetworkViewDialog`), Network information (`NetworkInformationDialog`) and
-     the accessibility window (`AccessibilityDialog`).
    - Developer only: the conditions editor behind the Tuning utility (`PlanetaryConditionsDialog`).
 2. Live checks: a real MekHQ game, a network reconnect, a password-protected game and a second human player in a
    second MegaMek window. The system file dialog on macOS and Linux hasn't been tried on a real machine yet; step
@@ -330,7 +329,10 @@ Still open:
 5. To propose to the MegaMek team: a **Load anyway** for saves from another version.
 6. Each Swing dialog the lobby stopped using stays while MekHQ, MegaMekLab or the in-game screens still open it;
    retire it once its last user moves.
-7. If the developers accept the system, move hud-v3 onto the tokens and the new libGDX controls (including the
+7. Accessibility in libGDX: a spike on how a screen reader can follow the game, since a libGDX window shows it
+   nothing. The Swing accessibility window, a text log with typed commands that was never finished, is deleted;
+   `EntityAction.toAccessibilityDescription` is kept for this.
+8. If the developers accept the system, move hud-v3 onto the tokens and the new libGDX controls (including the
    `UiTheme` rename pass). Until then, hud-v3 code does not change.
 
 ## Review probes

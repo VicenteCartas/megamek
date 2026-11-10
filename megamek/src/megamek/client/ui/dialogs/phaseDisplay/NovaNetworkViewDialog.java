@@ -37,22 +37,19 @@ import java.awt.FlowLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.Serial;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import javax.swing.*;
 
+import megamek.client.lobby.NovaNetworkForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.util.UIUtil;
-import megamek.common.game.Game;
-import megamek.common.units.Entity;
 import megamek.logging.MMLogger;
 
 /**
  * Read-only dialog for viewing Nova CEWS network configurations. Displays current network status without allowing
- * modifications. Can be opened at any time during the game from View menu.
+ * modifications. Can be opened at any time during the game from View menu; over the battle window the native card
+ * shows the same {@link NovaNetworkForm} instead.
  *
  * @author MegaMek Team (with Claude Code assistance)
  */
@@ -63,57 +60,23 @@ public class NovaNetworkViewDialog extends JDialog implements ActionListener {
     private static final int PADDING = UIUtil.scaleForGUI(10);
     private static final int PADDING_SMALL = UIUtil.scaleForGUI(5);
 
-    private final ClientGUI clientGUI;
-    private final Game game;
-    private final int localPlayerId;
+    private final NovaNetworkForm form;
 
     // UI Components
-    private JList<String> unitList;
     private DefaultListModel<String> unitListModel;
     private JButton btnClose;
-
-    // Data structures
-    private List<Entity> playerNovaUnits;
-    private List<Entity> alliedNovaUnits;
-    private Map<Integer, Entity> entityMap; // Index to Entity mapping
 
     public NovaNetworkViewDialog(JFrame parent, ClientGUI clientGUI) {
         super(parent, Messages.getString("NovaNetworkViewDialog.title"), true);
         logger.debug("Opening Nova CEWS Network View Dialog");
-        this.clientGUI = clientGUI;
-        this.game = clientGUI.getClient().getGame();
-        this.localPlayerId = clientGUI.getClient().getLocalPlayer().getId();
+        form = NovaNetworkForm.of(clientGUI.getClient().getGame(), clientGUI.getClient().getLocalPlayer().getId());
 
-        this.entityMap = new HashMap<>();
-
-        initializeData();
         initializeUI();
 
         pack();
         setLocationRelativeTo(parent);
         logger.debug("Nova CEWS View Dialog initialized: {} player units, {} allied units",
-              playerNovaUnits.size(), alliedNovaUnits.size());
-    }
-
-    /**
-     * Initializes the data structures with player's and allied Nova CEWS units.
-     */
-    private void initializeData() {
-        playerNovaUnits = new ArrayList<>();
-        alliedNovaUnits = new ArrayList<>();
-
-        for (Entity entity : game.getEntitiesVector()) {
-            if (!entity.hasNovaCEWS()) {
-                continue;
-            }
-
-            if (entity.getOwnerId() == localPlayerId) {
-                playerNovaUnits.add(entity);
-            } else if (!entity.getOwner().isEnemyOf(game.getPlayer(localPlayerId))) {
-                // Allied units (can link with teammates per IO: AE p.60)
-                alliedNovaUnits.add(entity);
-            }
-        }
+              form.yours().size(), form.allied().size());
     }
 
     /**
@@ -141,7 +104,7 @@ public class NovaNetworkViewDialog extends JDialog implements ActionListener {
         unitListModel = new DefaultListModel<>();
         populateUnitList();
 
-        unitList = new JList<>(unitListModel);
+        JList<String> unitList = new JList<>(unitListModel);
         unitList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         unitList.setVisibleRowCount(10);
 
@@ -169,136 +132,47 @@ public class NovaNetworkViewDialog extends JDialog implements ActionListener {
      */
     private void populateUnitList() {
         unitListModel.clear();
-        entityMap.clear();
 
-        int index = 0;
-
-        // Add player's units
-        if (!playerNovaUnits.isEmpty()) {
+        if (!form.yours().isEmpty()) {
             unitListModel.addElement(Messages.getString("NovaNetworkDialog.sectionHeader",
                   Messages.getString("NovaNetworkViewDialog.yourUnits")));
-            entityMap.put(index++, null); // Header, no entity
-
-            for (Entity entity : playerNovaUnits) {
-                String displayText = formatEntityDisplay(entity);
-                unitListModel.addElement(displayText);
-                entityMap.put(index++, entity);
-            }
+            form.yours().forEach(unit -> unitListModel.addElement(formatUnitDisplay(unit)));
         }
 
-        // Add allied units
-        if (!alliedNovaUnits.isEmpty()) {
-            if (!playerNovaUnits.isEmpty()) {
+        if (!form.allied().isEmpty()) {
+            if (!form.yours().isEmpty()) {
                 unitListModel.addElement(""); // Spacer
-                entityMap.put(index++, null);
             }
-
             unitListModel.addElement(Messages.getString("NovaNetworkDialog.sectionHeader",
                   Messages.getString("NovaNetworkViewDialog.alliedUnits")));
-            entityMap.put(index++, null); // Header, no entity
-
-            for (Entity entity : alliedNovaUnits) {
-                String displayText = formatEntityDisplay(entity);
-                unitListModel.addElement(displayText);
-                entityMap.put(index++, entity);
-            }
+            form.allied().forEach(unit -> unitListModel.addElement(formatUnitDisplay(unit)));
         }
     }
 
     /**
-     * Formats an entity for display in the list (read-only, no pending changes).
+     * Formats a unit for display in the list (read-only, no pending changes).
      */
-    private String formatEntityDisplay(Entity entity) {
-        StringBuilder entityDisplayText = new StringBuilder();
+    private static String formatUnitDisplay(NovaNetworkForm.Unit unit) {
+        StringBuilder text = new StringBuilder();
+        text.append(Messages.getString("NovaNetworkDialog.entityIdFormat", unit.id(), unit.name()));
 
-        // ID and name
-        entityDisplayText.append(Messages.getString("NovaNetworkDialog.entityIdFormat",
-              entity.getId(), entity.getShortName()));
-
-        // Current network
-        String currentNetwork = entity.getC3NetId();
-
-        if (isEntityNetworked(entity)) {
-            int networkSize = getNetworkSize(currentNetwork);
-            String networkMembers = getNetworkMembersDisplay(entity, currentNetwork);
-            int freeNodes = 3 - networkSize;
-            String availability = (freeNodes == 0)
+        if (unit.linked()) {
+            List<String> memberIds = unit.partners().stream()
+                  .map(partner -> Messages.getString("NovaNetworkDialog.memberId", partner.id()))
+                  .toList();
+            String availability = unit.full()
                   ? Messages.getString("NovaNetworkDialog.networkFull")
                   : Messages.getString("NovaNetworkDialog.networkAvailable");
-
-            entityDisplayText.append(Messages.getString("NovaNetworkDialog.networkStatus",
-                  networkMembers, networkSize, availability));
+            text.append(Messages.getString("NovaNetworkDialog.networkStatus",
+                  String.join(", ", memberIds), unit.networkSize(), availability));
         } else {
-            entityDisplayText.append(Messages.getString("NovaNetworkDialog.unlinked"));
+            text.append(Messages.getString("NovaNetworkDialog.unlinked"));
         }
 
-        // Owner info for allied units
-        if (entity.getOwnerId() != localPlayerId) {
-            entityDisplayText.append(Messages.getString("NovaNetworkDialog.ownerSuffix",
-                  game.getPlayer(entity.getOwnerId()).getName()));
+        if (unit.owner() != null) {
+            text.append(Messages.getString("NovaNetworkDialog.ownerSuffix", unit.owner()));
         }
-
-        return entityDisplayText.toString();
-    }
-
-    /**
-     * Checks if an entity is currently networked with other units. An entity is considered networked if at least one
-     * other Nova CEWS unit shares its network ID.
-     */
-    private boolean isEntityNetworked(Entity entity) {
-        String networkId = entity.getC3NetId();
-        if (networkId == null) {
-            return false;
-        }
-
-        // Entity is networked if at least one other unit shares this network ID
-        return game.getEntitiesVector().stream()
-              .filter(Entity::hasNovaCEWS)
-              .filter(other -> other.getId() != entity.getId())
-              .anyMatch(other -> networkId.equals(other.getC3NetId()));
-    }
-
-    /**
-     * Gets the size of a network.
-     */
-    private int getNetworkSize(String networkId) {
-        if (networkId == null) {
-            return 0;
-        }
-
-        return (int) game.getEntitiesVector().stream()
-              .filter(Entity::hasNovaCEWS)
-              .filter(other -> networkId.equals(other.getC3NetId()))
-              .count();
-    }
-
-    /**
-     * Gets a human-readable display of network members (excluding the current entity). Returns a comma-separated list
-     * of IDs like "ID2, ID3" or "No other members".
-     */
-    private String getNetworkMembersDisplay(Entity currentEntity, String networkId) {
-        if (networkId == null) {
-            return Messages.getString("NovaNetworkDialog.unknownNetwork");
-        }
-
-        // Find all OTHER entities in the same network
-        List<String> memberIds = new ArrayList<>();
-        for (Entity networkMember : game.getEntitiesVector()) {
-            // Skip self
-            if (networkMember.getId() == currentEntity.getId()) {
-                continue;
-            }
-            // Check if in same network
-            if (networkMember.hasNovaCEWS() && networkId.equals(networkMember.getC3NetId())) {
-                memberIds.add(Messages.getString("NovaNetworkDialog.memberId", networkMember.getId()));
-            }
-        }
-
-        if (memberIds.isEmpty()) {
-            return Messages.getString("NovaNetworkDialog.noOtherMembers");
-        } else {
-            return String.join(", ", memberIds);
-        }
+        return text.toString();
     }
 
     @Override

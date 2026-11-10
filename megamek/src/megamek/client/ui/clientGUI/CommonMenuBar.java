@@ -40,7 +40,6 @@ import static megamek.client.ui.clientGUI.ClientGUI.*;
 import java.awt.Component;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.ConcurrentModificationException;
 import java.util.HashMap;
@@ -140,7 +139,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     private final JCheckBoxMenuItem viewMekDisplay = new JCheckBoxMenuItem(getString("CommonMenuBar.viewMekDisplay"));
     private final JCheckBoxMenuItem viewForceDisplay = new JCheckBoxMenuItem(getString("CommonMenuBar.viewForceDisplay"));
     private final JMenuItem viewNovaNetworks = new JMenuItem(getString("CommonMenuBar.viewNovaNetworks"));
-    private final JMenuItem viewAccessibilityWindow = new JMenuItem(getString("CommonMenuBar.viewAccessibilityWindow"));
     private final JMenu helpUiLibrary = new JMenu(getString("CommonMenuBar.helpUiLibrary"));
     private final JCheckBoxMenuItem viewKeybindsOverlay = new JCheckBoxMenuItem(getString(
           "CommonMenuBar.viewKeyboardShortcuts"));
@@ -328,8 +326,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
 
         JMenuItem viewResetWindowPositions = new JMenuItem(getString("CommonMenuBar.viewResetWindowPos"));
         initMenuItem(viewResetWindowPositions, menu, VIEW_RESET_WINDOW_POSITIONS);
-        initMenuItem(viewAccessibilityWindow, menu, VIEW_ACCESSIBILITY_WINDOW, VK_A);
-        viewAccessibilityWindow.setMnemonic(KeyEvent.VK_A);
         menu.addSeparator();
 
         initMenuItem(viewZoomIn, menu, VIEW_ZOOM_IN);
@@ -523,7 +519,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
               && !phase.isStartingScenario();
         boolean isNotVictory = !phase.isVictory();
 
-        viewAccessibilityWindow.setEnabled(false);
         helpUiLibrary.setVisible(isLobby);
 
         gameQLoad.setEnabled(isLobby);
