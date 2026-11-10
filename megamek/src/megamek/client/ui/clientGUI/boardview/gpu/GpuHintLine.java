@@ -14,6 +14,7 @@ import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.utils.TimeUtils;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
@@ -32,6 +33,9 @@ final class GpuHintLine implements GpuHud.Component {
     private static final float SIZE = 11;
     private static final float ITEM_GAP = 16;
     private static final float NAME_GAP = 5;
+    /** How long the line stays after its gestures change, and how long it then takes to fade out. */
+    private static final long HOLD_MILLIS = 4000;
+    private static final long FADE_MILLIS = 600;
 
     private final UiKit ui;
     private final Table root = new Table() {
@@ -51,6 +55,8 @@ final class GpuHintLine implements GpuHud.Component {
     };
     /** Gesture and action texts, alternating, of the line on screen. */
     private List<String> shown = List.of();
+    /** When the shown gestures last changed, in TimeUtils milliseconds. */
+    private long changedAt;
     /**
      * The pick's chip: its instructions, the picked hexes once there are some, Done and Cancel, as the Legacy 2D
      * board's picker dialog shows them.
@@ -104,8 +110,10 @@ final class GpuHintLine implements GpuHud.Component {
     public void update(GpuHud.Inputs inputs) {
         // While the camera flies, Free Flight's keys replace the board's gestures (the old GL UI's help line).
         List<String> items = camera.firstPerson() ? flight() : items(inputs);
+        long now = TimeUtils.millis();
         if (!items.equals(shown)) {
             shown = items;
+            changedAt = now;
             root.clearChildren();
             for (int index = 0; index < items.size(); index += 2) {
                 root.add(ui.label(items.get(index), "hud-medium", SIZE, Color.WHITE))
@@ -114,6 +122,10 @@ final class GpuHintLine implements GpuHud.Component {
             }
         }
         GpuPlayers.Pick pick = inputs.frame().panels().players().pick();
+        // The gestures fade once read and return when they change; a pick's steps and Free Flight's keys stay.
+        boolean lasting = pick != null || camera.firstPerson();
+        float faded = Math.min(1, Math.max(0, (now - changedAt - HOLD_MILLIS) / (float) FADE_MILLIS));
+        root.getColor().a = lasting ? 1 : 1 - faded;
         if (pick != null) {
             instructions.setText(pick.instructions());
             status.setText(pick.status());

@@ -158,9 +158,10 @@ class GpuUnitPanelTest {
     @Test
     void theSheetFillsTheLeftColumnAboveTheMiniCardAndKeepsClearOfTheDock() throws Exception {
         // Window, display scale, sheet height and dock clearance at 1778 x 1000, 1536 x 864 and 1280 x 720 stages.
-        // The shared HUD margin is 10; normalize the changing phase header to 84 units (80 when narrow).
-        float[][] stages = { { 1920, 1080, 1.08f, 772, 30, 84 }, { 1920, 1080, 1.25f, 636, 30, 84 },
-              { 1280, 720, 1, 496, 70, 80 } };
+        // The shared HUD margin is 10, the sheet's distance from the dock beside it; normalize the changing phase header
+        // to 84 units (80 when narrow).
+        float[][] stages = { { 1920, 1080, 1.08f, 772, 10, 84 }, { 1920, 1080, 1.25f, 636, 10, 84 },
+              { 1280, 720, 1, 496, 10, 80 } };
         for (float[] stage : stages) {
             hud.resize((int) stage[0], (int) stage[1], stage[2]);
             show(ATLAS, SheetTab.SYSTEMS, true, GamePhase.FIRING);

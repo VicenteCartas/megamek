@@ -74,6 +74,8 @@ class GpuForcesPanelSmokeTest {
         final Table root;
 
         Panel(GpuHudTestStage hud) {
+            // The open list, which these checks read; railFoldsTheListUntilItIsPinned unpins it.
+            state.forcesPinned = true;
             forces = new GpuForcesPanel(hud.kit, mock(GpuBoardSource.class), state, menu, selected::add);
             root = (Table) forces.actor();
             hud.window.addActor(root);
@@ -272,6 +274,75 @@ class GpuForcesPanelSmokeTest {
                 }
             }
         });
+    }
+
+    @Test
+    void railFoldsTheListUntilItIsPinned() {
+        GpuHudTestStage.run(hud -> {
+            Panel panel = new Panel(hud);
+            panel.state.forcesPinned = false;
+            AtomicInteger nextRuns = new AtomicInteger();
+            GpuBoardSource.Frame frame = frame(MOCK, next(true, nextRuns::incrementAndGet));
+            rail(hud, panel, frame);
+
+            // Folded: the rail lists every unit as a sprite under the pending count, and no rows.
+            assertTrue(panel.forces.folded(), "An unpinned panel folds");
+            assertTrue(GpuBoardTestUi.shown(panel.find("forces-rail")));
+            assertNull(panel.find("forces-unit-1"), "The rail shows no rows");
+            assertEquals(List.of(1, 2, 3, 4, 5), railItems(panel.root));
+            assertEquals("5", panel.<Label>find("forces-rail-count").getText().toString());
+
+            // Its items select and its Next pending runs the phase's command, as the list's do.
+            click(hud, panel.find("forces-rail-2"), Input.Buttons.LEFT);
+            assertEquals(List.of(2), panel.selected);
+            click(hud, panel.find("forces-rail-next"), Input.Buttons.LEFT);
+            assertEquals(1, nextRuns.get());
+
+            // The pointer on the rail unfolds it; it folds again a moment after the pointer left.
+            Vector2 over = centre(hud, panel.find("forces-rail"));
+            hud.stage.mouseMoved((int) over.x, (int) over.y);
+            hud.stage.act(0);
+            rail(hud, panel, frame);
+            assertFalse(panel.forces.folded(), "The pointer on the panel unfolds it");
+            hud.stage.mouseMoved(1900, 540);
+            hud.stage.act(0);
+            try {
+                Thread.sleep(GpuForcesPanel.COLLAPSE_MILLIS + 100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            rail(hud, panel, frame);
+            assertTrue(panel.forces.folded(), "It folds after the pointer left");
+
+            // The chevron pins the list open; the header's pin unpins it.
+            click(hud, panel.find("forces-expand"), Input.Buttons.LEFT);
+            assertTrue(panel.state.forcesPinned);
+            show(hud, panel, frame);
+            assertFalse(panel.forces.folded());
+            assertNotNull(panel.find("forces-unit-1"), "The pinned panel lists its rows");
+            click(hud, panel.find("forces-pin"), Input.Buttons.LEFT);
+            assertFalse(panel.state.forcesPinned);
+        });
+    }
+
+    /** One frame at the left column's place as the rail, {@link GpuForcesPanel#RAIL_WIDTH} wide. */
+    private static void rail(GpuHudTestStage hud, Panel panel, GpuBoardSource.Frame frame) {
+        panel.update(hud, frame);
+        panel.place(hud, 20, 132, panel.forces.folded() ? GpuForcesPanel.RAIL_WIDTH : 300, 1080 - 20);
+        hud.draw();
+    }
+
+    /** The unit ids of the rail's items, in their order on the screen. */
+    private static List<Integer> railItems(Actor actor) {
+        List<Integer> ids = new ArrayList<>();
+        String name = actor.getName();
+        if (name != null && name.matches("forces-rail-\\d+")) {
+            ids.add(Integer.parseInt(name.substring("forces-rail-".length())));
+        }
+        if (actor instanceof Group group) {
+            group.getChildren().forEach(child -> ids.addAll(railItems(child)));
+        }
+        return ids;
     }
 
     @Test

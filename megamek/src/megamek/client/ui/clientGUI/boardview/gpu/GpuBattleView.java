@@ -1306,6 +1306,7 @@ class GpuBattleView extends ApplicationAdapter {
         }
         // The HUD shows the tuning controls' own values, not the settings of the terrain on display.
         try (TerrainSettings.Scope ignored = TerrainSettings.use(null)) {
+            ui.cameraGesture(boardInput.panning && boardInput.dragged || !cameraKeys.isEmpty());
             ui.update(frame, view, dialog(), source.uiPreferences());
         }
         if (ui.isModal()) {

@@ -129,19 +129,19 @@ class GpuMenuCoverageSmokeTest {
             moving.board.panel = moving.display;
             assertReachable("movement", moving.board.source, Map.of(
                   "moveWalk", "dock-mode-walk", "moveJump", "dock-mode-jump", "moveTurn", "dock-turn-left",
-                  "moveBackUp", "dock-more", "moveNext", "forces-next", "clear", "dock-more"));
+                  "moveBackUp", "dock-more", "moveNext", "forces-rail-next", "clear", "dock-more"));
         }
         try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             // The weapons panel picks the weapon (Skip is MegaMek's next weapon), its target, mode and called shot.
             assertReachable("firing", firing.board.source, Map.of(
-                  "fireTwist", "dock-twist-left", "fireFire", "dock-main", "fireNext", "forces-next",
+                  "fireTwist", "dock-twist-left", "fireFire", "dock-main", "fireNext", "forces-rail-next",
                   "fireSkip", "weapons-panel", "fireNextTarg", "weapons-panel", "fireMode", "weapons-panel",
                   "fireCalled", "weapons-panel", "clear", "dock-clear"));
         }
         try (GpuPhysicalOptionsTest.Scene physical = GpuPhysicalOptionsTest.Scene.create(yesClient(),
               "testresources/megamek/common/units/Atlas AS7-D.mtf", 0)) {
             // The punches and kicks are options per limb; a club is one for a unit that carries a club.
-            assertReachable("physical", physical.source, Map.of("next", "forces-next",
+            assertReachable("physical", physical.source, Map.of("next", "forces-rail-next",
                   "punch", "dock-option-punchLeft", "kick", "dock-option-kickLeft", "club", WITH_A_CLUB,
                   "clear", CANCEL_KEY));
         }

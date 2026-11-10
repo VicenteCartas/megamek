@@ -64,15 +64,23 @@ final class GpuBoardActions {
 
     /**
      * The phase panel's status and the ids of its completion commands in the phase commands, "" when absent.
-     * {@code turnDetails} and {@code conditions} are the lines of the turn-details and planetary-conditions overlays.
+     * {@code turnDetails} and {@code conditions} are the lines of the turn-details and planetary-conditions overlays;
+     * {@code notable} are the short phrases of the conditions that differ from the standard ones.
      */
     record PhaseInfo(String status, boolean blocking, String doneId, String skipId, String clearId,
-          List<String> turnDetails, List<String> conditions) {
+          List<String> turnDetails, List<String> conditions, List<String> notable) {
         static final PhaseInfo EMPTY = new PhaseInfo("", false, "", "", "", List.of(), List.of());
 
         PhaseInfo {
             turnDetails = List.copyOf(turnDetails);
             conditions = List.copyOf(conditions);
+            notable = List.copyOf(notable);
+        }
+
+        /** The info without notable conditions. */
+        PhaseInfo(String status, boolean blocking, String doneId, String skipId, String clearId,
+              List<String> turnDetails, List<String> conditions) {
+            this(status, blocking, doneId, skipId, clearId, turnDetails, conditions, List.of());
         }
     }
 
@@ -89,8 +97,10 @@ final class GpuBoardActions {
               .map(line -> AbstractBoardViewOverlay.cleanedLine(line).strip()).toList() : List.of();
         List<String> conditions = PlanetaryConditionsOverlay.conditionLines(view.game.getPlanetaryConditions(),
               view.getBoard().isSpace()).stream().map(String::strip).toList();
+        List<String> notable = PlanetaryConditionsOverlay.notableConditions(view.game.getPlanetaryConditions(),
+              view.getBoard().isSpace());
         return new PhaseInfo(status.text(), status.blocking(), present(commands, DONE_ID), skipId(commands),
-              present(commands, CLEAR_ID), turnDetails, conditions);
+              present(commands, CLEAR_ID), turnDetails, conditions, notable);
     }
 
     /** The id of the phase command that presses {@link #skipButton}, "" without one. */

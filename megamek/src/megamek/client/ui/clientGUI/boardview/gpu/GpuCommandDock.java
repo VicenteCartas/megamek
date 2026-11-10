@@ -919,9 +919,16 @@ final class GpuCommandDock implements GpuHud.Component {
         GamePhase phase = status.phase();
         String[] lines = inputs.frame().panels().phase().status().split("\n", -1);
         GpuBattleStatus.UnitStatus actor = status.myTurn() ? state.presented(status.actorId()) : null;
-        head(phase.isMovement() && actor != null ? text("GpuBoard.hud.dock.movement", name(actor))
-              : phase.localizedName(), false);
-        span(lines[0].strip(), UiTheme.MINT);
+        // The phase header names the phase; the dock names the unit it commands and the phase display's status line.
+        String headline = actor == null ? "" : phase.isMovement() ? text("GpuBoard.hud.dock.movement", name(actor))
+              : name(actor);
+        String line = lines[0].strip();
+        head(headline, false);
+        span(line, UiTheme.MINT);
+        boolean headed = !headline.isEmpty() || !line.isEmpty();
+        if ((headCell.getActor() == head) != headed) {
+            headCell.setActor(headed ? head : null).padBottom(headed ? 7 : 0);
+        }
         List<BoardScene.Command> row = rowCommands();
         for (int i = 0; i < choices.size() && i < row.size(); i++) {
             choices.get(i).setText(UiTheme.upper(row.get(i).label()));

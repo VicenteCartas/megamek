@@ -119,7 +119,7 @@ class GpuPhaseHeaderSmokeTest {
                       opponent, 1, List.of()), List.of(), "g1-opponent");
                 hud.compare("g1-header-04", shot, header.actor(), "04-opponent-turn.jpg", 20, 20);
                 shot.dispose();
-                // The playback's speeds at the round line's right, in every phase and also on the opponent's turn
+                // The playback's speeds at the round line's right outside the local turn, as on the opponent's turn;
                 // the history's speed is pressed.
                 Group head = (Group) header.actor();
                 assertTrue(head.<UiButton>findActor("phase-speed-normal").isChecked(), "1x is the history's speed");
@@ -148,9 +148,12 @@ class GpuPhaseHeaderSmokeTest {
                       GpuHudFixtures.ATLAS, turns, 0, List.of()), List.of(), "g1-firing-1280x720");
                 hud.compare("g1-header-15", shot, header.actor(), "15-compact-1280x720.jpg", 16, 16);
                 shot.dispose();
-                // The round text follows the line's width of the frame before: a second frame settles it.
-                render(hud, state, header, conditions, card, status(GamePhase.FIRING, true, GpuHudFixtures.ATLAS,
-                      turns, 0, List.of()), List.of(), "g1-firing-1280x720").dispose();
+                // The round text follows the line's width of the frame before: a second frame settles it. The speeds
+                // show outside the local turn only, so the opponent's turn fills the narrow line.
+                render(hud, state, header, conditions, card, status(GamePhase.FIRING, false, Entity.NONE,
+                      turns, 0, List.of()), List.of(), "g1-firing-1280x720-opponent").dispose();
+                render(hud, state, header, conditions, card, status(GamePhase.FIRING, false, Entity.NONE,
+                      turns, 0, List.of()), List.of(), "g1-firing-1280x720-opponent").dispose();
                 Rectangle frame = GpuHudTestStage.bounds(header.actor());
                 Rectangle last = GpuHudTestStage.bounds(((Group) header.actor()).findActor("phase-speed-instant"));
                 assertTrue(last.x + last.width <= frame.x + frame.width - 2, "The speeds fit the narrow header");
@@ -233,6 +236,7 @@ class GpuPhaseHeaderSmokeTest {
         AtomicReference<GpuBoardSource.Frame> frame = new AtomicReference<>();
         AtomicReference<GpuBoardSource.Frame> indicatorFrame = new AtomicReference<>();
         AtomicReference<List<String>> texts = new AtomicReference<>();
+        AtomicReference<String> strip = new AtomicReference<>();
         AtomicReference<List<String>> indicatorTexts = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
@@ -266,7 +270,16 @@ class GpuPhaseHeaderSmokeTest {
                 indicatorFrame.set(fixture.source.takeFrame());
             });
             GpuHudTestStage.run(hud -> {
-                GpuConditionsCard card = new GpuConditionsCard(hud.kit, null, new GpuHudState(new GpuPlaybackHistory(new UnitPlayback())));
+                GpuHudState state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
+                GpuConditionsCard card = new GpuConditionsCard(hud.kit, null, state);
+                // Closed, the card is a strip of the unusual conditions; a click on it opens the card.
+                card.update(inputs(hud, frame.get(), true));
+                place(hud, card.actor(), 332, 20, card.stripWidth(600));
+                hud.draw();
+                hud.capture("g1-conditions-strip").dispose();
+                strip.set(((Label) ((Group) card.actor()).findActor("conditions-summary")).getText().toString());
+                click(hud.stage, ((Group) card.actor()).findActor("conditions-strip"));
+                assertTrue(state.conditionsExpanded, "The strip opens the card");
                 card.update(inputs(hud, indicatorFrame.get(), true));
                 List<String> shown = new ArrayList<>();
                 labels(card.actor(), shown);
@@ -282,6 +295,8 @@ class GpuPhaseHeaderSmokeTest {
             });
             // The click posted the View-menu item to the EDT; this call returns after it ran.
             SwingUtilities.invokeAndWait(() -> { });
+            assertEquals("Full Moon Night \u00B7 Heavy Fog \u00B7 60\u00B0C \u00B7 0.5g", strip.get(),
+                  "The strip names only what is unusual");
             // The overlay's lines without their outer spaces and without the indicators the hud fonts have no glyph
             // for: the flame of the extreme heat (outside the Basic Multilingual Plane) and the fog's full blocks.
             assertEquals(List.of("CONDITIONS", "Temperature:  60\u00B0C", "Gravity:  0.5g   \u2B71",

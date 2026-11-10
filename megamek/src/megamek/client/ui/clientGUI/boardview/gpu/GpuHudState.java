@@ -69,6 +69,10 @@ final class GpuHudState {
     /** The sheet sections the player collapsed, by their caption keys. */
     final Set<String> collapsedSections = new HashSet<>();
     boolean forcesGrid;
+    /** The forces rail is pinned open as the full panel; unpinned it opens only while the pointer is over it. */
+    boolean forcesPinned;
+    /** The conditions strip is expanded to the full list of conditions. */
+    boolean conditionsExpanded;
     /** The nameplate key (SHOW_NAMEPLATES) shows every nameplate: it is held, or toggled on (NameplateMode). */
     boolean allNameplates;
     private boolean logOpen;

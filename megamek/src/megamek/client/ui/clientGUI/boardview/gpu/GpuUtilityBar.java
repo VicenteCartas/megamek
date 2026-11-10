@@ -72,11 +72,13 @@ final class GpuUtilityBar implements GpuHud.Component {
         chip.setName("tactical-chip");
         UiKit ui = kit.ui;
         isometric = cameraButtons(ui, root, camera, fitBoard);
-        tactical = utility(ui, "tactical", "GpuBoard.hud.util.tactical", "utility-tactical");
-        wireframe = utility(ui, "wireframe", "GpuBoard.hud.util.wireframe", "utility-wireframe");
-        map = utility(ui, "map", "GpuBoard.hud.util.map", "utility-map");
-        contacts = utility(ui, "enemy", "GpuBoard.hud.common.contacts", "utility-contacts");
-        log = utility(ui, "report", "GpuBoard.hud.util.log", "utility-log");
+        // Icons only, as the camera buttons beside them: their names are the tooltips.
+        tactical = iconButton(ui, "tactical", Messages.getString("GpuBoard.hud.util.tactical"), "utility-tactical");
+        wireframe = iconButton(ui, "wireframe", Messages.getString("GpuBoard.hud.util.wireframe"),
+              "utility-wireframe");
+        map = iconButton(ui, "map", Messages.getString("GpuBoard.hud.util.map"), "utility-map");
+        contacts = iconButton(ui, "enemy", Messages.getString("GpuBoard.hud.common.contacts"), "utility-contacts");
+        log = iconButton(ui, "report", Messages.getString("GpuBoard.hud.util.log"), "utility-log");
         help = iconButton(ui, null, Messages.getString("GpuBoard.hud.util.help"), "utility-help");
         help.setText("?");
         UiKit.size(help.getLabel(), "hud-medium", 19);
@@ -84,7 +86,7 @@ final class GpuUtilityBar implements GpuHud.Component {
         menu = iconButton(ui, "menu", Messages.getString("GpuBoard.hud.menu.title"), "utility-menu");
         menuTip = tipLabel(menu);
         for (UiButton utility : List.of(tactical, wireframe, map, contacts, log)) {
-            root.add(utility).height(HEIGHT).padLeft(GAP);
+            root.add(utility).size(HEIGHT).padLeft(GAP);
         }
         root.add(tuningButton).height(HEIGHT).padLeft(GAP);
         root.add(help).size(HEIGHT).padLeft(GAP);

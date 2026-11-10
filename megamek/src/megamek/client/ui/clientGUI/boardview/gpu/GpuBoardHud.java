@@ -42,6 +42,9 @@ interface GpuBoardHud extends Disposable {
     /** True while a modal owns input, including camera keys already held when it opened. */
     default boolean isModal() { return false; }
 
+    /** Whether the player pans, orbits or turns the camera this frame, reported before each update. */
+    default void cameraGesture(boolean moving) { }
+
     /** A key press before the board's camera keys; true when the HUD used it. */
     boolean keyDown(int key, int awt, int modifiers);
 

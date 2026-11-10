@@ -22,6 +22,7 @@ import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
+import com.badlogic.gdx.utils.TimeUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -58,6 +59,14 @@ final class GpuHud implements GpuBoardHud {
      */
     static final float FORCES_WIDTH = 250;
     private static final float INITIATIVE_WIDTH = 560;
+    /**
+     * The side panels fade to {@link #FADED} once the camera moved this long, in seconds, over FADE_OUT seconds, and
+     * come back over FADE_IN seconds when it stops.
+     */
+    private static final float GESTURE_DELAY = .15f;
+    private static final float FADED = .2f;
+    private static final float FADE_OUT = .2f;
+    private static final float FADE_IN = .25f;
     /**
      * The binds MegaMek applies without a unit besides its menu bar's ({@link #unitless}): the camera, the chat, the
      * pause, the report keys, the turn timer and the HUD's own panels.
@@ -178,6 +187,10 @@ final class GpuHud implements GpuBoardHud {
     private final GpuModalDialog modal;
     /** The Tactical View's Overlays panel, which the layout may show collapsed for a frame. */
     private final GpuTacticalOverlays overlays;
+    /** The conditions, a strip as wide as its summary while collapsed. */
+    private final GpuConditionsCard conditionsCard;
+    /** The forces, a rail at the window's edge until expanded. */
+    private final GpuForcesPanel forces;
     /** The layer of Help, Menu, Players and the tuning panel: a focus in it is that dialog's Esc step. */
     private final Group dialogs;
     private final UiModal centeredDialogs;
@@ -232,6 +245,11 @@ final class GpuHud implements GpuBoardHud {
     private int pendingSelect = Entity.NONE;
     /** The key that opened the chat also types a character (Enter's newline) that must not start the message. */
     private boolean swallowTyped;
+    /** The camera moves this frame; for how long, in seconds; the side panels' alpha; the last fade's nanoTime. */
+    private boolean cameraMoving;
+    private float gestureSeconds;
+    private float fade = 1;
+    private long fadeClock;
 
     /**
      * Builds the HUD on the render thread. The skin, the batch and the tuning model stay with their owner; the camera
@@ -275,8 +293,8 @@ final class GpuHud implements GpuBoardHud {
         losPanel = new GpuLosPanel(kit.ui, stage, source, camera);
         GpuPhaseHeader phaseHeader = new GpuPhaseHeader(kit, source, state);
         GpuInitiativeCard initiativeCard = new GpuInitiativeCard(kit, source, state);
-        GpuConditionsCard conditionsCard = new GpuConditionsCard(kit, source, state);
-        GpuForcesPanel forces = new GpuForcesPanel(kit, source, state, contextMenu, this::select);
+        conditionsCard = new GpuConditionsCard(kit, source, state);
+        forces = new GpuForcesPanel(kit, source, state, contextMenu, this::select);
         // The unit panel's paperdoll geometry, read once per window (unit panel design 6.2).
         GpuPaperdolls paperdolls = new GpuPaperdolls();
         GpuUnitCard unitCard = new GpuUnitCard(kit, source, state, contextMenu, paperdolls, false);
@@ -432,7 +450,34 @@ final class GpuHud implements GpuBoardHud {
         // The leaders run to the cards where the cards placed themselves in this frame (G9).
         boardLabels.cards(targetCards.placed());
         layout();
+        fadeForCamera();
         keepModalFocus();
+    }
+
+    /** Whether the player pans, orbits or turns the camera this frame; GpuBattleView reports it before the update. */
+    @Override
+    public void cameraGesture(boolean moving) {
+        cameraMoving = moving;
+    }
+
+    /**
+     * Fades the side panels while the camera moves, so the board around them shows, and brings them back when it
+     * stops; the phase header, the dock, the toolbar and the minimap stay.
+     */
+    private void fadeForCamera() {
+        long now = TimeUtils.nanoTime();
+        float delta = fadeClock == 0 ? 0 : Math.min(.1f, (now - fadeClock) / 1e9f);
+        fadeClock = now;
+        gestureSeconds = cameraMoving ? gestureSeconds + delta : 0;
+        if (gestureSeconds > GESTURE_DELAY) {
+            fade = Math.max(FADED, fade - delta / FADE_OUT);
+        } else {
+            fade = Math.min(1, fade + delta / FADE_IN);
+        }
+        for (Container<Actor> slot : List.of(forcesSlot, unitSlot, otherUnitSlot, sheetSlot, conditionsSlot,
+              contactsSlot, logSlot, weaponsSlot, solutionSlot, overlaysSlot, initiativeSlot)) {
+            slot.getColor().a = fade;
+        }
     }
 
     /**
@@ -1138,7 +1183,9 @@ final class GpuHud implements GpuBoardHud {
         logSlot.setVisible(!covered && logOpen);
         weaponsSlot.setVisible(!covered && weaponsOpen);
         solutionSlot.setVisible(!covered && weaponsOpen);
-        contactsSlot.setVisible(!covered && !logOpen && !weaponsOpen && inputs.preferences().contactsEnabled());
+        // The Forces panel lists the contacts; this panel only shows while a move previews its fire exchange.
+        contactsSlot.setVisible(!covered && !logOpen && !weaponsOpen && inputs.preferences().contactsEnabled()
+              && inputs.frame().panels().preview().active());
         chatSlot.setVisible(state.chatOpen);
         overviewSlot.setVisible(state.overview);
         helpSlot.setVisible(state.dialog == GpuHudState.Dialog.HELP);
@@ -1167,7 +1214,12 @@ final class GpuHud implements GpuBoardHud {
         float forcesTop = phaseTop + phaseHeight + STACK;
         float forcesBottom = cardHeight > 0 ? height - gap - cardHeight - STACK : height - gap;
         float forcesHeight = sheet ? height(forcesSlot) : forcesBottom - forcesTop;
-        place(forcesSlot, gap, forcesTop, forcesWidth, forcesHeight);
+        // The folded rail is as tall as its units, within the column.
+        float shownForcesWidth = forces.folded() ? GpuForcesPanel.RAIL_WIDTH : forcesWidth;
+        if (forces.folded()) {
+            forcesHeight = Math.min(height(forcesSlot), forcesHeight);
+        }
+        place(forcesSlot, gap, forcesTop, shownForcesWidth, forcesHeight);
         float sheetTop = forcesTop + forcesHeight + STACK;
         place(sheetSlot, gap, sheetTop, m.grid(), forcesBottom - sheetTop);
 
@@ -1202,15 +1254,15 @@ final class GpuHud implements GpuBoardHud {
         place(solutionSlot, width - gap - m.right(), height - rightReserve - solutionHeight, m.right(),
               solutionHeight);
 
-        // Middle band between the columns: the dock, the hint line above it and a pick's chip above it, centred in the
-        // window where the band allows. It starts after the left column, which the unit card fills, or the wider grid.
-        float bandLeft = gap + Math.max(forcesWidth, m.left()) + gap;
+        // Middle band between the columns: the dock beside the unit card, one bar along the bottom edge, with the hint
+        // line and a pick's chip above it. It starts after the left column, which the unit card fills, or the wider
+        // grid and the open unit sheet.
+        float bandLeft = gap + Math.max(sheet ? m.grid() : forcesWidth, m.left()) + gap;
         float bandRight = width - gap - rightWidth - gap;
         float dockWidth = Math.min(m.dock(), bandRight - bandLeft);
         float dockHeight = height(dockSlot);
         float dockTop = height - gap - dockHeight;
-        place(dockSlot, centred(dockWidth, bandLeft, bandRight), dockTop, dockWidth,
-              dockHeight);
+        place(dockSlot, bandLeft, dockTop, dockWidth, dockHeight);
         float pickHeight = height(pickSlot);
         float chatHeight = chat.height(dockTop - STACK - rightStart - (pickHeight > 0 ? pickHeight + STACK : 0));
         place(chatSlot, dockSlot.getX(), dockTop - STACK - chatHeight, dockWidth, chatHeight);
@@ -1221,7 +1273,7 @@ final class GpuHud implements GpuBoardHud {
               height - hintBottom - hintHeight, hintWidth,
               hintHeight);
         float pickWidth = Math.min(pickSlot.getPrefWidth(), dockWidth);
-        place(pickSlot, centred(pickWidth, bandLeft, bandRight),
+        place(pickSlot, dockSlot.getX() + (dockWidth - pickWidth) / 2,
               dockTop - (state.chatOpen ? chatHeight + STACK : 0) - STACK - pickHeight,
               pickWidth, pickHeight);
         // The More panel, sized to its commands: right of the dock, up to the window edge, or up to the right column
@@ -1266,6 +1318,9 @@ final class GpuHud implements GpuBoardHud {
         boolean conditionsBelow = conditionsX + CONDITIONS_WIDTH + STACK > utilityLeft;
         float conditionsRight = conditionsBelow ? bandRight : utilityLeft - STACK;
         float conditionsWidth = Math.max(0, Math.min(CONDITIONS_WIDTH, conditionsRight - conditionsX));
+        if (!state.conditionsExpanded) {
+            conditionsWidth = conditionsCard.stripWidth(conditionsWidth);
+        }
         place(conditionsSlot, conditionsX, conditionsBelow ? rightStart : gap, conditionsWidth, height(conditionsSlot));
         float chipLeft = Math.max(gap + m.left(), shown(conditionsSlot) ? conditionsX + conditionsWidth : 0) + STACK;
         float chipRight = utilityLeft - STACK;

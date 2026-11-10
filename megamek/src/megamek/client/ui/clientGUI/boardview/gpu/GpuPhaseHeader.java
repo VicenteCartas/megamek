@@ -23,8 +23,8 @@ import megamek.common.enums.GamePhase;
 
 /**
  * Phase header, top left: round, phase ring, phase name, who line and the movement activation ribbon, and the
- * playback speeds in the frame's top right corner, one pill of sections from 0.5x to Instant, for every phase and turn:
- * also to hurry the other players' moves).
+ * playback speeds in the frame's top right corner, one pill of sections from 0.5x to Instant, while the playback runs
+ * or another player acts (to hurry their moves); the local player's own turn hides them.
  */
 final class GpuPhaseHeader implements GpuHud.Component {
     /** The phase name's size (#phase .name), and at W <= 1350. */
@@ -58,6 +58,7 @@ final class GpuPhaseHeader implements GpuHud.Component {
     /** The round and the line's width the round text was chosen for. */
     private int shownRound = -1;
     private float shownWidth = -1;
+    private boolean shownSpeeds = true;
     private final Label round;
     private final Label name;
     private final Label who;
@@ -134,14 +135,19 @@ final class GpuPhaseHeader implements GpuHud.Component {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         GamePhase phase = status.phase();
         ring.progress = progress(phase) / 6f;
+        // The speeds pace the other players' moves and the playback; on the local player's own turn they only crowd
+        // the header.
+        boolean speedsShown = !status.myTurn() || inputs.view().playbackBusy();
+        speeds.setVisible(speedsShown);
         // No number before the first combat round (the start-of-game deployment and the setup phases before it); only
         // the number where the round line has no room for the word.
-        if (status.round() != shownRound || top.getWidth() != shownWidth) {
+        if (status.round() != shownRound || top.getWidth() != shownWidth || speedsShown != shownSpeeds) {
             shownRound = status.round();
             shownWidth = top.getWidth();
+            shownSpeeds = speedsShown;
             round.setText(status.round() > 0
                   ? UiTheme.upper(Messages.getString("GpuBoard.hud.phase.round", status.round())) : "");
-            float room = shownWidth - speeds.getPrefWidth() - SPEEDS_RIGHT - ROUND_GAP;
+            float room = shownWidth - (speedsShown ? speeds.getPrefWidth() + SPEEDS_RIGHT + ROUND_GAP : 0);
             if (status.round() > 0 && shownWidth > 0 && round.getPrefWidth() > room) {
                 round.setText(Messages.getString("GpuBoard.hud.phase.roundShort", status.round()));
             }
