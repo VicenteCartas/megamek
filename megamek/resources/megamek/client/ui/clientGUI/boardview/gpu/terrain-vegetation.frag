@@ -32,6 +32,10 @@ void main() {
     vec3 leaf = normalize(v_normal) * (gl_FrontFacing || grounded ? 1.0 : -1.0);
     vec3 normal = grounded ? leaf : normalize(mix(vec3(0.0, 0.0, 1.0), leaf, .45));
 #ifdef lightingFlag
+    // Seen from low down, a blade tilted away would turn its ground's normal from the viewer, and a face turned away
+    // reflects no sun (diffuseReflectance): the normal stays on the viewer's side.
+    float facing = dot(normal, -viewDirection());
+    if (grounded && facing < .05) normal = normalize(normal - viewDirection() * (.05 - facing));
     // Actual grass blades keep this triangle frame; the flagged clump proxies select their virtual frame below.
     vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
     // Before the coverage discards below, like the face above.
