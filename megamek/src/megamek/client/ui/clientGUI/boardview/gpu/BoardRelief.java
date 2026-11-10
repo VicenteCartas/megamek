@@ -4170,7 +4170,7 @@ final class BoardRelief {
     /**
      * Sparse field cover: loose stones and low shrubs on open ground, from the hex's own seed and outside the unit
      * anchor. Hexes with features of their own (woods, buildings, rubble) keep only those, and biomes their own cover:
-     * tundra's tussocks stand with the foliage (BoardScatter). Placed on the finished top, after the road banks have
+     * tundra's tussocks grow with its sward (GpuGroundCover). Placed on the finished top, after the road banks have
      * eased it, so each stands whole on the ground.
      */
     void field(List<BoardSurface.Face> destination) {

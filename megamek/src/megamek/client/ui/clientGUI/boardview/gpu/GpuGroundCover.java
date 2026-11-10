@@ -66,6 +66,11 @@ final class GpuGroundCover implements Disposable {
     private static final float[][][] GRASS = { { { 0, 0, .5f } }, { { 0, 0, .25f, .5f, .75f } } };
     /** A bank rim's blade (part 9): grass that arches out over the lip and hangs, at three or six segments. */
     private static final float[][][] RIM = { { { 9, 0, .35f, .7f } }, { { 9, 0, .18f, .36f, .54f, .72f, .88f } } };
+    /** A tundra tussock's blade (part 10): grass arching out from its tuft's centre, at two or four segments. */
+    private static final float[][][] TUSSOCK = { { { 10, 0, .5f } }, { { 10, 0, .25f, .5f, .75f } } };
+    /** The first candidates of a hex that may seed a tussock, the blades of one, and the metres between two. */
+    private static final int TUSSOCK_SEEDS = 32, TUSSOCK_BLADES = 112;
+    private static final float TUSSOCK_SPACING = 1.6f;
     private static final float[][][] WHEAT = { { { 1, 0, .8f, .96f } }, { { 1, 0, .45f, .8f, .83f, .96f } } };
     private static final float[][][] MAIZE = {
           { { 2, 0, .55f, .9f }, { 3, 0, .5f }, { 4, 0, .5f }, { 5, 0, .5f }, { 6, 0, .5f }, { 7, 0, .5f }, { 8, 0, .5f } },
@@ -80,7 +85,7 @@ final class GpuGroundCover implements Disposable {
     /** Metres beyond a bridge landing's solid asphalt over which standing grass thickens to the full meadow. */
     private static final float LANDING_FADE_METRES = 5;
 
-    /** Whether a hex's tundra grows its grass sward: earth's carpets, as its tussocks (BoardScatter). */
+    /** Whether a hex's tundra grows its grass sward and its tussocks: earth's carpets. */
     static boolean sward(BoardScene.Tile tile) {
         return BoardBiome.kind(tile) == BoardScene.Biome.TUNDRA && BoardSurfaceBlend.natural(tile)
               && BoardBiome.earthTundra(tile.surface());
@@ -149,24 +154,31 @@ final class GpuGroundCover implements Disposable {
     }
 
     /**
-     * The share of tundra at a point that grows its sward: earth's carpets where no pavement lies, between the
-     * sward's own openings ({@link BoardBiome#sward}), clear of the Snow theme's remnants (terrain-tundra.glsl draws
-     * its ground by the same shares).
+     * The share of tundra at a point that is earth's and grows grass: its carpets where no pavement lies, clear of the
+     * Snow theme's remnants (terrain-tundra.glsl draws its ground by the same shares). The sward grows on it between
+     * its own openings ({@link BoardBiome#sward}), the tussocks anywhere.
      */
-    private static float swardShare(BoardSurfaceBlend.Cover cover, float xMetres, float yMetres) {
+    private static float earthShare(BoardSurfaceBlend.Cover cover, float xMetres, float yMetres) {
         float earth = cover.grass() + cover.dirt() + cover.sand() + cover.rock() + cover.snow() + cover.desert()
               + cover.tropical() + cover.concrete();
         float total = earth + cover.lunar() + cover.fungus() + cover.mars() + cover.volcano();
         if (earth <= 0) { return 0; }
         float remnant = cover.snow() <= 0 ? 0 : cover.snow() / total
               * BoardRelief.smooth((BoardRelief.noise(xMetres / 8 + 29, yMetres / 8 + 29) - .55f) / .17f);
-        return earth / total * (1 - cover.concrete() / total) * (1 - remnant) * BoardBiome.sward(xMetres, yMetres);
+        return earth / total * (1 - cover.concrete() / total) * (1 - remnant);
+    }
+
+    /** The hex's grass alone: its tussocks ({@link #tufts}) grow only for a caller that collects them. */
+    static FloatArray plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface,
+          BoardDecals.Opacity paint) {
+        return plant(scene, tile, surface, paint, null);
     }
 
     /**
      * Deterministic roots over the hex, filtered by the existing surface and road rules, as (x, y, z, rank) in rank
-     * order. A meadow's root has a whole rank; earth tundra's sward grows from the same candidates, where the tundra
-     * reaches, and marks its roots in the rank's fraction ({@link #swardCode}).
+     * order. Earth tundra's sward grows from the meadow's candidates, where the tundra reaches. A rank's fraction packs
+     * twelve bits (terrain-grass.glsl): the half that marks a sward's root, and the root's ground's slope
+     * ({@link #slopeCode}). Tundra's tussocks grow into {@code tussocks}, when given ({@link #tufts}).
      * Candidates are drawn in the hex's plane and dropped onto the finished ground, so a root keeps its place
      * and rank at every terrain detail level and only its height follows the installed ground: a medium-detail
      * chunk's grass carries over to its full-detail replacement without a blade moving. Density selects a prefix by
@@ -174,7 +186,7 @@ final class GpuGroundCover implements Disposable {
      * paints the hex): adding or removing a decal keeps every other root's place and rank.
      */
     static FloatArray plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface,
-          BoardDecals.Opacity paint) {
+          BoardDecals.Opacity paint, FloatArray tussocks) {
         var vegetation = surface.vegetation();
         List<BoardSurface.Face> ground;
         Map<Vector3, Vector3> normals;
@@ -195,6 +207,13 @@ final class GpuGroundCover implements Disposable {
         var water = vegetation == null || vegetation.water().isEmpty() ? null
               : new GpuBiomeVegetation.Support(vegetation.water());
         Coords coords = tile.coords();
+        var coverage = new BoardBiome.Coverage(scene, coords);
+        // Level tundra all around is covered whole on its level: no query per candidate.
+        boolean tundraAround = BoardVegetation.uniform(scene, tile, BoardScene.Biome.TUNDRA);
+        float levelZ = BoardGeometry.groundZ(tile);
+        // Where a tussock may stand, as (x, y), and the ground under each.
+        var seeds = new FloatArray();
+        List<BoardSurface.Face> seedGround = new ArrayList<>();
         float centerX = BoardGeometry.centerX(coords), centerY = BoardGeometry.centerY(coords);
         float halfWidth = BoardGeometry.width() / 2, halfHeight = BoardGeometry.height() / 2;
         var random = new Random(coords.getX() * 0x9E3779B97F4A7C15L ^ coords.getY() * 0xC2B2AE3D27D4EB4FL);
@@ -265,27 +284,33 @@ final class GpuGroundCover implements Disposable {
             var mixture = boundary ? cover.sample(x, y, z) : BoardSurfaceBlend.solid(tile.surface());
             float grass = boundary ? BoardSurfaceBlend.grass(tile, mixture, x, y)
                   : tile.surface() == BoardScene.Surface.GRASS ? 1 : 0;
-            float sward = 0;
+            float earth = 0;
             if (tundraEdge) {
-                float tundra = BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, x, y, z);
+                float tundra = tundraAround && Math.abs(z - levelZ) <= .15f * metre ? 1
+                      : coverage.of(BoardScene.Biome.TUNDRA, x, y, z);
                 grass *= 1 - tundra;
-                sward = tundra * swardShare(mixture, x / metre, y / metre);
+                earth = tundra * earthShare(mixture, x / metre, y / metre);
             }
             // Marsh, paint and mineral soil leave either kind as little.
             float clear = 1;
             if (marshEdge && waterHeights.containsKey(face.a())) {
-                clear *= 1 - BoardBiome.coverage(scene, BoardScene.Biome.MARSH, x, y, z);
+                clear *= 1 - coverage.of(BoardScene.Biome.MARSH, x, y, z);
             }
-            if (paint != null && grass + sward > 0) { clear *= 1 - paint.at(x, y); }
+            if (paint != null && grass + earth > 0) { clear *= 1 - paint.at(x, y); }
             if (!minerals.isEmpty()) {
                 clear *= 1 - GpuMineralGround.coverage(minerals, (x - centerX) / BoardGeometry.hexScale(),
                       (y - centerY) / BoardGeometry.hexScale());
             }
             grass *= clear;
-            sward *= clear;
+            earth *= clear;
             // Follow the same smoothly varying normals as the turf material, including the next hex's slope toe.
             // A whole-triangle cutoff removes green ground and leaves straight, full-density blade edges.
-            float slope = grass + sward > 0 ? groundGrowth(face, normals, waterHeights, x, y, z, normal) : 0;
+            float slope = grass + earth > 0 ? groundGrowth(face, normals, waterHeights, x, y, z, normal) : 0;
+            if (tussocks != null && rank < TUSSOCK_SEEDS && earth * slope > .5f) {
+                seeds.addAll(x, y);
+                seedGround.add(face);
+            }
+            float sward = earth > 0 ? earth * BoardBiome.sward(x / metre, y / metre) : 0;
             float growth = grass * BoardRelief.smooth((grass - .55f) / .35f) * slope;
             // The sward thins out into its openings. It takes the candidates the meadow leaves: the far end of chance.
             float swardGrowth = sward * BoardRelief.smooth(sward / .6f) * slope;
@@ -307,22 +332,62 @@ final class GpuGroundCover implements Disposable {
                 fade *= BoardRelief.smooth((BoardRoad.distance(landings, x, y) - BoardRoad.SHOULDER - 1) / landingFade);
             }
             if (meadow ? chance <= growth * fade : chance > 1 - swardGrowth * fade) {
-                roots.addAll(x, y, z - sink, meadow ? rank : rank + swardCode(normal));
+                roots.addAll(x, y, z - sink, rank + ((meadow ? 0 : 2048) | slopeCode(normal)) / 4096f);
             }
         }
         roots.shrink();
+        if (tussocks != null) { tufts(coords, seeds, seedGround, sink, tussocks); }
         return roots;
     }
 
     /**
-     * What a sward's root adds to its rank: the half that marks it, and its ground's slope, which its blades lie along
-     * and are lit by (terrain-grass.glsl): the rise per metre in eight steps of .2 and the uphill heading in sixteen.
-     * Twelve bits in all, which a rank below {@link #ROOTS_PER_HEX} keeps exactly, like a rim root's.
+     * Earth tundra's tussocks: tufts of its sward's grass, standing taller, in loose clusters that run on across hex
+     * edges, {@link #TUSSOCK_SPACING} metres apart or more. Each grows {@link #TUSSOCK_BLADES} blades out of a disc some
+     * .9 to 1.8 metres across, most near its centre, as (x, y, z, rank): a blade of every tuft in turn, their ranks
+     * spread over {@link #ROOTS_PER_HEX}, so that a prefix by rank thins every tuft alike. A rank's fraction packs
+     * twelve bits (terrain-grass.glsl): the tuft's size in eight steps, the blade's distance from the centre in eight,
+     * which leans it out, and its heading out from the centre in 64.
      */
-    private static float swardCode(Vector3 normal) {
-        int rise = Math.min(7, Math.round((float) Math.hypot(normal.x, normal.y) / Math.max(normal.z, .01f) / .2f));
+    private static void tufts(Coords coords, FloatArray seeds, List<BoardSurface.Face> ground, float sink,
+          FloatArray blades) {
+        float metre = BoardRelief.metres(1);
+        var random = new Random(coords.getX() * 0x632BE59BD9B4E019L ^ coords.getY() * 0x85157AF5L ^ 0x7155L);
+        // Each tuft's x, y, size and seed.
+        var tufts = new FloatArray();
+        for (int seed = 0; seed < seeds.size / 2; seed++) {
+            float x = seeds.items[seed * 2], y = seeds.items[seed * 2 + 1], size = random.nextFloat();
+            boolean crowded = BoardRelief.noise(x / metre / 5 + 31, y / metre / 5 - 17) < .45f;
+            for (int other = 0; other < tufts.size && !crowded; other += 4) {
+                crowded = Math.hypot(x - tufts.items[other], y - tufts.items[other + 1]) < TUSSOCK_SPACING * metre;
+            }
+            if (!crowded) { tufts.addAll(x, y, size, seed); }
+        }
+        int total = tufts.size / 4 * TUSSOCK_BLADES;
+        for (int blade = 0; blade < total; blade++) {
+            int tuft = blade % (tufts.size / 4) * 4;
+            float size = tufts.items[tuft + 2], distance = random.nextFloat(), heading = random.nextFloat();
+            float reach = distance * (.45f + .45f * size) * metre;
+            float x = tufts.items[tuft] + reach * (float) Math.cos(heading * 2 * Math.PI);
+            float y = tufts.items[tuft + 1] + reach * (float) Math.sin(heading * 2 * Math.PI);
+            int code = Math.round(size * 7) << 9 | Math.round(distance * 7) << 6 | Math.min((int) (heading * 64), 63);
+            blades.addAll(x, y, ground.get((int) tufts.items[tuft + 3]).height(x, y) - sink,
+                  (int) ((long) blade * ROOTS_PER_HEX / total) + code / 4096f);
+        }
+        blades.shrink();
+    }
+
+    /**
+     * A root's ground's slope, by which its blades are lit and which a sward's lie along (terrain-grass.glsl), in the
+     * low seven of its rank's twelve fraction bits: the rise per metre in eight steps of .2 and the uphill heading in
+     * sixteen. A rank below {@link #ROOTS_PER_HEX} keeps the twelve exactly, like a rim root's.
+     */
+    private static int slopeCode(Vector3 normal) {
+        int rise = Math.min(7, Math.round((float) Math.sqrt(normal.x * normal.x + normal.y * normal.y)
+              / Math.max(normal.z, .01f) / .2f));
+        // Level ground, most of a board, has no heading.
+        if (rise == 0) { return 0; }
         int heading = Math.floorMod(Math.round((float) (Math.atan2(-normal.y, -normal.x) / (2 * Math.PI) * 16)), 16);
-        return (2048 | rise << 4 | heading) / 4096f;
+        return rise << 4 | heading;
     }
 
     /** Interpolate the rendered normal and water reference on the actual support; allocate nothing per root. */
@@ -649,12 +714,14 @@ final class GpuGroundCover implements Disposable {
         public void dispose() { for (Batch batch : batches) { batch.dispose(); } }
     }
 
-    /** One terrain chunk's grass, its banks' rims and its fields' wheat and maize. */
+    /** One terrain chunk's grass, its banks' rims, its tundra's tussocks and its fields' wheat and maize. */
     private static final class Chunk implements Disposable {
         final Layer grass = new Layer(GRASS, START_PIXELS);
         final Layer rim = new Layer(RIM, RIM_START_PIXELS);
+        final Layer tussock = new Layer(TUSSOCK, RIM_START_PIXELS);
         final Layer wheat = new Layer(WHEAT, GpuBiomeVegetation.CROP_FADE[0]);
         final Layer maize = new Layer(MAIZE, GpuBiomeVegetation.CROP_FADE[0]);
+        final Layer[] layers = { grass, rim, tussock, wheat, maize };
         float nearPixels;
         long frame;
         // Blades place themselves from their roots; the transform only orders chunks nearest first for early depth.
@@ -665,10 +732,14 @@ final class GpuGroundCover implements Disposable {
                   chunk.getY() * TerrainLod.CHUNK_SIZE + TerrainLod.CHUNK_SIZE / 2), 0);
         }
 
-        void begin(long next) { frame = next; grass.begin(); rim.begin(); wheat.begin(); maize.begin(); nearPixels = 0; }
+        void begin(long next) {
+            frame = next;
+            for (Layer layer : layers) { layer.begin(); }
+            nearPixels = 0;
+        }
 
         @Override
-        public void dispose() { grass.dispose(); rim.dispose(); wheat.dispose(); maize.dispose(); }
+        public void dispose() { for (Layer layer : layers) { layer.dispose(); } }
     }
 
     private final Map<Coords, Chunk> chunks = new HashMap<>();
@@ -786,6 +857,8 @@ final class GpuGroundCover implements Disposable {
             if (meadow) {
                 chunk.grass.add(planted.grass(), (int) Math.ceil(ROOTS_PER_HEX * quality.meadowShare * density(pixels) * growth));
                 chunk.rim.add(planted.rim(), (int) Math.ceil(ROOTS_PER_HEX * rimDensity(pixels) * growth));
+                // A tussock's blades stand up and thin out as a rim's do.
+                chunk.tussock.add(planted.tussocks(), (int) Math.ceil(ROOTS_PER_HEX * rimDensity(pixels) * growth));
             } else {
                 chunk.wheat.add(planted.wheat(), (int) Math.ceil(ROOTS_PER_HEX
                       * GpuBiomeVegetation.cropDensity(BoardFields.Crop.WHEAT, pixels) * growth));
@@ -803,7 +876,7 @@ final class GpuGroundCover implements Disposable {
                 continue;
             }
             int detail = chunk.nearPixels >= 280 ? 1 : 0;
-            for (Layer layer : new Layer[] { chunk.grass, chunk.rim, chunk.wheat, chunk.maize }) {
+            for (Layer layer : chunk.layers) {
                 for (int i = 0; i < layer.batches.length; i++) {
                     Batch batch = layer.batches[i];
                     // The idle template keeps its buffer for a return to its scale.

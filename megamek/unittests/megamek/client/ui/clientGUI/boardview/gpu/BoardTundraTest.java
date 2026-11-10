@@ -46,26 +46,27 @@ class BoardTundraTest {
         }
     }
 
-    @Test
-    void tussocksStandAsLowAsGrassClearOfTheUnitAndOnlyOnEarthTundra() {
-        int tussocks = 0;
-        for (int x = 0; x < 12; x++) for (int y = 0; y < 12; y++) {
-            var coords = new Coords(x, y);
-            for (var feature : BoardFeatures.capture(new Hex(0, "tundra:1", "grass"), coords, java.util.Map.of())) {
-                if (!feature.asset().equals(BoardScatter.TUSSOCK)) { continue; }
-                tussocks++;
-                assertTrue(feature.height() < .5f, "Grass height, far below the low woods, so never mistaken for cover");
-                assertTrue(Math.hypot(feature.x(), feature.y()) >= 9, "The unit at the centre stands clear");
-                float metre = BoardRelief.metres(1), scale = BoardGeometry.hexScale();
-                assertTrue(BoardBiome.sward((BoardGeometry.centerX(coords) + feature.x() * scale) / metre,
-                      (BoardGeometry.centerY(coords) + feature.y() * scale) / metre) <= .5f, "In the sward's openings");
-            }
-            for (String theme : List.of("fungus", "mars", "lunar", "volcano")) {
-                assertTrue(BoardFeatures.capture(new Hex(0, "tundra:1", theme), coords, java.util.Map.of()).stream()
-                      .noneMatch(feature -> feature.asset().equals(BoardScatter.TUSSOCK)), theme + " grows no tussocks");
+    @ParameterizedTest
+    @CsvSource({ "grass,true", "snow,true", "fungus,false", "lunar,false" })
+    void tussocksGrowAsTuftsOfBladesOnlyOnEarthTundra(String theme, boolean earth) throws Exception {
+        var scene = BoardScenes.capture(board(theme, true));
+        int blades = 0;
+        for (int x = 5; x < 8; x++) for (int y = 2; y < 6; y++) {
+            var tile = scene.tile(new Coords(x, y));
+            var support = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
+            var plants = BoardPlants.plant(scene, tile, support, TerrainLod.FULL, List.of());
+            var tussocks = plants == null ? null : plants.tussocks();
+            if (tussocks == null) { continue; }
+            blades += tussocks.size / 4;
+            for (int i = 0; i < tussocks.size; i += 4) {
+                assertTrue(Math.hypot(tussocks.items[i] - BoardGeometry.centerX(tile.coords()),
+                      tussocks.items[i + 1] - BoardGeometry.centerY(tile.coords())) < BoardGeometry.width(),
+                      "A tuft stands in or by its hex");
+                assertTrue(i == 0 || (int) tussocks.items[i + 3] >= (int) tussocks.items[i - 1],
+                      "Blades stay in rank order, so a prefix thins every tuft alike");
             }
         }
-        assertTrue(tussocks > 12 && tussocks < 12 * 12 * 10, "Clusters of tussocks in the openings: " + tussocks);
+        assertEquals(earth, blades > 0, theme + " tundra's tussocks");
     }
 
     @ParameterizedTest
@@ -125,11 +126,11 @@ class BoardTundraTest {
         var tile = scene.tile(center);
         var support = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
         var roots = GpuGroundCover.plant(scene, tile, support, null);
-        // A meadow's root has a whole rank; the sward's carries a fraction (GpuGroundCover.swardCode).
+        // A sward's root carries half a rank more than a meadow's (GpuGroundCover.plant).
         int meadow = 0, sward = 0;
         for (int i = 0; i < roots.size; i += 4) {
             float tundra = BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, roots.items[i], roots.items[i + 1], 0);
-            if (roots.items[i + 3] % 1 == 0) {
+            if (roots.items[i + 3] % 1 < .5f) {
                 meadow++;
                 assertTrue(tundra < .45f, "Grass cannot fill the tundra side of the contact");
             } else {

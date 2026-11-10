@@ -205,8 +205,7 @@ final class GpuBiomeVegetation implements Disposable {
         var obstacles = new BoardObstacles(scene, tile, true);
         float levelZ = BoardGeometry.groundZ(tile);
         var kind = BoardBiome.plantKind(scene, tile);
-        boolean uniform = BoardVegetation.key(scene, tile).sites().stream()
-              .allMatch(site -> site != null && site.biome() == kind && site.elevation() == tile.elevation());
+        boolean uniform = BoardVegetation.uniform(scene, tile, kind);
         float reach = crop == BoardFields.Crop.WHEAT ? STALK_REACH : ROW_HALF_WIDTH;
         var roots = new FloatArray();
         var root = new Vector3();

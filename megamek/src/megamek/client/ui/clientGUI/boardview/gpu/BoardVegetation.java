@@ -173,6 +173,15 @@ final class BoardVegetation {
         return new Key(Collections.unmodifiableList(sites));
     }
 
+    /**
+     * Whether a hex and every hex within two of it are ground of one biome on one level: on that level the biome's
+     * coverage ({@link BoardBiome#coverage}) is 1 all over the hex.
+     */
+    static boolean uniform(BoardScene scene, BoardScene.Tile tile, BoardScene.Biome kind) {
+        return key(scene, tile).sites().stream()
+              .allMatch(site -> site != null && site.biome() == kind && site.elevation() == tile.elevation());
+    }
+
     static boolean sameGround(BoardTacticalGeometry.Surface a, BoardTacticalGeometry.Surface b, boolean slopes) {
         return a == b || a.top().equals(b.top()) && (!slopes || a.slopes().equals(b.slopes()));
     }

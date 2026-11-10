@@ -26,11 +26,11 @@ uniform float u_levelHeight;
 // terrain-ground-color-functions
 
 void main() {
-    // An upward-biased normal approximates the many sunlit leaves in a tuft without black card-like speckles. Tundra's
-    // sward (v_coverData.x of .25) brings its ground's normal, on either side of a blade (terrain-grass.glsl).
-    bool sward = v_coverData.x > .1 && v_coverData.x < .5;
-    vec3 leaf = normalize(v_normal) * (gl_FrontFacing || sward ? 1.0 : -1.0);
-    vec3 normal = sward ? leaf : normalize(mix(vec3(0.0, 0.0, 1.0), leaf, .45));
+    // An upward-biased normal approximates the many sunlit leaves in a tuft without black card-like speckles. Grass
+    // (v_coverData.x of .25) brings the normal it is lit by, its ground's, on either side of a blade (terrain-grass.glsl).
+    bool grounded = v_coverData.x > .1 && v_coverData.x < .5;
+    vec3 leaf = normalize(v_normal) * (gl_FrontFacing || grounded ? 1.0 : -1.0);
+    vec3 normal = grounded ? leaf : normalize(mix(vec3(0.0, 0.0, 1.0), leaf, .45));
 #ifdef lightingFlag
     // Actual grass blades keep this triangle frame; the flagged clump proxies select their virtual frame below.
     vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
@@ -76,7 +76,7 @@ void main() {
     if (dot(normal, -viewDirection()) < 0.0) normal = -normal;
     geometric = normal;
 #endif
-    if (!sward) normal = shadingNormal(normal, geometric, -viewDirection());
+    if (!grounded) normal = shadingNormal(normal, geometric, -viewDirection());
     // Dry blades have a broad, rough reflection; rain smooths the same dielectric response into brighter glints. The
     // blade's own normal decides its lit side.
     Surface blade = opaqueSurface(albedo, normal, normal, finish.roughness, .6 * u_wetness, surfaceVisibility());

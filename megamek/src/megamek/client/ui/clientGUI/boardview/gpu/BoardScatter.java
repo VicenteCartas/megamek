@@ -20,11 +20,6 @@ final class BoardScatter {
     static final int BUSHES = 8;
     /** Metres, covering the widest authored bush variant for placement and culling. */
     static final float BUSH_RADIUS = 1.8f;
-    /** Tundra's grass tussock, drawn with the trees (foliage-tussock.glb) but never counted as their cover. */
-    static final String TUSSOCK = "vegetation/foliage-tussock";
-    private static final int TUSSOCKS = 10;
-    /** Tile pixels between tussocks, and kept clear around the unit standing at the hex centre. */
-    private static final float TUSSOCK_SPACING = 10, TUSSOCK_CLEAR = 9;
 
     private BoardScatter() { }
 
@@ -124,7 +119,6 @@ final class BoardScatter {
             return;
         }
         BoardScene.Surface surface = BoardFeatures.surface(hex);
-        if (tundra) { tussocks(surface, coords, result); }
         float density = switch (surface) {
             case GRASS, TROPICAL -> .16f;
             case ROCK, LUNAR, VOLCANO -> .18f;
@@ -170,43 +164,6 @@ final class BoardScatter {
             // Replace only tundra's plants with support-rooted dwarf shrubs. Consume the same random values so
             // its loose rocks and slabs retain their original positions, sizes and rotations.
             if (!tundra || stone(asset)) { result.add(feature); }
-        }
-    }
-
-    /**
-     * Earth tundra's grass tussocks, a couple of metres apart in loose clusters, clear of the unit at the centre, in
-     * the openings of its sward ({@link BoardBiome#sward}), whose blades stand as tall. They stand as tall as the
-     * meadow's grass, well below the low woods, so they never read as cover; fungal mats, mineral crust and pavement
-     * lichen grow none.
-     */
-    private static void tussocks(BoardScene.Surface surface, Coords coords, List<BoardScene.Feature> result) {
-        if (!BoardBiome.earthTundra(surface)) { return; }
-        Random random = new Random(coords.getX() * 0x632BE59BD9B4E019L ^ coords.getY() * 0x85157AF5L ^ 0x7155L);
-        float half = BoardGeometry.TILE_WIDTH / 2, scale = BoardGeometry.hexScale();
-        float centreX = BoardGeometry.centerX(coords), centreY = BoardGeometry.centerY(coords);
-        float cluster = BoardGeometry.TILE_WIDTH / 6, metre = BoardRelief.metres(1);
-        // The tallest meadow blade's height, in levels.
-        float levels = BoardGeometry.width() * GpuGroundCover.MAX_HEIGHT_FRACTION / BoardGeometry.level();
-        List<float[]> placed = new ArrayList<>();
-        for (int attempt = 0; attempt < TUSSOCKS * 8 && placed.size() < TUSSOCKS; attempt++) {
-            float x = (random.nextFloat() * 2 - 1) * half, y = (random.nextFloat() * 2 - 1) * half;
-            float chance = random.nextFloat(), size = random.nextFloat(), turn = random.nextFloat() * 360;
-            if (Math.hypot(x, y) < TUSSOCK_CLEAR || !BoardGeometry.contains(coords, centreX + x * scale, centreY + y * scale)) {
-                continue;
-            }
-            // Clusters in the shared world field, so they run on across hex edges.
-            float worldX = centreX / scale + x, worldY = centreY / scale + y;
-            if (chance > BoardRelief.smooth((BoardRelief.noise(worldX / cluster, worldY / cluster) - .45f) / .3f)) {
-                continue;
-            }
-            boolean crowded = BoardBiome.sward((centreX + x * scale) / metre, (centreY + y * scale) / metre) > .5f;
-            for (float[] other : placed) {
-                crowded |= Math.hypot(x - other[0], y - other[1]) < TUSSOCK_SPACING;
-            }
-            if (crowded) { continue; }
-            placed.add(new float[] { x, y });
-            result.add(new BoardScene.Feature(TUSSOCK, x, y, turn, 1, levels * (.75f + .25f * size), 0,
-                  BoardScene.FeatureKind.TREE));
         }
     }
 }

@@ -208,10 +208,11 @@ class BoardGrassBankTest {
               support.walls(), support.waterfalls(), support.frozenFalls(), support.highestTop(), null);
     }
 
+    /** Each root's place and whole rank; the rank's fraction carries its ground's slope (GpuGroundCover.slopeCode). */
     private static Set<List<Float>> roots(FloatArray roots) {
         Set<List<Float>> result = new HashSet<>();
         for (int i = 0; i < roots.size; i += 4) {
-            result.add(List.of(roots.get(i), roots.get(i + 1), roots.get(i + 2), roots.get(i + 3)));
+            result.add(List.of(roots.get(i), roots.get(i + 1), roots.get(i + 2), (float) Math.floor(roots.get(i + 3))));
         }
         return result;
     }

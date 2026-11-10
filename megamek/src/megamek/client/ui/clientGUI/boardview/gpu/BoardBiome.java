@@ -43,7 +43,7 @@ final class BoardBiome {
               + .30f * BoardRelief.noise(px / 2 + 19, py / 2 - 7) + .15f * BoardRelief.noise(px / .65f, py / .65f);
     }
 
-    /** Whether tundra over this ground is earth's: its carpets, tussocks and grass. Fungal mats and mineral crust grow none. */
+    /** Whether tundra over this ground is earth's: its carpets, its sward and its tussocks. Fungal mats and mineral crust grow none. */
     static boolean earthTundra(BoardScene.Surface surface) {
         return switch (surface) {
             case FUNGUS, MARS, LUNAR, VOLCANO, CONCRETE -> false;
@@ -81,56 +81,95 @@ final class BoardBiome {
 
     /** All candidates, including ordinary land, compete. Adjacent matching tiles have no internal fade. */
     static float coverage(BoardScene scene, BoardScene.Biome kind, float x, float y, float z) {
-        boolean marsh = kind == BoardScene.Biome.MARSH;
-        boolean tundra = kind == BoardScene.Biome.TUNDRA;
-        float width = BoardRelief.metres(marsh || tundra ? WET_EDGE_METRES : EDGE_METRES);
-        float fieldWidth = BoardRelief.metres(EDGE_METRES);
-        float metre = BoardRelief.metres(1);
-        float edgeNoise = tundra ? BoardRelief.noise(x / metre / 3.2f + 41, y / metre / 3.2f + 41) : 0;
-        float down = 1.4f + (Math.max(3.6f, BoardGeometry.level() / metre * 1.4f) - 1.4f)
-              * BoardRelief.smooth((edgeNoise - .15f) / .7f);
-        int col = (int) Math.floor(x / (BoardGeometry.width() * .75f));
-        float sum = 0, covered = 0, wet = 0, field = 0, fieldSum = 0;
-        float tundraTiles = 0, tundraAbove = 0, tundraBelow = 0;
-        for (int dx = -1; dx <= 1; dx++) {
-            int cx = col + dx;
-            int row = (int) Math.floor(-y / BoardGeometry.height() - (cx & 1) * .5f);
-            for (int dy = -1; dy <= 1; dy++) {
-                var coords = new Coords(cx, row + dy);
-                float distance = hexDistance(Math.abs(x - BoardGeometry.centerX(coords)),
-                      Math.abs(y - BoardGeometry.centerY(coords)));
-                float w = 1 - BoardRelief.smooth((distance + width) / (2 * width));
-                float fw = marsh ? 1 - BoardRelief.smooth((distance + fieldWidth) / (2 * fieldWidth)) : 0;
-                sum += w;
-                fieldSum += fw;
+        int column = (int) Math.floor(x / (BoardGeometry.width() * .75f));
+        return new Coverage(scene, new Coords(column, (int) Math.floor(-y / BoardGeometry.height() - (column & 1) * .5f)))
+              .of(kind, x, y, z);
+    }
+
+    /**
+     * {@link #coverage} for many points around one hex: a point reads the nine hexes around it, and a planter asks
+     * thousands of points in its hex, so each hex of the neighbourhood is looked up once. Points farther out are
+     * answered alike, without being kept.
+     */
+    static final class Coverage {
+        /** A hex's centre, its biome ({@link #kind}) and, with one, its ground. */
+        private record Cell(float x, float y, BoardScene.Biome biome, float floor) { }
+
+        private static final int REACH = 3, SPAN = 2 * REACH + 1;
+        private final BoardScene scene;
+        private final Coords around;
+        private final Cell[] cells = new Cell[SPAN * SPAN];
+
+        Coverage(BoardScene scene, Coords around) {
+            this.scene = scene;
+            this.around = around;
+        }
+
+        private Cell cell(int column, int row) {
+            int i = column - around.getX() + REACH, j = row - around.getY() + REACH;
+            boolean near = i >= 0 && j >= 0 && i < SPAN && j < SPAN;
+            Cell cell = near ? cells[i * SPAN + j] : null;
+            if (cell == null) {
+                var coords = new Coords(column, row);
                 var tile = scene.tile(coords);
                 var biome = kind(tile);
-                if (tile != null && biome != BoardScene.Biome.NONE) {
-                    float floor = BoardGeometry.groundZ(tile);
-                    float sameLevel = sameLevel(z, floor);
-                    if (biome == kind) {
-                        if (tundra) {
-                            float reach = z < floor ? down : 2.8f + edgeNoise * .8f;
-                            covered += w * (1 - BoardRelief.smooth((Math.abs(z - floor) / metre - .15f) / (reach - .15f)));
-                            tundraTiles += w;
-                            if (floor >= z + .15f * metre) { tundraAbove += w; }
-                            if (z >= floor + .15f * metre) { tundraBelow += w; }
-                        } else { covered += w * sameLevel; }
+                cell = new Cell(BoardGeometry.centerX(coords), BoardGeometry.centerY(coords), biome,
+                      biome == BoardScene.Biome.NONE ? 0 : BoardGeometry.groundZ(tile));
+                if (near) { cells[i * SPAN + j] = cell; }
+            }
+            return cell;
+        }
+
+        float of(BoardScene.Biome kind, float x, float y, float z) {
+            boolean marsh = kind == BoardScene.Biome.MARSH;
+            boolean tundra = kind == BoardScene.Biome.TUNDRA;
+            float width = BoardRelief.metres(marsh || tundra ? WET_EDGE_METRES : EDGE_METRES);
+            float fieldWidth = BoardRelief.metres(EDGE_METRES);
+            float metre = BoardRelief.metres(1);
+            float edgeNoise = tundra ? BoardRelief.noise(x / metre / 3.2f + 41, y / metre / 3.2f + 41) : 0;
+            float down = 1.4f + (Math.max(3.6f, BoardGeometry.level() / metre * 1.4f) - 1.4f)
+                  * BoardRelief.smooth((edgeNoise - .15f) / .7f);
+            int col = (int) Math.floor(x / (BoardGeometry.width() * .75f));
+            float sum = 0, covered = 0, wet = 0, field = 0, fieldSum = 0;
+            float tundraTiles = 0, tundraAbove = 0, tundraBelow = 0;
+            for (int dx = -1; dx <= 1; dx++) {
+                int cx = col + dx;
+                int row = (int) Math.floor(-y / BoardGeometry.height() - (cx & 1) * .5f);
+                for (int dy = -1; dy <= 1; dy++) {
+                    Cell cell = cell(cx, row + dy);
+                    float distance = hexDistance(Math.abs(x - cell.x()), Math.abs(y - cell.y()));
+                    float w = 1 - BoardRelief.smooth((distance + width) / (2 * width));
+                    float fw = marsh ? 1 - BoardRelief.smooth((distance + fieldWidth) / (2 * fieldWidth)) : 0;
+                    sum += w;
+                    fieldSum += fw;
+                    var biome = cell.biome();
+                    if (biome != BoardScene.Biome.NONE) {
+                        float floor = cell.floor();
+                        float sameLevel = sameLevel(z, floor);
+                        if (biome == kind) {
+                            if (tundra) {
+                                float reach = z < floor ? down : 2.8f + edgeNoise * .8f;
+                                covered += w * (1 - BoardRelief.smooth((Math.abs(z - floor) / metre - .15f) / (reach - .15f)));
+                                tundraTiles += w;
+                                if (floor >= z + .15f * metre) { tundraAbove += w; }
+                                if (z >= floor + .15f * metre) { tundraBelow += w; }
+                            } else { covered += w * sameLevel; }
+                        }
+                        if (biome == BoardScene.Biome.FIELD) { field += fw * sameLevel; }
+                        else if (biome != BoardScene.Biome.TUNDRA) { wet += w * sameLevel; }
                     }
-                    if (biome == BoardScene.Biome.FIELD) { field += fw * sameLevel; }
-                    else if (biome != BoardScene.Biome.TUNDRA) { wet += w * sameLevel; }
                 }
             }
+            float result = sum > 0 ? covered / sum : 0;
+            if (tundra && sum > 0) {
+                float connected = BoardRelief.smooth(Math.min(tundraAbove, tundraBelow) / sum / .18f);
+                result = Math.max(result, tundraTiles / sum * connected);
+            }
+            // Match the ground shader's wet-bank reach and its cultivated-row priority in the same bounded stencil.
+            if (marsh && wet > 0) {
+                result *= Math.min(3, sum / wet) * (1 - field / Math.max(fieldSum, .0001f));
+            }
+            return result;
         }
-        float result = sum > 0 ? covered / sum : 0;
-        if (tundra && sum > 0) {
-            float connected = BoardRelief.smooth(Math.min(tundraAbove, tundraBelow) / sum / .18f);
-            result = Math.max(result, tundraTiles / sum * connected);
-        }
-        // Match the ground shader's wet-bank reach and its cultivated-row priority in the same bounded stencil.
-        if (marsh && wet > 0) {
-            result *= Math.min(3, sum / wet) * (1 - field / Math.max(fieldSum, .0001f));
-        }
-        return result;
     }
 }
