@@ -14,7 +14,7 @@ import megamek.common.board.TilesetScenery;
 import org.junit.jupiter.api.Test;
 
 class GpuBuildingTest {
-    static final String ASSET = "buildings/saxarba/fortress_light/fortress_light_a_52";
+    static final String ASSET = "buildings/standard/fortress-light";
 
     /** A fresh copy of {@code asset}'s generated kit's levels of detail, which a test may change; none kept cached. */
     static List<ModelData> lods(String asset) {
@@ -126,7 +126,7 @@ class GpuBuildingTest {
 
     @Test
     void shippedKitsChangeTowardsAConnectedNeighbour() {
-        for (String asset : List.of(ASSET, "buildings/saxarba/building_light/building_light_00")) {
+        for (String asset : List.of(ASSET, "buildings/standard/building-light")) {
             // Loading checks the connected kits' contract (ConnectedKit.load).
             var kit = GpuBuilding.kit(asset);
             var alone = ConnectedKit.placements(kit, 0, 2, new int[6], 0, 1).stream().map(ConnectedKit.Placement::node).toList();
@@ -138,7 +138,7 @@ class GpuBuildingTest {
 
     @Test
     void shippedLightBuildingVariantsShareTheirFloorFootprintInBothLods() {
-        var lods = GpuBuilding.kit("buildings/saxarba/building_light/building_light_00").lods();
+        var lods = GpuBuilding.kit("buildings/standard/building-light").lods();
         assertEquals(2, lods.size());
         for (var lod : lods) {
             assertEquals(Set.of("base0", "base1", "floor0", "floor1", "roof0"), roles(lod).keySet());
@@ -175,7 +175,7 @@ class GpuBuildingTest {
 
     @Test
     void aSquareFootprintDrawsAGeneratedKitsSquareFootprint() {
-        String light = "buildings/saxarba/building_light/building_light_00";
+        String light = "buildings/standard/building-light";
         assertEquals(light, TilesetScenery.footprint(light, megamek.common.board.HexAppearance.Footprint.ANGLED));
         String square = TilesetScenery.footprint(light, megamek.common.board.HexAppearance.Footprint.SQUARE);
         assertEquals(light + "-square", square);

@@ -38,20 +38,20 @@ final class BayKit {
      * Convex corners round to {@code cornerRadius} in {@code cornerSegments} facets (0: square). With {@code fittings}
      * every roof module comes once per layout of the footprint's fittings, and the kit is not turned (its pieces stand
      * in all six corners, as the fittings stand in the hex's middle). With {@code varyBays} a wall may hold a bay fewer
-     * or more than the nearest count, by its place ({@link #scale}). {@code door}: its large doors' look
+     * or more than the nearest count, by its place ({@link #scale}). {@code largeDoor}: its large doors' look
      * ({@link KitDoors.Style}; a plain steel door without).
      */
     record Spec(String name, String style, String pieces, List<double[]> lone, double bandEnd, Slab roof, Slab floors,
                 Sidewalk sidewalk, Map<String, List<Run>> modules, double cornerRadius, int cornerSegments,
-                HabitatKit.Fittings fittings, boolean varyBays, KitDoors.Style door) { }
+                HabitatKit.Fittings fittings, boolean varyBays, KitDoors.Style largeDoor) { }
 
     /**
      * A flat surface over the piece: a board material, {@code repeat} units a repeat on the board's axes, at a height per
      * level of detail (the last for any further), kept {@code inset} off the walls; with {@code underlay} (a glass roof),
-     * a planted bed just under it, so the glass shows a greenhouse rather than the ground down a seam; with {@code aol}
-     * (a roof), aviation obstruction lights on its convex corners ({@link GeneratedKit#lights}).
+     * a planted bed just under it, so the glass shows a greenhouse rather than the ground down a seam; with
+     * {@code aviationLights} (a roof), aviation obstruction lights on its convex corners ({@link GeneratedKit#lights}).
      */
-    record Slab(String material, double repeat, double inset, double[] heights, boolean underlay, boolean aol, Vault vault) {
+    record Slab(String material, double repeat, double inset, double[] heights, boolean underlay, boolean aviationLights, Vault vault) {
         double height(int lod) { return heights[Math.min(lod, heights.length - 1)]; }
     }
 
@@ -100,7 +100,7 @@ final class BayKit {
 
     /**
      * How a module lays a wall. Whole {@code bay}s of the {@code bays} pieces (chosen by the wall's place where there are
-     * several) are stretched to fit between a {@code margin} at each end, a ground storey's {@code door} piece in a hub
+     * several) are stretched to fit between a {@code margin} at each end, a ground storey's {@code entrance} piece in a hub
      * face's first bay and next to the middle of a whole hex's front; with no margin a bay more goes on past an end where
      * the wall goes on. Whole {@code ends} stretches fill the margins and the wall's going on; one {@code under} stretch
      * lies along the whole of it. {@code planar} materials are textured along the wall's line, units a repeat, so their
@@ -113,7 +113,7 @@ final class BayKit {
      * inset off it; such a roof comes closed above lower neighbours (ConnectedKit's {@code -closed-N} twins), its caps
      * empty. All but bays and bay are optional.
      */
-    record Run(List<String> bays, double bay, double margin, String door, Stretch ends, Stretch under,
+    record Run(List<String> bays, double bay, double margin, String entrance, Stretch ends, Stretch under,
                Map<String, Double> planar, Stretch round, Stretch shallow, Joints joints, Stretch seam) { }
 
     /** The turn, in radians, from which a rounded corner takes its run's {@code round} piece rather than its {@code shallow}. */
@@ -186,28 +186,27 @@ final class BayKit {
         boardUVs.put(board(spec.floors().material()) + GeneratedMesh.BUILDING_FLOOR, (float) spec.floors().repeat());
         boardUVs.put(board(deck(spec.roof())), (float) spec.roof().repeat());
         if (spec.sidewalk() != null) { boardUVs.put(board(spec.sidewalk().material()), (float) spec.sidewalk().repeat()); }
-        HabitatKit.Fitting fitting = spec.fittings() == null ? null : square ? spec.fittings().square() : spec.fittings().angled();
         // With fittings, each roof module comes once per layout: roof roles numbered on, each naming its module and layout.
         Map<String, String> modules = new LinkedHashMap<>();
-        Map<String, HabitatKit.Layout> layouts = new HashMap<>();
+        Map<String, Map<String, List<double[]>>> layouts = new HashMap<>();
         int roofs = 0;
         for (String role : spec.modules().keySet()) {
-            if (!role.startsWith("roof") || fitting == null) {
+            if (!role.startsWith("roof") || spec.fittings() == null) {
                 modules.put(role, role);
                 continue;
             }
-            for (var layout : fitting.layouts()) {
+            for (var layout : spec.fittings().of(square)) {
                 String numbered = "roof" + roofs++;
                 modules.put(numbered, role);
                 layouts.put(numbered, layout);
             }
         }
-        List<KitOutline.Piece> pieces = KitOutline.footprint(square, spec.bandEnd(), turned(spec, fitting), footprintScale).stream()
+        List<KitOutline.Piece> pieces = KitOutline.footprint(square, spec.bandEnd(), turned(spec), footprintScale).stream()
               .map(piece -> KitOutline.rounded(piece, spec.cornerRadius(), Math.max(1, spec.cornerSegments()))).toList();
         double halfLength = spec.lone() == null ? H : spec.lone().stream().mapToDouble(p -> Math.abs(p[1])).max().orElse(H);
         return GeneratedKit.lods(name, square, modelled, List.copyOf(modules.keySet()), pieces, boardUVs,
-              (role, piece, lod) -> twins(spec, modelled, modules.get(role), piece, lod, square, footprintScale, fitting,
-                    layouts.get(role), halfLength), spec.roof().aol() ? spec.roof()::height : null);
+              (role, piece, lod) -> twins(spec, modelled, modules.get(role), piece, lod, square, footprintScale,
+                    layouts.get(role), halfLength), spec.roof().aviationLights() ? spec.roof()::height : null);
     }
 
     /**
@@ -217,15 +216,15 @@ final class BayKit {
      * edges.
      */
     private static Map<String, GeneratedMesh> twins(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece,
-          int lod, boolean square, float footprintScale, HabitatKit.Fitting fitting, HabitatKit.Layout layout, double halfLength) {
+          int lod, boolean square, float footprintScale, Map<String, List<double[]>> layout, double halfLength) {
         boolean seamed = role.startsWith("roof") && spec.modules().get(role).stream().anyMatch(run -> run.seam() != null);
-        boolean closing = seamed || role.startsWith("roof") && spec.roof().aol()
+        boolean closing = seamed || role.startsWith("roof") && spec.roof().aviationLights()
               || !square && (!role.startsWith("roof") || spec.cornerRadius() > 0);
         if (closing && piece.tags().endsWith("-cap")) { return Map.of("", new GeneratedMesh()); }
         Map<String, GeneratedMesh> result = new LinkedHashMap<>();
-        result.put("", module(spec, modelled, role, piece, 0, lod, square, footprintScale, fitting, layout, halfLength));
+        result.put("", module(spec, modelled, role, piece, 0, lod, square, footprintScale, layout, halfLength));
         // A roof's aviation lights, beside each of its twins (GeneratedKit#lights).
-        boolean lit = role.startsWith("roof") && spec.roof().aol();
+        boolean lit = role.startsWith("roof") && spec.roof().aviationLights();
         double facet = spec.cornerRadius() * Math.PI / Math.max(1, spec.cornerSegments()), deck = spec.roof().height(lod);
         if (lit) { GeneratedKit.lights(result, "", piece, facet, deck, lod); }
         int links = closing ? KitOutline.links(piece) : 0;
@@ -243,7 +242,7 @@ final class BayKit {
             var closedPiece = KitOutline.rounded(KitOutline.closed(piece, closed), spec.cornerRadius(),
                   Math.max(1, spec.cornerSegments()));
             result.put("-closed-" + closed, module(spec, modelled, role, closedPiece, closed, lod,
-                  square, footprintScale, fitting, layout, halfLength));
+                  square, footprintScale, layout, halfLength));
             if (lit) { GeneratedKit.lights(result, "-closed-" + closed, closedPiece, facet, deck, lod); }
             if (fills) { putFill(result, "-closed-" + closed + "-fill", fill(spec, modelled, role, closedPiece, closed, lod, square)); }
             // A closed twin's own: over the corners its remaining links would still turn.
@@ -251,9 +250,9 @@ final class BayKit {
             if (closedSill != null && !closedSill.parts.isEmpty()) { result.put("-closed-" + closed + "-sill", closedSill); }
             if (turns && Integer.bitCount(closed) == 1) {
                 result.put("-closed-" + closed + "-valley", module(spec, modelled, role, KitOutline.inward(closedPiece, true), closed,
-                      lod, square, footprintScale, fitting, layout, halfLength));
+                      lod, square, footprintScale, layout, halfLength));
                 result.put("-closed-" + closed + "-wall", module(spec, modelled, role, KitOutline.inward(closedPiece, false), closed,
-                      lod, square, footprintScale, fitting, layout, halfLength));
+                      lod, square, footprintScale, layout, halfLength));
             }
         }
         // At a notch its walls ending open turn the corner with the next hex's ({@link KitOutline#notched}): a twin for
@@ -261,7 +260,7 @@ final class BayKit {
         int open = square || jointed || piece.tags().endsWith("-cap") ? 0 : KitOutline.openCorners(piece);
         for (int notch = open; notch > 0; notch = (notch - 1) & open) {
             var notched = KitOutline.notched(piece, notch);
-            result.put("-notch-" + notch, module(spec, modelled, role, notched, 0, lod, square, footprintScale, fitting, layout,
+            result.put("-notch-" + notch, module(spec, modelled, role, notched, 0, lod, square, footprintScale, layout,
                   halfLength));
             if (lit) { GeneratedKit.lights(result, "-notch-" + notch, notched, facet, deck, lod); }
         }
@@ -309,7 +308,7 @@ final class BayKit {
      * of {@code layout} ({@code null}: none), cut to its corner; {@code closed}, the links a roof closes.
      */
     private static GeneratedMesh module(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece, int closed,
-          int lod, boolean square, float footprintScale, HabitatKit.Fitting fitting, HabitatKit.Layout layout, double halfLength) {
+          int lod, boolean square, float footprintScale, Map<String, List<double[]>> layout, double halfLength) {
         boolean ground = role.startsWith("base"), top = role.startsWith("roof"), cap = piece.tags().endsWith("-cap");
         List<Run> runs = spec.modules().get(role);
         Run run = runs.get(Math.min(lod, runs.size() - 1));
@@ -326,8 +325,8 @@ final class BayKit {
             double outlineScale = piece.direction() == null && !piece.tags().contains("-link-") ? footprintScale : 1;
             List<GeneratedMesh.Keep> keeps = keeps(wall, sides);
             KitOutline.Wall[] partners = square || piece.direction() == null ? new KitOutline.Wall[2]
-                  : new KitOutline.Wall[] { partner(spec, piece.direction(), wall, true, turned(spec, fitting)),
-                        partner(spec, piece.direction(), wall, false, turned(spec, fitting)) };
+                  : new KitOutline.Wall[] { partner(spec, piece.direction(), wall, true, turned(spec)),
+                        partner(spec, piece.direction(), wall, false, turned(spec)) };
             double[] goesOn = facade(result, run, wall, keeps, modelled, lod, top ? ROOF_INSET : 0, ground, outlineScale,
                   wall.turn() > 0 ? corner(run, wall) : null, joints, cap, chamfer, cut, partners, spec.varyBays());
             if (ground && spec.sidewalk() != null) { sidewalk(result, spec.sidewalk(), wall, keeps, goesOn[0], goesOn[1]); }
@@ -375,7 +374,7 @@ final class BayKit {
             for (var wall : piece.walls()) { gable(result, slab.vault(), wall, slab.height(lod) - .02, barrels(square, piece), lod); }
         }
         if (top && layout != null) {
-            HabitatKit.fittings(result, modelled, lod, fitting, layout, piece, spec.roof().height(lod), halfLength, footprintScale);
+            HabitatKit.fittings(result, modelled, lod, layout, piece, spec.roof().height(lod), halfLength, footprintScale);
         }
         return piece.direction() != null
               ? result.clipped(KitOutline.sector(piece.direction(), KitOutline.SEAM_OVERLAP)) : result;
@@ -839,7 +838,7 @@ final class BayKit {
 
     /** {@code run}'s bay {@code index} of {@code count} along {@code wall}: a door, or chosen by where the wall stands. */
     private static String bay(Run run, KitOutline.Wall wall, int index, int count, boolean ground) {
-        if (ground && run.door() != null && doors(wall, count).contains(index)) { return run.door(); }
+        if (ground && run.entrance() != null && doors(wall, count).contains(index)) { return run.entrance(); }
         return run.bays().get((int) Math.floorMod(seed(wall, 7, 13) + index * 5L, (long) run.bays().size()));
     }
 
@@ -948,7 +947,7 @@ final class BayKit {
      * Whether the kit's Angled corner pieces are built once and turned by the runtime: not where they hold something that
      * lies one way in the hex, roof fittings or a vault along its column.
      */
-    private static boolean turned(Spec spec, HabitatKit.Fitting fitting) { return fitting == null && spec.roof().vault() == null; }
+    private static boolean turned(Spec spec) { return spec.fittings() == null && spec.roof().vault() == null; }
 
     /** How far a piece's column reaches each side of its middle line: half a hexside, or a lone hex's half width. */
     private static double halfSpan(KitOutline.Piece piece) {

@@ -24,10 +24,12 @@ import megamek.common.board.HexAppearance;
 import megamek.common.board.TilesetScenery;
 
 /**
- * A connected building kit generated from its JSON spec ({@code models/buildings/<kit>/<kit>.json}) in place of a GLB:
- * an array of named variants, the first the default ({@link megamek.common.board.TilesetScenery#kitVariants}), each
- * dressing its footprint's walls in its {@code style} ({@link HabitatKit}, {@link BayKit}) with the modelled pieces of
- * its pieces GLB, as the nodes a kit GLB holds ({@link ConnectedKit}).
+ * A connected building kit generated from its JSON spec (a file under {@code models/buildings}: a standard kit's
+ * {@code standard/<class>-<weight>.json}, a look's {@code <look>/<look>.json}) in place of a GLB: its {@code style}
+ * ({@link HabitatKit}, {@link BayKit}) and pieces GLB, what its variants share ({@code shared}), its roofs by name
+ * ({@code roofs}) and its named {@code variants}, the first the default
+ * ({@link megamek.common.board.TilesetScenery#kitVariants}), each dressing its footprint's walls with the modelled
+ * pieces of the pieces GLB, as the nodes a kit GLB holds ({@link ConnectedKit}).
  */
 final class GeneratedKit {
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -53,9 +55,9 @@ final class GeneratedKit {
         return KITS.computeIfAbsent(key, ignored -> new BoardKit<>(() -> {
             try {
                 boolean vaulted = variant != null && variant.endsWith(TilesetScenery.VAULTED);
-                JsonNode chosen = roofed(variant(JSON.readTree(spec),
-                      vaulted ? variant.substring(0, variant.length() - TilesetScenery.VAULTED.length()) : variant), vaulted);
-                if (!chosen.path("pieces").isTextual()) { throw new IllegalArgumentException("a variant names its pieces GLB"); }
+                JsonNode chosen = resolved(JSON.readTree(spec),
+                      vaulted ? variant.substring(0, variant.length() - TilesetScenery.VAULTED.length()) : variant, vaulted);
+                if (!chosen.path("pieces").isTextual()) { throw new IllegalArgumentException("a kit names its pieces GLB"); }
                 var modelled = RigidGlb.loadLods(new FileHandle(new File(spec.getParentFile(), chosen.path("pieces").asText())),
                       new File(Configuration.dataDir(), "models").toPath());
                 String name = spec.getName().replaceFirst("\\.json$", "");
@@ -66,15 +68,15 @@ final class GeneratedKit {
                     case "habitat" -> {
                         var habitat = JSON.treeToValue(chosen, HabitatKit.Spec.class);
                         lods = HabitatKit.lods(habitat, modelled, square, name, footprintScale);
-                        doors = doors(habitat.door(), square, habitat.lone().bandEnd(), footprintScale, habitat.cornerRadius(),
+                        doors = doors(habitat.largeDoor(), square, habitat.lone().bandEnd(), footprintScale, habitat.cornerRadius(),
                               habitat.cornerSegments(), modelled);
                     }
                     case "bays" -> {
                         var bays = JSON.treeToValue(chosen, BayKit.Spec.class);
                         lods = BayKit.lods(bays, modelled, square, name, footprintScale);
-                        doors = doors(bays.door(), square, bays.bandEnd(), footprintScale, bays.cornerRadius(), bays.cornerSegments(), modelled);
+                        doors = doors(bays.largeDoor(), square, bays.bandEnd(), footprintScale, bays.cornerRadius(), bays.cornerSegments(), modelled);
                     }
-                    default -> throw new IllegalArgumentException("a variant's style is habitat or bays, not " + style);
+                    default -> throw new IllegalArgumentException("a kit's style is habitat or bays, not " + style);
                 }
                 var kit = ConnectedKit.load(List.copyOf(lods)).withDoors(doors);
                 return style.equals("bays") ? seated(kit) : kit;
@@ -106,26 +108,111 @@ final class GeneratedKit {
               door == null ? KitDoors.Style.DEFAULT : door.resolved(), modelled);
     }
 
+    /** The storeys a variant lays: each a list of the runs the game picks among ({@code base0}, {@code base1}, ...). */
+    private static final List<String> ROLES = List.of("base", "floor", "top");
+
+    /** A run's fields a kit may state once, in {@code shared}, for all its runs. */
+    private static final List<String> RUN_DEFAULTS = List.of("planar", "bay");
+
     /**
-     * {@code variant} under one of its roofs: its flat one as it stands, or, {@code vaulted}, the one that spans its
-     * hall: the fields of its {@code vaulted} object in place of its own (its {@code modules} role by role; a null
-     * takes a field away).
+     * The spec {@code file}'s variant named {@code name} (else its first) as its style's spec record reads it: the
+     * file's {@code shared} under the variant's own fields (objects key by key, anything else replaced; a role's object
+     * in {@code shared} under each of that role's runs); its storeys' runs and its roof's as {@code modules}, a run's
+     * {@code far} as its second level of detail; the roof it names among the file's {@code roofs}
+     * ({@code vaulted}: its other one, where it names one); its fittings for both footprints, none under a vault;
+     * colours as linear tints.
      */
-    private static JsonNode roofed(JsonNode variant, boolean vaulted) {
-        if (!variant.has("vaulted")) { return variant; }
-        ObjectNode result = variant.deepCopy();
-        JsonNode other = result.remove("vaulted");
-        if (!vaulted) { return result; }
-        other.fields().forEachRemaining(field -> {
-            if (field.getValue().isNull()) {
-                result.remove(field.getKey());
-            } else if (field.getKey().equals("modules")) {
-                result.withObject("/modules").setAll((ObjectNode) field.getValue());
-            } else {
-                result.set(field.getKey(), field.getValue());
+    private static JsonNode resolved(JsonNode file, String name, boolean vaulted) {
+        ObjectNode own = (ObjectNode) variant(file.path("variants"), name);
+        JsonNode shared = file.path("shared");
+        ObjectNode result = JSON.createObjectNode();
+        result.set("style", file.get("style"));
+        result.set("pieces", file.get("pieces"));
+        for (JsonNode source : List.of(shared, own)) {
+            source.fields().forEachRemaining(field -> {
+                if (!ROLES.contains(field.getKey())) { merge(result, field.getKey(), field.getValue()); }
+            });
+        }
+        result.remove("class");
+        JsonNode other = result.remove("vaulted"), flat = result.remove("roof"), named = vaulted && other != null ? other : flat;
+        if (named == null || !file.path("roofs").path(named.asText()).isObject()) {
+            throw new IllegalArgumentException("a variant names its roof among the kit's roofs, not " + named);
+        }
+        ObjectNode roof = file.get("roofs").get(named.asText()).deepCopy();
+        JsonNode fittings = result.remove("fittings");
+        if (fittings != null && !roof.has("vault")) {
+            // One list of layouts where both footprints lay the same.
+            result.set("fittings", fittings.isArray()
+                  ? JSON.createObjectNode().<ObjectNode>set("square", fittings).set("angled", fittings) : fittings);
+        }
+        if (file.path("style").asText().equals("bays")) {
+            Map<String, JsonNode> defaults = new HashMap<>();
+            for (String key : RUN_DEFAULTS) {
+                JsonNode value = result.remove(key);
+                if (value != null) { defaults.put(key, value); }
             }
-        });
-        return result;
+            ObjectNode modules = result.putObject("modules");
+            for (String role : ROLES) { runs(modules, role, own.path(role), shared.path(role), defaults); }
+            runs(modules, "roof", roof.remove("runs"), null, defaults);
+            result.set("roof", roof);
+        } else {
+            result.setAll(roof);
+        }
+        return linear(result);
+    }
+
+    /** {@code value} under {@code key} of {@code into}: an object into the object there, key by key; else in its place. */
+    private static void merge(ObjectNode into, String key, JsonNode value) {
+        if (value.isObject() && into.path(key).isObject()) {
+            value.fields().forEachRemaining(field -> merge((ObjectNode) into.get(key), field.getKey(), field.getValue()));
+        } else {
+            into.set(key, value.deepCopy());
+        }
+    }
+
+    /**
+     * A role's {@code runs} as the modules {@code <role>0}, {@code <role>1}, ...: each over the role's {@code common}
+     * fields, its {@code far} (a whole run of its own) as its second level of detail; both over the kit's
+     * {@code defaults}.
+     */
+    private static void runs(ObjectNode modules, String role, JsonNode runs, JsonNode common, Map<String, JsonNode> defaults) {
+        int index = 0;
+        for (JsonNode run : runs == null ? List.<JsonNode>of() : runs) {
+            ObjectNode near = common != null && common.isObject() ? common.deepCopy() : JSON.createObjectNode();
+            near.setAll((ObjectNode) run);
+            ObjectNode far = (ObjectNode) near.remove("far");
+            var levels = modules.putArray(role + index++);
+            levels.add(near);
+            if (far != null) { levels.add(far.deepCopy()); }
+            for (JsonNode level : levels) {
+                defaults.forEach((key, value) -> { if (!level.has(key)) { ((ObjectNode) level).set(key, value); } });
+            }
+        }
+    }
+
+    /** {@code node} with every {@code tint} written as a colour ({@code #rrggbb}, sRGB) as the linear triple the records read. */
+    private static JsonNode linear(JsonNode node) {
+        if (node.isObject()) {
+            ObjectNode object = (ObjectNode) node;
+            List<String> keys = new ArrayList<>();
+            object.fieldNames().forEachRemaining(keys::add);
+            for (String key : keys) {
+                JsonNode value = object.get(key);
+                if (key.equals("tint") && value.isTextual()) {
+                    int rgb = Integer.parseInt(value.asText().substring(1), 16);
+                    var tint = object.putArray(key);
+                    for (int shift = 16; shift >= 0; shift -= 8) {
+                        double channel = (rgb >> shift & 255) / 255.0;
+                        tint.add(channel <= .04045 ? channel / 12.92 : Math.pow((channel + .055) / 1.055, 2.4));
+                    }
+                } else {
+                    linear(value);
+                }
+            }
+        } else if (node.isArray()) {
+            node.forEach(GeneratedKit::linear);
+        }
+        return node;
     }
 
     /** The spec's variant named {@code name}, else its first; their names distinct, each a valid appearance key. */
@@ -168,7 +255,7 @@ final class GeneratedKit {
     private static final double LIGHT_INSET = 2.5;
 
     /**
-     * A roof twin's aviation obstruction lights ({@code aol} in its kit's spec), as its own node {@code <twin>-aol} that
+     * A roof twin's aviation obstruction lights ({@code aviationLights} in its kit's spec), as its own node {@code <twin>-aol} that
      * ConnectedKit stands on a tall enough hex's roof: one on each convex corner of the twin's {@code piece}
      * ({@link KitOutline#convexCorners}, arcs of facets no longer than {@code facet}) within its sector, so the piece's
      * cut never halves one; its stick from {@code deck}, the roof's height, down into the roof.

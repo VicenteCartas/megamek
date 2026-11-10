@@ -215,7 +215,7 @@ class BoardObstaclesTest {
 
     @Test
     void modularBuildingUsesItsSelectedAuthoredPartsWithoutGpuResources() {
-        var feature = new BoardScene.Feature("buildings/saxarba/fortress_light/fortress_light_a_52",
+        var feature = new BoardScene.Feature("buildings/standard/fortress-light",
               0, 0, 0, 1, 4, 0, BoardScene.FeatureKind.BUILDING);
         BoardScene scene = scene(CENTER, feature, 0);
         var obstacles = new BoardObstacles(scene, scene.tile(CENTER));

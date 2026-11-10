@@ -62,7 +62,7 @@ class TilesetSceneryFilesTest {
             Hex hex = new Hex(0, "building:1", "");
             assertEquals(exact.toFile(), TilesetScenery.customBuildingFile(ASSET));
             assertFalse(TilesetScenery.structureModels(hex).containsKey(Terrains.BUILDING));
-            Files.writeString(generated, "[{\"name\":\"first\"},{\"name\":\"second\"}]");
+            Files.writeString(generated, "{\"variants\":[{\"name\":\"first\"},{\"name\":\"second\"}]}");
             assertFalse(TilesetScenery.structureModels(hex).containsKey(Terrains.BUILDING),
                   "A capture uses one asset generation until the explicit reload");
             TilesetScenery.reload();
@@ -71,7 +71,7 @@ class TilesetSceneryFilesTest {
             assertEquals(generated.toFile(), TilesetScenery.customBuildingFile(ASSET + "-square@second"));
             assertEquals(List.of("first", "second"), TilesetScenery.kitVariants(ASSET));
             // A hangar draws a variant's vaulted roof where it offers one, unless it chooses the flat one; no other building does.
-            Files.writeString(generated, "[{\"name\":\"first\"},{\"name\":\"second\",\"vaulted\":{}}]");
+            Files.writeString(generated, "{\"variants\":[{\"name\":\"first\"},{\"name\":\"second\",\"vaulted\":\"vault\"}]}");
             TilesetScenery.reload();
             assertEquals(List.of("second"), TilesetScenery.kitVaults(ASSET));
             Hex hangar = new Hex(0, "building:1;bldg_class:1", "");

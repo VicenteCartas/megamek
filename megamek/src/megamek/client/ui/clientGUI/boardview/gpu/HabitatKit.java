@@ -42,17 +42,17 @@ final class HabitatKit {
      * battered skirt; the pieces at the walls' corners and joints: piers up every storey, their tops on the roof, footings
      * on the ground ({@code null}: none); the Angled lone hex's half length and a single link's band end; the storeys
      * above the ground ({@code windows} lit or dim, shifted along by a fraction of a repeat); the roofs' fittings per
-     * footprint (hatch and vent pieces, laid out at x, y); with {@code aol}, aviation obstruction lights on the roofs'
-     * convex corners ({@link GeneratedKit#lights}); its large doors' look ({@code door}, {@link KitDoors.Style}; a plain
-     * steel door without); with {@code vault}, a roof that spans the hall ({@link BayKit.Vault}) in place of the flat roof
+     * footprint ({@link Fittings}); with {@code aviationLights}, aviation obstruction lights on the roofs' convex corners
+     * ({@link GeneratedKit#lights}); its large doors' look ({@code largeDoor}, {@link KitDoors.Style}; a plain steel
+     * door without); with {@code vault}, a roof that spans the hall ({@link BayKit.Vault}) in place of the flat roof
      * with its rim, pier tops and fittings.
      */
     record Spec(String name, String style, Map<String, String> materials, String pieces, double cornerRadius, int cornerSegments, Parapet parapet,
                 Eave eave, Skirt skirt, Uprights piers, Uprights tops, Uprights footings, Lone lone, List<Storey> storeys,
-                Fittings fittings, boolean aol, KitDoors.Style door, BayKit.Vault vault) {
+                Fittings fittings, boolean aviationLights, KitDoors.Style largeDoor, BayKit.Vault vault) {
         /** The roof that spans the hall ({@code vault}; null: the flat roof), in the roof's material. */
         BayKit.Slab hall() {
-            return vault == null ? null : new BayKit.Slab(materials.get("roof"), 18, 0, new double[] { 0 }, false, aol, vault);
+            return vault == null ? null : new BayKit.Slab(materials.get("roof"), 18, 0, new double[] { 0 }, false, aviationLights, vault);
         }
     }
 
@@ -72,13 +72,14 @@ final class HabitatKit {
     record Uprights(String joint, String corner) { }
     record Lone(double halfLength, double bandEnd) { }
     record Storey(String windows, double shift) { }
-    record Fittings(Fitting square, Fitting angled) { }
 
-    /** A footprint's roof fittings: its hatch and vent pieces (each on the roof at its centre) and their layouts. */
-    record Fitting(String hatch, String vent, List<Layout> layouts) { }
-
-    /** Where a roof's hatches and vents stand (x, y), and any other pieces by name (x, y and a turn in degrees). */
-    record Layout(List<double[]> hatches, List<double[]> vents, Map<String, List<double[]>> pieces) { }
+    /**
+     * The roofs' fittings by footprint: the layouts a roof comes in, each naming pieces of the pieces GLB and where each
+     * stands on the roof about the hex's middle (x, y and a turn in degrees, none without).
+     */
+    record Fittings(List<Map<String, List<double[]>>> square, List<Map<String, List<double[]>>> angled) {
+        List<Map<String, List<double[]>>> of(boolean isSquare) { return isSquare ? square : angled; }
+    }
 
     /** A pier at a wall's start: where, facing which way, whether at a corner. */
     private record Pier(double x, double y, double[] n, boolean corner) { }
@@ -107,8 +108,8 @@ final class HabitatKit {
         }
         List<KitOutline.Piece> pieces = KitOutline.footprint(square, spec.lone().bandEnd(), false, footprintScale).stream()
               .map(piece -> KitOutline.rounded(piece, spec.cornerRadius(), spec.cornerSegments())).toList();
-        Fitting fitting = square ? spec.fittings().square() : spec.fittings().angled();
-        List<Layout> roofs = fitting.layouts();
+        // A roof for each layout of its fittings; one bare roof without any.
+        List<Map<String, List<double[]>>> roofs = spec.fittings() == null ? List.of(Map.of()) : spec.fittings().of(square);
         List<String> roles = new ArrayList<>();
         roles.add("base0");
         for (int k = 0; k < spec.storeys().size(); k++) { roles.add("floor" + k); }
@@ -139,7 +140,7 @@ final class HabitatKit {
                 Plating plating = square ? new Plating(0, 0, null) : plating(outline, twin.getKey().equals("-bend"));
                 Laid laid;
                 if (roof) {
-                    laid = roof(spec, modelled, outline, z0, lod, fitting, roofs.get(Integer.parseInt(role.substring(4))),
+                    laid = roof(spec, modelled, outline, z0, lod, roofs.get(Integer.parseInt(role.substring(4))),
                           square, plating, footprintScale);
                 } else {
                     Storey storey = role.equals("base0") ? new Storey("lit", 0)
@@ -158,13 +159,13 @@ final class HabitatKit {
                 }
                 result.put(twin.getKey(), mesh);
                 // Its aviation lights beside it (GeneratedKit#lights), on the roof's plating or parapet foot.
-                if (roof && spec.aol()) {
+                if (roof && spec.aviationLights()) {
                     double facet = spec.cornerRadius() * Math.PI / Math.max(1, spec.cornerSegments());
                     GeneratedKit.lights(result, twin.getKey(), outline, facet, lightDeck(spec), lod);
                 }
             }
             return result;
-        }, spec.aol() ? lod -> lightDeck(spec) : null);
+        }, spec.aviationLights() ? lod -> lightDeck(spec) : null);
         for (var level : levels) {
             level.buildingPaint.add(spec.materials().get("wall"));
         }
@@ -382,8 +383,8 @@ final class HabitatKit {
      * top edge rounded by the eave), or without one the eave's rim from the wall onto the plating; the piers' tops, and
      * the fittings of its layout about the hex's middle.
      */
-    private static Laid roof(Spec spec, List<ModelData> modelled, KitOutline.Piece piece, double z0, int lod, Fitting fitting,
-          Layout layout, boolean square, Plating plating, float footprintScale) {
+    private static Laid roof(Spec spec, List<ModelData> modelled, KitOutline.Piece piece, double z0, int lod,
+          Map<String, List<double[]>> layout, boolean square, Plating plating, float footprintScale) {
         var geometry = new GeneratedMesh();
         List<Pier> piers = new ArrayList<>();
         if (spec.vault() != null) {
@@ -430,7 +431,7 @@ final class HabitatKit {
                 piers.add(pierAt(wall, piece.walls()));
             }
         }
-        fittings(geometry, modelled, lod, fitting, layout, piece, deck, spec.lone().halfLength(), footprintScale);
+        fittings(geometry, modelled, lod, layout, piece, deck, spec.lone().halfLength(), footprintScale);
         return new Laid(geometry, piers);
     }
 
@@ -438,22 +439,14 @@ final class HabitatKit {
      * A roof's fittings of {@code layout} about the hex's middle, on the deck at {@code deck}: they move in with a compact
      * isolated roof (its outline's half length against the lone hex's {@code halfLength}), keeping their own size.
      */
-    static void fittings(GeneratedMesh geometry, List<ModelData> modelled, int lod, Fitting fitting, Layout layout,
+    static void fittings(GeneratedMesh geometry, List<ModelData> modelled, int lod, Map<String, List<double[]>> layout,
           KitOutline.Piece piece, double deck, double halfLength, float footprintScale) {
         boolean isolated = piece.direction() == null && !piece.tags().contains("-link-");
         double across = isolated ? footprintScale : 1;
         double along = isolated
               ? piece.polygons().stream().flatMap(List::stream).mapToDouble(p -> Math.abs(p[1])).max().orElse(0) / halfLength : 1;
-        if (layout.hatches() != null) {
-            for (double[] at : layout.hatches()) { GeneratedKit.piece(geometry, modelled, lod, fitting.hatch(), on(at, deck, across, along), 0); }
-        }
-        if (layout.vents() != null) {
-            for (double[] at : layout.vents()) { GeneratedKit.piece(geometry, modelled, lod, fitting.vent(), on(at, deck, across, along), 0); }
-        }
-        if (layout.pieces() != null) {
-            layout.pieces().forEach((name, places) -> places.forEach(at -> GeneratedKit.piece(geometry, modelled, lod, name,
-                  on(at, deck, across, along).rotate(0, 0, 1, at.length > 2 ? (float) at[2] : 0), 0)));
-        }
+        layout.forEach((name, places) -> places.forEach(at -> GeneratedKit.piece(geometry, modelled, lod, name,
+              on(at, deck, across, along).rotate(0, 0, 1, at.length > 2 ? (float) at[2] : 0), 0)));
     }
 
     /**

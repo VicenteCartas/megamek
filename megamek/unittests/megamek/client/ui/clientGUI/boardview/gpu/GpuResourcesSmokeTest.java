@@ -217,7 +217,7 @@ class GpuResourcesSmokeTest {
                         tiles.add(new BoardScene.Tile(coords, x == 4 ? 2 : 0,
                               coords.equals(target) ? depth : -1, false, 0, BoardScene.Surface.GRASS, null,
                               coords.equals(target) && depth < 0
-                                    ? List.of(new BoardScene.Feature("buildings/saxarba/building_hard/building_hard_00",
+                                    ? List.of(new BoardScene.Feature("buildings/standard/building-hard",
                                           0, 0, 0, 1, 3, 0, BoardScene.FeatureKind.BUILDING)) : List.of(),
                               List.of()));
                     }

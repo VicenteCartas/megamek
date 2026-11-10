@@ -288,7 +288,7 @@ class GpuTerrainSubmissionSmokeTest {
         for (BoardScene.Tile tile : relief.tiles()) {
             Coords coords = tile.coords();
             List<BoardScene.Feature> features = coords.equals(new Coords(4, 4))
-                  ? List.of(new BoardScene.Feature("buildings/saxarba/building_hard/building_hard_00",
+                  ? List.of(new BoardScene.Feature("buildings/standard/building-hard",
                         0, 0, 0, 1, 3, 0, BoardScene.FeatureKind.BUILDING))
                   : coords.equals(new Coords(2, 4))
                         ? List.of(new BoardScene.Feature("vegetation/tree", 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE))

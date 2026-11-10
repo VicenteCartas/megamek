@@ -30,8 +30,8 @@ import org.junit.jupiter.api.Test;
  */
 @Tag("on-demand")
 class GpuConnectedKitSmokeTest {
-    private static final List<String> LOOKS = List.of("buildings/saxarba/building_light/building_light_00",
-          "buildings/saxarba/fortress_light/fortress_light_a_52", "building/lunar-habitat");
+    private static final List<String> LOOKS = List.of("buildings/standard/building-light",
+          "buildings/standard/fortress-light", "building/lunar-habitat");
     private static final int BLOCK = 7, WIDTH = BLOCK * 3, ROWS = 10, HEIGHT = ROWS * 2;
 
     @Test

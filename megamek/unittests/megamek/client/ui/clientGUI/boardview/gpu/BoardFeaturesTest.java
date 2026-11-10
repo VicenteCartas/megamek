@@ -105,7 +105,7 @@ class BoardFeaturesTest {
     void cityParkEmptyTerrainMarkerKeepsEnhancedGroundBeneathItsBuilding() {
         // City Park 0916 retains an old "none" token beside its actual building terrain.
         Hex hex = new Hex(1, "none:2:4;bldg_elev:3:4;building:4:4;bldg_cf:105:4", "");
-        var models = Map.of(Terrains.BUILDING, "buildings/saxarba/building_hard/building_hard_04");
+        var models = Map.of(Terrains.BUILDING, "buildings/standard/building-hard");
         assertTrue(BoardFeatures.detailedGround(hex, models),
               "An empty legacy marker must not replace enhanced grass with tileset artwork");
         assertFalse(BoardFeatures.detailedGround(hex, Map.of()),
@@ -284,7 +284,7 @@ class BoardFeaturesTest {
         hex.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, 18));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 2));
         hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, 3));
-        String selectedRoof = "buildings/saxarba/building_hard/building_hard_09";
+        String selectedRoof = "buildings/standard/building-hard";
         String industrialRoof = "buildings/saxarba/misc/heavy_industrial_a";
         var models = Map.of(Terrains.BUILDING, selectedRoof, Terrains.INDUSTRIAL, industrialRoof);
         var features = BoardFeatures.capture(hex, new Coords(2, 2), models);

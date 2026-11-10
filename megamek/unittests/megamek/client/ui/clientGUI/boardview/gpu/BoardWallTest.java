@@ -253,7 +253,7 @@ class BoardWallTest {
     @Test
     void authoredWallModelKeepsItsAppearanceAndSolidRulesHeight() {
         Hex hex = new Hex(2, "building:5:4;bldg_elev:7;bldg_cf:120", "");
-        String asset = "buildings/saxarba/building_hard/building_hard_04";
+        String asset = "buildings/standard/building-hard";
         hex.setAppearance(Map.of("building", new HexAppearance(null, asset, null, null)));
         var models = TilesetScenery.structureModels(hex);
         assertEquals(asset, models.get(Terrains.BUILDING));
@@ -334,7 +334,7 @@ class BoardWallTest {
     void explicitWallModelKeepsItsAppearanceWhenCfChanges() {
         Board board = board(151);
         board.getHex(ORIGIN).setAppearance(Map.of("building",
-              new HexAppearance(null, "buildings/saxarba/building_hard/building_hard_04", null, null)));
+              new HexAppearance(null, "buildings/standard/building-hard", null, null)));
         var before = BoardTiles.captureAll(board).getFirst();
         board.getHex(ORIGIN).addTerrain(new Terrain(Terrains.BLDG_CF, 10));
         var after = BoardTiles.captureAll(board).getFirst();

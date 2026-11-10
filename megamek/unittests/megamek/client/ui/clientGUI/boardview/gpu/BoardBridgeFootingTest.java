@@ -728,7 +728,7 @@ class BoardBridgeFootingTest {
         assertEquals(List.of(1, 2, 2, 1), List.of(joints(maglevPiers(dry, first), first), joints(maglevPiers(dry, second), second),
               joints(maglevPiers(dry, third), third), joints(maglevPiers(dry, fourth), fourth)));
         for (var kind : List.of(BoardScene.FeatureKind.BUILDING, BoardScene.FeatureKind.INDUSTRIAL)) {
-            var structure = new BoardScene.Feature("buildings/saxarba/building_light/building_light_00", 0, 0, 0, 1, 2, 0, kind);
+            var structure = new BoardScene.Feature("buildings/standard/building-light", 0, 0, 0, 1, 2, 0, kind);
             var built = BoardScenes.replace(dry, withFeatures(dry.tile(second), List.of(structure)));
             assertEquals(0, joints(maglevPiers(built, second), second), kind + ": none in the structure's hex");
             assertEquals(0, joints(maglevPiers(built, first), first), kind + ": nor its neighbour's half of that joint");

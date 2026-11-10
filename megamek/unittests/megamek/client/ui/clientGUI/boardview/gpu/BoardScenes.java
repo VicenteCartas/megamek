@@ -353,7 +353,7 @@ final class BoardScenes {
                 land &= !(x == 4 && y == 3);
                 boolean building = land && (x == 4 && y == 5 || x == 5 && y == 7);
                 List<BoardScene.Feature> features = building
-                      ? List.of(new BoardScene.Feature("buildings/saxarba/building_hard/building_hard_00",
+                      ? List.of(new BoardScene.Feature("buildings/standard/building-hard",
                             0, 0, 0, 1, 3, 0, BoardScene.FeatureKind.BUILDING)) : List.of();
                 Hex hex = new Hex(0);
                 if (family == BoardScene.Surface.CONCRETE) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
@@ -393,7 +393,7 @@ final class BoardScenes {
     static BoardScene pavedMapScene(int number) {
         Board board = BoardFile.loadSheet(new File("data/boards/Deserts/16x17 AeroBase " + number + ".board"), false, true);
         BoardScene.Pixels pixels = groundPixels();
-        Map<Integer, String> models = Map.of(Terrains.BUILDING, "buildings/saxarba/building_hard/building_hard_00");
+        Map<Integer, String> models = Map.of(Terrains.BUILDING, "buildings/standard/building-hard");
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < board.getWidth(); x++) {
             for (int y = 0; y < board.getHeight(); y++) {

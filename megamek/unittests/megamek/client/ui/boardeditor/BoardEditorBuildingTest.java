@@ -169,7 +169,7 @@ class BoardEditorBuildingTest {
                   first, TilesetScenery.structureModels(editor.board().getHex(first)),
                   second, TilesetScenery.structureModels(editor.board().getHex(second)),
                   separate, TilesetScenery.structureModels(editor.board().getHex(separate)));
-            assertTrue(models.get(first).get(Terrains.BUILDING).contains("building_light"));
+            assertTrue(models.get(first).get(Terrains.BUILDING).contains("building-light"));
             assertFalse(editor.board().getHex(first).getTerrain(Terrains.BUILDING).hasExitsSpecified(),
                   "Exercise calculated connections, which the native writer used to omit");
             for (Coords at : List.of(first, second, separate)) {

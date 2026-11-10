@@ -1988,9 +1988,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private void buildingVariant() {
         var names = snapshot.kitVariants();
         if (names.size() < 2) { return; }
-        var buildingClass = snapshot.property("bldg_class");
-        String drawn = megamek.common.board.TilesetScenery.drawnVariant(megamek.common.board.HexAppearance.kitVariant(snapshot.appearance()),
-              names, buildingClass == null ? 0 : buildingClass.value());
+        String drawn = snapshot.kitDrawn();
         choose(UiKit.text("BoardEditor.kitVariant"), drawn,
               names.stream().map(name -> new Option(name, name)).toList(), name -> send(Action.KIT_VARIANT, name));
     }
@@ -2003,8 +2001,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private void buildingRoof() {
         var buildingClass = snapshot.property("bldg_class");
         int value = buildingClass == null ? 0 : buildingClass.value();
-        String drawn = megamek.common.board.TilesetScenery.drawnVariant(megamek.common.board.HexAppearance.kitVariant(snapshot.appearance()),
-              snapshot.kitVariants(), value);
+        String drawn = snapshot.kitDrawn();
         if (value != megamek.common.units.IBuilding.HANGAR || drawn == null || !snapshot.kitVaults().contains(drawn)) { return; }
         boolean vaulted = megamek.common.board.TilesetScenery.vaulted(megamek.common.board.HexAppearance.roof(snapshot.appearance()), value);
         choose(UiKit.text("BoardEditor.buildingRoof"), vaulted ? "vaulted" : "flat",

@@ -254,7 +254,8 @@ public final class BoardEditorSession {
      * {@code drawsRoutes}: a Paint drag with the active brush
      * draws a route by hand, built on its release ({@link #pointer}). {@code copies}: the identical copies the issues
      * list reports, which {@link Action#REMOVE_COPIES} removes. {@code kitVariants}: the variants of the selected
-     * building's generated kit ({@link TilesetScenery#kitVariants}), empty where it has none. {@code joinedSides}: for
+     * building's generated kit ({@link TilesetScenery#kitVariants}), empty where it has none; {@code kitDrawn}: the one
+     * it draws. {@code joinedSides}: for
      * the selected hex's water and pavement, the sides that join the same terrain beside it, by terrain name.
      * {@code rampSides}: the sides
      * of the selected two-lane road where a single-lane road joins it ({@link SingleLane#joined}), of which
@@ -272,7 +273,7 @@ public final class BoardEditorSession {
           String object, String message, int width, int height, Brush activeBrush, List<Selection> selection,
           List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<HexIssue> issues,
           List<Level> levels, List<String> tags, List<String> boardComponents, boolean drawsRoutes,
-          int copies, List<String> kitVariants, List<String> kitVaults, boolean buildingConnected, BuildingVolumes.Reference buildingReference, int buildingInteriors,
+          int copies, List<String> kitVariants, List<String> kitVaults, String kitDrawn, boolean buildingConnected, BuildingVolumes.Reference buildingReference, int buildingInteriors,
           boolean buildingProfileAvailable, Map<String, Integer> joinedSides, List<String> destroyed, int rampSides,
           int entranceSides, boolean laneRun, List<Integer> exitFrom, int apronSides, LaneJunction junction) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
@@ -528,7 +529,7 @@ public final class BoardEditorSession {
               selectionGroups(), groupSizes(hex), issueList, levels(hex), board().getTags().stream().sorted().toList(),
               boardComponents(), drawsRoutes(),
               copies.values().stream().mapToInt(Integer::intValue).sum(), hex == null ? List.of() : kitVariants(hex),
-              hex == null ? List.of() : kitVaults(hex),
+              hex == null ? List.of() : kitVaults(hex), hex == null ? null : kitDrawn(hex),
               TilesetScenery.buildingConnected(hex, selected, board()::getHex), hex == null ? null : hex.getBuildingReference(),
               building == null ? 0 : BuildingInteriors.choice(building).ordinal(),
               TilesetScenery.buildingProfileAvailable(hex, selected, board()::getHex), joinedSides(), destroyed(hex),
@@ -3333,6 +3334,14 @@ public final class BoardEditorSession {
         return hex.containsTerrain(Terrains.BUILDING)
               ? TilesetScenery.kitVariants(TilesetScenery.structureModels(hex,
                     TilesetScenery.buildingConnected(hex, hex.getCoords(), board()::getHex)).get(Terrains.BUILDING)) : List.of();
+    }
+
+    /** The variant of its generated kit that {@code hex}'s building draws ({@link TilesetScenery#drawnVariant}); none: null. */
+    private String kitDrawn(Hex hex) {
+        return hex.containsTerrain(Terrains.BUILDING)
+              ? TilesetScenery.drawnVariant(HexAppearance.kitVariant(hex.getAppearance()), TilesetScenery.structureModels(hex,
+                    TilesetScenery.buildingConnected(hex, hex.getCoords(), board()::getHex)).get(Terrains.BUILDING),
+                    hex.terrainLevel(Terrains.BLDG_CLASS)) : null;
     }
 
     /** Those of {@link #kitVariants} that offer a roof that spans their hall beside the flat one ({@link TilesetScenery#kitVaults}). */

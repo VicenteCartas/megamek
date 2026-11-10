@@ -20,7 +20,7 @@ class GpuBuildingInteriorTest {
 
     @Test
     void lightBuildingFloorsAndRoofCoverItsCentre() {
-        var kit = GpuBuilding.kit("buildings/saxarba/building_light/building_light_00");
+        var kit = GpuBuilding.kit("buildings/standard/building-light");
         // Its floor caps hold the occupied area (GpuBuilding#volumes), as its closed panels are wall strips, not rooms.
         // Alone, every storey's cap and its roof cover its centre; connected, its roof still does.
         for (int[] reach : List.of(new int[6], new int[] { 2, 0, 0, 2, 0, 0 }, new int[] { 2, 0, 2, 0, 2, 0 })) {

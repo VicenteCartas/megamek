@@ -128,7 +128,7 @@ class GpuTerrainLoadBenchmarkTest {
                 Hex hex = board.getHex(coords);
                 Map<Integer, String> models = new HashMap<>();
                 for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
-                    if (hex.containsTerrain(terrain)) { models.put(terrain, "buildings/building_hard/building_hard"); }
+                    if (hex.containsTerrain(terrain)) { models.put(terrain, "buildings/standard/building-hard"); }
                 }
                 var artwork = new BoardArtwork.HexImage(coords, null, null, List.of(), models, null);
                 tiles.add(BoardScene.captureTile(hex, artwork, null, pool, board::getHex));

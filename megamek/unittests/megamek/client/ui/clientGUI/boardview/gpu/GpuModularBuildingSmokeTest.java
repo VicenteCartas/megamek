@@ -156,7 +156,7 @@ class GpuModularBuildingSmokeTest {
     private static void checkLightBuilding() {
         var assets = new GpuAssets();
         try {
-            var building = assets.building("buildings/saxarba/building_light/building_light_00", 5, new int[6], 0, true);
+            var building = assets.building("buildings/standard/building-light", 5, new int[6], 0, true);
             assertNotNull(building);
             var floors = new ModelInstance(building.interior(), "floors").calculateBoundingBox(new BoundingBox());
             // A lone hex stands on its whole-hex pieces: its floors fill it inside the walls.
@@ -188,7 +188,7 @@ class GpuModularBuildingSmokeTest {
     }
 
     private static void checkTerrain() throws Exception {
-        String hangar = "buildings/hangar_light/hangar_light_a";
+        String hangar = "buildings/standard/hangar-light";
         GpuAssets assets = new GpuAssets();
         try {
             assertNotNull(assets.building(hangar, 5, new int[6], 4, true), "Hangars use their current modular kit");

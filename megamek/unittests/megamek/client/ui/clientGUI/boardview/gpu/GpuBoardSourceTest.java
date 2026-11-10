@@ -414,7 +414,7 @@ class GpuBoardSourceTest {
     }
 
     /** A generic building's kit follows its weight and class, whatever roof art a tileset has for it: here, level 4. */
-    private static final String HARDENED_KIT = "buildings/building_hard/building_hard";
+    private static final String HARDENED_KIT = "buildings/standard/building-hard";
 
     @Test
     void aBuildingsKitIgnoresTheTwoDTilesetAndItsHeightLabelIsRaised() throws Exception {

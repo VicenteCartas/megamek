@@ -36,7 +36,7 @@ class GpuModularNightSmokeTest {
                     var camera = new BoardCamera(); camera.resize(1000, 900); camera.setIsometric(true);
                     var centre = BoardGeometry.center(new Coords(4, 4), 0);
                     camera.center(centre.cpy().add(0, 0, 29)); camera.camera.zoom = .15f; camera.update();
-                    for (String family : List.of("building_light/building_light", "fortress_light/fortress_light_a", "lunar_habitat/lunar_habitat")) {
+                    for (String family : List.of("standard/building-light", "standard/fortress-light", "lunar_habitat/lunar_habitat")) {
                         var building = assets.building("buildings/" + family, 3, new int[6], 17, false);
                         assertNotNull(building, family);
                         for (int lod = 0; lod < 2; lod++) {

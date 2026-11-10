@@ -217,7 +217,10 @@ public final class TilesetScenery {
         return false;
     }
 
-    /** The generic modular kit is determined by gameplay weight and class, independently of height and connections. */
+    /**
+     * The standard modular kit is determined by gameplay class and weight, independently of height and connections:
+     * {@code buildings/standard/<class>-<weight>}, an ordinary building's class written {@code building}.
+     */
     public static String genericBuilding(Hex hex) {
         if (!hex.containsTerrain(Terrains.BUILDING)) { return null; }
         if (hex.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue()) {
@@ -229,14 +232,8 @@ public final class TilesetScenery {
             case 4 -> "hard";
             default -> "light";
         };
-        String family = switch (hex.terrainLevel(Terrains.BLDG_CLASS)) {
-            case IBuilding.HANGAR -> "hangar";
-            case IBuilding.FORTRESS -> "fortress";
-            case IBuilding.GUN_EMPLACEMENT -> "gun_emplacement";
-            default -> "building";
-        };
-        String name = family + "_" + weight;
-        return "buildings/" + name + "/" + name + (family.equals("building") ? "" : "_a");
+        String name = className(hex.terrainLevel(Terrains.BLDG_CLASS));
+        return "buildings/standard/" + (name == null ? "building" : name) + "-" + weight;
     }
 
     private static BuildingFile buildingFile(String asset) {
@@ -285,25 +282,35 @@ public final class TilesetScenery {
         return name != null && kitVariants(asset).indexOf(name) > 0 ? asset + "@" + name : asset;
     }
 
-    /** The variant a kit names for its hangars: a hall, without the rooms its other variants show. */
-    private static final String HANGAR_VARIANT = "hangar";
-
-    /**
-     * The variant a building of {@code buildingClass} draws of a kit that lists {@code names}: its {@code stored} one
-     * where the kit lists it; else, for a hangar, the kit's {@code hangar} variant where it has one; else the first
-     * (null where the kit lists none).
-     */
-    public static String drawnVariant(String stored, List<String> names, int buildingClass) {
-        if (stored != null && names.contains(stored)) { return stored; }
-        if (buildingClass == IBuilding.HANGAR && names.contains(HANGAR_VARIANT)) { return HANGAR_VARIANT; }
-        return names.isEmpty() ? null : names.getFirst();
+    /** A building class as a kit's spec names it (a variant's {@code class}); null for an ordinary building. */
+    private static String className(int buildingClass) {
+        return switch (buildingClass) {
+            case IBuilding.HANGAR -> "hangar";
+            case IBuilding.FORTRESS -> "fortress";
+            case IBuilding.GUN_EMPLACEMENT -> "gun-emplacement";
+            default -> null;
+        };
     }
 
     /**
-     * A generated kit's spec, read for its variants' names, and those that offer a roof that spans their hall, while
-     * the file is unchanged ({@link #kitVariants}, {@link #kitVaults}).
+     * The variant a building of {@code buildingClass} draws of the generated kit {@code asset}: its {@code stored} one
+     * where the kit lists it; else the kit's first variant for its class (a hangar's hall, without the rooms its other
+     * variants show) where it has one; else the first (null where the kit lists none).
      */
-    private record Variants(long modified, long length, List<String> names, List<String> vaults) { }
+    public static String drawnVariant(String stored, String asset, int buildingClass) {
+        Variants kit = variants(asset);
+        if (stored != null && kit.names().contains(stored)) { return stored; }
+        String name = className(buildingClass);
+        if (name != null && kit.classes().containsKey(name)) { return kit.classes().get(name); }
+        return kit.names().isEmpty() ? null : kit.names().getFirst();
+    }
+
+    /**
+     * A generated kit's spec, read for its variants' names, those that offer a roof that spans their hall, and the first
+     * variant for each building class, while the file is unchanged ({@link #kitVariants}, {@link #kitVaults},
+     * {@link #drawnVariant}).
+     */
+    private record Variants(long modified, long length, List<String> names, List<String> vaults, Map<String, String> classes) { }
 
     private static final Map<File, Variants> VARIANTS = new ConcurrentHashMap<>();
 
@@ -337,7 +344,7 @@ public final class TilesetScenery {
         return (drawn.contains("@") ? drawn : drawn + "@" + variant) + VAULTED;
     }
 
-    private static final Variants NO_VARIANTS = new Variants(0, 0, List.of(), List.of());
+    private static final Variants NO_VARIANTS = new Variants(0, 0, List.of(), List.of(), Map.of());
 
     private static Variants variants(String asset) {
         if (asset == null || !asset.startsWith("buildings/") || !generatedKit(asset)) { return NO_VARIANTS; }
@@ -346,17 +353,21 @@ public final class TilesetScenery {
         Variants known = VARIANTS.get(spec);
         if (known == null || known.modified() != modified || known.length() != length) {
             List<String> names = new ArrayList<>(), vaults = new ArrayList<>();
+            Map<String, String> classes = new java.util.HashMap<>();
             try {
-                for (var variant : new com.fasterxml.jackson.databind.ObjectMapper().readTree(spec)) {
+                var file = new com.fasterxml.jackson.databind.ObjectMapper().readTree(spec);
+                for (var variant : file.path("variants")) {
                     if (variant.hasNonNull("name")) {
-                        names.add(variant.get("name").asText());
-                        if (variant.hasNonNull("vaulted")) { vaults.add(variant.get("name").asText()); }
+                        String name = variant.get("name").asText();
+                        names.add(name);
+                        if (variant.hasNonNull("vaulted") || file.path("shared").hasNonNull("vaulted")) { vaults.add(name); }
+                        if (variant.hasNonNull("class")) { classes.putIfAbsent(variant.get("class").asText(), name); }
                     }
                 }
             } catch (IOException failure) {
                 LOGGER.warn("Cannot read the variants of {}: {}", spec, failure.getMessage());
             }
-            known = new Variants(modified, length, List.copyOf(names), List.copyOf(vaults));
+            known = new Variants(modified, length, List.copyOf(names), List.copyOf(vaults), Map.copyOf(classes));
             VARIANTS.put(spec, known);
         }
         return known;
@@ -461,7 +472,7 @@ public final class TilesetScenery {
         models.computeIfPresent(Terrains.BUILDING, (terrain, asset) -> {
             String kit = footprint(asset, HexAppearance.footprint(hex.getAppearance()));
             int buildingClass = hex.terrainLevel(Terrains.BLDG_CLASS);
-            return roofed(kit, drawnVariant(HexAppearance.kitVariant(hex.getAppearance()), kitVariants(kit), buildingClass),
+            return roofed(kit, drawnVariant(HexAppearance.kitVariant(hex.getAppearance()), kit, buildingClass),
                   vaulted(HexAppearance.roof(hex.getAppearance()), buildingClass));
         });
         // Walls are a supported building type without legacy building art. The renderer generates their solid mesh.

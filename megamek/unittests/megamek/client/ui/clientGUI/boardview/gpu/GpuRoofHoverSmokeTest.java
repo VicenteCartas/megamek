@@ -24,7 +24,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 @Tag("on-demand")
 class GpuRoofHoverSmokeTest {
     private static final Coords CENTER = new Coords(4, 4);
-    private static final String FLAT_ROOF = "buildings/building_hard/building_hard-square";
+    private static final String FLAT_ROOF = "buildings/standard/building-hard-square";
 
     @ParameterizedTest
     @ValueSource(strings = { FLAT_ROOF, GpuBuildingTest.ASSET })

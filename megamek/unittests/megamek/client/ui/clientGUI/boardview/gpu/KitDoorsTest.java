@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 
 /** A hex's large doors stand in the wall towards their hexside, join along a straight wall and open the wall there. */
 class KitDoorsTest {
-    private static final String HANGAR = "buildings/hangar_light/hangar_light_a";
+    private static final String HANGAR = "buildings/standard/hangar-light";
     private static final double A = KitOutline.A, H = KitOutline.H;
 
     @BeforeAll

@@ -195,7 +195,7 @@ class GpuBuildingConnectionsSmokeTest {
                     } catch (Throwable error) { throw new AssertionError(design, error); }
                 }
             }
-            for (String asset : List.of("buildings/building_light/building_light", "buildings/lunar_habitat/lunar_habitat")) {
+            for (String asset : List.of("buildings/standard/building-light", "buildings/lunar_habitat/lunar_habitat")) {
                 var hall = assets.building(asset, 2, new int[6], 0, megamek.common.board.BuildingInteriors.NO_FLOORS);
                 Vector3 hit = frontHit(GpuTerrain.triangles(hall.interior()), new Ray(new Vector3(0, 1, 30), new Vector3(0, 0, -1)));
                 assertNotNull(hit);
