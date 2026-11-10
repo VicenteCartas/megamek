@@ -177,14 +177,13 @@ public final class GpuBoardWindow {
     private static volatile GpuBoardWindow active;
     /**
      * The Swing windows the user kept over the battle window (rebuild plan R9, closed by Z1), each with its decision:
-     * R6 and swing-inventory Q1 (the menu-level dialogs stay Swing for now) and U2 (user item 6). Message boxes and
-     * file choosers have no class of their own; {@link #approved} names the kept ones. Everything else is native.
+     * R6 and swing-inventory Q1 (the menu-level dialogs stay Swing for now); U2's conditions editor is native now.
+     * Message boxes and file choosers have no class of their own; {@link #approved} names the kept ones. Everything
+     * else is native.
      */
     private static final List<Class<? extends Dialog>> SWING_DIALOGS = List.of(
           // R6: Client Settings, which hold the real settings (user item 3)
-          megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog.class,
-          // U2: the developer conditions editor behind the Tuning utility
-          megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog.class);
+          megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog.class);
     private final ClientGUI gui;
     private final BoardClientState initialView;
     private final Supplier<JComponent> panel;
@@ -905,6 +904,9 @@ public final class GpuBoardWindow {
                   : new GpuMapSource(mapGame, swingWindow, editor, this::requestExit,
                         offersLegacy2D ? this::requestLegacy2D : null,
                         preview ? this::requestEditor : null);
+            if (source instanceof GpuMapSource map) {
+                map.fileDialogs(() -> nativeOwner, busy -> post(battle -> battle.setInputBlocked(busy || modalOpen)));
+            }
             startupTimer.stop();
             // The board shown is the likeliest next one: the shader warm-up prepares it first from now on.
             Game shown = mapGame == null ? view.getGame() : mapGame;

@@ -309,24 +309,20 @@ Done so far, in short:
   briefing) and its follow-ups, and the libGDX lobby (L0 to L18) with its review rounds. The lobby opens no Swing
   dialog except Client Settings and the startup-failure fallback. On the board, the Game Master's tools, the
   reinforcements, Edit Bots, the portrait chooser, Network information, the Nova network view, About and the battle
-  menu's dialogs are native; the accessibility window is gone. The unit cache's
-  progress, Refresh and Rebuild are a native Unit cache page under the start screen's Tools (#58), and the Swing
-  loading window no longer opens at startup.
+  menu's dialogs are native; the accessibility window is gone. The Tuning utility's planetary conditions open the
+  native conditions card, its material palette is a native gallery card, and the map editor's and preview's Print
+  picks its file with `SystemFileDialog`. The unit cache's progress, Refresh and Rebuild are a native Unit cache page
+  under the start screen's Tools (#58), and the Swing loading window no longer opens at startup.
 
 Still open:
 
-1. The board's remaining Swing dialogs, the `SWING_DIALOGS` allowlist in `GpuBoardWindow` (R6/U2), by size of the
-   port:
-   - Big: Client Settings (`CommonSettingsDialog`, about 4,900 lines, several PRs; the lobby's gear and the map
-     editor open it too).
-   - Developer only: the conditions editor behind the Tuning utility (`PlanetaryConditionsDialog`).
-2. The developer tools that are still Swing windows of their own, outside the allowlist because they are not
-   dialogs over the battle:
-   - The shader editor (`GpuShaderEditor`): a `JFrame` with its compiled GLSL window and a reload confirmation.
-   - The material palette (`GpuMaterialPalette`): a `JFrame`.
+1. The board's last Swing dialog, the `SWING_DIALOGS` allowlist in `GpuBoardWindow` (R6/U2): Client Settings
+   (`CommonSettingsDialog`, about 4,900 lines, several PRs; the lobby's gear and the map editor open it too).
+2. The developer tool that is still a Swing window of its own, outside the allowlist because it is not a dialog over
+   the battle: the shader editor (`GpuShaderEditor`), a `JFrame` with its compiled GLSL window and a reload
+   confirmation.
 3. Swing message boxes and choosers still shown by the native scenes:
-   - The map editor's and preview's Print: the file chooser (`GpuMapSource.choosePrintFile`) is Swing's, not
-     `SystemFileDialog`, and its failure is a Swing message box.
+   - The map editor's and preview's Print failure: a Swing message box.
    - The map editor's Run Board Tagger report (`GpuMapSource.runBoardTagger`).
    - `GpuBoardWindow`'s "already open" and "the game waits for the editor" messages.
    - The message boxes the battle keeps (`approvedMessageBoxes`): the exit's save question, the bug report and its

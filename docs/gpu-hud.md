@@ -1028,8 +1028,9 @@ A developer and tester tool, to be removed before release.
   file count, copied count and current relative filename (hover for the full path). Discovery and later artwork
   reload stages pulse without a percentage; file progress uses the actual inventory total. The display keeps
   updating while board snapshots are paused, and disappears when the reload succeeds or fails. The
-  Terrain page opens the Material palette (`GpuMaterialPalette`): a Swing window with every board material on a flat
-  tile, a cube or a sphere, drawn by the model shader with its whole finish (`GpuMaterialSwatches`,
+  Terrain page opens the Material palette (`GpuMaterialPalette`): a native gallery card over the battle with every
+  board material on a flat tile, a cube or a sphere, a few drawn each frame (the chosen shape first, then the others,
+  kept until it closes so a change of shape shows at once), drawn by the model shader with its whole finish (`GpuMaterialSwatches`,
   `GpuAssets.finish`) under the default daylight. It orders them by folder, similarity (a chain of nearest looks:
   mean colour and contrast on a 4 x 4 grid of each swatch), brightness (the material's own pixels), map bytes on disk
   or newest file; a tooltip gives the albedo size, map bytes and change time. Its Reload assets button requests the
@@ -1042,7 +1043,7 @@ A developer and tester tool, to be removed before release.
 | --- | --- |
 | Display | Display mode Windowed/Fullscreen, VSync, Render resolution 50-100% with its scene size, UI scale 50-100% (applied when the drag is released), Anti-aliasing Off/SMAA, Specular anti-aliasing, Normal maps (on until chosen), Ambient occlusion (off until chosen), the detected graphics and the Graphics card choice with its in-use and pending notes, Terrain cache with its live A/B switch and status. Resolution, UI scale, both anti-aliasing choices, normal maps and ambient occlusion are saved across sessions; Defaults leaves the whole Display page alone |
 | Board | Geometry (with Unit display), Unit family sizes, Zoom-out unit scaling, Route pulse (on/off, speed, intensity), Unit visibility, Outside field of view, Outside sensor range, Unit damage |
-| Atmosphere | Atmosphere presets with "Planetary conditions…" (the Swing editor), Lighting (time of day, exposure, moonlight, fixed sun, the lighting environment and Show lighting sky, not saved, which shows the sky that lights the scene, or its image, as the backdrop), Planet properties, Clouds and ground air, Weather effects, Light and fog effects |
+| Atmosphere | Atmosphere presets with "Planetary conditions…" (the native conditions card), Lighting (time of day, exposure, moonlight, fixed sun, the lighting environment and Show lighting sky, not saved, which shows the sky that lights the scene, or its image, as the backdrop), Planet properties, Clouds and ground air, Weather effects, Light and fog effects |
 | Terrain | Terrain build progress, Hex joins (Hex transitions, Hex padding), Water (Cliffs directly into water), Terrain detail (Grass blades, Water effects). Terrain and object detail levels are always on |
 | Camera | Fixed sun/moon, framing on selection, framing on movement (combat framing is the dock's Follow toggle); the model's camera rows: Free Flight, the thermal wireframe view, the Free Flight field of view; the live view as one line with Copy (`BoardCamera.readout`: `cam ortho\|persp\|fly fov az tilt span at x,y,z hex`) |
 

@@ -67,7 +67,7 @@ import megamek.client.ui.dialogs.MMDialogs.MMNarrativeStoryDialog;
 import megamek.client.ui.dialogs.PlayerListDialog;
 import megamek.client.ui.dialogs.SliderDialog;
 import megamek.client.ui.dialogs.TurretFacingDialog;
-import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
+import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.dialogs.phaseDisplay.AbandonUnitDialog;
 import megamek.client.ui.dialogs.phaseDisplay.AutomaticEjectionDialog;
@@ -108,7 +108,6 @@ import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.ObjectiveMarker;
 import megamek.common.event.GameScriptedMessageEvent;
 import megamek.common.loaders.MULParser;
-import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.AbstractBuildingEntity;
@@ -515,23 +514,22 @@ class GpuSwingDialogGateTest {
         try (Declaring declaring = Declaring.create(); Gate gate = new Gate(declaring.gui, declaring.fixture)) {
             JFrame frame = declaring.frame;
             gate.present();
-            // A kept window (the developer conditions editor) and a dialog it owns. LOS, Help, the network
-            // information and the Nova network view have native cards now.
-            PlanetaryConditionsDialog help = onSwing(
-                  () -> new PlanetaryConditionsDialog(frame, new PlanetaryConditions()));
+            // A kept window (Client Settings) and a dialog it owns. LOS, Help, the network information, the Nova
+            // network view and the developer conditions editor have native cards now.
+            CommonSettingsDialog settings = onSwing(() -> new CommonSettingsDialog(frame));
             assertTrue(gate.raised(() -> {
-                help.setVisible(true);
+                settings.setVisible(true);
                 return null;
-            }, PlanetaryConditionsDialog.class::isInstance), "U2: the developer conditions editor");
+            }, CommonSettingsDialog.class::isInstance), "R6: Client Settings");
             assertTrue(gate.raised(() -> {
-                JDialog detail = new JDialog(help, "Help detail");
+                JDialog detail = new JDialog(settings, "Help detail");
                 detail.setSize(120, 80);
                 detail.setVisible(true);
                 return null;
-            }, window -> window.getOwner() == help), "A dialog the conditions editor owns");
+            }, window -> window.getOwner() == settings), "A dialog Client Settings owns");
             assertEquals(List.of(), gate.errors, "A dialog a kept window owns is part of it");
             onSwing(() -> {
-                help.dispose();
+                settings.dispose();
                 return null;
             });
             // A file chooser (user item 21)

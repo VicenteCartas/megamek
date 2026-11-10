@@ -12,12 +12,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
+import javax.swing.filechooser.FileNameExtensionFilter;
 
 import megamek.MMConstants;
 import megamek.client.ui.Messages;
@@ -151,6 +153,8 @@ final class GpuMapSource implements BoardSource {
     /** EDT-owned job state; only the immutable request crosses to the render thread. */
     private boolean printing;
     private boolean choosingPrint;
+    private Supplier<GpuNativeDialogOwner> fileDialogOwner = () -> null;
+    private Consumer<Boolean> fileDialogBusy = busy -> { };
     private final AtomicReference<GpuBoardPrint.Request> printRequest = new AtomicReference<>();
     /** EDT-owned: the board tagger runs ({@link #runBoardTagger}). */
     private boolean tagging;
@@ -177,7 +181,7 @@ final class GpuMapSource implements BoardSource {
         this.requestClose = requestClose;
         this.requestLegacy2D = requestLegacy2D;
         this.requestEditor = requestEditor;
-        atmosphere = new GpuAtmosphereControls(() -> owner, game::getBoard, game::getPlanetaryConditions, () -> closed);
+        atmosphere = new GpuAtmosphereControls(game::getBoard, game::getPlanetaryConditions, () -> closed);
         if (editor != null) { trace = GpuTraceOverlay.Settings.capture(); }
         timer = new Timer(33, event -> refresh());
         try {
@@ -451,36 +455,59 @@ final class GpuMapSource implements BoardSource {
 
     @Override public GpuBoardPrint.Request takePrintRequest() { return printRequest.getAndSet(null); }
 
-    /** Print writes the 3D snapshot as a printable JPEG. */
+    /** EDT: the window's owner for the system file dialog, and its input block while the dialog is open. */
+    void fileDialogs(Supplier<GpuNativeDialogOwner> nativeOwner, Consumer<Boolean> busy) {
+        fileDialogOwner = nativeOwner;
+        fileDialogBusy = busy;
+    }
+
+    /** Print writes the 3D snapshot as a printable JPEG, to a file chosen in the system's save dialog. */
     private void choosePrint() {
         if (closed || printing || choosingPrint) { return; }
         choosingPrint = true;
         refresh();
         try {
             Path near = editor == null ? null : editor.path();
-            Path target = choosePrintFile(owner, near == null ? new File(".") : near.toFile().getParentFile(),
+            SystemFileDialog.Request request = printRequest(near == null ? new File(".") : near.toFile().getParentFile(),
                   near == null ? board.getBoardName() : BoardFile.withoutExtension(near.getFileName().toString()), "-3d");
-            if (target == null || closed) { return; }
-            // The print card's Cancel ends a print without an error to report.
-            requestPrint(target, () -> { }, failure -> {
-                if (!(failure instanceof java.util.concurrent.CancellationException)) { printFailed(failure); }
+            SystemFileDialog.show(request, fileDialogOwner, () -> owner, fileDialogBusy, choice -> {
+                choosingPrint = false;
+                refresh();
+                if (choice == null || closed) { return; }
+                try {
+                    // The print card's Cancel ends a print without an error to report.
+                    requestPrint(SystemFileDialog.withExtension(choice.file(), request.filter()).toPath(), () -> { },
+                          failure -> {
+                              if (!(failure instanceof java.util.concurrent.CancellationException)) {
+                                  printFailed(failure);
+                              }
+                          });
+                } catch (RuntimeException failure) { printFailed(failure); }
             });
-        } catch (RuntimeException failure) { printFailed(failure); }
-        finally { choosingPrint = false; refresh(); }
+        } catch (RuntimeException failure) {
+            choosingPrint = false;
+            refresh();
+            printFailed(failure);
+        }
     }
 
-    /** The print's JPEG file, chosen in {@code directory}; null when cancelled. Shared by the 3D and 2D previews. */
+    /** The system save dialog's request for a print's JPEG in {@code directory}. */
+    static SystemFileDialog.Request printRequest(File directory, String name, String suffix) {
+        return new SystemFileDialog.Request(directory, Messages.getString("CommonMenuBar.PrintMenu"),
+              new FileNameExtensionFilter(Messages.getString("GpuBoard.print.filter"), "jpg", "jpeg"), true,
+              (name == null || name.isBlank() ? "board" : name) + suffix + ".jpg");
+    }
+
+    /** The Legacy 2D preview's print JPEG, chosen in Swing's chooser over its Swing window; null when cancelled. */
     static Path choosePrintFile(Window owner, File directory, String name, String suffix) {
+        SystemFileDialog.Request request = printRequest(directory, name, suffix);
         JFileChooser chooser = new JFileChooser(directory);
-        chooser.setDialogTitle(Messages.getString("CommonMenuBar.PrintMenu"));
-        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-              Messages.getString("GpuBoard.print.filter"), "jpg", "jpeg"));
+        chooser.setDialogTitle(request.title());
+        chooser.setFileFilter(request.filter());
         chooser.setAccessory(new JLabel(Messages.getString("GpuBoard.print.scale")));
-        chooser.setSelectedFile(new File((name == null || name.isBlank() ? "board" : name) + suffix + ".jpg"));
+        chooser.setSelectedFile(new File(directory, request.name()));
         if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION) { return null; }
-        Path target = chooser.getSelectedFile().toPath();
-        String file = target.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
-        return file.endsWith(".jpg") || file.endsWith(".jpeg") ? target : target.resolveSibling(target.getFileName() + ".jpg");
+        return SystemFileDialog.withExtension(chooser.getSelectedFile(), request.filter()).toPath();
     }
 
     private void printFailed(Exception failure) { printFailed(owner, failure); }
@@ -805,7 +832,6 @@ final class GpuMapSource implements BoardSource {
         finishEditorStroke();
         timer.stop();
         closeMeasuring();
-        atmosphere.close();
         game.removeGameListener(gameListener);
         if (board != null) { board.removeBoardListener(boardListener); }
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(preferences);

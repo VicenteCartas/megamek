@@ -86,6 +86,8 @@ class LobbyDialogEntryPointsTest {
         assertFalse(window.contains("doAlertDialog("));
         // The planetary conditions and game options too; the window's own command opens them natively
         assertFalse(window.contains("new PlanetaryConditionsDialog("));
+        assertFalse(Files.readString(GPU.resolve("GpuAtmosphereControls.java")).contains("PlanetaryConditionsDialog"),
+              "the Tuning's conditions open as the window's native card");
         assertFalse(window.contains("new GameOptionsDialog("));
         assertFalse(window.contains("new AdvancedSearchMapDialog("), "the map setup's drawer filters the boards");
         String screen = Files.readString(GPU.resolve("GpuLobbyScreen.java"));
