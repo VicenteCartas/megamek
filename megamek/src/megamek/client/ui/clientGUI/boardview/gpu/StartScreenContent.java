@@ -6,6 +6,7 @@ import java.io.File;
 import java.util.List;
 
 import jakarta.annotation.Nullable;
+import megamek.client.ui.Messages;
 
 /**
  * What a program's start screen shows in the native window ({@link GpuStartWindow}): its art, greeting, tips, version,
@@ -28,8 +29,13 @@ public abstract class StartScreenContent {
         COMMAND
     }
 
-    /** The window's title. */
+    /** The window's title: the program's name, such as "MekHQ". */
     public abstract String title();
+
+    /** The heading of the welcome the screen shows at start, such as "Welcome to MekHQ". */
+    public String welcomeTitle() {
+        return Messages.getString("StartWelcome.title", title());
+    }
 
     /** The art behind the screen, scaled to cover it; null for none. */
     public abstract @Nullable File art();

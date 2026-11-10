@@ -37,6 +37,12 @@ final class MegaMekStartContent extends StartScreenContent {
     }
 
     @Override
+    public String welcomeTitle() {
+        // The Swing form's heading, which has translations
+        return Messages.getString("LicensingDialog.title");
+    }
+
+    @Override
     public File art() {
         return new File(Configuration.miscImagesDir(), "mm-background.jpg");
     }
