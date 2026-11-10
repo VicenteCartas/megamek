@@ -43,6 +43,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Layout;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
+import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
@@ -297,6 +298,7 @@ class GpuCommandDockSmokeTest {
             show(hud, dock, down);
             hud.capture("g6-stand-up").dispose();
             assertNotNull(dock.find("dock-stand-up"));
+            assertEquals("Prone", button(dock, "dock-stand-up").details.getFirst().getText().toString());
             assertNull(dock.find("dock-mode-jump"));
             assertNotNull(dock.find("dock-mode-walk"));
             assertTrue(dock.dock().more().items().stream().noneMatch(command -> command.id().equals(GET_UP)));
@@ -1275,11 +1277,35 @@ class GpuCommandDockSmokeTest {
               command(GpuBoardActions.CLEAR_ID, "Clear", true));
     }
 
-    /** The shot with MegaMek's Get Up, available while the unit, or its plan's end, is down. */
+    /**
+     * The shot with MegaMek's Get Up, available while the unit, or its plan's end, is down; the Atlas's board label
+     * then says it is prone.
+     */
     private Shot withGetUp(Shot shot, boolean down) {
         List<BoardScene.Command> commands = new ArrayList<>(shot.commands());
         commands.add(command(GET_UP, "Get Up", down));
-        return new Shot(shot.status(), shot.panels(), commands);
+        GpuBattleStatus.Snapshot status = shot.status();
+        if (down) {
+            List<UnitStatusWords.StatusWord> prone = List.of(new UnitStatusWords.StatusWord("PRONE", "PRONE",
+                  UnitStatusWords.Severity.CAUTION));
+            status = new GpuBattleStatus.Snapshot(status.round(), status.phase(), status.myTurn(),
+                  status.localPlayerId(), status.actorId(), status.turns(), status.turnIndex(), status.units().stream()
+                  .map(unit -> unit.id() == ATLAS ? prone(unit, prone) : unit).toList(), status.initiative(),
+                  status.turnOrderHidden(), status.links(), status.arc());
+        }
+        return new Shot(status, shot.panels(), commands);
+    }
+
+    private static GpuBattleStatus.UnitStatus prone(GpuBattleStatus.UnitStatus unit,
+          List<UnitStatusWords.StatusWord> words) {
+        return new GpuBattleStatus.UnitStatus(unit.id(), unit.side(), unit.sensorContact(), unit.name(),
+              unit.chassis(), unit.model(), unit.tons(), unit.weightClass(), unit.formation(), unit.pilot(),
+              unit.gunnery(), unit.piloting(), unit.armor(), unit.structure(), unit.heat(), unit.heatRgb(),
+              unit.heatCapacity(), unit.walk(), unit.run(), unit.jump(), unit.moved(), unit.mpUsed(),
+              unit.hexesMoved(), unit.facing(), unit.tmm(), unit.canActNow(), unit.pending(), unit.done(),
+              unit.destroyed(), unit.damageLevel(), unit.destroyedLocations(), unit.heatEffects(), unit.position(),
+              unit.boardId(), unit.icon(), words, unit.weightClassIndex(), unit.declaredAttacks(), unit.ownerId(),
+              unit.statusTiles());
     }
 
     private BoardScene.Command command(String id, String label, boolean enabled) {
