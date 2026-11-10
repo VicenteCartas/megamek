@@ -117,7 +117,9 @@ floors and struts are built when a unit first stands in its hex, and kept from t
 `GpuBuilding.Assembly#interior`): a city's would be hundreds of megabytes that nothing shows. A hex's floors are one
 prop, which shows all of them or none. A building that stands open (`ConnectedKit#open`: a hex, or a hex it joins, has
 an exit with nothing connecting back, such as a collapsed neighbour) builds them with its chunk and always draws its
-floors. An authored building's floors come with its model, a legacy shell's with its chunk. A floor's
+floors. An authored building and a building without a kit (a generated multi-hex building, or a kit that cannot load)
+show theirs by the same rule, only while a unit stands inside; their hidden meshes are made at load, with the model's
+cut or the chunk, and neither ever counts as standing open. A floor's
 edge keeps 0.2 units off any outward wall face beside its slab (`GpuBuildingInterior#keepClear`), in kit and authored
 buildings, so it never lies on a facade or a wall's cut end and flickers through it. Each kit caches its storey outlines by the placements of the
 pieces that shape them; repeated storeys cost a lookup. They do not enter the exterior shadow pass, which retains the authored opaque shell. Occupancy cutaways
