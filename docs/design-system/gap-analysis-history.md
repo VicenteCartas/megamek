@@ -1304,6 +1304,22 @@ The open items below were copied to the gap analysis and are tracked there; this
          `EditBotsDialog` and `BotConfigDialog` left the allowlist. Both Swing classes stay for the lounge, the
          start screen and the Swing player settings. Covered by `EditBotsFormTest` and
          `BattleMenuCardsSmokeTest`.
+       - Done: the medium group of the board's Swing dialogs.
+         - Network information (View > Network Information) is a native card (`LobbyNetworkInfoView`). It shows the
+           local address, the public address and the host, each hidden behind a reveal eye like a password, so a
+           shared screen or stream doesn't show them; an address not found says so. The card opens at once, and the
+           slow lookups (the public address asks a web service) run off the GL thread in the toolkit-free
+           `NetworkInformationForm`, then fill the fields in place.
+         - The Nova network view (View > Nova Networks) is a native card (`LobbyNovaNetworkView`).
+           Your units and your allies' units are listed as panels, each with its ID, a Linked / Full / Unlinked chip
+           and its partners; an ally's unit also names its commander. The toolkit-free `NovaNetworkForm` builds the
+           list, and the Swing `NovaNetworkViewDialog`, kept for the lounge, now uses it too.
+         - The accessibility window (`AccessibilityDialog`) is deleted, with its menu item, which was always
+           disabled, and its messages. A screen reader cannot read a libGDX window, so accessibility needs its own
+           work for libGDX (see the open list).
+         - All three left the allowlist; the Swing `NetworkInformationDialog` stays for the lounge. Covered by
+           `NetworkInformationFormTest`, `NovaNetworkFormTest`, `GpuSwingDialogGateTest` and
+           `NetworkCardsSmokeTest`, and both cards were tried by hand in a game.
        - The "Save First?" question when leaving a battle is native since #39.
        - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
          thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser

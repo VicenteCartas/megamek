@@ -238,7 +238,6 @@ public class ClientGUI extends AbstractClientGUI
     public static final String VIEW_FORCE_DISPLAY = "viewForceDisplay";
     public static final String VIEW_NOVA_NETWORKS = "viewNovaNetworks";
     public static final String VIEW_UNIT_DISPLAY = "viewMekDisplay";
-    public static final String VIEW_ACCESSIBILITY_WINDOW = "viewAccessibilityWindow";
     public static final String VIEW_KEYBINDS_OVERLAY = "viewKeyboardShortcuts";
     public static final String VIEW_PLANETARY_CONDITIONS_OVERLAY = "viewPlanetaryConditions";
     public static final String VIEW_MINI_MAP = "viewMinimap";
@@ -349,7 +348,6 @@ public class ClientGUI extends AbstractClientGUI
     protected CommonMenuBar menuBar;
     private AbstractHelpDialog help;
     private CommonSettingsDialog commonSettingsDialog;
-    private AccessibilityDialog aw;
 
     public MegaMekController controller;
     private ChatterBox cb;
@@ -1067,10 +1065,6 @@ public class ClientGUI extends AbstractClientGUI
         updateGameMasterMenuItems();
         updateLobbyEquipmentMenuItems();
 
-        aw = new AccessibilityDialog(this);
-        aw.setLocation(0, 0);
-        aw.setSize(300, 300);
-
         setForceDisplayPanel(new ForceDisplayPanel(this));
         setForceDisplayDialog(new ForceDisplayDialog(getFrame(), this));
         getForceDisplayDialog().add(getForceDisplayPanel(), BorderLayout.CENTER);
@@ -1295,6 +1289,9 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     private void showNetworkInformation() {
+        if (!inLounge() && GpuBoardWindow.showNetworkInformation(this)) {
+            return;
+        }
         // Display the network information screen
         getNetworkInformationDialog().refresh();
         getNetworkInformationDialog().pack();
@@ -1596,9 +1593,6 @@ public class ClientGUI extends AbstractClientGUI
                 break;
             case FILE_GAME_EDIT_BOTS:
                 editBots();
-                break;
-            case VIEW_ACCESSIBILITY_WINDOW:
-                toggleAccessibilityWindow();
                 break;
             case VIEW_LOS_SETTING:
                 showLOSSettingDialog();
@@ -2294,16 +2288,6 @@ public class ClientGUI extends AbstractClientGUI
     private void requestFocus() {
         frame.requestFocusInWindow();
         boardViewsContainer.getPanel().requestFocusInWindow();
-    }
-
-    /**
-     * Toggles the accessibility window
-     */
-    private void toggleAccessibilityWindow() {
-        aw.setVisible(!aw.isVisible());
-        if (aw.isVisible()) {
-            frame.requestFocus();
-        }
     }
 
     /**
@@ -3663,6 +3647,9 @@ public class ClientGUI extends AbstractClientGUI
      * Shows the Nova CEWS network view dialog (read-only).
      */
     private void showNovaNetworkViewDialog() {
+        if (!inLounge() && GpuBoardWindow.showNovaNetworks(this)) {
+            return;
+        }
         NovaNetworkViewDialog dialog = new NovaNetworkViewDialog(frame, this);
         dialog.setVisible(true);
     }
@@ -4754,8 +4741,7 @@ public class ClientGUI extends AbstractClientGUI
               || ((gameOptionsDialog != null) && gameOptionsDialog.isVisible())
               || isModalDialogShown()
               || ((help != null) && help.isVisible())
-              || ((commonSettingsDialog != null) && commonSettingsDialog.isVisible())
-              || ((aw != null) && aw.isVisible());
+              || ((commonSettingsDialog != null) && commonSettingsDialog.isVisible());
     }
 
     /**

@@ -35,6 +35,8 @@ import megamek.client.lobby.LobbyError;
 import megamek.client.lobby.LobbyFiles;
 import megamek.client.lobby.LobbyGameMaster;
 import megamek.client.lobby.MapNoteForm;
+import megamek.client.lobby.NetworkInformationForm;
+import megamek.client.lobby.NovaNetworkForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -262,6 +264,39 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
     /** Shows an HTML guide a chapter at a time. */
     void help(String title, File file) {
         tools.helpDocument(title, file);
+    }
+
+    /**
+     * Shows this computer's addresses and the game's host. The card opens at once and the addresses follow once they
+     * have been looked up on a thread of their own, as finding the public address can take a few seconds.
+     */
+    void networkInformation() {
+        NetworkInformationForm form = NetworkInformationForm.of(gui.getClient());
+        open(dialogs -> dialogs.networkInformation(form.pending()));
+        Thread lookup = new Thread(() -> {
+            List<NetworkInformationForm.Row> rows = form.read();
+            gpu.accept(() -> {
+                LobbyNativeDialogs dialogs = cards.get();
+                LobbyNetworkInfoView view = dialogs == null ? null : dialogs.networkInfoView();
+                if (view != null) {
+                    view.addresses(rows);
+                }
+            });
+        }, "Battle network information");
+        lookup.setDaemon(true);
+        lookup.start();
+    }
+
+    /** Shows the Nova CEWS networks of the local player and their allies, read only. */
+    void novaNetworks() {
+        NovaNetworkForm form;
+        try {
+            form = NovaNetworkForm.of(gui.getClient().getGame(), gui.getClient().getLocalPlayer().getId());
+        } catch (RuntimeException failure) {
+            LOGGER.error(failure, "The battle could not read the Nova CEWS networks");
+            return;
+        }
+        open(dialogs -> dialogs.novaNetworks(form));
     }
 
     // ---- The Game Master's cards ----

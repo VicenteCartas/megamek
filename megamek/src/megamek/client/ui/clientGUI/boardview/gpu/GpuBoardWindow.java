@@ -183,12 +183,6 @@ public final class GpuBoardWindow {
     private static final List<Class<? extends Dialog>> SWING_DIALOGS = List.of(
           // R6: Client Settings, which hold the real settings (user item 3)
           megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog.class,
-          // R6: Network information
-          megamek.client.ui.dialogs.buttonDialogs.NetworkInformationDialog.class,
-          // U2: the accessibility window
-          megamek.client.ui.dialogs.AccessibilityDialog.class,
-          // U2: the Nova network view
-          megamek.client.ui.dialogs.phaseDisplay.NovaNetworkViewDialog.class,
           // U2: the developer conditions editor behind the Tuning utility
           megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog.class);
     private final ClientGUI gui;
@@ -1482,6 +1476,27 @@ public final class GpuBoardWindow {
         GpuBattleTools tools = battleTools(gui);
         if (tools != null) {
             tools.editBots();
+        }
+        return tools != null;
+    }
+
+    /**
+     * EDT: shows this computer's addresses and the game's host natively over this client's battle window; false as
+     * above.
+     */
+    public static boolean showNetworkInformation(ClientGUI gui) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.networkInformation();
+        }
+        return tools != null;
+    }
+
+    /** EDT: shows the Nova CEWS networks natively over this client's battle window; false as above. */
+    public static boolean showNovaNetworks(ClientGUI gui) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.novaNetworks();
         }
         return tools != null;
     }
