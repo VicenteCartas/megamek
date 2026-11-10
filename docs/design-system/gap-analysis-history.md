@@ -1326,7 +1326,7 @@ The open items below were copied to the gap analysis and are tracked there; this
          the trademark fine print. The welcome and About share that notice (`SuiteLegalNotice`). About left the
          kept message boxes in `GpuBoardWindow`; the Swing `MMAboutDialog` stays for the lounge and the Legacy 2D
          preview. Covered by `GpuSwingDialogGateTest`, `GpuMapMenuSmokeTest`, `BattleMenuCardsSmokeTest`,
-         `StartWelcomeSmokeTest` and `GpuBoardWindowSmokeTest`.
+         `StartWelcomeSmokeTest` and `GpuBoardWindowSmokeTest`, and it was tried by hand in the game.
        - The "Save First?" question when leaving a battle is native since #39.
        - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
          thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser
