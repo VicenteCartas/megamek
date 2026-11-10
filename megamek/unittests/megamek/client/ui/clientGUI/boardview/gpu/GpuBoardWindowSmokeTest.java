@@ -1468,27 +1468,28 @@ class GpuBoardWindowSmokeTest {
                         return null;
                     });
                 }
-                // The HUD's Menu holds the menu bar's commands; its groups stay open when it opens again.
+                // The HUD's Menu opens the menu bar's commands as pages; Esc goes back a page, then closes it.
                 input(() -> GpuBoardTestUi.click("utility-menu"));
-                input(() -> GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.FileMenu")));
-                captureMenu("menu-file.png");
+                input(() -> GpuBoardTestUi.click("GpuBoard.hud.menu.game"));
+                captureMenu("menu-game.png");
+                input(() -> Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE));
                 input(() -> Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE));
                 input(() -> GpuBoardTestUi.click("utility-menu"));
-                input(() -> GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.ViewMenu")));
-                captureMenu("menu-view.png");
+                input(() -> GpuBoardTestUi.click("GpuBoard.hud.menu.display"));
+                captureMenu("menu-display.png");
                 onGl(() -> {
-                    // Swing's GUI scale is Swing's alone: the View menu leaves its commands out.
+                    // Swing's GUI scale is Swing's alone, and the HUD moves the camera itself: the page leaves both out.
                     List<String> texts = GpuBoardTestUi.texts(GpuBoardTestUi.stage().getRoot());
-                    assertTrue(texts.contains(Messages.getString("CommonMenuBar.viewZoomIn")), "View is open");
-                    for (String key : List.of("CommonMenuBar.viewIncGUIScale", "CommonMenuBar.viewDecGUIScale")) {
+                    assertTrue(GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor(GpuGameMenu.BACK)),
+                          "Display is open");
+                    for (String key : List.of("CommonMenuBar.viewIncGUIScale", "CommonMenuBar.viewDecGUIScale",
+                          "CommonMenuBar.viewZoomIn")) {
                         assertFalse(texts.contains(Messages.getString(key)), key);
                     }
-                    GpuBattleView battle = (GpuBattleView) GpuHost.sceneListener();
-                    float before = battle.boardCamera.camera.zoom;
-                    GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.viewZoomIn"));
-                    assertNotEquals(before, battle.boardCamera.camera.zoom, "The menu must zoom the active GPU camera");
                     return null;
                 });
+                input(() -> Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE));
+                input(() -> Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE));
                 // A game has no Legacy 2D board to switch to: Renderer offers only the 3D board's graphics.
                 assertTrue(GpuTestSupport.onSwing(() -> ui.gpuChoice().isSelected()), "Renderer shows the 3D board's graphics");
                 GpuTestSupport.onSwing(() -> {

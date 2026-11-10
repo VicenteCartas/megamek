@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doReturn;
@@ -31,7 +32,6 @@ import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
-import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 import com.badlogic.gdx.utils.Pools;
@@ -40,11 +40,11 @@ import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
-import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuHudState.Dialog;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.util.KeyCommandBind;
@@ -132,185 +132,145 @@ class GpuHelpMenuPlayersSmokeTest {
     }
 
     @Test
-    void menuShowsTheCapturedMenuBarWithShortcutsCheckMarksGroupsAndKeys() throws Exception {
+    void menuShowsItsPagesInTheLobbyLookWithKeysAndBack() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             List<String> ran = new CopyOnWriteArrayList<>();
             List<BoardScene.Command> menuBar = menuBar(fixture, ran);
             GpuHudTestStage.run(hud -> {
                 Dialogs dialogs = new Dialogs();
-                GpuMenuPanel menu = new GpuMenuPanel(hud.kit, dialogs.source, dialogs.state, dialogs.camera);
+                GpuMenuPanel menu = new GpuMenuPanel(hud.kit, dialogs.source, dialogs.state);
                 Table root = (Table) menu.actor();
                 hud.window.addActor(root);
                 GpuBoardSource.UiPreferences preferences = GpuBoardSource.UiPreferences.capture();
                 GpuHud.Inputs inputs = inputs(hud, frame(menuBar, GpuPlayers.Snapshot.EMPTY), preferences, true);
-                dialogs.state.overview = true;
+                Runnable show = () -> {
+                    menu.update(inputs);
+                    centre(hud, root);
+                };
                 dialogs.state.dialog = Dialog.MENU;
-                menu.update(inputs);
-                centre(hud, root);
-                assertEquals(List.of("MENU", players() + " [" + key(preferences, KeyCommandBind.BOT_COMMANDS) + "]",
-                      "---", menu("FileMenu") + " ›", menu("GameMenu") + " ›", menu("BoardMenu") + " ›",
-                      menu("ViewMenu") + " ›", menu("HelpMenu") + " ›",
-                      Messages.getString("GameCommands.title") + " ›", "Maps ›", "---",
-                      Messages.getString("GpuBoard.hud.menu.lobby"), Messages.getString("GpuBoard.hud.menu.quit")),
-                      lines(root), "the Players row, then one group per menu of the menu bar, the commands, the maps, "
-                            + "Return to Lobby (MegaMek's Reset Game, offered without a Game Master) and Quit");
+                show.run();
+                List<String> top = lines(root);
+                assertEquals(List.of(text("Lobby.menu.resume"), text("Lobby.gameMenu.save"),
+                      text("Lobby.gameMenu.quickSave"), players(), text("GpuBoard.hud.menu.game") + " ›",
+                      text("GpuBoard.hud.menu.display") + " ›", text("GameCommands.title") + " ›",
+                      text("GpuBoard.hud.menu.maps") + " ›", text("Lobby.menu.settings"),
+                      text("Lobby.menu.help") + " ›", text("GpuBoard.hud.menu.lobby"),
+                      text("GpuBoard.hud.menu.quit")).stream().map(String::toUpperCase).toList(), top.subList(1, top.size()),
+                      "Resume; saving; the pages and Players; Settings and Help; the ways out of the game");
+                assertEquals("resume", focus(hud), "the open menu takes the keyboard at Resume");
                 hud.draw();
                 hud.capture("menu-panel").dispose();
 
-                // The keyboard: Down from no highlight starts at the first row; Enter opens a group in place.
-                assertSame(root, hud.stage.getKeyboardFocus(), "the open menu takes the keyboard");
-                for (int row = 0; row < 5; row++) {
+                // The keyboard: Down walks the buttons; Enter opens a page in place, its first button focused.
+                String display = "GpuBoard.hud.menu.display";
+                for (int row = 0; row < 12 && !display.equals(focus(hud)); row++) {
                     hud.stage.keyDown(Input.Keys.DOWN);
                 }
-                assertEquals(List.of(menu("ViewMenu")), highlighted(root));
-                assertTrue(hud.stage.keyDown(Input.Keys.ENTER));
-                menu.update(inputs);
-                centre(hud, root);
-                List<String> lines = lines(root);
-                assertTrue(lines.contains(menu("ViewMenu") + " ⌄"), "an open group: " + lines);
-                assertEquals(List.of(menu("ViewMenu")), highlighted(root), "the highlight stays on the group");
-                BoardScene.Command view = menuBar.stream().filter(command -> command.label().equals(menu("ViewMenu")))
-                      .findFirst().orElseThrow();
-                int first = lines.indexOf(menu("ViewMenu") + " ⌄") + 1;
-                int next = lines.indexOf(menu("HelpMenu") + " ›");
-                assertEquals(view.children().size() - 1, next - first,
-                      "every View item but the window positions, which place Swing windows");
-                assertFalse(lines.contains(menu("viewResetWindowPos")));
-                assertTrue(lines.contains(menu("viewClientSettings") + " ["
-                      + key(preferences, KeyCommandBind.CLIENT_SETTINGS) + "]"), "a shortcut: " + lines);
-                assertTrue(lines.contains("✓ " + menu("viewForceDisplay") + " ["
-                      + key(preferences, KeyCommandBind.FORCE_DISPLAY) + "]"), "checked: the overview is open");
-                assertTrue(lines.contains("✓ " + Messages.getString("GpuBoard.hud.util.tactical") + " ["
-                      + key(preferences, KeyCommandBind.TOGGLE_ISO) + "]"),
-                      "the isometric item is the Tactical View, by name and check mark");
-                assertTrue(lines.contains(menu("viewMekDisplay") + " ["
-                      + key(preferences, KeyCommandBind.UNIT_DISPLAY) + "]"), "no sheet is open");
-                hud.stage.keyDown(Input.Keys.DOWN);
-                assertEquals(List.of(view.children().getFirst().label()), highlighted(root));
-
-                // A nested group (the bot commands panel's place) opens below its row, its radio items checked.
-                choose(item(root, menu("viewBotCommands")));
-                menu.update(inputs);
-                centre(hud, root);
-                lines = lines(root);
-                int bots = lines.indexOf(menu("viewBotCommands") + " ⌄");
-                assertTrue(bots > 0, "the nested group is open: " + lines);
-                assertEquals(1, lines.subList(bots + 1, bots + 4).stream().filter(line -> line.startsWith("✓ "))
-                      .count(), "one radio item is checked: " + lines.subList(bots + 1, bots + 4));
-                Rectangle area = GpuHudTestStage.bounds(root);
-                assertEquals(hud.height() - 140, area.height, .01f, "the open View menu scrolls");
-                ScrollPane list = root.findActor("menu-list");
-                assertTrue(list.getMaxY() > 0);
+                assertEquals(display, focus(hud));
+                hud.stage.keyDown(Input.Keys.ENTER);
+                show.run();
+                List<String> page = lines(root);
+                assertEquals(List.of(text("Lobby.back"), text(display)).stream().map(String::toUpperCase).toList(),
+                      page.subList(1, 3).stream().map(String::toUpperCase).toList(),
+                      "a page heads with Back and its title: " + page);
+                assertNotNull(root.findActor(ClientGUI.VIEW_TURN_DETAILS_OVERLAY), "its items: " + page);
+                assertTrue(page.stream().anyMatch(line -> line.startsWith("on ") || line.startsWith("off ")),
+                      "its check items as switches: " + page);
+                assertNull(root.findActor(ClientGUI.VIEW_ZOOM_IN), "the camera's items are the HUD's own");
+                assertEquals(ClientGUI.VIEW_TURN_DETAILS_OVERLAY, focus(hud), "the page's first control");
                 hud.draw();
                 hud.capture("menu-panel-view").dispose();
 
+                // A switch changes at once and the menu stays open.
+                UiChoice toggle = GpuMenuCoverageSmokeTest.controls(root).stream()
+                      .filter(UiChoice.class::isInstance).map(UiChoice.class::cast).findFirst().orElseThrow();
+                toggle.fire(new ChangeEvent());
+                SwingUtilities.invokeAndWait(() -> { });
+                assertEquals(1, ran.size(), "the switch runs its item: " + ran);
+                assertEquals(Dialog.MENU, dialogs.state.dialog, "and keeps the menu open");
+                ran.clear();
+
+                // Back (Esc in the HUD) returns to the first page at the page's button.
+                assertTrue(menu.back());
+                show.run();
+                assertEquals(top, lines(root));
+                assertEquals(display, focus(hud), "the page it left is focused");
+                assertFalse(menu.back(), "the first page has no way back; Esc closes the menu");
+
+                // The Back button.
+                choose(item(root, text("GpuBoard.hud.menu.game")));
+                show.run();
+                assertTrue(lines(root).contains(menu("viewGameOptions").toUpperCase()), "the Game page: " + lines(root));
+                ((UiButton) root.findActor(GpuGameMenu.BACK)).fire(new ChangeEvent());
+                show.run();
+                assertEquals(top, lines(root));
+
                 dialogs.state.dialog = Dialog.NONE;
                 menu.update(inputs);
-                assertTrue(hud.stage.getKeyboardFocus() == null, "a closed menu gives the keyboard back");
+                assertNull(hud.stage.getKeyboardFocus(), "a closed menu gives the keyboard back");
+                choose(item(root, text("GpuBoard.hud.menu.maps")));
                 dialogs.state.dialog = Dialog.MENU;
-                menu.update(inputs);
-                assertTrue(highlighted(root).isEmpty(), "a reopened menu starts without a highlight");
-                assertTrue(lines(root).contains(menu("ViewMenu") + " ⌄"), "and keeps its open groups");
-                choose(item(root, "Maps"));
-                menu.update(inputs);
-                choose(item(root, "Map 0"));
+                show.run();
+                assertEquals(top, lines(root), "a reopened menu starts at its first page");
+                assertEquals("resume", focus(hud));
+                choose(item(root, text("GpuBoard.hud.menu.maps")));
+                show.run();
+                choose(item(root, "Map 1"));
                 SwingUtilities.invokeAndWait(() -> { });
-                assertEquals(List.of("Map 0"), ran, "an item runs its own action");
+                assertEquals(List.of("Map 1"), ran, "an item runs its own action");
                 assertEquals(Dialog.NONE, dialogs.state.dialog, "choosing an item closes the menu");
             });
         }
     }
 
     @Test
-    void menuRedirectsOpenTheNativeSurfacesAndEveryOtherItemRunsItsSwingAction() throws Exception {
-        boolean keybinds = GUIPreferences.getInstance().getShowKeybindsOverlay();
+    void menuOpensTheHudsOwnSurfacesAndRunsTheOtherItemsSwingActions() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             List<String> ran = new CopyOnWriteArrayList<>();
             List<BoardScene.Command> menuBar = menuBar(fixture, ran);
             GpuHudTestStage.run(hud -> {
                 Dialogs dialogs = new Dialogs();
                 GpuHudState state = dialogs.state;
-                BoardCamera camera = dialogs.camera;
-                GpuMenuPanel menu = new GpuMenuPanel(hud.kit, dialogs.source, state, camera);
+                GpuMenuPanel menu = new GpuMenuPanel(hud.kit, dialogs.source, state);
                 Table root = (Table) menu.actor();
                 hud.window.addActor(root);
                 GpuHud.Inputs inputs = inputs(hud, frame(menuBar, GpuPlayers.Snapshot.EMPTY),
                       GpuBoardSource.UiPreferences.capture(), false);
+                // A frame passes between choices, as in the HUD: an item that closed the menu reopens it at its start.
                 Runnable open = () -> {
+                    menu.update(inputs);
                     state.dialog = Dialog.MENU;
                     menu.update(inputs);
                     centre(hud, root);
                 };
                 open.run();
-                choose(item(root, menu("ViewMenu")));
-                choose(item(root, menu("GameMenu")));
-
-                choose(root, open, menu("viewMekDisplay"));
-                assertTrue(state.recordOpen, "Unit Display opens the record sheet of the card unit");
-                choose(root, open, menu("viewForceDisplay"));
-                assertTrue(state.overview, "Force Display opens the forces overview");
-                choose(root, open, menu("viewForceDisplay"));
-                assertFalse(state.overview, "and closes it");
-                choose(root, open, menu("viewKeyboardShortcuts"));
-                assertEquals(Dialog.HELP, state.dialog, "the key bindings overlay is the Help dialog");
-                choose(root, open, menu("viewPlayerList"));
-                assertEquals(Dialog.PLAYERS, state.dialog, "the player list is the Players panel");
-                choose(root, open, menu("viewRoundReport"));
-                assertTrue(state.logOpen(), "the round report is the log");
-                choose(root, open, menu("viewRoundReport"));
-                assertFalse(state.logOpen(), "toggled as the Log utility does");
-                choose(root, open, menu("viewRoundsInAir"));
-                choose(root, open, menu("viewRoundsInAir"));
-                assertTrue(state.logOpen(), "the rounds in the air are the log's artillery in flight; it stays open");
-                float zoom = camera.camera.zoom;
-                choose(root, open, menu("viewZoomIn"));
-                assertEquals(zoom / 1.2f, camera.camera.zoom, 1e-4f, "Zoom In zooms the board camera");
-                choose(root, open, menu("viewZoomOut"));
-                assertEquals(zoom, camera.camera.zoom, 1e-4f, "Zoom Out zooms back");
-                choose(root, open, menu("viewZoomOverviewToggle"));
-                assertTrue(Math.abs(camera.camera.zoom - zoom) > 1e-3f, "the overview fits the board");
-                choose(root, open, menu("viewZoomOverviewToggle"));
-                assertEquals(zoom, camera.camera.zoom, 1e-4f, "and returns");
-                choose(root, open, Messages.getString("GpuBoard.hud.util.tactical"));
-                assertTrue(camera.tactical(), "the View menu's isometric item is the Tactical View, as T");
-                SwingUtilities.invokeAndWait(() -> { });
-                assertEquals(List.of(), ran, "no redirected item runs its Swing action");
-                assertEquals(keybinds, GUIPreferences.getInstance().getShowKeybindsOverlay(),
-                      "the Swing key bindings overlay is untouched");
+                choose(item(root, players()));
+                assertEquals(Dialog.PLAYERS, state.dialog, "Players opens the Players panel");
 
                 open.run();
-                choose(item(root, players()));
-                assertEquals(Dialog.PLAYERS, state.dialog, "the first row opens the Players panel");
-                choose(root, open, menu("viewGameOptions"));
+                choose(item(root, text("Lobby.menu.help")));
+                open.run();
+                choose(item(root, text("GpuBoard.hud.menu.keys")));
+                assertEquals(Dialog.HELP, state.dialog, "Keyboard shortcuts is the Help dialog");
                 SwingUtilities.invokeAndWait(() -> { });
-                assertEquals(List.of(ClientGUI.VIEW_GAME_OPTIONS), ran, "an item without a redirect runs Swing's");
-                // Line of sight stays MegaMek's ruler.
-                choose(root, open, menu("viewLOSSetting"));
-                SwingUtilities.invokeAndWait(() -> { });
-                assertEquals(List.of(ClientGUI.VIEW_GAME_OPTIONS, ClientGUI.VIEW_LOS_SETTING), ran,
-                      "the Ruler / LOS Tool runs Swing's ruler");
+                assertEquals(List.of(), ran, "neither runs a Swing action");
 
-                GpuMenuPanel boardless = new GpuMenuPanel(hud.kit, dialogs.source, state, camera);
-                Table other = (Table) boardless.actor();
-                hud.window.addActor(other);
-                GpuBoardSource.Frame shown = inputs.frame();
-                GpuHud.Inputs noBoard = inputs(hud, new GpuBoardSource.Frame(null, List.of(), null,
-                      shown.globalCommands(), "", null, 0, "", null, shown.reports(), shown.status(),
-                      shown.panels()), GpuBoardSource.UiPreferences.capture(), false);
-                state.dialog = Dialog.MENU;
-                boardless.update(noBoard);
-                choose(item(other, menu("ViewMenu")));
-                boardless.update(noBoard);
-                List<String> lines = lines(other);
-                String tactical = Messages.getString("GpuBoard.hud.util.tactical");
-                for (String cameraItem : List.of(menu("viewZoomIn"), tactical)) {
-                    assertTrue(lines.stream().anyMatch(line -> line.contains(cameraItem) && line.endsWith(OFF)),
-                          "before the first board its camera items are unavailable: " + lines);
-                }
+                open.run();
+                choose(item(root, text("GpuBoard.hud.menu.game")));
+                open.run();
+                choose(item(root, menu("viewGameOptions")));
+                SwingUtilities.invokeAndWait(() -> { });
+                assertEquals(List.of(ClientGUI.VIEW_GAME_OPTIONS), ran, "an item runs Swing's action");
+                assertEquals(Dialog.NONE, state.dialog);
+
+                open.run();
+                choose(item(root, text("Lobby.menu.settings")));
+                SwingUtilities.invokeAndWait(() -> { });
+                assertEquals(List.of(ClientGUI.VIEW_GAME_OPTIONS, ClientGUI.VIEW_CLIENT_SETTINGS), ran,
+                      "Settings is the client settings");
             });
         }
     }
-
     @Test
     void playersShowEachPlayerAndTheBotsCommandsAsGroups() {
         GpuHudTestStage.run(hud -> {
@@ -521,7 +481,8 @@ class GpuHelpMenuPlayersSmokeTest {
                   () -> false, () -> { }).globalCommands());
             // GpuBoardSource.capture adds the boards as "Maps".
             commands.add(new BoardScene.Command("boards", "Maps", "", true, false,
-                  List.of(new BoardScene.Command("Map 0", true, () -> ran.add("Map 0"))), () -> { }));
+                  List.of(new BoardScene.Command("Map 0", true, () -> ran.add("Map 0")),
+                        new BoardScene.Command("Map 1", true, () -> ran.add("Map 1"))), () -> { }));
             return commands;
         });
     }
@@ -600,7 +561,7 @@ class GpuHelpMenuPlayersSmokeTest {
 
     /** The first menu item or button with this text under {@code actor}, or null. */
     static UiButton find(Actor actor, String text) {
-        if (actor instanceof UiButton item && item.getText().toString().equals(text)) {
+        if (actor instanceof UiButton item && item.getText().toString().equalsIgnoreCase(text)) {
             return item;
         } else if (actor instanceof Group group && !(actor instanceof UiButton)) {
             for (Actor child : group.getChildren()) {
@@ -625,7 +586,10 @@ class GpuHelpMenuPlayersSmokeTest {
     }
 
     private static void collect(Actor actor, List<String> lines) {
-        if (actor instanceof UiButton item) {
+        if (actor instanceof UiChoice choice) {
+            lines.add((choice.isChecked() ? "on " : "off ") + choice.label().getText()
+                  + (choice.isDisabled() ? OFF : ""));
+        } else if (actor instanceof UiButton item) {
             if (item.getText().isEmpty()) {
                 return;
             }
@@ -684,5 +648,15 @@ class GpuHelpMenuPlayersSmokeTest {
 
     private static String players() {
         return Messages.getString("GpuBoard.hud.players.title");
+    }
+
+    private static String text(String key) {
+        return Messages.getString(key);
+    }
+
+    /** The name of the control that has the keyboard, or null. */
+    private static String focus(GpuHudTestStage hud) {
+        Actor focus = hud.stage.getKeyboardFocus();
+        return focus == null ? null : focus.getName();
     }
 }

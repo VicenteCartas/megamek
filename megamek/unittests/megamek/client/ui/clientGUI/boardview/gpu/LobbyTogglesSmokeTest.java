@@ -127,9 +127,9 @@ class LobbyTogglesSmokeTest {
         });
     }
 
-    /** Counts what the system menu asks for: save, quick save, load, quick load, settings, leave. */
+    /** Counts what the system menu asks for: save, quick save, load, quick load, settings, leave, help, bug, about. */
     private static final class CountingSystemActions implements LobbyNativeDialogs.SystemActions {
-        final int[] runs = new int[6];
+        final int[] runs = new int[9];
         private final boolean loads;
 
         CountingSystemActions(boolean loads) {
@@ -170,12 +170,37 @@ class LobbyTogglesSmokeTest {
         public void leave() {
             runs[5]++;
         }
+
+        @Override
+        public void helpContents() {
+            runs[6]++;
+        }
+
+        @Override
+        public void reportBug() {
+            runs[7]++;
+        }
+
+        @Override
+        public void about() {
+            runs[8]++;
+        }
     }
 
     private static void choose(UiTestStage ui, LobbyNativeDialogs dialogs, CountingSystemActions actions,
           String item) {
+        choose(ui, dialogs, actions, null, item);
+    }
+
+    /** Opens the menu, then the page {@code page} when given, and clicks {@code item}. */
+    private static void choose(UiTestStage ui, LobbyNativeDialogs dialogs, CountingSystemActions actions,
+          String page, String item) {
         dialogs.systemMenu(actions);
         ui.draw();
+        if (page != null) {
+            click(ui, ui.stage.getRoot().findActor(page));
+            ui.draw();
+        }
         click(ui, ui.stage.getRoot().findActor(item));
         ui.draw();
         assertFalse(dialogs.isOpen(), item + " closes the menu");
@@ -187,21 +212,33 @@ class LobbyTogglesSmokeTest {
             LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
             CountingSystemActions actions = new CountingSystemActions(true);
             choose(ui, dialogs, actions, "Lobby.menu.resume");
-            assertArrayEquals(new int[6], actions.runs, "Resume only closes the menu");
+            assertArrayEquals(new int[9], actions.runs, "Resume only closes the menu");
             choose(ui, dialogs, actions, "Lobby.gameMenu.save");
             choose(ui, dialogs, actions, "Lobby.gameMenu.quickSave");
             choose(ui, dialogs, actions, "Lobby.gameMenu.load");
             choose(ui, dialogs, actions, "Lobby.gameMenu.quickLoad");
             choose(ui, dialogs, actions, "Lobby.menu.settings");
             choose(ui, dialogs, actions, "Lobby.menu.leave");
-            assertArrayEquals(new int[] { 1, 1, 1, 1, 1, 1 }, actions.runs, "each button does its one thing");
+            choose(ui, dialogs, actions, "Lobby.menu.help", "Lobby.menu.helpContents");
+            choose(ui, dialogs, actions, "Lobby.menu.help", "Lobby.menu.reportBug");
+            choose(ui, dialogs, actions, "Lobby.menu.help", "Lobby.menu.about");
+            int[] each = { 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+            assertArrayEquals(each, actions.runs, "each button does its one thing");
 
             dialogs.systemMenu(actions);
             ui.draw();
+            click(ui, ui.stage.getRoot().findActor("Lobby.menu.help"));
+            ui.draw();
+            assertEquals(null, ui.stage.getRoot().findActor("Lobby.menu.leave"), "Help shows in the menu's place");
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            ui.draw();
+            assertTrue(dialogs.isOpen(), "Escape on a page goes back");
+            assertTrue(ui.stage.getRoot().findActor("Lobby.menu.leave") != null, "back on the first page");
+            assertEquals("Lobby.menu.help", ui.stage.getKeyboardFocus().getName(), "Help has the focus again");
             ui.stage.keyDown(Input.Keys.ESCAPE);
             ui.draw();
             assertFalse(dialogs.isOpen(), "Escape resumes");
-            assertArrayEquals(new int[] { 1, 1, 1, 1, 1, 1 }, actions.runs);
+            assertArrayEquals(each, actions.runs);
             dialogs.dispose();
         });
     }

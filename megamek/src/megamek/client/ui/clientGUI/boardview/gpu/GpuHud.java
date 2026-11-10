@@ -26,6 +26,7 @@ import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.NameplateMode;
+import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiModal;
 import megamek.client.ui.util.KeyCommandBind;
@@ -180,6 +181,8 @@ final class GpuHud implements GpuBoardHud {
     /** The layer of Help, Menu, Players and the tuning panel: a focus in it is that dialog's Esc step. */
     private final Group dialogs;
     private final UiModal centeredDialogs;
+    /** The game menu, whose pages Esc steps back through before it closes the menu. */
+    private final GpuMenuPanel menu;
     /** Every component, bottom layer first and the developer tuning tool last: the order of updates. */
     private final List<Component> components;
     private final Container<Actor> phaseSlot;
@@ -298,7 +301,7 @@ final class GpuHud implements GpuBoardHud {
         dock = new GpuCommandDock(kit, source, state, camera, contextMenu, chat.button());
         GpuForceOverview overview = new GpuForceOverview(kit, source, state, contextMenu, this::select);
         GpuHelpDialog help = new GpuHelpDialog(kit, source, state);
-        GpuMenuPanel menu = new GpuMenuPanel(kit, source, state, camera);
+        menu = new GpuMenuPanel(kit, source, state);
         GpuPlayersPanel players = new GpuPlayersPanel(kit, source, state);
         GpuToastStack toasts = new GpuToastStack(kit, source, state);
         modal = new GpuModalDialog(kit, source, state);
@@ -584,8 +587,11 @@ final class GpuHud implements GpuBoardHud {
         }
         if (centeredDialogOpen()) {
             if (binds.contains(KeyCommandBind.CANCEL)) {
-                state.dialog = GpuHudState.Dialog.NONE;
-                stage.setKeyboardFocus(null);
+                // The menu's pages go back one at a time; Esc on its first page, or over another dialog, closes it
+                if (state.dialog != GpuHudState.Dialog.MENU || !menu.back()) {
+                    state.dialog = GpuHudState.Dialog.NONE;
+                    stage.setKeyboardFocus(null);
+                }
             } else if (binds.contains(KeyCommandBind.KEY_BINDS)) {
                 state.toggle(GpuHudState.Dialog.HELP);
             } else {
@@ -1300,9 +1306,12 @@ final class GpuHud implements GpuBoardHud {
         // Overlays: forces overview, centred dialogs and toasts.
         place(overviewSlot, gap, SECOND_ROW, width - 2 * gap, height - SECOND_ROW - RIGHT_BOTTOM);
         float dialogWidth = Math.min(UiKit.DIALOG_WIDTH, width - 2 * gap);
+        // The game menu is the lobby's, a column of buttons as wide as its dialog there
+        float menuWidth = Math.min(DesignTokens.shipped().size().get("dialog.sm"), width - 2 * gap);
         for (Container<Actor> dialog : List.of(helpSlot, menuSlot, playersSlot)) {
             float dialogHeight = Math.min(height(dialog), height - UiKit.DIALOG_MARGIN);
-            place(dialog, (width - dialogWidth) / 2, (height - dialogHeight) / 2, dialogWidth, dialogHeight);
+            float shownWidth = dialog == menuSlot ? menuWidth : dialogWidth;
+            place(dialog, (width - shownWidth) / 2, (height - dialogHeight) / 2, shownWidth, dialogHeight);
         }
         float toastWidth = Math.min(GpuToastStack.MAX_WIDTH, width - 2 * gap);
         place(toastSlot, (width - toastWidth) / 2, SECOND_ROW, toastWidth, height - SECOND_ROW - TOAST_BOTTOM);

@@ -4,8 +4,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -17,6 +15,7 @@ import static org.mockito.Mockito.when;
 import java.awt.Component;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,7 +37,6 @@ import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.MegaMekGUI;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
-import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
 import megamek.client.ui.panels.phaseDisplay.ReportDisplay;
 import megamek.client.ui.util.MegaMekController;
@@ -50,8 +48,8 @@ import org.mockito.MockedStatic;
 
 /**
  * No command is lost with the old UI (plan I2 T2). Every item of the client's menu bar as GpuBoardActions captures it,
- * with the game commands and the maps, has its row in the HUD's Menu once its groups are open; only View > Reset window
- * positions is left out, as it places Swing windows that no longer show. And in a turn of each kind, every command of
+ * with the game commands and the maps, has its button on one of the HUD Menu's pages, but those the HUD does itself or
+ * that no longer apply, which the Menu leaves out to stay short. And in a turn of each kind, every command of
  * MegaMek's real phase display is reachable in the HUD: as the dock's main or second button, a button of its row, an
  * entry of its More, or the native control that stands for it (plan C.2).
  */
@@ -63,13 +61,13 @@ class GpuMenuCoverageSmokeTest {
     private static final String WITH_A_CLUB = "a club's physical option";
 
     @Test
-    void everyMenuBarItemHasItsRowInTheMenu() throws Exception {
+    void everyMenuBarItemIsInTheMenuOrStandsForWhatTheHudDoes() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             List<String> ran = new CopyOnWriteArrayList<>();
             List<BoardScene.Command> menuBar = GpuHelpMenuPlayersSmokeTest.menuBar(fixture, ran);
             GpuHudTestStage.run(harness -> {
                 GpuHudState state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
-                GpuMenuPanel menu = new GpuMenuPanel(harness.kit, mock(GpuBoardSource.class), state, new BoardCamera());
+                GpuMenuPanel menu = new GpuMenuPanel(harness.kit, mock(GpuBoardSource.class), state);
                 Table root = (Table) menu.actor();
                 harness.window.addActor(root);
                 GpuHud.Inputs inputs = new GpuHud.Inputs(frame(menuBar), GpuHud.HudView.EMPTY, null,
@@ -82,28 +80,49 @@ class GpuMenuCoverageSmokeTest {
                     harness.draw();
                 };
                 show.run();
-                // Opens each closed group, a frame at a time, until every group shows its items.
-                for (UiButton group = closedGroup(root, menuBar, ""); group != null;
-                      group = closedGroup(root, menuBar, "")) {
-                    group.fire(new ChangeEvent());
-                    show.run();
+                Set<String> shown = reachable(root, menu, show);
+
+                List<String> missing = new ArrayList<>();
+                List<String> nested = new ArrayList<>();
+                int items = 0;
+                for (BoardScene.Command group : menuBar) {
+                    if (group.id().equals(GpuBoardActions.GAME_COMMANDS_ID)) {
+                        String reset = Messages.getString("GameCommands.ResetGame.title");
+                        String bug = Messages.getString("GameCommands.ReportBug.title");
+                        for (BoardScene.Command command : group.children()) {
+                            String stand = command.label().equals(reset) ? "lobby" : command.id();
+                            if (!command.label().equals(bug) && !shown.contains(stand)) {
+                                missing.add(command.label());
+                            }
+                        }
+                    } else if (group.id().equals("boards")) {
+                        assertEquals(group.children().size() > 1, shown.contains("GpuBoard.hud.menu.maps"),
+                              "the Maps page with more than one map");
+                    } else {
+                        for (BoardScene.Command command : group.children()) {
+                            if (!command.children().isEmpty()) {
+                                nested.add(command.label());
+                                continue;
+                            }
+                            items++;
+                            String action = GpuMenuPanel.actionCommand(command, group.id());
+                            if (LEFT_OUT.contains(action)) {
+                                assertFalse(shown.contains(action), command.label() + " is left out");
+                            } else if (!shown.contains(action)) {
+                                missing.add(action + " " + command.label());
+                            }
+                        }
+                    }
                 }
-                Map<String, String> expected = new LinkedHashMap<>();
-                rows(menuBar, "", expected);
-                assertTrue(expected.size() > 60, "the captured menu bar's " + expected.size() + " items");
-                for (Map.Entry<String, String> row : expected.entrySet()) {
-                    UiButton item = root.findActor(row.getKey());
-                    assertNotNull(item, "no row for " + row.getKey());
-                    assertEquals(row.getValue(), item.getText().toString(), row.getKey());
-                }
-                BoardScene.Command positions = GpuBoardActions.menuItem(menuBar, ClientGUI.VIEW_RESET_WINDOW_POSITIONS);
-                assertNotNull(positions, "the menu bar has the window positions item");
-                assertNull(root.findActor(key(menuBar, positions)), "which the Menu leaves out");
-                assertEquals(List.of(), ran, "opening groups runs no command");
+                assertTrue(items > 50, "the captured menu bar's " + items + " items");
+                assertEquals(List.of(), missing, "every menu bar item but those the HUD does itself has a button");
+                assertEquals(List.of(Messages.getString("CommonMenuBar.viewRenderer"),
+                      Messages.getString("CommonMenuBar.viewBotCommands")), nested,
+                      "the View menu's renderer and bot commands panel choices, of a Swing board, are left out");
+                assertEquals(List.of(), ran, "opening pages runs no command");
             });
         }
     }
-
     @Test
     void everyPhaseCommandOfARealPhaseDisplayIsReachable() throws Exception {
         try (GpuMovementFixture moving = GpuMovementFixture.create()) {
@@ -253,66 +272,69 @@ class GpuMenuCoverageSmokeTest {
     }
 
     /**
-     * The rows the Menu should show for {@code commands} under {@code parent}, by their keys (GpuCommandTree's
-     * "/"-joined ids) with their labels: every item and group, and the rows of an enabled group; without the window
-     * positions item, and the isometric item named after the Tactical View it switches.
+     * The menu bar's items the Menu leaves out, by action command: loading, which only the lobby does; what the HUD
+     * shows or does itself (the unit display, minimap, log, players, forces overview, conditions, key help, camera,
+     * hex and field-of-view overlays, the ruler); the Game Master's request, which the Commands page holds; and the
+     * Swing window, cache, board image and nag commands.
      */
-    private static void rows(List<BoardScene.Command> commands, String parent, Map<String, String> rows) {
-        for (BoardScene.Command command : commands) {
-            String action = action(command.id());
-            if (action.equals(ClientGUI.VIEW_RESET_WINDOW_POSITIONS)) {
-                continue;
-            }
-            String key = parent + "/" + command.id();
-            rows.put(key, action.equals(ClientGUI.VIEW_TOGGLE_ISOMETRIC)
-                  ? Messages.getString("GpuBoard.hud.util.tactical") : command.label());
-            if (command.enabled()) {
-                rows(command.children(), key, rows);
+    private static final Set<String> LEFT_OUT = Set.of(ClientGUI.FILE_GAME_LOAD, ClientGUI.FILE_GAME_QUICK_LOAD,
+          ClientGUI.GAME_REQUEST_GAME_MASTER, ClientGUI.GAME_GIVE_UP_GAME_MASTER, ClientGUI.FILE_REFRESH_CACHE,
+          ClientGUI.FILE_REBUILD_CACHE, ClientGUI.BOARD_SAVE_AS_IMAGE, ClientGUI.BOARD_SAVE_AS_IMAGE_UNITS,
+          ClientGUI.VIEW_UNIT_DISPLAY, ClientGUI.VIEW_MINI_MAP, ClientGUI.VIEW_ROUND_REPORT,
+          ClientGUI.VIEW_PLAYER_LIST, ClientGUI.VIEW_ROUNDS_IN_AIR, ClientGUI.VIEW_FORCE_DISPLAY,
+          ClientGUI.VIEW_KEYBINDS_OVERLAY, ClientGUI.VIEW_PLANETARY_CONDITIONS_OVERLAY,
+          ClientGUI.VIEW_RESET_WINDOW_POSITIONS, ClientGUI.VIEW_ACCESSIBILITY_WINDOW, ClientGUI.VIEW_ZOOM_IN,
+          ClientGUI.VIEW_ZOOM_OUT, ClientGUI.VIEW_ZOOM_RESET, ClientGUI.VIEW_ZOOM_OVERVIEW_TOGGLE,
+          ClientGUI.VIEW_TOGGLE_ISOMETRIC, ClientGUI.VIEW_TOGGLE_HEX_COORDS, ClientGUI.VIEW_TOGGLE_HEX_TYPES,
+          ClientGUI.VIEW_TOGGLE_FOV_DARKEN, ClientGUI.VIEW_LOS_SETTING, ClientGUI.VIEW_TOGGLE_FOV_HIGHLIGHT,
+          ClientGUI.VIEW_MOVE_ENV, ClientGUI.VIEW_TOGGLE_SENSOR_RANGE, ClientGUI.VIEW_TOGGLE_FIELD_OF_FIRE,
+          ClientGUI.VIEW_TOGGLE_UNIT_LINKS, ClientGUI.HELP_RESET_NAGS, ClientGUI.HELP_SKINNING);
+
+    /**
+     * The names of the controls on the Menu's pages: the first page's, and each page's its buttons open, which it
+     * opens and leaves again.
+     */
+    static Set<String> reachable(Table root, GpuMenuPanel menu, Runnable show) {
+        Set<String> names = new LinkedHashSet<>();
+        for (Actor control : controls(root)) {
+            names.add(control.getName());
+        }
+        for (Actor control : controls(root)) {
+            if (control.getUserObject() == GpuGameMenu.Kind.PAGE) {
+                String page = control.getName();
+                control.fire(new ChangeEvent());
+                show.run();
+                names.addAll(reachable(root, menu, show));
+                assertTrue(menu.back(), "Back leaves " + page);
+                show.run();
             }
         }
+        return names;
     }
 
-    /** An item's action command: the last key of its id is "{action command}:{text}". */
-    private static String action(String id) {
-        String key = id.substring(id.lastIndexOf('/') + 1);
-        int colon = key.indexOf(':');
-        return colon < 0 ? "" : key.substring(0, colon);
+    /** The menu's buttons and switches that show, top to bottom, without the Back button. */
+    static List<Actor> controls(Table root) {
+        List<Actor> controls = new ArrayList<>();
+        collect(root.findActor("game-menu"), controls);
+        return controls;
     }
 
-    /** The Menu's row key of {@code target}: the ids of its groups and its own, each after a "/". */
-    private static String key(List<BoardScene.Command> commands, BoardScene.Command target) {
-        for (BoardScene.Command command : commands) {
-            if (command == target) {
-                return "/" + command.id();
+    private static void collect(Actor actor, List<Actor> controls) {
+        if (actor == null || !actor.isVisible()) {
+            return;
+        }
+        if (actor instanceof com.badlogic.gdx.scenes.scene2d.ui.Button) {
+            if (actor.getName() != null && !GpuGameMenu.BACK.equals(actor.getName())) {
+                controls.add(actor);
             }
-            String child = key(command.children(), target);
-            if (child != null) {
-                return "/" + command.id() + child;
+            return;
+        }
+        if (actor instanceof com.badlogic.gdx.scenes.scene2d.Group group) {
+            for (Actor child : group.getChildren()) {
+                collect(child, controls);
             }
         }
-        return null;
-    }
-
-    /** An enabled group's row that is not open yet, or null. */
-    private static UiButton closedGroup(Actor root, List<BoardScene.Command> commands, String parent) {
-        for (BoardScene.Command command : commands) {
-            String key = parent + "/" + command.id();
-            if (command.children().isEmpty() || !command.enabled()) {
-                continue;
-            }
-            UiButton row = ((Table) root).findActor(key);
-            if (row != null && ((Table) root).findActor(key + "/" + command.children().getFirst().id()) == null) {
-                return row;
-            }
-            UiButton nested = closedGroup(root, command.children(), key);
-            if (nested != null) {
-                return nested;
-            }
-        }
-        return null;
-    }
-
-    /** A frame with the captured menu bar, as GpuBoardSource publishes it. */
+    }    /** A frame with the captured menu bar, as GpuBoardSource publishes it. */
     private static GpuBoardSource.Frame frame(List<BoardScene.Command> menuBar) {
         GpuHudData panels = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
