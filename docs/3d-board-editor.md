@@ -35,6 +35,16 @@ or **Step back**. Keep footprint continues the ground outline to the roof and cl
 the neighbour. Step back narrows the upper walls, floors and roof together. This choice affects only the selected
 hex; `.board2` saves it only for Step back, as `building.appearance.profile: "stepped"`.
 
+A building whose **Class** is Hangar has no interior floors by default, draws its kit's `hangar` variant where the
+kit has one (the Variant row shows it; any other can be chosen) and has a **Hangar doors** section: a click on a
+side of its hex diagram gives the hex a large door in the wall facing that side, as high as the building, or takes
+it away, and each door has a height row (1 to the building's levels). A side the building continues across is
+refused. Doors of one height side by side along a straight wall, in this hex or the next, draw as one wide door, so
+a door two hexes wide is two hexes' doors (Square footprints have the long straight walls). `.board2` saves them as
+`building.appearance.doors`, heights by direction (`{"n": 3, "se": 2}`). The 3D views draw them
+(`models/buildings/README.md`, Large doors); rules and the 2D views ignore them. Limitations: doors are set in the
+panel, not by clicking walls in the view.
+
 Domed buildings derive their layout from connected hexes and heights. Broad clusters fit separate domes; narrow
 level runs form continuous corridors, including bends and junctions. Raised peaks can support taller domes.
 Three mutually connected neighbouring hexes form a solid junction. Corridor roof panels share a board-wide

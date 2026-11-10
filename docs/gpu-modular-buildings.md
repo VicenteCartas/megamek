@@ -120,10 +120,16 @@ buildings, so it never lies on a facade or a wall's cut end and flickers through
 pieces that shape them; repeated storeys cost a lookup. They do not enter the exterior shadow pass, which retains the authored opaque shell. Existing occupancy cutaways
 fade walls and upper slabs while the occupied/lower floors and struts remain opaque. Hover cutaways reveal the selected
 interior floor and fade its walls; the top storey's cutaway also fades the entire roof cap and trim. Hovering the roof
-itself does not start a cutaway.
+itself does not start a cutaway, and neither does a unit standing on the roof: only a unit inside opens its building (in
+the Tactical View a building under any unit goes, so none of it covers a token).
 
 Picking keeps one triangle set per LOD0 piece and moves the ray into each placed piece's frame. It does not retain
 expanded triangles for every possible building combination. Picking is independent of the displayed LOD.
+
+A unit on a generated kit's roof is drawn on the roof's own surface (`GpuTerrain#roofLift`, `GpuBuilding.Assembly#roof`
+over the roof parts keyed `GeneratedMesh.ROOF_DECK`): a vault's sheeting, a raised deck. Parapets, fittings and aviation
+lights are other parts and never raise it. The lift is looks only, at most half a level, and fades out within a quarter
+level of the roof's game height. A unit on an authored building stands at the game's height, its volumes' top.
 
 Industrial pointer selection passes through equipment to the underlying terrain in both camera presentations,
 as it does for foliage. Physical effects still hit the equipment's authored triangles. Industrial shells never
