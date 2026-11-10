@@ -234,8 +234,7 @@ final class BayKit {
         boolean jointed = spec.modules().values().stream().flatMap(List::stream).anyMatch(run -> run.joints() != null);
         // A storey's sills, where the storey standing on it closes links it keeps (ConnectedKit places them).
         GeneratedMesh sill = role.startsWith("roof") || fills || square || piece.tags().endsWith("-cap") ? null : sill(spec, piece);
-        boolean sills = sill != null && !sill.parts.isEmpty();
-        if (sills) { result.put("-sill", sill); }
+        if (sill != null && !sill.parts.isEmpty()) { result.put("-sill", sill); }
         // A roof's corner linked both ways and closed one way: its edge turns an inside corner there (ConnectedKit#VALLEY).
         boolean turns = role.startsWith("roof") && !square && !seamed && !jointed && spec.roof().vault() == null
               && piece.direction() != null && piece.walls().isEmpty() && Integer.bitCount(links) == 2;
@@ -247,7 +246,9 @@ final class BayKit {
                   square, footprintScale, fitting, layout, halfLength));
             if (lit) { GeneratedKit.lights(result, "-closed-" + closed, closedPiece, facet, deck, lod); }
             if (fills) { putFill(result, "-closed-" + closed + "-fill", fill(spec, modelled, role, closedPiece, closed, lod, square)); }
-            if (sills) { result.put("-closed-" + closed + "-sill", sill); }
+            // A closed twin's own: over the corners its remaining links would still turn.
+            GeneratedMesh closedSill = sill == null ? null : sill(spec, KitOutline.closed(piece, closed));
+            if (closedSill != null && !closedSill.parts.isEmpty()) { result.put("-closed-" + closed + "-sill", closedSill); }
             if (turns && Integer.bitCount(closed) == 1) {
                 result.put("-closed-" + closed + "-valley", module(spec, modelled, role, KitOutline.inward(closedPiece, true), closed,
                       lod, square, footprintScale, fitting, layout, halfLength));

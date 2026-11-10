@@ -626,6 +626,7 @@ final class ConnectedKit {
                     }
                     // Its walls ending at a notch turn the corner there with the next hex's: a storey's, or the roof's on
                     // the top storey's notches (board corner b at this piece's own corner b - steps - turn).
+                    Piece plain = piece;
                     int notch = junctions == null || piece == null || piece.closed() != 0 || role.startsWith("roof") && level != height
                           ? 0 : turn(notches(junctions, level), -turn - steps)
                           & notchable.getOrDefault(role, Map.of()).getOrDefault(piece.identity(), 0);
@@ -650,27 +651,24 @@ final class ConnectedKit {
                         }
                     }
                     if (piece != null && node(source, drawn).parts.length > 0) {
-                        result.add(new Placement(drawn, role, level, placement(level * GpuBuilding.LEVEL_HEIGHT
-                              - ground.get(role), turn + steps), drawn + "@" + turn + "/" + role + "-at-" + level + "/"));
+                        result.add(placed(drawn, role, level, ground.get(role), turn, steps));
                     }
                     // A tall enough hex's roof takes its aviation lights there (GeneratedKit#lights).
                     String lights = piece == null ? null : piece.node() + "-aol";
                     if (lights != null && height >= LIT_LEVELS && role.startsWith("roof") && ids.contains(lights)) {
-                        result.add(new Placement(lights, role, level, placement(level * GpuBuilding.LEVEL_HEIGHT - ground.get(role),
-                              turn + steps), lights + "@" + turn + "/" + role + "-at-" + level + "/"));
+                        result.add(placed(lights, role, level, ground.get(role), turn, steps));
                     }
                     // A storey another stands on takes its fill there (BayKit#fill).
                     String fill = piece == null ? null : piece.node() + "-fill";
                     if (holds && level < height - 1 && ids.contains(fill)) {
-                        result.add(new Placement(fill, role, level, placement(level * GpuBuilding.LEVEL_HEIGHT - ground.get(role),
-                              turn + steps), fill + "@" + turn + "/" + role + "-at-" + level + "/"));
+                        result.add(placed(fill, role, level, ground.get(role), turn, steps));
                     }
                     // A storey takes its sills where the one standing on it closes links it keeps itself (BayKit#sill).
-                    String sill = piece == null ? null : piece.node() + "-sill";
+                    // Its piece before any notch twin stood in for it: those carry none of their own.
+                    String sill = plain == null ? null : plain.node() + "-sill";
                     if (holds && level < height - 1 && ids.contains(sill)
-                          && (piece.links() & turn(connected[level] & ~connected[level + 1], -turn)) != 0) {
-                        result.add(new Placement(sill, role, level, placement(level * GpuBuilding.LEVEL_HEIGHT - ground.get(role),
-                              turn + steps), sill + "@" + turn + "/" + role + "-at-" + level + "/"));
+                          && (plain.links() & turn(connected[level] & ~connected[level + 1], -turn)) != 0) {
+                        result.add(placed(sill, role, level, ground.get(role), turn, steps));
                     }
                     before = holds;
                 }
@@ -690,6 +688,15 @@ final class ConnectedKit {
             }
         }
         return List.copyOf(result);
+    }
+
+    /**
+     * {@code node} (a piece or one of its twins) standing at {@code level} as {@code role}, {@code turn} sixths round on
+     * a hex turned {@code steps}.
+     */
+    private static Placement placed(String node, String role, int level, float ground, int turn, int steps) {
+        return new Placement(node, role, level, placement(level * GpuBuilding.LEVEL_HEIGHT - ground, turn + steps),
+              node + "@" + turn + "/" + role + "-at-" + level + "/");
     }
 
     /** The board corners where {@code junctions}' level (storeys, then the roof) meets a notch. */
@@ -718,8 +725,7 @@ final class ConnectedKit {
                 for (var junction : KitOutline.Junction.values()) {
                     String node = both.node() + "-junction-" + junction.ordinal();
                     if (junction.notch() || (mask & bit(junction)) == 0 || !ids.contains(node)) { continue; }
-                    result.add(new Placement(node, role, level, placement(level * GpuBuilding.LEVEL_HEIGHT - ground.get(role),
-                          turn + steps), node + "@" + turn + "/" + role + "-at-" + level + "/"));
+                    result.add(placed(node, role, level, ground.get(role), turn, steps));
                 }
             }
         }
