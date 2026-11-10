@@ -19,10 +19,14 @@ import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import jakarta.annotation.Nullable;
+import megamek.client.bot.princess.BehaviorSettings;
+import megamek.client.bot.princess.PrincessException;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
+import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.BuildingEditForm;
 import megamek.client.lobby.ClientCommandForm;
+import megamek.client.lobby.EditBotsForm;
 import megamek.client.lobby.GameMasterPlayerSetup;
 import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.HexBrush;
@@ -31,6 +35,8 @@ import megamek.client.lobby.LobbyError;
 import megamek.client.lobby.LobbyFiles;
 import megamek.client.lobby.LobbyGameMaster;
 import megamek.client.lobby.MapNoteForm;
+import megamek.client.lobby.NetworkInformationForm;
+import megamek.client.lobby.NovaNetworkForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -53,6 +59,7 @@ import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.loaders.MekSummary;
 import megamek.common.options.GameOptions;
 import megamek.common.options.IBasicOption;
+import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Terrains;
 import megamek.common.util.Distractable;
 import megamek.logging.MMLogger;
@@ -191,9 +198,110 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
         tools.randomArmy();
     }
 
+    /**
+     * Shows the game's bots and dropped-out players: a ghost may be handed to a bot, a local bot's settings edited
+     * and a bot kicked, as the Swing Edit Bots dialog allowed. Each seat's bot settings open the bot setup over the
+     * card; Apply has the client carry out what was chosen.
+     */
+    void editBots() {
+        EditBotsForm form;
+        try {
+            form = EditBotsForm.of(gui.getClient(), PreferenceManager.getClientPreferences().getUseCASPAR());
+        } catch (RuntimeException failure) {
+            LOGGER.error(failure, "The battle could not read the bots");
+            return;
+        }
+        LobbyEditBotsView.Host host = new LobbyEditBotsView.Host() {
+            @Override
+            public void settings(EditBotsForm.Row row, Consumer<BehaviorSettings> configured) {
+                SwingUtilities.invokeLater(() -> botSettings(row, configured));
+            }
+
+            @Override
+            public void apply(EditBotsForm.Result result) {
+                SwingUtilities.invokeLater(() -> {
+                    if (!closing() && !result.isEmpty()) {
+                        gui.applyBotEdits(result.newBots(), result.newBotTypes(), result.changedBots(),
+                              result.kickBots());
+                    }
+                });
+            }
+        };
+        open(dialogs -> dialogs.editBots(form, host));
+    }
+
+    /** The bot setup for one seat of Edit Bots, over its card; {@code configured} runs on the GPU thread. */
+    private void botSettings(EditBotsForm.Row row, Consumer<BehaviorSettings> configured) {
+        if (closing()) {
+            return;
+        }
+        BotSetupForm form;
+        try {
+            form = BotSetupForm.of(gui.getClient(), row.name(), row.settings().getCopy(), row.configuredType());
+        } catch (PrincessException | RuntimeException failure) {
+            LOGGER.error(failure, "The battle could not read the settings of the bot {}", row.name());
+            return;
+        }
+        LobbyBotSetupView.Host host = new LobbyBotSetupView.Host() {
+            @Override
+            public void edt(Runnable work, Runnable then) {
+                GpuBattleTools.this.edt("bot setup", work, then);
+            }
+
+            @Override
+            public void help() {
+                tools.princessHelp();
+            }
+
+            @Override
+            public void confirm(LobbyPlayerController.BotSetup setup) {
+                gpu.accept(() -> configured.accept(setup.behavior()));
+            }
+        };
+        open(dialogs -> dialogs.botSetup(form, host));
+    }
+
     /** Shows an HTML guide a chapter at a time. */
     void help(String title, File file) {
         tools.helpDocument(title, file);
+    }
+
+    /**
+     * Shows this computer's addresses and the game's host. The card opens at once and the addresses follow once they
+     * have been looked up on a thread of their own, as finding the public address can take a few seconds.
+     */
+    void networkInformation() {
+        NetworkInformationForm form = NetworkInformationForm.of(gui.getClient());
+        open(dialogs -> dialogs.networkInformation(form.pending()));
+        Thread lookup = new Thread(() -> {
+            List<NetworkInformationForm.Row> rows = form.read();
+            gpu.accept(() -> {
+                LobbyNativeDialogs dialogs = cards.get();
+                LobbyNetworkInfoView view = dialogs == null ? null : dialogs.networkInfoView();
+                if (view != null) {
+                    view.addresses(rows);
+                }
+            });
+        }, "Battle network information");
+        lookup.setDaemon(true);
+        lookup.start();
+    }
+
+    /** Shows the Nova CEWS networks of the local player and their allies, read only. */
+    void novaNetworks() {
+        NovaNetworkForm form;
+        try {
+            form = NovaNetworkForm.of(gui.getClient().getGame(), gui.getClient().getLocalPlayer().getId());
+        } catch (RuntimeException failure) {
+            LOGGER.error(failure, "The battle could not read the Nova CEWS networks");
+            return;
+        }
+        open(dialogs -> dialogs.novaNetworks(form));
+    }
+
+    /** Shows About MegaMek. */
+    void about() {
+        open(LobbyNativeDialogs::about);
     }
 
     // ---- The Game Master's cards ----

@@ -61,6 +61,7 @@ import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.lobby.UnitConfigForm;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
@@ -541,6 +542,21 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             @Override
             public void leave() {
                 window.leave();
+            }
+
+            @Override
+            public void helpContents() {
+                window.runMenuItem(ClientGUI.HELP_CONTENTS);
+            }
+
+            @Override
+            public void reportBug() {
+                window.runMenuItem(Messages.getString("CommonMenuBar.helpReportBug"));
+            }
+
+            @Override
+            public void about() {
+                nativeDialog(LobbyNativeDialogs::about);
             }
         };
     }

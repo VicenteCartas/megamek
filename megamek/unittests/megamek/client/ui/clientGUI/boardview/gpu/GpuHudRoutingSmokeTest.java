@@ -1027,41 +1027,52 @@ class GpuHudRoutingSmokeTest {
     }
 
     /**
-     * L5 and N9 through the real view: the Menu's redirects open the force overview for View > Force display, zoom
-     * the view's own camera for Zoom in and switch the Tactical View; one Esc closes the Menu, the Players panel and
-     * the Tuning panel with its open choice list, from the keyboard focus inside them. (The client's capture leaves
-     * View > Unit overview out of the menu; its key opens the same overview.)
+     * L5 and N9 through the real view: the Menu's Players opens the Players panel; Esc on one of the Menu's pages goes
+     * back to its first page, where the next Esc closes it; a switch of a page applies at once and keeps the Menu open.
+     * One Esc closes the Menu, the Players panel and the Tuning panel with its open choice list, from the keyboard focus
+     * inside them.
      */
     @Test
-    void theMenuRedirectsMoveTheViewsCameraAndOneEscClosesEachDialog() throws Exception {
+    void theMenuPagesGoBackOnEscAndOneEscClosesEachDialog() throws Exception {
         run(routing -> {
             List<String> ran = new CopyOnWriteArrayList<>();
             routing.menuBar = GpuHelpMenuPlayersSmokeTest.menuBar(routing.fixture, ran);
             routing.show(SCENARIOS.get(4));
             GpuHudState state = routing.hud.state;
-            BoardCamera camera = routing.view.boardCamera;
             Actor menu = routing.find("menu-panel");
             routing.press(routing.find("utility-menu"));
             assertEquals(GpuHudState.Dialog.MENU, state.dialog, "the Menu utility opens the Menu");
-            routing.choose(menu, GpuHelpMenuPlayersSmokeTest.menu("ViewMenu"));
-            routing.capture("i1a2-menu-view");
-            routing.choose(menu, GpuHelpMenuPlayersSmokeTest.menu("viewForceDisplay"));
-            assertTrue(state.overview, "View > Force display opens the native overview");
-            assertEquals(GpuHudState.Dialog.NONE, state.dialog, "and closes the Menu");
+            routing.choose(menu, Messages.getString("GpuBoard.hud.players.title"));
+            assertEquals(GpuHudState.Dialog.PLAYERS, state.dialog, "Players opens the Players panel");
             routing.key(Input.Keys.ESCAPE, 0);
-            assertFalse(state.overview);
-
-            float zoom = camera.camera.zoom;
-            routing.press(routing.find("utility-menu"));
-            routing.choose(menu, GpuHelpMenuPlayersSmokeTest.menu("viewZoomIn"));
-            assertEquals(zoom / GpuBattleView.ZOOM_STEP, camera.camera.zoom, 1e-4f, "Zoom in zooms the view's camera");
-            routing.press(routing.find("utility-menu"));
-            routing.choose(menu, Messages.getString("GpuBoard.hud.util.tactical"));
-            assertTrue(camera.tactical(), "the isometric item is the Tactical View");
-            routing.view.setTacticalView(false);
             routing.view.render();
-            assertEquals(List.of(), ran, "no redirected item runs its Swing action");
 
+            routing.press(routing.find("utility-menu"));
+            routing.choose(menu, Messages.getString("GpuBoard.hud.menu.display"));
+            routing.view.render();
+            assertNotNull(routing.find(GpuGameMenu.BACK), "the Display page");
+            routing.capture("i1a2-menu-view");
+            routing.press(routing.find(ClientGUI.VIEW_TOGGLE_SHOW_OBJECTS));
+            routing.view.render();
+            assertEquals(GpuHudState.Dialog.MENU, state.dialog, "a switch keeps the Menu open");
+            routing.key(Input.Keys.ESCAPE, 0);
+            routing.view.render();
+            assertEquals(GpuHudState.Dialog.MENU, state.dialog, "Esc on a page goes back");
+            assertNull(routing.find(GpuGameMenu.BACK), "to the first page");
+            routing.key(Input.Keys.ESCAPE, 0);
+            routing.view.render();
+            assertEquals(GpuHudState.Dialog.NONE, state.dialog, "and Esc there closes the Menu");
+            routing.press(routing.find("utility-menu"));
+            routing.choose(menu, Messages.getString("GpuBoard.hud.menu.display"));
+            routing.view.render();
+            routing.press(routing.find(ClientGUI.VIEW_TOGGLE_SHOW_OBJECTS));
+            routing.view.render();
+            routing.key(Input.Keys.ESCAPE, 0);
+            routing.key(Input.Keys.ESCAPE, 0);
+            routing.view.render();
+            SwingUtilities.invokeAndWait(() -> { });
+            assertEquals(List.of(ClientGUI.VIEW_TOGGLE_SHOW_OBJECTS, ClientGUI.VIEW_TOGGLE_SHOW_OBJECTS), ran,
+                  "the switch runs its item, and again to restore it");
             // One Esc closes each dialog from the focus inside it.
             routing.press(routing.find("utility-menu"));
             assertTrue(routing.hud.stage.getKeyboardFocus().isDescendantOf(menu), "the Menu's list has the focus");

@@ -183,18 +183,6 @@ public final class GpuBoardWindow {
     private static final List<Class<? extends Dialog>> SWING_DIALOGS = List.of(
           // R6: Client Settings, which hold the real settings (user item 3)
           megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog.class,
-          // R6: Edit Bots
-          megamek.client.ui.dialogs.buttonDialogs.EditBotsDialog.class,
-          // R6: a bot's settings, opened from Edit Bots and Player Settings
-          megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog.class,
-          // R6: Network information
-          megamek.client.ui.dialogs.buttonDialogs.NetworkInformationDialog.class,
-          // U2: the accessibility window
-          megamek.client.ui.dialogs.AccessibilityDialog.class,
-          // U2: the Nova network view
-          megamek.client.ui.dialogs.phaseDisplay.NovaNetworkViewDialog.class,
-          // U2: unit cache loading
-          megamek.client.ui.dialogs.UnitLoadingDialog.class,
           // U2: the developer conditions editor behind the Tuning utility
           megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog.class);
     private final ClientGUI gui;
@@ -1010,8 +998,6 @@ public final class GpuBoardWindow {
         return List.of(
               // D11: the exit's save question
               Messages.getString("ClientGUI.gameSaveFirst"),
-              // R6: About
-              Messages.getString("about.title", megamek.MMConstants.PROJECT_NAME),
               // R6: the bug report, and the result of its package (a file the player saves, user item 21)
               bugReport.get("title"), bugReport.get("package.result.title"),
               // User item 21: the version check of the unit file a game master reinforces from
@@ -1476,6 +1462,48 @@ public final class GpuBoardWindow {
         GpuBattleTools tools = battleTools(gui);
         if (tools != null) {
             tools.reinforce();
+        }
+        return tools != null;
+    }
+
+    /**
+     * EDT: shows the game's bots and dropped-out players natively over this client's battle window, to replace,
+     * edit or kick; false as above.
+     */
+    public static boolean showEditBots(ClientGUI gui) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.editBots();
+        }
+        return tools != null;
+    }
+
+    /**
+     * EDT: shows this computer's addresses and the game's host natively over this client's battle window; false as
+     * above.
+     */
+    public static boolean showNetworkInformation(ClientGUI gui) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.networkInformation();
+        }
+        return tools != null;
+    }
+
+    /** EDT: shows the Nova CEWS networks natively over this client's battle window; false as above. */
+    public static boolean showNovaNetworks(ClientGUI gui) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.novaNetworks();
+        }
+        return tools != null;
+    }
+
+    /** EDT: shows About MegaMek natively over this client's battle window; false as above. */
+    public static boolean showAbout(ClientGUI gui) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.about();
         }
         return tools != null;
     }

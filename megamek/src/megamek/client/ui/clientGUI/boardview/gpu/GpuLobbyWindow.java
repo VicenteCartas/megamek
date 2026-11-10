@@ -24,6 +24,10 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import javax.imageio.ImageIO;
 import javax.swing.JFrame;
+import javax.swing.JMenu;
+import javax.swing.JMenuItem;
+import javax.swing.JPopupMenu;
+import javax.swing.MenuElement;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
@@ -1179,6 +1183,43 @@ public final class GpuLobbyWindow {
                 gui.openClientSettings();
             }
         });
+    }
+
+    /**
+     * Any thread: runs the hidden menu bar's item whose action command is {@code command} (an item made from an action
+     * answers to its text), as clicking it did.
+     */
+    void runMenuItem(String command) {
+        SwingUtilities.invokeLater(() -> {
+            if (closing || swingDialogs.blocked()) {
+                return;
+            }
+            JMenuItem item = menuItem(gui.getMenuBar(), command);
+            if (item == null) {
+                LOGGER.warn("No lobby menu item {}", command);
+            } else if (item.isEnabled()) {
+                item.doClick(0);
+            }
+        });
+    }
+
+    private static @Nullable JMenuItem menuItem(MenuElement parent, String command) {
+        for (MenuElement element : parent.getSubElements()) {
+            if (element instanceof JMenu menu) {
+                JMenuItem found = menuItem(menu.getPopupMenu(), command);
+                if (found != null) {
+                    return found;
+                }
+            } else if (element instanceof JMenuItem item && command.equals(item.getActionCommand())) {
+                return item;
+            } else if (element instanceof JPopupMenu popup) {
+                JMenuItem found = menuItem(popup, command);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
     }
 
     /** Any thread: asks for a file through the system's dialog and saves the game to it, as the menu bar's Save did. */

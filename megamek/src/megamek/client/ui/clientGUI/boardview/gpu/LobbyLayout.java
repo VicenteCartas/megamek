@@ -2,10 +2,10 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 /**
- * Where the lobby's parts go, as the Swing briefing room settled it (docs/design-system/gap-analysis.md, step 6): the
- * players at the left and the battlefield at the right keep their widths and the forces in the centre take the rest;
- * below {@link #FOLD_BELOW} the battlefield folds into a rail at the right edge. All in stage units, which already
- * hold the GUI scale, so it needs no OpenGL.
+ * Where the lobby's parts go, as the Swing briefing room settled it (docs/design-system/gap-analysis-history.md,
+ * step 6): the players at the left and the battlefield at the right keep their widths and the forces in the centre
+ * take the rest; below {@link #FOLD_BELOW} the battlefield folds into a rail at the right edge. All in stage units,
+ * which already hold the GUI scale, so it needs no OpenGL.
  */
 final class LobbyLayout {
     /** The players column's width. */

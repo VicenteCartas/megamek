@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.image.BufferedImage;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
@@ -24,6 +25,7 @@ import megamek.client.lobby.BuildingEditForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.ClientCommandForm;
+import megamek.client.lobby.EditBotsForm;
 import megamek.client.lobby.ForceNameRequest;
 import megamek.client.lobby.GameMasterPlayerSetup;
 import megamek.client.lobby.GameMasterUnitTools;
@@ -34,6 +36,8 @@ import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyGameMaster;
 import megamek.client.lobby.LobbyRequisition;
 import megamek.client.lobby.MapNoteForm;
+import megamek.client.lobby.NetworkInformationForm;
+import megamek.client.lobby.NovaNetworkForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.PortraitCatalog;
@@ -48,7 +52,6 @@ import megamek.client.lobby.UnitDamageForm;
 import megamek.client.lobby.VictoryConditionsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
-import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiKit;
@@ -97,6 +100,9 @@ final class LobbyNativeDialogs {
     private LobbyPortraitView portraitView;
     private LobbyPlayerSettingsView settingsView;
     private LobbyBotSetupView botView;
+    private LobbyEditBotsView editBotsView;
+    private LobbyNetworkInfoView networkInfoView;
+    private LobbyNovaNetworkView novaNetworkView;
     private LobbyConditionsView conditionsView;
     private LobbyGameOptionsView optionsView;
     private LobbyRandomMapView randomMapView;
@@ -219,6 +225,39 @@ final class LobbyNativeDialogs {
         botView = new LobbyBotSetupView(kit, dialog, form, bodyWidth(dialog, "dialog.lg"), host, this::close);
         show(dialog);
         return botView;
+    }
+
+    /**
+     * Opens the game's bots and dropped-out players as a card over the battle; each seat's bot settings open the bot
+     * setup over it.
+     */
+    LobbyEditBotsView editBots(EditBotsForm form, LobbyEditBotsView.Host host) {
+        UiDialog dialog = begin(Messages.getString("EditBotsDialog.native.title"), "dialog.lg", false,
+              () -> editBotsView = null);
+        editBotsView = new LobbyEditBotsView(kit, dialog, form, host, () -> closeDialog(dialog));
+        show(dialog);
+        return editBotsView;
+    }
+
+    /**
+     * Opens this computer's addresses and the game's host as a card over the battle, showing {@code rows} until
+     * {@link LobbyNetworkInfoView#addresses} brings the looked-up ones.
+     */
+    LobbyNetworkInfoView networkInformation(List<NetworkInformationForm.Row> rows) {
+        UiDialog dialog = begin(Messages.getString("NetworkInformation.title"), "dialog.sm", false,
+              () -> networkInfoView = null);
+        networkInfoView = new LobbyNetworkInfoView(kit, dialog, rows, () -> closeDialog(dialog));
+        show(dialog);
+        return networkInfoView;
+    }
+
+    /** Opens the Nova CEWS networks, read only, as a card over the battle. */
+    LobbyNovaNetworkView novaNetworks(NovaNetworkForm form) {
+        UiDialog dialog = begin(Messages.getString("NovaNetworkViewDialog.title"), "dialog.md", false,
+              () -> novaNetworkView = null);
+        novaNetworkView = new LobbyNovaNetworkView(kit, dialog, form, () -> closeDialog(dialog));
+        show(dialog);
+        return novaNetworkView;
     }
 
     /** Opens the planetary conditions. */
@@ -748,49 +787,52 @@ final class LobbyNativeDialogs {
         void settings();
 
         void leave();
+
+        /** Opens the help contents. */
+        void helpContents();
+
+        /** Opens the bug report. */
+        void reportBug();
+
+        /** Shows the About box. */
+        void about();
     }
 
     /**
-     * The lobby's system menu, as a game's pause menu: Resume, then saving and loading, Settings and Leave lobby, one
-     * column of buttons in groups. Esc or Resume closes it; every other button closes it before it acts.
+     * The lobby's system menu, as a game's pause menu: Resume, then saving and loading, Settings, Help and Leave lobby,
+     * one column of buttons in groups ({@link GpuGameMenu}). Help opens its page in the menu's place; Esc goes back from
+     * it, and on the first page Esc or Resume closes the menu. Every other button closes it before it acts.
      */
     UiDialog systemMenu(SystemActions actions) {
         UiDialog dialog = begin(Messages.getString("Lobby.menu.title"), "dialog.sm", false, () -> { });
-        Table column = dialog.body();
-        float gap = DesignTokens.shipped().space().get("sm");
-        float group = DesignTokens.shipped().space().get("lg");
-        menuButton(column, "button-primary", "Lobby.menu.resume", null, 0, null);
-        menuButton(column, "button-secondary", "Lobby.gameMenu.save", KeyCommandBind.LOCAL_SAVE, group,
-              actions::save);
-        menuButton(column, "button-secondary", "Lobby.gameMenu.quickSave", KeyCommandBind.QUICK_SAVE, gap,
-              actions::quickSave);
+        GpuGameMenu menu = new GpuGameMenu(kit, this::close);
+        dialog.body().add(menu.actor()).growX().top();
+        List<List<GpuGameMenu.Entry>> groups = new ArrayList<>();
+        groups.add(List.of(GpuGameMenu.Entry.primary("Lobby.menu.resume", Messages.getString("Lobby.menu.resume"),
+              () -> { })));
+        List<GpuGameMenu.Entry> saves = new ArrayList<>();
+        saves.add(menuEntry("Lobby.gameMenu.save", KeyCommandBind.LOCAL_SAVE, actions::save));
+        saves.add(menuEntry("Lobby.gameMenu.quickSave", KeyCommandBind.QUICK_SAVE, actions::quickSave));
         if (actions.loads()) {
-            menuButton(column, "button-secondary", "Lobby.gameMenu.load", KeyCommandBind.LOCAL_LOAD, gap,
-                  actions::load);
-            menuButton(column, "button-secondary", "Lobby.gameMenu.quickLoad", KeyCommandBind.QUICK_LOAD, gap,
-                  actions::quickLoad);
+            saves.add(menuEntry("Lobby.gameMenu.load", KeyCommandBind.LOCAL_LOAD, actions::load));
+            saves.add(menuEntry("Lobby.gameMenu.quickLoad", KeyCommandBind.QUICK_LOAD, actions::quickLoad));
         }
-        menuButton(column, "button-secondary", "Lobby.menu.settings", KeyCommandBind.CLIENT_SETTINGS, group,
-              actions::settings);
-        menuButton(column, "button-secondary", "Lobby.menu.leave", null, group, actions::leave);
+        groups.add(saves);
+        List<List<GpuGameMenu.Entry>> help = List.of(List.of(
+              menuEntry("Lobby.menu.helpContents", null, actions::helpContents),
+              menuEntry("Lobby.menu.reportBug", null, actions::reportBug),
+              menuEntry("Lobby.menu.about", null, actions::about)));
+        groups.add(List.of(menuEntry("Lobby.menu.settings", KeyCommandBind.CLIENT_SETTINGS, actions::settings),
+              GpuGameMenu.Entry.page("Lobby.menu.help", Messages.getString("Lobby.menu.help"), "", help)));
+        groups.add(List.of(menuEntry("Lobby.menu.leave", null, actions::leave)));
+        menu.open(groups);
         show(dialog);
         return dialog;
     }
 
-    private void menuButton(Table column, String style, String key, KeyCommandBind binding, float above,
-          Runnable action) {
-        UiButton button = kit.button(style, null, Messages.getString(key), null);
-        button.setName(key);
-        if (binding != null) {
-            kit.tip(button, true).getActor().setText(KeyCommandBind.getDesc(binding));
-        }
-        UiKit.onChange(button, () -> {
-            close();
-            if (action != null) {
-                action.run();
-            }
-        });
-        column.add(button).growX().padTop(above).row();
+    private static GpuGameMenu.Entry menuEntry(String key, KeyCommandBind binding, Runnable action) {
+        return GpuGameMenu.Entry.button(key, Messages.getString(key),
+              binding == null ? "" : KeyCommandBind.getDesc(binding), true, action);
     }
 
     /**
@@ -846,6 +888,14 @@ final class LobbyNativeDialogs {
                 report.run();
             }).setName("error-report");
         }
+        show(dialog);
+        return dialog;
+    }
+
+    /** About MegaMek: the version and the suite's legal notice, in place of whatever shows. */
+    UiDialog about() {
+        UiDialog dialog = begin(GpuAbout.title(), "dialog.md", false, () -> { });
+        GpuAbout.fill(kit, dialog, this::close);
         show(dialog);
         return dialog;
     }
@@ -935,6 +985,18 @@ final class LobbyNativeDialogs {
 
     @Nullable LobbyBotSetupView botView() {
         return botView;
+    }
+
+    @Nullable LobbyEditBotsView editBotsView() {
+        return editBotsView;
+    }
+
+    @Nullable LobbyNetworkInfoView networkInfoView() {
+        return networkInfoView;
+    }
+
+    @Nullable LobbyNovaNetworkView novaNetworkView() {
+        return novaNetworkView;
     }
 
     @Nullable LobbyConditionsView conditionsView() {

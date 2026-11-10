@@ -6,13 +6,21 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.File;
 import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
@@ -20,15 +28,21 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import megamek.MMConstants;
 import megamek.client.Client;
+import megamek.client.bot.AIType;
+import megamek.client.bot.princess.BehaviorSettings;
+import megamek.client.bot.princess.Princess;
 import megamek.client.lobby.BalancedArmy;
 import megamek.client.lobby.BattleValueArmy;
+import megamek.client.lobby.EditBotsForm;
 import megamek.client.lobby.FactionChoice;
 import megamek.client.lobby.RandomArmyForm;
 import megamek.client.lobby.RatBrowser;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiTestStage;
+import megamek.common.Player;
 import megamek.common.alphaStrike.ASUnitType;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
@@ -125,6 +139,117 @@ class BattleMenuCardsSmokeTest {
             assertNotNull(find(ui, "army-add"));
             cards.dispose();
         });
+    }
+
+    /**
+     * Edit Bots over the battle: a ghost the save remembers as a bot starts on its replacement, a local bot's settings
+     * open the bot setup over the card and set it to Edit, and Apply hands what was chosen to the client.
+     */
+    @Test
+    void editBotsShowsTheSeatsAndHandsTheChoicesToTheClient() {
+        UiTestStage.run(ui -> {
+            Game game = new Game();
+            game.setPhase(GamePhase.MOVEMENT);
+            Player human = new Player(1, "Human");
+            Player gone = new Player(2, "Gone");
+            gone.setGhost(true);
+            Player local = new Player(3, "Local");
+            local.setBot(true);
+            Player remote = new Player(4, "Remote");
+            remote.setBot(true);
+            for (Player player : List.of(human, gone, local, remote)) {
+                game.addPlayer(player.getId(), player);
+            }
+            BehaviorSettings saved = new BehaviorSettings();
+            saved.setBraveryIndex(7);
+            game.setBotSettings(Map.of("Gone", saved));
+            game.setBotTypes(Map.of("Gone", AIType.PRINCESS));
+            ClientGUI gui = mock(ClientGUI.class);
+            Client client = mock(Client.class);
+            when(gui.getClient()).thenReturn(client);
+            when(client.getGame()).thenReturn(game);
+            when(client.getBots()).thenReturn(Map.of());
+            Princess princess = mock(Princess.class);
+            when(princess.getBehaviorSettings()).thenReturn(new BehaviorSettings());
+            when(princess.getAIType()).thenReturn(AIType.PRINCESS);
+            when(client.isLocalBot(local)).thenReturn(true);
+            when(client.getBotClient(local)).thenReturn(princess);
+            LobbyNativeDialogs cards = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            // The GPU work queues here and runs on this, the GL thread, as the battle window's would
+            Queue<Runnable> gl = new ConcurrentLinkedQueue<>();
+            Runnable drain = () -> {
+                for (Runnable work = gl.poll(); work != null; work = gl.poll()) {
+                    work.run();
+                }
+                ui.draw();
+            };
+            GpuBattleTools tools = new GpuBattleTools(gui, gl::add, () -> false, () -> cards);
+
+            tools.editBots();
+            drain.run();
+            LobbyEditBotsView view = cards.editBotsView();
+            assertNotNull(view, "Edit Bots shows over the battle");
+            assertEquals(3, view.form().rows().size(), "the ghost and both bots, not the human");
+            assertEquals(EditBotsForm.Action.REPLACE_PRINCESS, view.form().rows().get(0).action(),
+                  "the ghost the save remembers as Princess goes back to Princess");
+            assertFalse(((UiButton) find(ui, "bots-restore-0")).isDisabled());
+            assertNull(ui.stage.getRoot().findActor("bots-settings-2"), "a remote bot's settings are not ours");
+
+            click(ui, find(ui, "bots-settings-1"));
+            flushSwing();
+            drain.run();
+            assertNotNull(cards.botView(), "the bot setup opens over Edit Bots");
+            click(ui, find(ui, "bot-ok"));
+            drain.run();
+            assertNull(cards.botView());
+            assertEquals(view, cards.editBotsView(), "Edit Bots shows again");
+            assertEquals(EditBotsForm.Action.EDIT, view.form().rows().get(1).action(),
+                  "confirmed settings set the bot to Edit");
+
+            UiSegmented remoteActions = (UiSegmented) find(ui, "bots-action-2");
+            click(ui, remoteActions.option(1));
+            assertEquals(EditBotsForm.Action.KICK, view.form().rows().get(2).action());
+
+            click(ui, find(ui, "bots-apply"));
+            flushSwing();
+            assertFalse(cards.isOpen());
+            verify(gui).applyBotEdits(argThat(bots -> bots.keySet().equals(Set.of("Gone"))
+                        && bots.get("Gone").getBraveryIndex() == 7), eq(Map.of("Gone", AIType.PRINCESS)),
+                  argThat(changed -> changed.keySet().equals(Set.of("Local"))), eq(Set.of("Remote")));
+            cards.dispose();
+        });
+    }
+
+    /** About over the battle: the native card with the version and the legal notice's links, which Close closes. */
+    @Test
+    void aboutShowsOverTheBattle() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs cards = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            Queue<Runnable> gl = new ConcurrentLinkedQueue<>();
+            GpuBattleTools tools = new GpuBattleTools(mock(ClientGUI.class), gl::add, () -> false, () -> cards);
+
+            tools.about();
+            for (Runnable work = gl.poll(); work != null; work = gl.poll()) {
+                work.run();
+            }
+            ui.draw();
+            assertTrue(cards.isOpen(), "About shows over the battle");
+            find(ui, "about-card");
+            for (String link : List.of("about-rules", "about-wiki", "about-discord", "about-callout")) {
+                find(ui, link);
+            }
+            click(ui, find(ui, "about-close"));
+            assertFalse(cards.isOpen());
+            cards.dispose();
+        });
+    }
+
+    private static void flushSwing() {
+        try {
+            SwingUtilities.invokeAndWait(() -> { });
+        } catch (Exception failure) {
+            throw new IllegalStateException(failure);
+        }
     }
 
     /** Six Meks of 2000 BV, designed in 3040. */

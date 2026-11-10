@@ -238,7 +238,6 @@ public class ClientGUI extends AbstractClientGUI
     public static final String VIEW_FORCE_DISPLAY = "viewForceDisplay";
     public static final String VIEW_NOVA_NETWORKS = "viewNovaNetworks";
     public static final String VIEW_UNIT_DISPLAY = "viewMekDisplay";
-    public static final String VIEW_ACCESSIBILITY_WINDOW = "viewAccessibilityWindow";
     public static final String VIEW_KEYBINDS_OVERLAY = "viewKeyboardShortcuts";
     public static final String VIEW_PLANETARY_CONDITIONS_OVERLAY = "viewPlanetaryConditions";
     public static final String VIEW_MINI_MAP = "viewMinimap";
@@ -349,7 +348,6 @@ public class ClientGUI extends AbstractClientGUI
     protected CommonMenuBar menuBar;
     private AbstractHelpDialog help;
     private CommonSettingsDialog commonSettingsDialog;
-    private AccessibilityDialog aw;
 
     public MegaMekController controller;
     private ChatterBox cb;
@@ -1067,10 +1065,6 @@ public class ClientGUI extends AbstractClientGUI
         updateGameMasterMenuItems();
         updateLobbyEquipmentMenuItems();
 
-        aw = new AccessibilityDialog(this);
-        aw.setLocation(0, 0);
-        aw.setSize(300, 300);
-
         setForceDisplayPanel(new ForceDisplayPanel(this));
         setForceDisplayDialog(new ForceDisplayDialog(getFrame(), this));
         getForceDisplayDialog().add(getForceDisplayPanel(), BorderLayout.CENTER);
@@ -1104,8 +1098,8 @@ public class ClientGUI extends AbstractClientGUI
         // The scene follows the server's first phase: the lobby for the lounge, the board for a scenario or a running
         // game. Until then whatever holds the window stays, so a scenario never flashes the lobby on its way in
         client.changePhase(GamePhase.UNKNOWN);
-        // Unit tools are created on demand; constructing them here can wait for the cache on the EDT.
-        new UnitLoadingDialog(frame).showForBackgroundLoad();
+        // Unit tools are created on demand; constructing them here can wait for the cache on the EDT. The native
+        // lobby's Requisition says it is reading the unit catalogue while the cache still loads.
         frame.setVisible(getClient() instanceof BotClient);
         GUIP.addPreferenceChangeListener(this);
     }
@@ -1124,6 +1118,9 @@ public class ClientGUI extends AbstractClientGUI
      * Called when the user selects the "Help->About" menu item.
      */
     private void showAbout() {
+        if (!inLounge() && GpuBoardWindow.showAbout(this)) {
+            return;
+        }
         new MMAboutDialog(frame).show();
     }
 
@@ -1295,6 +1292,9 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     private void showNetworkInformation() {
+        if (!inLounge() && GpuBoardWindow.showNetworkInformation(this)) {
+            return;
+        }
         // Display the network information screen
         getNetworkInformationDialog().refresh();
         getNetworkInformationDialog().pack();
@@ -1596,9 +1596,6 @@ public class ClientGUI extends AbstractClientGUI
                 break;
             case FILE_GAME_EDIT_BOTS:
                 editBots();
-                break;
-            case VIEW_ACCESSIBILITY_WINDOW:
-                toggleAccessibilityWindow();
                 break;
             case VIEW_LOS_SETTING:
                 showLOSSettingDialog();
@@ -2294,16 +2291,6 @@ public class ClientGUI extends AbstractClientGUI
     private void requestFocus() {
         frame.requestFocusInWindow();
         boardViewsContainer.getPanel().requestFocusInWindow();
-    }
-
-    /**
-     * Toggles the accessibility window
-     */
-    private void toggleAccessibilityWindow() {
-        aw.setVisible(!aw.isVisible());
-        if (aw.isVisible()) {
-            frame.requestFocus();
-        }
     }
 
     /**
@@ -3663,6 +3650,9 @@ public class ClientGUI extends AbstractClientGUI
      * Shows the Nova CEWS network view dialog (read-only).
      */
     private void showNovaNetworkViewDialog() {
+        if (!inLounge() && GpuBoardWindow.showNovaNetworks(this)) {
+            return;
+        }
         NovaNetworkViewDialog dialog = new NovaNetworkViewDialog(frame, this);
         dialog.setVisible(true);
     }
@@ -4754,8 +4744,7 @@ public class ClientGUI extends AbstractClientGUI
               || ((gameOptionsDialog != null) && gameOptionsDialog.isVisible())
               || isModalDialogShown()
               || ((help != null) && help.isVisible())
-              || ((commonSettingsDialog != null) && commonSettingsDialog.isVisible())
-              || ((aw != null) && aw.isVisible());
+              || ((commonSettingsDialog != null) && commonSettingsDialog.isVisible());
     }
 
     /**
@@ -4784,15 +4773,24 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     void editBots() {
+        if (!inLounge() && GpuBoardWindow.showEditBots(this)) {
+            return;
+        }
         var rpd = new EditBotsDialog(frame, this);
         rpd.setVisible(true);
         if (rpd.getResult() == DialogResult.CANCELLED) {
             return;
         }
+        applyBotEdits(rpd.getNewBots(), rpd.getNewBotTypes(), rpd.getChangedBots(), rpd.getKickBots());
+    }
 
+    /**
+     * Carries out what Edit Bots chose: the ghosts to replace with a bot of the given AI and settings, the local bots
+     * whose settings changed, and the bots to kick.
+     */
+    public void applyBotEdits(Map<String, BehaviorSettings> newBotSettings, Map<String, AIType> newBotTypes,
+          Map<String, BehaviorSettings> changedBots, Set<String> kickBotNames) {
         AddBotUtil util = new AddBotUtil();
-        Map<String, BehaviorSettings> newBotSettings = rpd.getNewBots();
-        Map<String, AIType> newBotTypes = rpd.getNewBotTypes();
         for (String ghostName : newBotSettings.keySet()) {
             StringBuilder message = new StringBuilder();
             AIType aiType = newBotTypes.getOrDefault(ghostName, AIType.PRINCESS);
@@ -4823,14 +4821,12 @@ public class ClientGUI extends AbstractClientGUI
             }
         }
 
-        Map<String, BehaviorSettings> changedBots = rpd.getChangedBots();
         for (String botName : changedBots.keySet()) {
             StringBuilder message = new StringBuilder();
             util.changeBotSettings(changedBots.get(botName), botName, client, message);
             systemMessage(message.toString());
         }
 
-        Set<String> kickBotNames = rpd.getKickBots();
         for (String botName : kickBotNames) {
             StringBuilder message = new StringBuilder();
             util.kickBot(botName, client, message);

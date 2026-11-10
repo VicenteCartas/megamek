@@ -11,8 +11,10 @@ import java.util.List;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import megamek.client.ui.Messages;
 import megamek.client.ui.gdx.UiDialog;
@@ -32,7 +34,7 @@ class StartWelcomeSmokeTest {
     void theWelcomeUnfoldsThenItsSectionsRiseIn() {
         UiTestStage.run(ui -> {
             List<String> said = new ArrayList<>();
-            StartWelcome welcome = new StartWelcome(ui.kit, true, answers(said));
+            StartWelcome welcome = megaMek(ui, true, said);
             welcome.show(ui.stage);
             ui.draw();
             UiDialog dialog = welcome.dialog();
@@ -74,7 +76,7 @@ class StartWelcomeSmokeTest {
             });
             ui.window.addActor(screen);
             List<String> said = new ArrayList<>();
-            StartWelcome welcome = new StartWelcome(ui.kit, false, answers(said));
+            StartWelcome welcome = megaMek(ui, false, said);
             welcome.show(ui.stage);
             ui.draw();
             assertFalse(welcome.dialog().unfolding(), "without motion the welcome opens at once");
@@ -100,14 +102,14 @@ class StartWelcomeSmokeTest {
             assertFalse(welcome.isOpen(), "Acknowledge closes the welcome");
 
             said.clear();
-            StartWelcome again = new StartWelcome(ui.kit, false, answers(said));
+            StartWelcome again = megaMek(ui, false, said);
             again.show(ui.stage);
             ui.draw();
             ui.stage.keyDown(Input.Keys.ENTER);
             assertEquals(List.of("acknowledged false"), said, "Enter acknowledges, the box unticked");
 
             said.clear();
-            StartWelcome quit = new StartWelcome(ui.kit, false, answers(said));
+            StartWelcome quit = megaMek(ui, false, said);
             quit.show(ui.stage);
             ui.draw();
             click(ui, quit.quit());
@@ -119,10 +121,45 @@ class StartWelcomeSmokeTest {
     }
 
     @Test
+    void anotherProgramsWelcomeNamesThatProgram() {
+        UiTestStage.run(ui -> {
+            List<String> said = new ArrayList<>();
+            StartWelcome welcome = new StartWelcome(ui.kit, false, Messages.getString("StartWelcome.title", "MekHQ"),
+                  "MekHQ", answers(said));
+            welcome.show(ui.stage);
+            ui.draw();
+            List<String> texts = texts(welcome.dialog().layer());
+            assertTrue(texts.contains("WELCOME TO MEKHQ"), "the heading, in capitals, names MekHQ: " + texts);
+            assertTrue(texts(welcome.quit()).contains("QUIT MEKHQ"), "Quit names MekHQ");
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            assertEquals(List.of("quit"), said);
+        });
+    }
+
+    @Test
     void theSwingTextsReadAsPlainSentences() {
-        assertEquals("an unofficial game", StartWelcome.plain("an <b>unofficial</b> game"));
-        assertEquals("visit our wiki.", StartWelcome.sentence("visit our wiki: "));
-        assertEquals("join us.", StartWelcome.sentence("join us."));
+        assertEquals("an unofficial game", SuiteLegalNotice.plain("an <b>unofficial</b> game"));
+        assertEquals("visit our wiki.", SuiteLegalNotice.sentence("visit our wiki: "));
+        assertEquals("join us.", SuiteLegalNotice.sentence("join us."));
+    }
+
+    /** MegaMek's welcome, as its start screen makes it. */
+    private static StartWelcome megaMek(UiTestStage ui, boolean motion, List<String> said) {
+        return new StartWelcome(ui.kit, motion, Messages.getString("LicensingDialog.title"), "MegaMek",
+              answers(said));
+    }
+
+    /** The texts of every label in {@code actor}, depth first. */
+    private static List<String> texts(Actor actor) {
+        List<String> texts = new ArrayList<>();
+        if (actor instanceof Label label) {
+            texts.add(label.getText().toString());
+        } else if (actor instanceof Group group) {
+            for (Actor child : group.getChildren()) {
+                texts.addAll(texts(child));
+            }
+        }
+        return texts;
     }
 
     private static StartWelcome.Answer answers(List<String> said) {
