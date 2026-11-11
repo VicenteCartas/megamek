@@ -420,6 +420,7 @@ final class GpuTerrain implements Disposable {
                 private final int coverPixelsUniform = register("u_coverPixels");
                 private final int coverShareUniform = register("u_coverShare");
                 private final int coverHexWidthUniform = register("u_coverHexWidth");
+                private final int grassHeightUniform = register("u_grassHeight");
                 private final int gridShadeUniform = register("u_gridShade");
                 private final int[] waterOceanUniforms = { register("u_waterOcean0"), register("u_waterOcean1"),
                       register("u_waterOcean2") };
@@ -557,6 +558,7 @@ final class GpuTerrain implements Disposable {
                     if (shockCount > 0 && has(shocksUniform)) { program.setUniform4fv(loc(shocksUniform), shocks, 0, shockCount * 4); }
                     set(metreUniform, BoardRelief.detailMetres(1));
                     set(coverHexWidthUniform, BoardGeometry.width());
+                    set(grassHeightUniform, grassHeight);
                     set(coverShareUniform, BoardQuality.current.meadowShare, BoardQuality.current.cropShare);
                     // Scene pixels: the render resolution's target, not the window's.
                     set(coverPixelsUniform, BoardGeometry.width()
@@ -1324,6 +1326,7 @@ final class GpuTerrain implements Disposable {
     private boolean normalMaps = true;
     private boolean terrainParallax = true;
     private boolean grass = true;
+    private float grassHeight = 1;
     private boolean waterEffects = true;
     /** This frame's visual gravity, converted from the scenario's g multiplier to metres per second squared. */
     private float gravity = BoardAtmosphere.STANDARD_GRAVITY;
@@ -10188,6 +10191,11 @@ final class GpuTerrain implements Disposable {
      */
     void setGrass(boolean enabled) {
         grass = enabled;
+    }
+
+    /** The Grass height option: a multiple of the height of every blade but a field's plants. */
+    void setGrassHeight(float height) {
+        grassHeight = height;
     }
 
     /**

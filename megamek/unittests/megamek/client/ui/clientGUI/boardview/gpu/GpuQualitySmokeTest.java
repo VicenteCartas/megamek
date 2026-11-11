@@ -32,9 +32,11 @@ class GpuQualitySmokeTest {
         GUIPreferences preferences = GUIPreferences.getInstance();
         String savedQuality = preferences.getBoardQuality();
         float savedResolution = preferences.getBoardRenderResolution();
+        boolean savedGrass = preferences.getBoardGrass();
         // What a new player starts with, whatever this machine has saved.
         preferences.setBoardQuality(preferences.getDefaultString(GUIPreferences.BOARD_QUALITY));
         preferences.setBoardRenderResolution(preferences.getDefaultFloat(GUIPreferences.BOARD_RENDER_RESOLUTION));
+        preferences.setBoardGrass(preferences.getDefaultBoolean(GUIPreferences.BOARD_GRASS));
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             var config = GpuBoardWindow.configuration(false);
             config.setWindowedMode(1280, 800);
@@ -117,6 +119,7 @@ class GpuQualitySmokeTest {
             SwingUtilities.invokeAndWait(() -> {
                 preferences.setBoardQuality(savedQuality);
                 preferences.setBoardRenderResolution(savedResolution);
+                preferences.setBoardGrass(savedGrass);
             });
             BoardCamera.renderScale = 1;
         }

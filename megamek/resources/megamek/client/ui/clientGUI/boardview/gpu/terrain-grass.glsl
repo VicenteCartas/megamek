@@ -9,6 +9,8 @@ uniform float u_coverPixels;
 // The shares its quality draws of a meadow's blades and of a field's plants (BoardQuality).
 uniform vec2 u_coverShare;
 uniform float u_coverHexWidth;
+// The Grass height option: a multiple of every blade's height but a field's plants'.
+uniform float u_grassHeight;
 uniform float u_levelHeight;
 uniform float u_metre;
 // 1 for a field's plant, .25 for grass lit by its ground (a meadow's, tundra's sward and tussocks), 0 for a rim's blade;
@@ -138,6 +140,7 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
         width = max(u_coverHexWidth * mix(.0022, .0036, grassRandom(seed + 37u)), .75 * u_coverHexWidth / pixels)
               * (.4 + .6 * smoothstep(0.0, .25, t)) * (1.0 - t);
     }
+    if (!wheat) { height *= u_grassHeight; }
     height *= 1.0 - scar * .5;
     // Fractional growth of the last blade keeps density transitions continuous, without shading invisible blades.
     float growth = clamp(density - a_coverRoot.w, 0.0, 1.0) / widening;

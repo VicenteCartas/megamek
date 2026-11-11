@@ -349,6 +349,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String BOARD_DEPTH_CUES = "BoardDepthCues";
     /** Whether the 3D board darkens the corners of the view like a camera lens. */
     public static final String BOARD_VIGNETTE = "BoardVignette";
+    public static final String BOARD_GRASS = "BoardGrass";
     /** Whether the 3D board tessellates its sculpted relief, where the graphics card offers it (OpenGL 4.0). */
     public static final String BOARD_TESSELLATION = "BoardTessellation";
     /** The 3D board's UI scale, a choice of its Tuning panel: the share (0.5 to 1) of the scale the window sets. */
@@ -922,6 +923,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(BOARD_AMBIENT_OCCLUSION, false);
         store.setDefault(BOARD_DEPTH_CUES, false);
         store.setDefault(BOARD_VIGNETTE, false);
+        store.setDefault(BOARD_GRASS, true);
         store.setDefault(BOARD_TESSELLATION, false);
         store.setDefault(BOARD_UI_SCALE, 1f);
         store.setDefault(BOARD_RENDER_RESOLUTION, 1f);
@@ -2008,6 +2010,15 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setBoardVignette(boolean enabled) {
         store.setValue(BOARD_VIGNETTE, enabled);
+    }
+
+    /** Whether the 3D board's grass blades are drawn. */
+    public boolean getBoardGrass() {
+        return store.getBoolean(BOARD_GRASS);
+    }
+
+    public void setBoardGrass(boolean enabled) {
+        store.setValue(BOARD_GRASS, enabled);
     }
 
     /** Whether the 3D board's sculpted relief is tessellated. */

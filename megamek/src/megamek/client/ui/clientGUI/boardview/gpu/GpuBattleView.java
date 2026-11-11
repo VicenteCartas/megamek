@@ -938,6 +938,7 @@ class GpuBattleView extends ApplicationAdapter {
         // The Tactical View hides the scatter, by one draw rule and without a rebuild.
         terrain.setScatterHidden(boardCamera.tactical());
         terrain.setGrass(tuning.grass());
+        terrain.setGrassHeight(tuning.grassHeight());
         terrain.setWaterEffects(tuning.waterEffects());
         // Sprite meshes bake their atlas UVs. New artwork is appended, so only the moved slots need new meshes.
         Set<BoardScene.Pixels> moved = unitTextures.updateRegions(Stream.concat(scene.units().stream().filter(unit -> !unit.sensorContact()

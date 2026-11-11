@@ -145,6 +145,7 @@ final class GpuBoardTuning {
     private List<Control> padding;
     private final CheckBox transitions;
     private final CheckBox grass;
+    private final List<Control> grassHeight;
     private final CheckBox waterEffects;
     private final Label terrainProgress;
     private int terrainPercent = -1;
@@ -398,6 +399,19 @@ final class GpuBoardTuning {
             public void changed(ChangeEvent event, Actor actor) {
                 boolean enabled = vignette.isChecked();
                 SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardVignette(enabled));
+            }
+        });
+        grass = checkbox(skin, "Grass blades", "tuning-grass");
+        // The saved choice (on until one is saved); like anti-aliasing, Defaults leaves it alone.
+        grass.setChecked(GUIPreferences.getInstance().getBoardGrass());
+        grass.addListener(new TextTooltip("Show wind-blown grass blades on the ground. Uncheck to remove the blades; "
+              + "fields' crops stay. Low quality draws none. The choice is saved for the next session.", skin, "menu"));
+        grass.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                boolean enabled = grass.isChecked();
+                updateQualityOptions();
+                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardGrass(enabled));
             }
         });
         Label graphics = new Label("Graphics: " + GpuGlsl.description(), skin, "small");
@@ -786,9 +800,9 @@ final class GpuBoardTuning {
             }
         });
         section(skin, "Terrain detail");
-        grass = checkbox(skin, "Grass blades", "tuning-grass");
-        grass.addListener(new TextTooltip("Show wind-blown grass blades on the ground. Uncheck to remove the blades; "
-              + "fields' crops stay.", skin, "menu"));
+        grassHeight = controls(skin, List.of(new Knob("Grass height", 50, 200, 10, "%.0f%%")), this::applyGrassHeight, 0);
+        grassHeight.getFirst().slider().addListener(new TextTooltip("How tall grass blades stand, as a share of their "
+              + "normal height. Fields' crops keep their height.", skin, "menu"));
         waterEffects = checkbox(skin, "Water effects", "tuning-water-effects");
         waterEffects.addListener(new TextTooltip("Animate water: waves, currents, foam, ripples, glitter and the "
               + "light patterns on riverbeds, with cloud reflections. Uncheck for calm water with simpler sunlight "
@@ -1065,7 +1079,8 @@ final class GpuBoardTuning {
         setValues(cameraFieldOfView, new float[] { BoardCamera.DEFAULT_FIELD_OF_VIEW });
         applyCamera();
         unitDisplayMode.setSelected(UnitDisplayMode.DEFAULT);
-        grass.setChecked(true);
+        setValues(grassHeight, new float[] { 100 });
+        applyGrassHeight();
         waterEffects.setChecked(true);
         boolean fixedSunKept = fixedSun.isChecked();
         BoardGeometry.Tuning defaults = BoardGeometry.DEFAULTS;
@@ -1336,6 +1351,7 @@ final class GpuBoardTuning {
         tessellation.setDisabled(!level.costlyOptions || !GpuTessellation.available());
         ambientOcclusion.setDisabled(!level.costlyOptions);
         grass.setDisabled(level.meadowShare == 0);
+        grassHeight.getFirst().slider().setDisabled(level.meadowShare == 0 || !grass.isChecked());
     }
 
     private void applyAntiAliasing() {
@@ -1386,6 +1402,11 @@ final class GpuBoardTuning {
 
     boolean grass() {
         return grass.isChecked();
+    }
+
+    /** The height of grass blades, as a multiple of their normal height. */
+    float grassHeight() {
+        return value(grassHeight, 0) / 100;
     }
 
     boolean waterEffects() {
@@ -1564,6 +1585,10 @@ final class GpuBoardTuning {
 
     private void applyVisibility() {
         updateReadings(visibility);
+    }
+
+    private void applyGrassHeight() {
+        updateReadings(grassHeight);
     }
 
     private void applyZoomScaling() {

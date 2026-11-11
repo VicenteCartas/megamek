@@ -24,9 +24,15 @@ density and mesh rules.
 | `terrain-materials.glsl` | The ground under the blades, including a bank's turf lip and the root mat below it. |
 | `GpuTerrain` | Wind phase integration, finished support surfaces and pass ordering. |
 
-The **Grass blades** control under Tuning → Terrain hides the grass and its rim
-blades; the crops' plants stand either way. Planted roots remain available when it
-is re-enabled.
+The **Grass blades** control under Tuning → Display hides the grass and its rim
+blades; the crops' plants stand either way. The choice is saved across sessions
+(`GUIPreferences.BOARD_GRASS`, on until chosen). Planted roots remain available
+when it is re-enabled.
+
+The **Grass height** slider under Tuning → Terrain (50-200%, not saved) multiplies
+the height of every blade but a field's plants (`u_grassHeight` in
+`terrain-grass.glsl`). Blade width and the obstacle clearance the roots were planted
+with keep the 100% height.
 Ground shading, crops, marsh plants and trees have separate controls/owners.
 
 ## Roots and drawing
