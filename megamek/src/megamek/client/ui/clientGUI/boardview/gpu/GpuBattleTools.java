@@ -44,6 +44,7 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
+import megamek.client.ui.settings.ClientSettingsForm;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.tileset.TilesetManager;
 import megamek.common.Hex;
@@ -716,7 +717,18 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
 
     @Override
     public void openSettings() {
-        gui.openClientSettings();
+        clientSettings(null);
+    }
+
+    /**
+     * Any thread: opens the native Client Settings over the battle on {@code page} ({@code ClientSettingsForm}'s page
+     * ids, which the Swing dialog's routes share), read on the Swing thread.
+     */
+    void clientSettings(@Nullable String page) {
+        SwingUtilities.invokeLater(() -> {
+            ClientSettingsForm form = ClientSettingsForm.current();
+            open(dialogs -> dialogs.clientSettings(form, form.pageOf(page), ClientSettingsView.Host.swing(gpu)));
+        });
     }
 
     @Override

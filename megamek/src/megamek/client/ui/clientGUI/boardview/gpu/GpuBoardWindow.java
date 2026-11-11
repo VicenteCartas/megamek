@@ -72,6 +72,7 @@ import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.MMAboutDialog;
 import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
 import megamek.client.ui.enums.DialogResult;
+import megamek.client.ui.settings.ClientSettingsForm;
 import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.SpecialHexDisplay;
@@ -876,6 +877,25 @@ public final class GpuBoardWindow {
     }
 
     /**
+     * EDT: shows the native Client Settings over this window's scene on the page of the Swing dialog's {@code route}.
+     * Returns false, showing nothing, while the window is not presented or closes, so the caller shows them in Swing.
+     */
+    private boolean clientSettings(@Nullable String route) {
+        if (!presented || closing || battleView == null) {
+            return false;
+        }
+        ClientSettingsForm form = ClientSettingsForm.current();
+        post(battle -> {
+            LobbyNativeDialogs cards = battle.cards();
+            if (cards != null) {
+                cards.clientSettings(form, form.pageOf(route), ClientSettingsView.Host.swing(GpuHost::post));
+            }
+        });
+        focus(false);
+        return true;
+    }
+
+    /**
      * EDT: tells the user that the open native window keeps the one asked for from opening, in that window when it
      * shows, else in Swing over {@code owner}.
      */
@@ -948,6 +968,7 @@ public final class GpuBoardWindow {
             if (source instanceof GpuMapSource map) {
                 map.fileDialogs(() -> nativeOwner, busy -> post(battle -> battle.setInputBlocked(busy || modalOpen)));
                 map.notices(this::notice);
+                map.settings(this::clientSettings);
             }
             startupTimer.stop();
             // The board shown is the likeliest next one: the shader warm-up prepares it first from now on.
@@ -1469,6 +1490,18 @@ public final class GpuBoardWindow {
         GpuBattleTools tools = battleTools(gui);
         if (tools != null) {
             tools.gameOptions();
+        }
+        return tools != null;
+    }
+
+    /**
+     * EDT: shows the native Client Settings over this client's battle window on the page of the Swing dialog's
+     * {@code route}; false as above.
+     */
+    public static boolean showClientSettings(ClientGUI gui, @Nullable String route) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.clientSettings(route);
         }
         return tools != null;
     }

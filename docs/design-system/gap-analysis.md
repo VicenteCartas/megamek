@@ -307,7 +307,7 @@ Done so far, in short:
 - The Swing trial on MegaMek's startup path, steps 1 to 6: MegaMek Dark as the default theme, the shared dialog
   footers, the libGDX start screen (G1 to G6: the menu, Host, Connect, Load game, the scenario browser and the
   briefing) and its follow-ups, and the libGDX lobby (L0 to L18) with its review rounds. The lobby opens no Swing
-  dialog except Client Settings and the startup-failure fallback. On the board, the Game Master's tools, the
+  dialog except the startup-failure fallback. On the board, the Game Master's tools, the
   reinforcements, Edit Bots, the portrait chooser, Network information, the Nova network view, About and the battle
   menu's dialogs are native; the accessibility window is gone. The Tuning utility's planetary conditions open the
   native conditions card, its material palette is a native gallery card, and the map editor's and preview's Print
@@ -320,12 +320,23 @@ Done so far, in short:
   its result natively (`GpuBugReport`). The start screen's About is the native About card. The battle's Swing
   allowlist no longer keeps any message box.
 - Help: the start screen's Contents and Skinning how-to and the lobby's Help contents open the same native document
-  card the battle shows its help in (`LobbyNativeDialogs.document`), so no scene opens the Swing help any more.
+  card the battle shows its help in (`LobbyNativeDialogs.document`), so no scene opens the Swing help any more.- Client Settings, part 1 (shell and Audio): a native settings card, `GpuSettingsView`, shared with the Game Options,
+  which moved onto it and took its look. A rail of groups with icons and a search on the left, the group's pages as
+  tabs, section cards in the middle, a live preview on the right and a help strip that follows the pointer. The model
+  is toolkit-free: `SettingsForm` (shared with `GameOptionsForm`) and `ClientSettingsForm`, which reads the GUI
+  preferences once, applies each change at once on the Swing thread, and puts everything back on Cancel. OK also
+  stores the preferences, which the Swing dialog left to quitting. Audio is native, with a Sound check preview whose
+  pads play each alert as the game will. Nothing on Audio was dropped. The start screen, the lobby's gear, the
+  battle's View menu, the map editor's and preview's View menu and the "my turn" sound prompt's Settings link all
+  open the native card. A route whose page is not native yet opens it on its first page.
 
 Still open:
 
 1. The board's last Swing dialog, the `SWING_DIALOGS` allowlist in `GpuBoardWindow` (R6/U2): Client Settings
-   (`CommonSettingsDialog`, about 4,900 lines, several PRs; the lobby's gear and the map editor open it too).
+   (`CommonSettingsDialog`). Audio and the shared shell are native (see above). Still to port, in their own PRs: Game
+   Board, Overlays, Unit Display, Player Colours, Report, Mini Map, Settings (Main), Phase and Advanced. The last
+   of them removes the dialog from the allowlist. Until then, the native card has no page for those yet
+   and the Swing dialog stays only for the Legacy 2D window and the Swing-only client.
 2. The developer tool that is still a Swing window of its own, outside the allowlist because it is not a dialog over
    the battle: the shader editor (`GpuShaderEditor`), a `JFrame` with its compiled GLSL window and a reload
    confirmation.

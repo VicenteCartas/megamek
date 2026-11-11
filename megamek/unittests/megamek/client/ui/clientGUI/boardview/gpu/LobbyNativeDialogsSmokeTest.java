@@ -55,10 +55,14 @@ import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.PortraitCatalog;
 import megamek.client.lobby.SbfStatsForm;
+import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.audio.SoundType;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.gdx.UiTextField;
+import megamek.client.ui.panels.CommonSettingsPane;
+import megamek.client.ui.settings.ClientSettingsForm;
 import megamek.common.Hex;
 import megamek.common.OffBoardDirection;
 import megamek.common.Player;
@@ -78,6 +82,7 @@ import megamek.common.orders.UnitOrders;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.planetaryConditions.Weather;
+import megamek.common.preference.PreferenceStore;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -617,6 +622,71 @@ class LobbyNativeDialogsSmokeTest {
             assertEquals(List.of(OptionsConstants.ADVANCED_DOUBLE_BLIND),
                   sent.getFirst().stream().map(IBasicOption::getName).toList());
             assertFalse(dialogs.isOpen(), "OK closes the options");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theClientSettingsTakeEffectAtOnceAndCancelPutsThemBack() {
+        UiTestStage.run(ui -> {
+            PreferenceStore store = new PreferenceStore();
+            store.setDefault(GUIPreferences.MASTER_VOLUME, 80);
+            store.setDefault(GUIPreferences.SOUND_MUTE_CHAT, true);
+            store.setDefault(GUIPreferences.SOUND_MUTE_MY_TURN, false);
+            store.setDefault(GUIPreferences.SOUND_MUTE_OTHERS_TURN, true);
+            store.setDefault(GUIPreferences.SOUND_BING_FILENAME_CHAT, "chat.wav");
+            int[] saved = { 0 };
+            List<SoundType> played = new ArrayList<>();
+            ClientSettingsView.Host host = new ClientSettingsView.Host() {
+                @Override
+                public void edt(Runnable work, Runnable then) {
+                    work.run();
+                    then.run();
+                }
+
+                @Override
+                public void play(SoundType sound) {
+                    played.add(sound);
+                }
+
+                @Override
+                public void save() {
+                    saved[0]++;
+                }
+            };
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            ClientSettingsView view = dialogs.clientSettings(new ClientSettingsForm(store),
+                  CommonSettingsPane.SETTINGS_AUDIO, host);
+            ui.draw();
+            assertEquals(ClientSettingsForm.AUDIO, view.pageId());
+            assertNotNull(ui.stage.getRoot().findActor("client-group-" + ClientSettingsForm.AUDIO));
+            assertFalse(find(ui, "client-reset-" + ClientSettingsForm.AUDIO).isVisible(),
+                  "a page at its defaults offers no reset");
+
+            Actor chat = find(ui, "client-setting-" + GUIPreferences.SOUND_MUTE_CHAT);
+            reveal(ui, chat);
+            click(ui, chat);
+            assertFalse(store.getBoolean(GUIPreferences.SOUND_MUTE_CHAT), "the switch unmutes the chat at once");
+            assertTrue(find(ui, "client-setting-" + GUIPreferences.SOUND_MUTE_CHAT + "-changed").isVisible());
+            assertTrue(find(ui, "client-reset-" + ClientSettingsForm.AUDIO).isVisible());
+
+            click(ui, find(ui, "client-play-chat"));
+            assertEquals(List.of(SoundType.BING_CHAT), played);
+
+            click(ui, find(ui, "client-cancel"));
+            assertFalse(dialogs.isOpen(), "Cancel closes the settings");
+            assertTrue(store.getBoolean(GUIPreferences.SOUND_MUTE_CHAT), "Cancel puts the chat's mute back");
+            assertEquals(0, saved[0]);
+
+            view = dialogs.clientSettings(new ClientSettingsForm(store), null, host);
+            ui.draw();
+            chat = find(ui, "client-setting-" + GUIPreferences.SOUND_MUTE_CHAT);
+            reveal(ui, chat);
+            click(ui, chat);
+            click(ui, find(ui, "client-ok"));
+            assertFalse(dialogs.isOpen(), "OK closes the settings");
+            assertFalse(store.getBoolean(GUIPreferences.SOUND_MUTE_CHAT), "OK keeps what was set");
+            assertEquals(1, saved[0], "OK stores the preferences");
             dialogs.dispose();
         });
     }

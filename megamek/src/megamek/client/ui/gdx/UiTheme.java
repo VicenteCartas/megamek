@@ -221,7 +221,9 @@ public final class UiTheme implements Disposable {
           Map.entry("building", 0xE7EE), Map.entry("factory", 0xEBBC), Map.entry("tree", 0xE406),
           Map.entry("decal", 0xE243), Map.entry("stack", 0xF500), Map.entry("train", 0xE570), Map.entry("water", 0xF084),
           Map.entry("road", 0xEB91), Map.entry("bridge", 0xEAC6), Map.entry("fuel-tank", 0xEC13), Map.entry("rules", 0xF1C2),
-          Map.entry("car", 0xE531), Map.entry("animal", 0xE91D));
+          Map.entry("car", 0xE531), Map.entry("animal", 0xE91D),
+          // The settings rail: flight (the aerospace rules), volume_up (Audio) and restart_alt (a page's reset)
+          Map.entry("flight", 0xE539), Map.entry("volume", 0xE050), Map.entry("restart", 0xF053));
     /**
      * Icons the prototype draws filled. The shipped font has no filled named instance, so their outlines are closed:
      * every texel that the glyph's outline encloses becomes opaque.

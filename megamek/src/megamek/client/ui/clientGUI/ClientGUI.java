@@ -1247,6 +1247,9 @@ public class ClientGUI extends AbstractClientGUI
      * Called when the user selects the "View->Client Settings" menu item.
      */
     private void showSettings() {
+        if (showNativeSettings(null)) {
+            return;
+        }
         // Do we need to create the "settings" dialog?
         if (commonSettingsDialog == null) {
             commonSettingsDialog = new CommonSettingsDialog(frame, this);
@@ -1256,12 +1259,23 @@ public class ClientGUI extends AbstractClientGUI
         commonSettingsDialog.setVisible(true);
     }
 
+    /**
+     * Shows the native Client Settings on the page of {@code route} over this client's lobby or battle window, when
+     * one shows; false otherwise, so the Swing dialog shows.
+     */
+    private boolean showNativeSettings(@Nullable String route) {
+        return GpuLobbyWindow.showClientSettings(this, route) || GpuBoardWindow.showClientSettings(this, route);
+    }
+
     /** Opens Client Settings, as View &gt; Client Settings does; for the lobby, whose window hides the menu bar. */
     public void openClientSettings() {
         showSettings();
     }
 
     private void showSettingsSubPage(String subpage) {
+        if (showNativeSettings(subpage)) {
+            return;
+        }
         // Do we need to create the "settings" dialog?
         if (commonSettingsDialog == null) {
             commonSettingsDialog = new CommonSettingsDialog(frame, this, subpage);

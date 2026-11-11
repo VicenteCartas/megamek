@@ -71,6 +71,7 @@ import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiRangeInput;
 import megamek.client.ui.gdx.UiVirtualList;
+import megamek.client.ui.settings.ClientSettingsForm;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.alphaStrike.cardDrawer.ASCard;
 import megamek.common.icons.Camouflage;
@@ -1029,6 +1030,14 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         if (stage != null) {
             closeMenus();
             nativeDialogs.gameOptions(form, host);
+        }
+    }
+
+    /** GPU thread: closes the lobby's open menus, then opens the Client Settings over the lobby on {@code page}. */
+    void clientSettingsDialog(ClientSettingsForm form, @Nullable String page, ClientSettingsView.Host host) {
+        if (stage != null) {
+            closeMenus();
+            nativeDialogs.clientSettings(form, page, host);
         }
     }
 
