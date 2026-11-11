@@ -27,6 +27,11 @@ public abstract class SettingsForm {
         /** A file's path; the row's values are the extensions it takes, without the dot. */
         FILE,
         /**
+         * A ranking of items, first first: the row's values are the items' ids and its labels their names, and the text
+         * is every id once, joined by commas.
+         */
+        ORDER,
+        /**
          * A key and the modifiers held with it, as AWT keeps them, in the text {@link #key(int, int)} makes; "0,0" while
          * nothing is bound.
          */

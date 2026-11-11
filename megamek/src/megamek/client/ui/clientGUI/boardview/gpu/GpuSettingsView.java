@@ -30,6 +30,7 @@ import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiFormField;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiList;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiSliderInput;
 import megamek.client.ui.gdx.UiTextField;
@@ -144,7 +145,7 @@ final class GpuSettingsView {
 
     /** One shown setting: its control, its form field (null for a switch), its reading, picker and changed dot. */
     private record Control(Row row, Actor input, @Nullable UiFormField field, @Nullable Label reading,
-          @Nullable UiButton picker, Actor changed, @Nullable KeyControl key) { }
+          @Nullable UiButton picker, Actor changed, @Nullable KeyControl key, @Nullable OrderControl order) { }
 
     /**
      * A key binding's parts: the keycap that shows its keys and takes a new one on a click, its buttons back to the
@@ -485,6 +486,7 @@ final class GpuSettingsView {
         Label reading = null;
         UiButton picker = null;
         KeyControl key = null;
+        OrderControl order = null;
         switch (row.kind()) {
             case BOOLEAN -> {
                 UiChoice toggle = kit.toggleSwitch(row.label(), form.bool(row.name()));
@@ -570,6 +572,12 @@ final class GpuSettingsView {
                 field = kit.formField(row.label(), text);
                 line.add(field).width(fieldWidth).left();
             }
+            case ORDER -> {
+                order = new OrderControl(row, name);
+                input = order.list;
+                field = kit.formField(row.label(), order.list);
+                line.add(field).growX().minWidth(0);
+            }
             case KEY -> {
                 key = keyControl(row, name);
                 input = key.cap;
@@ -589,7 +597,7 @@ final class GpuSettingsView {
         // Beside a field's input rather than its label
         line.add(marks).left().top().padTop(field == null ? size("control.sm") / 2 - changed.getPrefHeight() / 2
               : size("control.sm") / 2 + space("xs"));
-        if (row.kind() != Kind.SLIDER && row.kind() != Kind.FILE && row.kind() != Kind.KEY) {
+        if (row.kind() != Kind.SLIDER && row.kind() != Kind.FILE && row.kind() != Kind.KEY && row.kind() != Kind.ORDER) {
             line.add().expandX();
         }
         if (key != null) {
@@ -614,8 +622,80 @@ final class GpuSettingsView {
                 }
             }
         });
-        controls.put(row.name(), new Control(row, input, field, reading, picker, changed, key));
+        controls.put(row.name(), new Control(row, input, field, reading, picker, changed, key, order));
         return line;
+    }
+
+    // ---- Rankings
+
+    /**
+     * A ranking ({@link Kind#ORDER}): a row per item, first first, each with its place, a grip that drags it and arrows
+     * that move it a place, as the keyboard would. A move the rows finished goes to the form, and the rows then show
+     * the form's order.
+     */
+    private final class OrderControl {
+        final UiList list = new UiList(kit, UiTheme.TOKEN);
+        private final Row row;
+        private final Map<String, UiButton> items = new LinkedHashMap<>();
+        private String shown = "";
+        private boolean disabled;
+
+        OrderControl(Row row, String name) {
+            this.row = row;
+            for (int index = 0; index < row.values().size(); index++) {
+                String id = row.values().get(index);
+                UiButton item = kit.button(UiTheme.TOKEN_ROW, "grip", row.labels().get(index), null);
+                item.setName(name + "-" + id);
+                item.getLabel().setAlignment(Align.left);
+                item.getCell(item.getLabel()).growX();
+                item.add(arrow(item, name + "-" + id + "-up", "arrow-up", "ClientSettings.gameplay.sensors.up", -1));
+                item.add(arrow(item, name + "-" + id + "-down", "arrow-down", "ClientSettings.gameplay.sensors.down",
+                      1));
+                items.put(id, item);
+            }
+            list.reorderable((from, to) -> {
+                List<String> ids = new ArrayList<>(List.of(shown.split(",")));
+                ids.add(to, ids.remove((int) from));
+                changed(row, () -> form.text(row.name(), String.join(",", ids)));
+            });
+        }
+
+        private UiButton arrow(UiButton item, String name, String icon, String tip, int delta) {
+            UiButton arrow = kit.button("button-quiet" + UiTheme.COMPACT, icon, null, null);
+            arrow.setName(name);
+            kit.tip(arrow, true).getActor().setText(Messages.getString(tip));
+            UiKit.onChange(arrow, () -> {
+                if (!disabled && !syncing && !flavor.busy()) {
+                    list.move(list.getChildren().indexOf(item, true), delta);
+                }
+            });
+            return arrow;
+        }
+
+        /** Shows the form's order, unless a row is moving, and whether it can change. */
+        void show(boolean disabled) {
+            this.disabled = disabled;
+            String value = form.text(row.name());
+            if (!value.equals(shown) && !list.busy()) {
+                shown = value;
+                list.clearChildren();
+                for (String id : value.split(",")) {
+                    UiButton item = items.get(id);
+                    if (item != null) {
+                        list.add(item, disabled ? null : item);
+                    }
+                }
+            }
+            int place = 0;
+            for (String id : shown.split(",")) {
+                UiButton item = items.get(id);
+                if (item != null) {
+                    place++;
+                    item.findActor(item.getName() + "-up").setVisible(place > 1);
+                    item.findActor(item.getName() + "-down").setVisible(place < items.size());
+                }
+            }
+        }
     }
 
     // ---- Key bindings
@@ -875,6 +955,9 @@ final class GpuSettingsView {
                 }
                 if (control.key() != null) {
                     showKey(control, disabled);
+                }
+                if (control.order() != null) {
+                    control.order().show(disabled);
                 }
                 control.changed().setVisible(form.changed(name));
             }

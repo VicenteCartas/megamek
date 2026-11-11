@@ -72,6 +72,7 @@ import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.containers.MunitionTree;
+import megamek.common.equipment.SensorFamily;
 import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
 import megamek.common.icons.Portrait;
@@ -741,6 +742,51 @@ class LobbyNativeDialogsSmokeTest {
             click(ui, find(ui, "client-cancel"));
             assertEquals(1f, store.getFloat(GUIPreferences.GUI_SCALE), 1e-6, "Cancel puts the scale back");
             assertFalse(store.getBoolean(GUIPreferences.COLOR_BLIND_PALETTE));
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void aSensorMovesUpTheRankingByItsArrowAndTheWarningsShowTheirPrompt() {
+        UiTestStage.run(ui -> {
+            List<String> sensors = SensorFamily.defaultOrder().stream().map(Enum::name).toList();
+            PreferenceStore store = new PreferenceStore();
+            store.setDefault(GUIPreferences.SENSOR_PREFERENCE_ORDER, String.join(",", sensors));
+            store.setDefault(GUIPreferences.NAG_FOR_PSR, true);
+            ClientSettingsView.Host host = (work, then) -> {
+                work.run();
+                then.run();
+            };
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            ClientSettingsForm form = new ClientSettingsForm(store, new ClientPreferences(new PreferenceStore()));
+            ClientSettingsView view = dialogs.clientSettings(form, ClientSettingsForm.AUTOMATION, host);
+            ui.draw();
+            assertEquals(ClientSettingsForm.AUTOMATION, view.pageId());
+            String name = "client-setting-" + GUIPreferences.SENSOR_PREFERENCE_ORDER + "-" + sensors.getFirst();
+            assertFalse(find(ui, name + "-up").isVisible(), "the first sensor cannot go higher");
+            Actor down = find(ui, name + "-down");
+            reveal(ui, down);
+            click(ui, down);
+            for (int frame = 0; frame < 200 && store.getString(GUIPreferences.SENSOR_PREFERENCE_ORDER)
+                  .startsWith(sensors.getFirst() + ","); frame++) {
+                ui.stage.act(.05f);
+            }
+            List<String> swapped = new ArrayList<>(sensors);
+            swapped.add(1, swapped.removeFirst());
+            assertEquals(String.join(",", swapped), store.getString(GUIPreferences.SENSOR_PREFERENCE_ORDER),
+                  "the arrow moves the sensor one place down and applies at once");
+            ui.draw();
+            assertTrue(find(ui, name + "-up").isVisible(), "the moved sensor can go back up");
+
+            click(ui, find(ui, "client-page-" + ClientSettingsForm.WARNINGS));
+            ui.draw();
+            assertEquals(ClientSettingsForm.WARNINGS, view.pageId());
+            assertEquals(top(find(ui, "client-search")), top(find(ui, "client-prompt-sample").getParent()), 1,
+                  "the prompt's frame lines up with the search");
+
+            click(ui, find(ui, "client-cancel"));
+            assertEquals(String.join(",", sensors), store.getString(GUIPreferences.SENSOR_PREFERENCE_ORDER),
+                  "Cancel puts the ranking back");
             dialogs.dispose();
         });
     }

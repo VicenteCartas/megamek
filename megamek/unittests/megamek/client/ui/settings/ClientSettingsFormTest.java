@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.panels.CommonSettingsPane;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.common.equipment.SensorFamily;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceStore;
 import org.junit.jupiter.api.AfterEach;
@@ -25,6 +26,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class ClientSettingsFormTest {
+    private static final String SENSORS = String.join(",", SensorFamily.defaultOrder().stream().map(Enum::name).toList());
+
     private PreferenceStore store;
     private ClientPreferences client;
     private final List<String> heard = new ArrayList<>();
@@ -54,6 +57,9 @@ class ClientSettingsFormTest {
         store.setDefault(GUIPreferences.ADVANCED_KEY_REPEAT_DELAY, 0);
         store.setDefault(GUIPreferences.ADVANCED_KEY_REPEAT_RATE, 20);
         store.setDefault(GUIPreferences.TOOLTIP_DELAY, 1000);
+        store.setDefault(GUIPreferences.ADVANCED_NO_SAVE_NAG, false);
+        store.setDefault(GUIPreferences.NAG_FOR_PSR, true);
+        store.setDefault(GUIPreferences.SENSOR_PREFERENCE_ORDER, SENSORS);
         store.addPreferenceChangeListener(event -> heard.add(event.getName()));
         client = new ClientPreferences(new PreferenceStore());
     }
@@ -319,5 +325,63 @@ class ClientSettingsFormTest {
         assertEquals(35, store.getInt(GUIPreferences.ADVANCED_KEY_REPEAT_RATE));
         form.search("hotkeys");
         assertTrue(form.visiblePages().stream().allMatch(page -> ClientSettingsForm.CONTROLS.equals(page.categoryId())));
+    }
+
+    @Test
+    void theGameplayPagesAreThere() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+
+        for (String page : List.of(ClientSettingsForm.WARNINGS, ClientSettingsForm.AUTOMATION, ClientSettingsForm.BOTS,
+              ClientSettingsForm.UNITS)) {
+            assertNotNull(form.page(page), page);
+        }
+        assertEquals(ClientSettingsForm.BOTS, form.pageOf(CommonSettingsPane.SETTINGS_AIDISPLAY));
+        assertTrue(form.bool(GUIPreferences.NAG_FOR_PSR));
+    }
+
+    @Test
+    void aRankingKeepsItsKnownIdsAndGainsTheMissingOnes() {
+        assertEquals("B,A,C", ClientSettingsForm.order("B, nothing,B,A", List.of("A", "B", "C")));
+        assertEquals("A,B,C", ClientSettingsForm.order(null, List.of("A", "B", "C")));
+    }
+
+    @Test
+    void theSensorRankingIsWrittenAsItsIds() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+        List<String> ids = SensorFamily.defaultOrder().stream().map(Enum::name).toList();
+        assertEquals(SENSORS, form.text(GUIPreferences.SENSOR_PREFERENCE_ORDER));
+
+        String last = ids.getLast();
+        form.text(GUIPreferences.SENSOR_PREFERENCE_ORDER, last);
+        String expected = ClientSettingsForm.order(last, ids);
+        assertEquals(expected, form.text(GUIPreferences.SENSOR_PREFERENCE_ORDER));
+        assertTrue(expected.startsWith(last + ","));
+        form.apply().run();
+
+        assertEquals(expected, store.getString(GUIPreferences.SENSOR_PREFERENCE_ORDER));
+    }
+
+    @Test
+    void theAskingSwitchesThatSayNoAreTurnedAround() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+
+        assertTrue(form.bool(GUIPreferences.ADVANCED_NO_SAVE_NAG), "the save offer is on while its no-nag is off");
+        form.bool(GUIPreferences.ADVANCED_NO_SAVE_NAG, false);
+        assertEquals(!client.defaultAutoEjectDisabled(), form.bool(ClientPreferences.DEFAULT_AUTO_EJECT_DISABLED));
+        form.bool(ClientPreferences.DEFAULT_AUTO_EJECT_DISABLED, false);
+        form.apply().run();
+
+        assertTrue(store.getBoolean(GUIPreferences.ADVANCED_NO_SAVE_NAG));
+        assertTrue(client.defaultAutoEjectDisabled());
+    }
+
+    @Test
+    void theProtoMekCodesStartOnALetterOfAnAlphabet() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+
+        form.text(ClientPreferences.UNIT_START_CHAR, "945");
+        form.apply().run();
+
+        assertEquals('\u03B1', client.getUnitStartChar());
     }
 }

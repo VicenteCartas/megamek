@@ -8,17 +8,21 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 import jakarta.annotation.Nullable;
+import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.panels.CommonSettingsPane;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.KeyBindParser;
+import megamek.common.enums.WeaponSortOrder;
+import megamek.common.equipment.SensorFamily;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.IPreferenceStore;
 import megamek.common.preference.PreferenceManager;
@@ -46,6 +50,14 @@ public final class ClientSettingsForm extends SettingsForm {
     public static final String BIND = "bind.";
     /** The start of a key binding page's id, which keeps it apart from the old Swing routes such as "overlays". */
     public static final String KEYS = "keys.";
+    /** The Gameplay category and its pages. */
+    public static final String GAMEPLAY = "gameplay";
+    public static final String WARNINGS = "warnings";
+    public static final String AUTOMATION = "automation";
+    public static final String BOTS = "bots";
+    public static final String UNITS = "units";
+    /** The ProtoMek point codes' first letters, as the client preferences keep them: A, Alpha and alpha. */
+    static final List<String> UNIT_START_CHARS = List.of("65", "913", "945");
     /** The key bindings the Controls pages leave out: they scale the Swing interface, and the 3D board ignores them. */
     static final Set<KeyCommandBind> DROPPED_BINDS = Set.of(KeyCommandBind.INC_GUI_SCALE,
           KeyCommandBind.DEC_GUI_SCALE);
@@ -53,7 +65,8 @@ public final class ClientSettingsForm extends SettingsForm {
     static final List<String> LOCALES = List.of("en", "de", "ru", "es");
     /** The Swing dialog's routes that lead to a native page under another id. */
     private static final Map<String, String> ROUTES = Map.of(CommonSettingsPane.SETTINGS_MAIN, DISPLAY,
-          CommonSettingsPane.SETTINGS_MAIN + ".application", DISPLAY, CommonSettingsPane.SETTINGS_KEYBINDS, KEYBOARD);
+          CommonSettingsPane.SETTINGS_MAIN + ".application", DISPLAY, CommonSettingsPane.SETTINGS_KEYBINDS, KEYBOARD,
+          CommonSettingsPane.SETTINGS_AIDISPLAY, BOTS);
     /** The Controls pages of key bindings, in order, each with its sections and the commands each lists. */
     private static final List<BindPage> BIND_PAGES = List.of(
           new BindPage("camera",
@@ -166,8 +179,15 @@ public final class ClientSettingsForm extends SettingsForm {
         pages.add(display(gui, client));
         pages.add(keyboard(gui));
         BIND_PAGES.forEach(page -> pages.add(binds(page)));
+        pages.add(warnings(gui));
+        pages.add(automation(gui, client));
+        pages.add(bots(gui, client));
+        pages.add(units(client));
         for (Map.Entry<String, Setting> entry : settings.entrySet()) {
             String value = read(entry.getValue());
+            if (entry.getValue().kind() == Kind.ORDER) {
+                value = order(value, row(entry.getKey()).values());
+            }
             values.put(entry.getKey(), value);
             started.put(entry.getKey(), value);
         }
@@ -256,6 +276,128 @@ public final class ClientSettingsForm extends SettingsForm {
               row(gui, GUIPreferences.TOOLTIP_DELAY, Kind.SLIDER, false, "ClientSettings.controls.tooltipDelay",
                     "ClientSettings.controls.tooltipDelay.help", List.of("0", "3000", "100"), List.of("ms"))));
         return controlsPage(KEYBOARD, KEYBOARD, sections);
+    }
+
+    /** The questions MegaMek asks before a move, an attack or a step it thinks the player may regret. */
+    private Page warnings(IPreferenceStore gui) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(WARNINGS, "deployment", "ClientSettings.gameplay.warnings.deployment",
+              ask(gui, GUIPreferences.NAG_FOR_DOOMED, "doomed", "CommonSettingsDialog.nagForDoomedDeployment.tooltip"),
+              ask(gui, GUIPreferences.NAG_FOR_AUTO_EJECT, "autoEject", "CommonSettingsDialog.nagForAutoEject.tooltip")));
+        sections.add(section(WARNINGS, "movement", "ClientSettings.gameplay.warnings.movement",
+              ask(gui, GUIPreferences.NAG_FOR_PSR, "psr", null),
+              ask(gui, GUIPreferences.NAG_FOR_MASC, "masc", null),
+              ask(gui, GUIPreferences.NAG_FOR_SPRINT, "sprint", null),
+              ask(gui, GUIPreferences.NAG_FOR_MECHANICAL_FALL_DAMAGE, "jumpFall",
+                    "CommonSettingsDialog.nagForMechanicalJumpFallDamage.tooltip"),
+              ask(gui, GUIPreferences.NAG_FOR_CRUSHING_BUILDINGS, "buildings",
+                    "CommonSettingsDialog.nagForCrushingBuildings.tooltip"),
+              ask(gui, GUIPreferences.NAG_FOR_DOOMED_MOVE, "water", "CommonSettingsDialog.nagForDoomedMove.tooltip"),
+              ask(gui, GUIPreferences.NAG_FOR_WIGE_LANDING, "wige", "CommonSettingsDialog.nagForWiGELanding.tooltip"),
+              ask(gui, GUIPreferences.NAG_FOR_LAUNCH_DOORS, "launch", "CommonSettingsDialog.nagForLaunchDoors.tooltip"),
+              ask(gui, GUIPreferences.NAG_FOR_NO_UNJAM_RAC, "jammed", "CommonSettingsDialog.nagForUnJamRAC.tooltip")));
+        sections.add(section(WARNINGS, "combat", "ClientSettings.gameplay.warnings.combat",
+              ask(gui, GUIPreferences.NAG_FOR_NO_ACTION, "idle", "CommonSettingsDialog.nagForNoAction.tooltip"),
+              ask(gui, GUIPreferences.NAG_FOR_OVERHEAT, "overheat", "CommonSettingsDialog.nagForOverheat.tooltip"),
+              ask(gui, GUIPreferences.NAG_FOR_DISHONOR, "dishonor", "CommonSettingsDialog.nagForDishonor.tooltip"),
+              ask(gui, GUIPreferences.NAG_FOR_NO_ARTILLERY_DESIGNATION, "artillery",
+                    "CommonSettingsDialog.nagForNoArtilleryDesignation.tooltip")));
+        sections.add(section(WARNINGS, "table", "ClientSettings.gameplay.warnings.table",
+              ask(gui, GUIPreferences.NAG_FOR_ODD_SIZED_BOARD, "oddBoard",
+                    "CommonSettingsDialog.nagForOddSizedBoard.tooltip"),
+              row(gui, GUIPreferences.ADVANCED_NO_SAVE_NAG, Kind.BOOLEAN, true, "ClientSettings.gameplay.ask.save",
+                    "AdvancedOptions.NoSaveNag.tooltip", List.of()),
+              ask(gui, GUIPreferences.NAG_FOR_README, "welcome", null)));
+        return gameplayPage(WARNINGS, sections);
+    }
+
+    /** A question MegaMek asks; its label is {@code ClientSettings.gameplay.ask.<name>}, and so is its help without one. */
+    private Row ask(IPreferenceStore gui, String key, String name, @Nullable String helpKey) {
+        String labelKey = "ClientSettings.gameplay.ask." + name;
+        return row(gui, key, Kind.BOOLEAN, false, labelKey, helpKey == null ? labelKey + ".help" : helpKey,
+              List.of());
+    }
+
+    /** What MegaMek does for the player: in a turn, with a unit's weapons and sensors, and with the lobby. */
+    private Page automation(IPreferenceStore gui, ClientPreferences client) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(AUTOMATION, "turn", "ClientSettings.gameplay.automation.turn",
+              row(gui, GUIPreferences.AUTO_SELECT_NEXT, Kind.BOOLEAN, false, "ClientSettings.gameplay.autoSelect",
+                    "CommonSettingsDialog.useAutoSelectNext.tooltip", List.of()),
+              row(gui, GUIPreferences.AUTO_END_FIRING, Kind.BOOLEAN, false, "ClientSettings.gameplay.autoEndFiring",
+                    "ClientSettings.gameplay.autoEndFiring.help", List.of()),
+              row(gui, GUIPreferences.AUTO_DECLARE_SEARCHLIGHT, Kind.BOOLEAN, false,
+                    "ClientSettings.gameplay.searchlight", "CommonSettingsDialog.autoDeclareSearchlight.tooltip",
+                    List.of())));
+        sections.add(section(AUTOMATION, "paths", "ClientSettings.gameplay.automation.paths",
+              row(gui, GUIPreferences.BOARD_MOVE_DEFAULT_CLIMB_MODE, Kind.BOOLEAN, false,
+                    "ClientSettings.gameplay.climb", "ClientSettings.gameplay.climb.help", List.of()),
+              row(client, ClientPreferences.MAX_PATHFINDER_TIME, Kind.SLIDER, false,
+                    "ClientSettings.gameplay.pathfinder", "ClientSettings.gameplay.pathfinder.help",
+                    List.of("100", "10000", "100"), List.of("ms"))));
+        List<WeaponSortOrder> sorts = Arrays.stream(WeaponSortOrder.values()).filter(sort -> !sort.isCustom())
+              .toList();
+        List<SensorFamily> sensors = SensorFamily.defaultOrder();
+        sections.add(section(AUTOMATION, "gear", "ClientSettings.gameplay.automation.gear",
+              row(gui, GUIPreferences.DEFAULT_WEAPON_SORT_ORDER, Kind.CHOICE, "ClientSettings.gameplay.weaponSort",
+                    sorts.stream().map(Enum::name).toList(), sorts.stream().map(WeaponSortOrder::toString).toList()),
+              row(gui, GUIPreferences.SENSOR_PREFERENCE_ORDER, Kind.ORDER, "ClientSettings.gameplay.sensors",
+                    sensors.stream().map(Enum::name).toList(),
+                    sensors.stream().map(SensorFamily::getDisplayName).toList())));
+        sections.add(section(AUTOMATION, "lobby", "ClientSettings.gameplay.automation.lobby",
+              row(gui, GUIPreferences.ADVANCED_SAVE_LOBBY_ON_START, Kind.BOOLEAN, false,
+                    "ClientSettings.gameplay.lobbyBackup", "AdvancedOptions.SaveLobbyOnStart.tooltip", List.of())));
+        return gameplayPage(AUTOMATION, sections);
+    }
+
+    /** Princess, the bot: how a new one plays, and games where only bots fight. */
+    private Page bots(IPreferenceStore gui, ClientPreferences client) {
+        List<Section> sections = new ArrayList<>();
+        List<String> behaviors = new ArrayList<>(BehaviorSettingsFactory.getInstance().getBehaviorNameList());
+        String favorite = client.getFavoritePrincessBehaviorSetting();
+        if (favorite != null && !favorite.isBlank() && !behaviors.contains(favorite)) {
+            behaviors.add(favorite);
+        }
+        sections.add(section(BOTS, "princess", "ClientSettings.gameplay.bots.princess",
+              row(client, ClientPreferences.FAVORITE_PRINCESS_BEHAVIOR_SETTING, Kind.CHOICE,
+                    "ClientSettings.gameplay.behavior", List.copyOf(behaviors), List.copyOf(behaviors)),
+              row(client, ClientPreferences.ENABLE_EXPERIMENTAL_BOT_FEATURES, Kind.BOOLEAN, false,
+                    "ClientSettings.gameplay.experimental", "CommonSettingsDialog.enableExperimentalBotFeatures.tooltip",
+                    List.of())));
+        sections.add(section(BOTS, "watch", "ClientSettings.gameplay.bots.watch",
+              row(gui, GUIPreferences.BOT_COMMANDS_PAUSE_AT_START, Kind.BOOLEAN, false,
+                    "ClientSettings.gameplay.pauseBots", "CommonSettingsDialog.pauseBotGamesAtStart.tooltip", List.of()),
+              row(client, ClientPreferences.SHOW_AUTO_RESOLVE_PANEL, Kind.BOOLEAN, false,
+                    "ClientSettings.gameplay.autoResolve", "CommonSettingsDialog.showAutoResolvePanel.tooltip",
+                    List.of())));
+        return gameplayPage(BOTS, sections);
+    }
+
+    /** How a unit added in the lobby starts: its crew, its ejection and its codes. */
+    private Page units(ClientPreferences client) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(UNITS, "crews", "ClientSettings.gameplay.units.crews",
+              row(client, ClientPreferences.GENERATE_NAMES, Kind.BOOLEAN, false, "ClientSettings.gameplay.names",
+                    "ClientSettings.gameplay.names.help", List.of()),
+              row(client, ClientPreferences.USE_AVERAGE_SKILLS, Kind.BOOLEAN, false, "ClientSettings.gameplay.skills",
+                    "ClientSettings.gameplay.skills.help", List.of()),
+              row(client, ClientPreferences.DEFAULT_AUTO_EJECT_DISABLED, Kind.BOOLEAN, true,
+                    "ClientSettings.gameplay.eject", "ClientSettings.gameplay.eject.help", List.of())));
+        sections.add(section(UNITS, "labels", "ClientSettings.gameplay.units.labels",
+              row(client, ClientPreferences.UNIT_START_CHAR, Kind.INTEGER_CHOICE, "ClientSettings.gameplay.protoCodes",
+                    UNIT_START_CHARS, List.of("A, B, C, D\u2026", "\u0391, \u0392, \u0393, \u0394\u2026",
+                          "\u03B1, \u03B2, \u03B3, \u03B4\u2026")),
+              row(client, ClientPreferences.SHOW_UNIT_ID, Kind.BOOLEAN, false, "ClientSettings.gameplay.unitId",
+                    "ClientSettings.gameplay.unitId.help", List.of())));
+        return gameplayPage(UNITS, sections);
+    }
+
+    /** A Gameplay page; its id picks its texts. */
+    private Page gameplayPage(String id, List<Section> sections) {
+        String title = Messages.getString("ClientSettings.gameplay." + id);
+        String category = Messages.getString("ClientSettings.gameplay");
+        return new Page(id, title, GAMEPLAY, category, false, List.copyOf(sections),
+              searchText(GAMEPLAY, category, title, Messages.getString("ClientSettings.gameplay.keywords")));
     }
 
     /** A Controls page of key bindings, each a row named {@link #BIND} and its command. */
@@ -382,6 +524,8 @@ public final class ClientSettingsForm extends SettingsForm {
             return;
         } else if (setting.kind() == Kind.KEY) {
             text = key(keyCode(text), keyModifiers(text));
+        } else if (setting.kind() == Kind.ORDER) {
+            text = order(text, row(name).values());
         }
         values.put(name, text == null ? "" : text);
     }
@@ -563,6 +707,21 @@ public final class ClientSettingsForm extends SettingsForm {
             case SLIDER, INTEGER, INTEGER_CHOICE -> store.setValue(setting.key(), Integer.parseInt(value));
             default -> store.setValue(setting.key(), value);
         }
+    }
+
+    /**
+     * A ranking as the form keeps it: the known ids of {@code text} in their order, each once, then the ids it left out
+     * in their shipped order, so a sensor added since the ranking was kept still has a place.
+     */
+    static String order(@Nullable String text, List<String> ids) {
+        Set<String> ranked = new LinkedHashSet<>();
+        for (String id : Objects.requireNonNullElse(text, "").split(",")) {
+            if (ids.contains(id.strip())) {
+                ranked.add(id.strip());
+            }
+        }
+        ranked.addAll(ids);
+        return String.join(",", ranked);
     }
 
     /** The language of a kept locale such as "de" or "en_US"; one MegaMek has no texts in reads as the default. */

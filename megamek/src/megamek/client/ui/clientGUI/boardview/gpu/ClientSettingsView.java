@@ -25,6 +25,8 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.utils.Align;
 import jakarta.annotation.Nullable;
+import megamek.client.bot.princess.BehaviorSettings;
+import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.audio.SoundManager;
@@ -101,7 +103,8 @@ final class ClientSettingsView {
           GUIPreferences.SOUND_MUTE_MY_TURN, "otherTurns",
           GUIPreferences.SOUND_MUTE_OTHERS_TURN);
     private static final Map<String, String> ICONS = Map.of(ClientSettingsForm.AUDIO, "volume",
-          ClientSettingsForm.DISPLAY, "display", ClientSettingsForm.CONTROLS, "keyboard");
+          ClientSettingsForm.DISPLAY, "display", ClientSettingsForm.CONTROLS, "keyboard", ClientSettingsForm.GAMEPLAY,
+          "gameplay");
     /** The scales, which take effect where the slider is let go, as they move the card under the pointer. */
     private static final Set<String> SCALES = Set.of(GUIPreferences.GUI_SCALE, GUIPreferences.BOARD_UI_SCALE);
 
@@ -117,6 +120,9 @@ final class ClientSettingsView {
     private Table soundCheck;
     private DisplaySample sample;
     private KeyboardSample keyboard;
+    private PromptSample prompts;
+    private PrincessSample princess;
+    private RosterSample roster;
     private Actor restart;
     private UiFileDialog files;
     private boolean applying;
@@ -192,13 +198,24 @@ final class ClientSettingsView {
             soundCheck = ClientSettingsForm.AUDIO.equals(page.id()) ? soundCheck() : null;
             sample = ClientSettingsForm.DISPLAY.equals(page.id()) ? new DisplaySample() : null;
             keyboard = binds(page) ? new KeyboardSample(page) : null;
-            return soundCheck != null ? soundCheck : sample != null ? sample : keyboard;
+            prompts = ClientSettingsForm.WARNINGS.equals(page.id()) ? new PromptSample(page) : null;
+            princess = ClientSettingsForm.BOTS.equals(page.id()) ? new PrincessSample() : null;
+            roster = ClientSettingsForm.UNITS.equals(page.id()) ? new RosterSample() : null;
+            for (Table preview : new Table[] { soundCheck, sample, keyboard, prompts, princess, roster }) {
+                if (preview != null) {
+                    return preview;
+                }
+            }
+            return null;
         }
 
         @Override
         void pointed(@Nullable Row row) {
             if (keyboard != null) {
                 keyboard.point(row);
+            }
+            if (prompts != null) {
+                prompts.point(row);
             }
         }
 
@@ -306,6 +323,15 @@ final class ClientSettingsView {
         if (keyboard != null) {
             keyboard.show();
         }
+        if (prompts != null) {
+            prompts.show();
+        }
+        if (princess != null) {
+            princess.show();
+        }
+        if (roster != null) {
+            roster.show();
+        }
         if (restart != null) {
             restart.setVisible(form.changed(ClientPreferences.LOCALE));
         }
@@ -387,6 +413,210 @@ final class ClientSettingsView {
             Color color = new Color();
             Color.argb8888ToColor(color, tokens.color(role, Mode.DARK));
             return color;
+        }
+    }
+
+    /**
+     * The Warnings page's preview: how many of its warnings ask first, and the prompt the pointed one brings up in a
+     * game, faded while it is off.
+     */
+    private final class PromptSample extends Table {
+        private final List<Row> asks;
+        private final Label tally;
+        private final Table prompt;
+        private final Label question;
+        private final Label detail;
+        private final Label state;
+        private Row shown;
+
+        PromptSample(Page page) {
+            top();
+            setName("client-prompt-sample");
+            defaults().left().growX();
+            asks = page.sections().stream().flatMap(section -> section.rows().stream())
+                  .filter(row -> row.kind() == SettingsForm.Kind.BOOLEAN).toList();
+            add(kit.caption(Messages.getString("ClientSettings.prompt"), true)).row();
+            add(view.wrapped(Messages.getString("ClientSettings.prompt.summary"), "small", "text.muted"))
+                  .padTop(space("xs")).row();
+            tally = view.wrapped("", "body", "text.secondary");
+            tally.setName("client-prompt-tally");
+            add(tally).padTop(space("md")).row();
+            prompt = kit.card();
+            prompt.setName("client-prompt-card");
+            prompt.pad(space("md"));
+            prompt.defaults().left().growX();
+            Table head = new Table();
+            head.add(kit.icon("warn", 18, UiTheme.tokenColor("status.warning"))).padRight(space("sm"));
+            head.add(kit.typeLabel(Messages.getString("ClientSettings.prompt.title"), "label", "text.primary"))
+                  .left().growX();
+            prompt.add(head).row();
+            question = view.wrapped("", "body", "text.primary");
+            question.setName("client-prompt-question");
+            prompt.add(question).padTop(space("sm")).row();
+            detail = view.wrapped("", "small", "text.secondary");
+            prompt.add(detail).padTop(space("xs")).row();
+            Table buttons = new Table();
+            buttons.right();
+            UiButton cancel = kit.button("button-secondary" + UiTheme.COMPACT, null, Messages.getString("Cancel.text"),
+                  null);
+            UiButton go = kit.button("button-primary" + UiTheme.COMPACT, null,
+                  Messages.getString("ClientSettings.prompt.go"), null);
+            cancel.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
+            go.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
+            buttons.add(cancel);
+            buttons.add(go).padLeft(space("sm"));
+            prompt.add(buttons).padTop(space("md")).row();
+            add(prompt).padTop(space("md")).row();
+            state = view.wrapped("", "small", "text.secondary");
+            state.setName("client-prompt-state");
+            add(state).padTop(space("sm")).row();
+            shown = asks.isEmpty() ? null : asks.getFirst();
+            show();
+        }
+
+        /** The pointed warning shows until another is pointed at. */
+        void point(@Nullable Row row) {
+            if (row != null && asks.contains(row)) {
+                shown = row;
+                show();
+            }
+        }
+
+        void show() {
+            long on = asks.stream().filter(row -> form.bool(row.name())).count();
+            tally.setText(Messages.getString("ClientSettings.prompt.tally", on, asks.size()));
+            prompt.setVisible(shown != null);
+            if (shown == null) {
+                state.setText("");
+                return;
+            }
+            boolean asking = form.bool(shown.name());
+            question.setText(shown.label());
+            detail.setText(GpuSettingsView.plain(shown.tooltip()));
+            prompt.getColor().a = asking ? 1 : 0.35f;
+            state.setText(Messages.getString(asking ? "ClientSettings.prompt.on" : "ClientSettings.prompt.off"));
+            state.setColor(UiTheme.tokenColor(asking ? "status.success" : "text.muted"));
+        }
+    }
+
+    /** The Bots page's preview: the dials of the behavior a new Princess starts with, and her experimental features. */
+    private final class PrincessSample extends Table {
+        private final Label behavior;
+        private final UiKit.Meter bravery;
+        private final UiKit.Meter aggression;
+        private final UiKit.Meter support;
+        private final UiKit.Meter caution;
+        private final UiKit.Meter selfPreservation;
+        private final Label experimental;
+
+        PrincessSample() {
+            top();
+            setName("client-princess-sample");
+            defaults().left().growX();
+            Table head = new Table();
+            head.add(kit.icon("bot", 22, UiTheme.tokenColor("accent.primary"))).padRight(space("sm"));
+            head.add(kit.caption(Messages.getString("ClientSettings.princess"), true)).left().growX();
+            add(head).row();
+            add(view.wrapped(Messages.getString("ClientSettings.princess.summary"), "small", "text.muted"))
+                  .padTop(space("xs")).row();
+            behavior = view.wrapped("", "title", "text.primary");
+            behavior.setName("client-princess-behavior");
+            add(behavior).padTop(space("md")).row();
+            bravery = dial("bravery");
+            aggression = dial("aggression");
+            support = dial("support");
+            caution = dial("caution");
+            selfPreservation = dial("selfPreservation");
+            experimental = view.wrapped("", "small", "text.secondary");
+            experimental.setName("client-princess-experimental");
+            add(experimental).padTop(space("lg")).row();
+            show();
+        }
+
+        private UiKit.Meter dial(String name) {
+            UiKit.Meter meter = kit.meter(Messages.getString("ClientSettings.princess." + name), false, true);
+            meter.setName("client-princess-" + name);
+            add(meter).padTop(space("md")).row();
+            return meter;
+        }
+
+        void show() {
+            BehaviorSettingsFactory factory = BehaviorSettingsFactory.getInstance();
+            String name = form.text(ClientPreferences.FAVORITE_PRINCESS_BEHAVIOR_SETTING);
+            BehaviorSettings settings = factory.getBehaviorOrDefault(name, factory.DEFAULT_BEHAVIOR);
+            behavior.setText(name);
+            Color accent = UiTheme.tokenColor("accent.primary");
+            set(bravery, settings.getBraveryIndex(), accent);
+            set(aggression, settings.getHyperAggressionIndex(), accent);
+            set(support, settings.getMutualSupportIndex(), accent);
+            set(caution, settings.getFallShameIndex(), accent);
+            set(selfPreservation, settings.getSelfPreservationIndex(), accent);
+            boolean on = form.bool(ClientPreferences.ENABLE_EXPERIMENTAL_BOT_FEATURES);
+            experimental.setText(Messages.getString("ClientSettings.princess.experimental") + ": "
+                  + Messages.getString(on ? "ClientSettings.on" : "ClientSettings.off"));
+            experimental.setColor(UiTheme.tokenColor(on ? "status.warning" : "text.muted"));
+        }
+
+        private static void set(UiKit.Meter meter, int index, Color color) {
+            int value = MathUtils.clamp(index, 0, 10);
+            meter.set(value + " / 10", value / 10f, color);
+        }
+    }
+
+    /** The New units page's preview: a unit as it joins the force in the lobby, with its crew, ejection and codes. */
+    private final class RosterSample extends Table {
+        private final Label unit;
+        private final Label pilot;
+        private final Label skills;
+        private final Label eject;
+        private final Label point;
+
+        RosterSample() {
+            top();
+            setName("client-roster-sample");
+            defaults().left().growX();
+            add(kit.caption(Messages.getString("ClientSettings.roster"), true)).row();
+            add(view.wrapped(Messages.getString("ClientSettings.roster.summary"), "small", "text.muted"))
+                  .padTop(space("xs")).row();
+            Table card = kit.card();
+            card.pad(space("md"));
+            card.defaults().left().growX();
+            Table head = new Table();
+            head.add(kit.icon("unit", 22, UiTheme.tokenColor("accent.primary"))).padRight(space("sm"));
+            unit = kit.typeLabel("", "label", "text.primary");
+            unit.setName("client-roster-unit");
+            head.add(unit).left().growX();
+            card.add(head).row();
+            pilot = line(card, "client-roster-pilot");
+            skills = line(card, "client-roster-skills");
+            eject = line(card, "client-roster-eject");
+            point = line(card, "client-roster-point");
+            add(card).padTop(space("md")).row();
+            show();
+        }
+
+        private Label line(Table card, String name) {
+            Label label = view.wrapped("", "small", "text.secondary");
+            label.setName(name);
+            card.add(label).padTop(space("xs")).row();
+            return label;
+        }
+
+        void show() {
+            String name = Messages.getString("ClientSettings.roster.unit");
+            unit.setText(form.bool(ClientPreferences.SHOW_UNIT_ID)
+                  ? name + "  " + Messages.getString("ClientSettings.roster.id", "7") : name);
+            pilot.setText(Messages.getString(form.bool(ClientPreferences.GENERATE_NAMES)
+                  ? "ClientSettings.roster.named" : "ClientSettings.roster.unnamed"));
+            skills.setText(Messages.getString(form.bool(ClientPreferences.USE_AVERAGE_SKILLS)
+                  ? "ClientSettings.roster.rolled" : "ClientSettings.roster.standard"));
+            boolean ejects = form.bool(ClientPreferences.DEFAULT_AUTO_EJECT_DISABLED);
+            eject.setText(Messages.getString("ClientSettings.roster.eject") + ": "
+                  + Messages.getString(ejects ? "ClientSettings.on" : "ClientSettings.off"));
+            eject.setColor(UiTheme.tokenColor(ejects ? "status.success" : "text.muted"));
+            int start = Integer.parseInt(form.text(ClientPreferences.UNIT_START_CHAR).isBlank() ? "65"
+                  : form.text(ClientPreferences.UNIT_START_CHAR));
+            point.setText(Messages.getString("ClientSettings.roster.point", String.valueOf((char) start)));
         }
     }
 

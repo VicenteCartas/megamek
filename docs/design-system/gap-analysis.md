@@ -355,13 +355,25 @@ Done so far, in short:
   and the tooltip distance option (both drive only the Legacy 2D board), the Tab navigation option (a keycap takes
   Tab like any other key while it awaits one, and Tab moves the focus otherwise) and the tooltip dismiss delay
   (native tooltips stay while pointed and close when the pointer leaves).
+- Client Settings, part 4 (Gameplay): a Gameplay group with four pages. Warnings sorts the questions MegaMek asks
+  before an action into deployment, movement, combat and table, and its preview counts how many are on and shows the
+  pointed one as the prompt it raises, faded when off. Automation has the turn's helpers (select the next unit, end
+  firing, declare searchlights), the paths (climb by default, the pathfinder's time limit), the gear (the default
+  weapon sort and the sensor ranking, a list reordered by dragging a row or by its arrows) and the lobby backup.
+  Bots has Princess's favourite behavior, whose dials (bravery, aggression, mutual support, caution, self-preservation)
+  the preview shows, experimental bot features, pausing bot-only games at start and the auto-resolve panel. New units
+  has crew names, rolled or average skills, automatic ejection and the ProtoMek point codes' alphabet, with a unit
+  card that follows them. The Swing AI Display route opens Bots. From Advanced, the save offer when leaving a game
+  (shown as an on switch rather than "no nag") and the lobby backup moved here; the welcome on start, which the Swing
+  dialog never had, is a warning too. Dropped: focus on the board (it requested focus on a Swing panel that the native
+  window does not have) and animate move (it drives only the Legacy 2D board).
 
 Still open:
 
 1. The board's last Swing dialog, the `SWING_DIALOGS` allowlist in `GpuBoardWindow` (R6/U2): Client Settings
-   (`CommonSettingsDialog`). Audio, Display, Controls and the shared shell are native (see above). Still to port, in
+   (`CommonSettingsDialog`). Audio, Display, Controls, Gameplay and the shared shell are native (see above). Still to port, in
    their own PRs: Game Board, Overlays, Unit Display, Player Colours, Report, Mini Map, the rest of Settings (Main:
-   colours, window layout, unit defaults, logs, privacy, user files and the MegaMekLab path), Phase and Advanced. The last
+   colours, window layout, logs, privacy, user files and the MegaMekLab path), Phase and the rest of Advanced. The last
    of them removes the dialog from the allowlist. Until then, the native card has no page for those yet
    and the Swing dialog stays only for the Legacy 2D window and the Swing-only client.
 2. The developer tool that is still a Swing window of its own, outside the allowlist because it is not a dialog over
