@@ -56,6 +56,7 @@ import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.settings.ClientSettingsForm;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Player;
 import megamek.common.SpecialHexDisplay;
@@ -107,6 +108,7 @@ final class LobbyNativeDialogs {
     private LobbyConditionsView conditionsView;
     private GpuMaterialPalette paletteView;
     private LobbyGameOptionsView optionsView;
+    private ClientSettingsView clientSettingsView;
     private LobbyRandomMapView randomMapView;
     private LobbyVictoryView victoryView;
     private LobbyRandomArmyView randomArmyView;
@@ -311,6 +313,26 @@ final class LobbyNativeDialogs {
               host, this::close);
         show(dialog);
         return optionsView;
+    }
+
+    /**
+     * Opens the Client Settings as wide as the game options, on {@code page} (a {@link ClientSettingsForm} page id;
+     * null or one it lacks opens the first). Closing it other than by OK puts the settings back.
+     */
+    ClientSettingsView clientSettings(ClientSettingsForm form, @Nullable String page, ClientSettingsView.Host host) {
+        UiDialog dialog = begin(Messages.getString("CommonSettingsDialog.title"), OPTIONS_WIDTH, false, () -> {
+            if (clientSettingsView != null) {
+                clientSettingsView.closed();
+            }
+            clientSettingsView = null;
+        });
+        float space = DesignTokens.shipped().space().get("xxxl");
+        float paneHeight = Math.clamp(stage.getHeight() - 2 * space - OPTIONS_CHROME, OPTIONS_MIN_PANE,
+              OPTIONS_MAX_PANE);
+        clientSettingsView = new ClientSettingsView(kit, stage, dialog, form, page, bodyWidth(dialog, OPTIONS_WIDTH),
+              paneHeight, host, this::close);
+        show(dialog);
+        return clientSettingsView;
     }
 
     /** Opens the victory conditions as objective cards. */
@@ -1066,6 +1088,10 @@ final class LobbyNativeDialogs {
 
     @Nullable LobbyGameOptionsView optionsView() {
         return optionsView;
+    }
+
+    @Nullable ClientSettingsView clientSettingsView() {
+        return clientSettingsView;
     }
 
     @Nullable LobbyRandomMapView randomMapView() {

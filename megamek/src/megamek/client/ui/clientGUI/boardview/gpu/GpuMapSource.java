@@ -21,6 +21,7 @@ import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
+import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession;
@@ -40,6 +41,7 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.UIUtil;
 import megamek.codeUtilities.StringUtility;
 import megamek.common.Hex;
+import megamek.common.KeyBindParser;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
 import megamek.common.board.BoardSceneryLayouts;
@@ -123,6 +125,10 @@ final class GpuMapSource implements BoardSource {
         // Label/color preferences affect presentation only; interned terrain pixels and feature geometry are reused.
         dirtyAll();
     });
+    /** New key bindings change only the menus' shortcuts. */
+    private final IPreferenceChangeListener keyBinds = event -> onSwing(() -> {
+        if (!isClosed()) { refresh(); }
+    });
     private Board board;
     private List<BoardScene.Tile> tiles = List.of();
     /** EDT-owned derived editor annotations; never supplied to map previews or gameplay. */
@@ -156,6 +162,7 @@ final class GpuMapSource implements BoardSource {
     private Supplier<GpuNativeDialogOwner> fileDialogOwner = () -> null;
     private Consumer<Boolean> fileDialogBusy = busy -> { };
     private Notice notice = (title, text, error) -> false;
+    private Settings settings = route -> false;
     private final AtomicReference<GpuBoardPrint.Request> printRequest = new AtomicReference<>();
     /** EDT-owned: the board tagger runs ({@link #runBoardTagger}). */
     private boolean tagging;
@@ -190,6 +197,7 @@ final class GpuMapSource implements BoardSource {
             game.addGameListener(gameListener);
             PreferenceManager.getClientPreferences().addPreferenceChangeListener(preferences);
             GUIPreferences.getInstance().addPreferenceChangeListener(preferences);
+            KeyBindParser.addPreferenceChangeListener(keyBinds);
             timer.start();
         } catch (RuntimeException | Error failure) {
             close();
@@ -333,11 +341,11 @@ final class GpuMapSource implements BoardSource {
             // the Client Settings' Trace Overlay section.
             view.add(viewCommand("boardTraceOverlay", null, gui.getShowTraceOverlay(), gui::toggleTraceConditionsOverlay));
             view.add(menuCommand("boardTraceOverlaySettings", "BoardEditor.traceSettings",
-                  () -> clientSettings(owner, CommonSettingsPane.SETTINGS_OVERLAYS)));
+                  () -> showSettings(CommonSettingsPane.SETTINGS_OVERLAYS)));
         }
         commands.add(new BoardScene.Command("view", Messages.getString("CommonMenuBar.ViewMenu"), "", true,
               false, view, () -> { }));
-        commands.add(menuCommand("viewClientSettings", "CommonMenuBar.viewClientSettings", () -> clientSettings(owner, null)));
+        commands.add(menuCommand("viewClientSettings", "CommonMenuBar.viewClientSettings", () -> showSettings(null)));
         commands.add(menuCommand("helpAbout", "CommonMenuBar.helpAbout", () -> new MMAboutDialog(owner).show()));
         if (requestClose != null) { commands.add(menuCommand("close", "Close", requestClose)); }
         return List.copyOf(commands);
@@ -392,6 +400,13 @@ final class GpuMapSource implements BoardSource {
         }, "board-tagger");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /** EDT: Client Settings on the page of {@code route}, natively over this window when it shows them, else in Swing. */
+    private void showSettings(@Nullable String route) {
+        if (!settings.show(route)) {
+            clientSettings(owner, route);
+        }
     }
 
     /** The Client Settings dialog, opened on the settings page {@code route} when there is one. */
@@ -475,6 +490,15 @@ final class GpuMapSource implements BoardSource {
         this.notice = notice;
     }
 
+    /** Shows the Client Settings on the page of a route over the scene; false when Swing must show them instead. */
+    interface Settings {
+        boolean show(@Nullable String route);
+    }
+
+    /** EDT: where View &gt; Client Settings and the trace overlay's settings show, in place of the Swing dialog. */
+    void settings(Settings settings) {
+        this.settings = settings;
+    }
     /** Print writes the 3D snapshot as a printable JPEG, to a file chosen in the system's save dialog. */
     private void choosePrint() {
         if (closed || printing || choosingPrint) { return; }
@@ -858,6 +882,7 @@ final class GpuMapSource implements BoardSource {
         if (board != null) { board.removeBoardListener(boardListener); }
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(preferences);
         GUIPreferences.getInstance().removePreferenceChangeListener(preferences);
+        KeyBindParser.removePreferenceChangeListener(keyBinds);
         terrain.close();
         images.clear();
         tiles = List.of();

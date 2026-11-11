@@ -307,7 +307,7 @@ Done so far, in short:
 - The Swing trial on MegaMek's startup path, steps 1 to 6: MegaMek Dark as the default theme, the shared dialog
   footers, the libGDX start screen (G1 to G6: the menu, Host, Connect, Load game, the scenario browser and the
   briefing) and its follow-ups, and the libGDX lobby (L0 to L18) with its review rounds. The lobby opens no Swing
-  dialog except Client Settings and the startup-failure fallback. On the board, the Game Master's tools, the
+  dialog except the startup-failure fallback. On the board, the Game Master's tools, the
   reinforcements, Edit Bots, the portrait chooser, Network information, the Nova network view, About and the battle
   menu's dialogs are native; the accessibility window is gone. The Tuning utility's planetary conditions open the
   native conditions card, its material palette is a native gallery card, and the map editor's and preview's Print
@@ -321,15 +321,95 @@ Done so far, in short:
   allowlist no longer keeps any message box.
 - Help: the start screen's Contents and Skinning how-to and the lobby's Help contents open the same native document
   card the battle shows its help in (`LobbyNativeDialogs.document`), so no scene opens the Swing help any more.
+- Client Settings, part 1 (shell and Audio): a native settings card, `GpuSettingsView`, shared with the Game Options,
+  which moved onto it and took its look. A rail of groups with icons and a search on the left, the group's pages as
+  tabs, section cards in the middle, a live preview on the right and a help strip that follows the pointer. The model
+  is toolkit-free: `SettingsForm` (shared with `GameOptionsForm`) and `ClientSettingsForm`, which reads the GUI
+  preferences once, applies each change at once on the Swing thread, and puts everything back on Cancel. OK also
+  stores the preferences, which the Swing dialog left to quitting. Audio is native, with a Sound check preview whose
+  pads play each alert as the game will. Nothing on Audio was dropped. The start screen, the lobby's gear, the
+  battle's View menu, the map editor's and preview's View menu and the "my turn" sound prompt's Settings link all
+  open the native card. A route whose page is not native yet opens it on its first page.
+- Client Settings, part 2 (Display): the Display page's Scale, Language and Accessibility. Scale has two sliders,
+  shown as percentages: Menus and lobby (`GUIScale`, which the start screen and the lobby apply at once) and Battle
+  HUD (`BoardUiScale`, the Tuning panel's UI scale, which the battle and the map editor apply at once). A scale
+  applies where its slider is let go, so the card does not rescale under the pointer. Language changes the client
+  preferences' locale and shows a "Restart to apply" chip until MegaMek starts again. The colour-blind palette and
+  Reduce motion apply to each screen as it opens. The page's preview is a live sample: a unit's armour, heat and
+  structure bars in the status colours of the palette that is set, with the heat bar moving unless motion is
+  reduced. The Swing dialog's main route opens Display. Dropped as 2D-only: the UI theme, Classic themes and the
+  skin file (the native screens draw the design tokens), and "Expand option sections" (the native settings and
+  options have no collapsible sections). User files and the MegaMekLab path move to the Interface page.
+- Client Settings, part 3 (Controls): a Controls group with a Keyboard page and seven pages of key bindings (Camera,
+  Turn, Movement, Combat, Panels, Overlays, Game), each in sections, so every command has one place and a command
+  added later shows under Game's Other until it gets one. A binding is a keycap: click it, then press the key with
+  any of Ctrl, Alt and Shift held, or press and let go a modifier alone to bind it. Esc or a click elsewhere keeps the
+  old key. Each binding has a way back to its default key and an unbind button. A key that an exclusive or menu
+  command shares with another, and Ctrl+C or Ctrl+V, show their problem under the binding in red without blocking OK,
+  as the Swing editor did. Bindings apply at once and are stored (`KeyBindParser.writeKeyBindings`) when one changes;
+  Cancel puts them back. The preview is a keyboard that lights the page's keys, the pointed binding's key and
+  modifiers, and a key bound twice in red, and lists the page's keys it has no cap for. The Keyboard page has the key
+  repeat delay and rate (from Advanced) and the tooltip delay, which the native screens' tooltips now follow as well
+  as Swing's. The Swing Key Binds route opens Keyboard, and the map editor's menus follow new bindings. Dropped: the
+  Swing GUI scale up and down bindings (the native scales are the Display page's sliders), the move-step delay
+  and the tooltip distance option (both drive only the Legacy 2D board), the Tab navigation option (a keycap takes
+  Tab like any other key while it awaits one, and Tab moves the focus otherwise) and the tooltip dismiss delay
+  (native tooltips stay while pointed and close when the pointer leaves).
+- Client Settings, part 4 (Gameplay): a Gameplay group with four pages. Warnings sorts the questions MegaMek asks
+  before an action into deployment, movement, combat and table, and its preview counts how many are on and shows the
+  pointed one as the prompt it raises, faded when off. Automation has the turn's helpers (select the next unit, end
+  firing, declare searchlights), the paths (climb by default, the pathfinder's time limit), the gear (the default
+  weapon sort and the sensor ranking, a list reordered by dragging a row or by its arrows) and the lobby backup.
+  Bots has Princess's favourite behavior, whose dials (bravery, aggression, mutual support, caution, self-preservation)
+  the preview shows, experimental bot features, pausing bot-only games at start and the auto-resolve panel. New units
+  has crew names, rolled or average skills, automatic ejection and the ProtoMek point codes' alphabet, with a unit
+  card that follows them. The Swing AI Display route opens Bots. From Advanced, the save offer when leaving a game
+  (shown as an on switch rather than "no nag") and the lobby backup moved here; the welcome on start, which the Swing
+  dialog never had, is a warning too. Dropped: focus on the board (it requested focus on a Swing panel that the native
+  window does not have) and animate move (it drives only the Legacy 2D board).
+- Client Settings, part 5 (Battlefield and Colours): a Battlefield group with Board (enhanced or classic graphics,
+  wrecks, hex coordinates, terrain names, their outline and map sheet edges), Unit Labels (label style, when the
+  nameplates show, colour by side, the damage tile), Battle Marks (artillery and bomb misses and drifts, drift arrows,
+  the demolition hazard, and how solid the attack arrows and ECM fields are, as percentages of the kept 0 to 255) and
+  Trace Image (the board editor's scanned map, its file, opacity, scale and origin); and a Colours group with Player
+  Colours, Forces (the sides' and the status colours), Moves and Ranges, and Map Text. A colour is a tile with its
+  swatch; a click opens `UiColorPicker`, a new shared widget (a saturation and value field, a hue strip, a hex field and
+  presets, the default player colours) in a popover that previews while dragging, applies on release, has a way back
+  to the default and closes on Escape without closing the settings. A preview shows a unit of each side by its
+  nameplate, the status colours, a move's legs and the range bands, or the map's text and marks, as the page sets
+  them. The Swing Game Board route opens Board and the Overlays route opens Trace Image. Dropped, as they only drive
+  the Legacy 2D board or have no meaning on the 3D one: high-quality and high-performance graphics,
+  ambient-occlusion shadows, the shadow map, inclines, the level highlight, floating isometric, darkening at night,
+  translucent hidden units, damage decals, the unit valid, selected and text colours, the entity owner colour, soft
+  and auto centring, the fire-solution colours, TMM pips, the move fonts, every field-of-view setting, the unit
+  overview shadow colours, the planetary overlay's colours and switches, and the Swing mini map's options.
+- Client Settings, part 6 (Messages and Files), which ends the port: `CommonSettingsDialog` leaves the board's
+  `SWING_DIALOGS` allowlist, now empty, so over the battle it is reported like any other Swing dialog. A Messages
+  group has Notifications (whether toasts show, the round's reports as toasts, how long a toast stays and the gap
+  between reports), whose preview plays a round of the battle's own toast cards timed as set, and Reports, whose
+  search and filter presets are phrase chips, each with its close and an entry to add one; its preview is a stretch
+  of the battle log that the picked search preset lights and the picked filter preset dims. A Files group has Logs
+  (keep a game log, its name, the auto-resolve log's name, the data set log, date stamps and their format, which is
+  checked and not stored until it is a pattern), whose preview names the files a game writes today, and Folders (the
+  user data folder, marked when the launcher sets it, and the MegaMekLab program). `UiFileDialog` gains a folder mode
+  for it. Board gets the tileset back, as the Classic graphics draw it; the colour palette gets the camouflage
+  shading; Bots gets a Hosting section with IP addresses in the chat. The Swing Report route opens Reports and the
+  Advanced route opens Logs. The native screens open the native card; the Swing dialog stays only for the Legacy 2D
+  window and the Swing-only fallbacks with no native window.
+  Dropped, as nothing native reads them: docking (on the left, several on the Y axis), the HTML unit tooltip's
+  options and colours, the unit display's heat colours and values, weapon list height, Mek fonts and tab order, the
+  whole Phase page (each phase's automatic displays and the move and fire tabs), the mini report's colours, font,
+  sprites and shown events, the game summary's board view, mini map and GIF recording, the second chat box's colour,
+  transparency and sliding, the move step delay, the frame counter, mouse wheel zoom and its direction, the tooltip
+  dismiss delay and distance, expanded option sections, the Swing look and its skin file, buttons per row, the
+  players remaining to show, the StratOps mini map symbols and the other mini map options, and sprites only.
 
 Still open:
 
-1. The board's last Swing dialog, the `SWING_DIALOGS` allowlist in `GpuBoardWindow` (R6/U2): Client Settings
-   (`CommonSettingsDialog`, about 4,900 lines, several PRs; the lobby's gear and the map editor open it too).
-2. The developer tool that is still a Swing window of its own, outside the allowlist because it is not a dialog over
+1. The developer tool that is still a Swing window of its own, outside the allowlist because it is not a dialog over
    the battle: the shader editor (`GpuShaderEditor`), a `JFrame` with its compiled GLSL window and a reload
    confirmation.
-3. Swing surfaces still shown by the native scenes:
+2. Swing surfaces still shown by the native scenes:
    - The Legacy 2D window of the editor's 2D Preview and the preview's 2D Board (`GpuBoardWindow.boardWindow2D`): a
      Swing `BoardView` with a Swing menu bar, Client Settings and `MMAboutDialog`. Kept by decision (see Native
      window); listed so the menu's dialogs are not forgotten.
@@ -337,20 +417,20 @@ Still open:
    These stay Swing by design: the start screen's failure messages when the native window cannot open or fails
    (`GpuStartWindow`), the error box `GpuErrorPresenter` falls back to while a native error already shows, and Swing's
    file chooser as `SystemFileDialog`'s fallback.
-4. Live checks: a real MekHQ game, a network reconnect, a password-protected game and a second human player in a
+3. Live checks: a real MekHQ game, a network reconnect, a password-protected game and a second human player in a
    second MegaMek window. The system file dialog on macOS and Linux hasn't been tried on a real machine yet; step
    5.5 in the history lists what to try.
-5. A Swing modal that a dead client leaves open could still block the start screen. The prompt routing covers the
+4. A Swing modal that a dead client leaves open could still block the start screen. The prompt routing covers the
    questions found so far.
-6. Step 7: a settings check across the startup path. The lobby's part (L14) is done.
-7. To propose to the MegaMek team: a **Load anyway** for saves from another version.
-8. Each Swing dialog the lobby stopped using stays while MekHQ, MegaMekLab or the in-game screens still open it;
+5. Step 7: a settings check across the startup path. The lobby's part (L14) is done.
+6. To propose to the MegaMek team: a **Load anyway** for saves from another version.
+7. Each Swing dialog the lobby stopped using stays while MekHQ, MegaMekLab or the in-game screens still open it;
    retire it once its last user moves.
-9. Accessibility in libGDX: a spike on how a screen reader can follow the game, since a libGDX window shows it
+8. Accessibility in libGDX: a spike on how a screen reader can follow the game, since a libGDX window shows it
    nothing. The Swing accessibility window, a text log with typed commands that was never finished, is deleted;
    `EntityAction.toAccessibilityDescription` is kept for this.
-10. If the developers accept the system, move hud-v3 onto the tokens and the new libGDX controls (including the
-    `UiTheme` rename pass). Until then, hud-v3 code does not change.
+9. If the developers accept the system, move hud-v3 onto the tokens and the new libGDX controls (including the
+   `UiTheme` rename pass). Until then, hud-v3 code does not change.
 
 ## Review probes
 

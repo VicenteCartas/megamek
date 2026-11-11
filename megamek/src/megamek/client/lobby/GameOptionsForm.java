@@ -19,6 +19,7 @@ import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.panels.GameOptionsCatalog;
 import megamek.client.ui.panels.GameOptionsPresentation;
+import megamek.client.ui.settings.SettingsForm;
 import megamek.client.ui.settings.SettingsRoute;
 import megamek.codeUtilities.MathUtility;
 import megamek.common.options.BasicOption;
@@ -35,45 +36,13 @@ import megamek.common.options.OptionsConstants;
  * rules between options (recomputed from the current values), the clean-ups a switch makes in its dependants, the
  * Core/Total Warfare rules system, defaults, values loaded from a file and the changed options to send.
  */
-public final class GameOptionsForm {
-
-    /** How an option is edited. */
-    public enum Kind {
-        BOOLEAN, INTEGER, INTEGER_CHOICE, FLOAT, STRING, CHOICE
-    }
-
-    /**
-     * One option on a page.
-     *
-     * @param name      the option's stable name
-     * @param label     its concise display name
-     * @param tooltip   its details or, without them, its description
-     * @param kind      how it is edited
-     * @param values    the values a choice offers, in order (the numbers as text for an integer choice)
-     * @param labels    the shown names of those values
-     * @param important whether it carries the important marker
-     */
-    public record Row(String name, String label, String tooltip, Kind kind, List<String> values, List<String> labels,
-          boolean important, boolean unofficial, boolean legacy, String searchText) {
-    }
-
-    /** A titled group of rows on a page. */
-    public record Section(String id, String title, String summary, List<Row> rows, String searchText) {
-    }
-
-    /**
-     * One settings page.
-     *
-     * @param categoryId    the navigation category, blank for a page shown at the top level
-     * @param categoryTitle the category's title, blank without one
-     * @param advanced      whether the page holds advanced rules
-     */
-    public record Page(String id, String title, String categoryId, String categoryTitle, boolean advanced,
-          List<Section> sections, String searchText) {
-        public boolean isLanding() {
-            return categoryId.isBlank();
-        }
-    }
+public final class GameOptionsForm extends SettingsForm {
+    /** The tag of a row carrying the important marker. */
+    public static final String IMPORTANT = "important";
+    /** The tag of an unofficial rule, hidden while the unofficial rules are. */
+    public static final String UNOFFICIAL = "unofficial";
+    /** The tag of a legacy rule, hidden while the legacy rules are. */
+    public static final String LEGACY = "legacy";
 
     private final GameOptions options;
     private final boolean editable;
@@ -123,68 +92,17 @@ public final class GameOptionsForm {
         return locked.contains(name);
     }
 
-    // ---- structure and search
+    // ---- structure
 
-    /** @return every page, in navigation order */
+    @Override
     public List<Page> pages() {
         return pages;
     }
 
-    /** @return the page with the id, or null */
-    public @Nullable Page page(String id) {
-        return pages.stream().filter(page -> page.id().equals(id)).findFirst().orElse(null);
-    }
-
-    public String search() {
-        return search;
-    }
-
-    public void search(String text) {
-        search = text == null ? "" : text;
-    }
-
-    /** @return whether a search is active */
-    public boolean searching() {
-        return !SettingsRoute.normalizeSearchText(search).isBlank();
-    }
-
-    /** @return the rows of the section shown now: neither in a hidden rule category nor filtered out by the search */
-    public List<Row> visibleRows(Page page, Section section) {
-        String filter = SettingsRoute.normalizeSearchText(search);
-        return section.rows().stream()
-              .filter(this::shown)
-              .filter(row -> matches(filter, page, section, row))
-              .toList();
-    }
-
-    /** @return the sections of the page with any row shown now */
-    public List<Section> visibleSections(Page page) {
-        return page.sections().stream().filter(section -> !visibleRows(page, section).isEmpty()).toList();
-    }
-
-    /** @return the pages to navigate: with a row shown, and the landing page unless a search is active */
-    public List<Page> visiblePages() {
-        return pages.stream()
-              .filter(page -> (page.isLanding() && !searching()) || !visibleSections(page).isEmpty())
-              .toList();
-    }
-
     /** @return whether the row's rule category is shown */
+    @Override
     public boolean shown(Row row) {
-        return !(row.unofficial() && !unofficialShown()) && !(row.legacy() && !legacyShown());
-    }
-
-    private static boolean matches(String filter, Page page, Section section, Row row) {
-        if (filter.isBlank()) {
-            return true;
-        }
-        String text = page.searchText() + ' ' + section.searchText() + ' ' + row.searchText();
-        for (String token : filter.split("\\s+")) {
-            if (!text.contains(token)) {
-                return false;
-            }
-        }
-        return true;
+        return !(row.tagged(UNOFFICIAL) && !unofficialShown()) && !(row.tagged(LEGACY) && !legacyShown());
     }
 
     // ---- values
@@ -198,15 +116,18 @@ public final class GameOptionsForm {
         return option.getType() == IOption.BOOLEAN ? values.get(name) : texts.get(name);
     }
 
+    @Override
     public boolean bool(String name) {
         return Boolean.TRUE.equals(values.get(name));
     }
 
+    @Override
     public String text(String name) {
         return texts.getOrDefault(name, "");
     }
 
     /** Switches a boolean option and clears what only applies without it, as the Swing dialog's clicks do. */
+    @Override
     public void bool(String name, boolean on) {
         IOption option = represented.get(name);
         if (option == null || option.getType() != IOption.BOOLEAN || bool(name) == on || locked(name)) {
@@ -217,6 +138,7 @@ public final class GameOptionsForm {
     }
 
     /** Sets the text of a number, text or choice option. */
+    @Override
     public void text(String name, String text) {
         IOption option = represented.get(name);
         if (option == null || option.getType() == IOption.BOOLEAN || locked(name)) {
@@ -226,6 +148,7 @@ public final class GameOptionsForm {
     }
 
     /** @return whether the option can be changed now */
+    @Override
     public boolean editable(String name) {
         if (!editable || !represented.containsKey(name) || locked(name)) {
             return false;
@@ -301,6 +224,7 @@ public final class GameOptionsForm {
     }
 
     /** @return the problem with the option's text, or null when it is fine (booleans and choices always are) */
+    @Override
     public @Nullable String error(String name) {
         IOption option = represented.get(name);
         if (option == null) {
@@ -326,17 +250,20 @@ public final class GameOptionsForm {
     }
 
     /** @return whether no option's text has a problem */
+    @Override
     public boolean valid() {
         return represented.keySet().stream().allMatch(name -> error(name) == null);
     }
 
     /** @return whether the option differs from the game's value */
+    @Override
     public boolean changed(String name) {
         IOption option = represented.get(name);
         return option != null && !Objects.equals(option.getValue(), typedValue(option));
     }
 
     /** @return whether any option differs from the game's values */
+    @Override
     public boolean modified() {
         return represented.keySet().stream().anyMatch(this::changed);
     }
@@ -371,6 +298,7 @@ public final class GameOptionsForm {
     }
 
     /** Resets every option to its default, keeping the rule toggles in step. */
+    @Override
     public void defaults() {
         for (IOption option : represented.values()) {
             if (locked(option.getName())) {
@@ -621,8 +549,17 @@ public final class GameOptionsForm {
               : "";
         String searchText = SettingsRoute.normalizeSearchText(
               name + ' ' + option.getDisplayableName() + ' ' + label + extra);
-        return new Row(name, label, tooltip, kind, choiceValues, choiceLabels, GameOptionsCatalog.isImportant(option),
-              GameOptionsCatalog.isUnofficial(name), GameOptionsCatalog.isLegacy(name), searchText);
+        Set<String> tags = new HashSet<>();
+        if (GameOptionsCatalog.isImportant(option)) {
+            tags.add(IMPORTANT);
+        }
+        if (GameOptionsCatalog.isUnofficial(name)) {
+            tags.add(UNOFFICIAL);
+        }
+        if (GameOptionsCatalog.isLegacy(name)) {
+            tags.add(LEGACY);
+        }
+        return new Row(name, label, tooltip, kind, choiceValues, choiceLabels, tags, searchText);
     }
 
     private static final class PageSeed {

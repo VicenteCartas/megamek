@@ -72,6 +72,7 @@ import megamek.client.ui.gdx.UiModal;
 import megamek.client.ui.gdx.UiOptionBar;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.client.ui.settings.ClientSettingsForm;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.preference.PreferenceManager;
 import megamek.logging.MMLogger;
@@ -765,13 +766,32 @@ final class GpuStartScreen extends ApplicationAdapter {
         }
     }
 
+    /**
+     * Settings: MegaMek's start screen opens the native Client Settings over itself, read on the Swing thread; another
+     * program's start screen, such as MekHQ's, opens its own.
+     */
+    private void settings() {
+        if (!content.gamePages()) {
+            window.settings();
+            return;
+        }
+        window.run(() -> {
+            ClientSettingsForm form = ClientSettingsForm.current();
+            GpuHost.post(() -> {
+                if (dialogs != null && !disposed) {
+                    dialogs.clientSettings(form, null, ClientSettingsView.Host.swing(GpuHost::post));
+                }
+            });
+        });
+    }
+
     private Table bottomRow() {
         Table row = new Table();
         row.left();
         row.defaults().padRight(6);
         UiButton settings = kit.button("button-quiet-compact", "settings",
               Messages.getString("StartScreen.settings"), null);
-        UiKit.onChange(settings, window::settings);
+        UiKit.onChange(settings, this::settings);
         UiButton help = kit.button("button-quiet-compact", "help", Messages.getString("StartScreen.help"), null);
         UiKit.onChange(help, () -> showPage(page == Page.HELP ? Page.MAIN : Page.HELP));
         UiButton quit = kit.button("button-quiet-compact", "close", Messages.getString("StartScreen.quit"), null);

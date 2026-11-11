@@ -11,6 +11,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
@@ -55,16 +56,25 @@ import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.PortraitCatalog;
 import megamek.client.lobby.SbfStatsForm;
+import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.audio.SoundType;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.gdx.UiTextField;
+import megamek.client.ui.panels.CommonSettingsPane;
+import megamek.client.ui.settings.ClientSettingsForm;
+import megamek.client.ui.settings.SettingsForm;
+import megamek.client.ui.util.KeyCommandBind;
+import megamek.client.ui.util.PlayerColour;
 import megamek.common.Hex;
 import megamek.common.OffBoardDirection;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.containers.MunitionTree;
+import megamek.common.equipment.SensorFamily;
 import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
 import megamek.common.icons.Portrait;
@@ -78,6 +88,8 @@ import megamek.common.orders.UnitOrders;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.planetaryConditions.Weather;
+import megamek.common.preference.ClientPreferences;
+import megamek.common.preference.PreferenceStore;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -622,6 +634,318 @@ class LobbyNativeDialogsSmokeTest {
     }
 
     @Test
+    void theClientSettingsTakeEffectAtOnceAndCancelPutsThemBack() {
+        UiTestStage.run(ui -> {
+            PreferenceStore store = new PreferenceStore();
+            store.setDefault(GUIPreferences.MASTER_VOLUME, 80);
+            store.setDefault(GUIPreferences.SOUND_MUTE_CHAT, true);
+            store.setDefault(GUIPreferences.SOUND_MUTE_MY_TURN, false);
+            store.setDefault(GUIPreferences.SOUND_MUTE_OTHERS_TURN, true);
+            store.setDefault(GUIPreferences.SOUND_BING_FILENAME_CHAT, "chat.wav");
+            int[] saved = { 0 };
+            List<SoundType> played = new ArrayList<>();
+            ClientSettingsView.Host host = new ClientSettingsView.Host() {
+                @Override
+                public void edt(Runnable work, Runnable then) {
+                    work.run();
+                    then.run();
+                }
+
+                @Override
+                public void play(SoundType sound) {
+                    played.add(sound);
+                }
+
+                @Override
+                public void save() {
+                    saved[0]++;
+                }
+            };
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            ClientSettingsView view = dialogs.clientSettings(new ClientSettingsForm(store, new ClientPreferences(new PreferenceStore())),
+                  CommonSettingsPane.SETTINGS_AUDIO, host);
+            ui.draw();
+            assertEquals(ClientSettingsForm.AUDIO, view.pageId());
+            assertNotNull(ui.stage.getRoot().findActor("client-group-" + ClientSettingsForm.AUDIO));
+            assertFalse(find(ui, "client-reset-" + ClientSettingsForm.AUDIO).isVisible(),
+                  "a page at its defaults offers no reset");
+            float searchTop = top(find(ui, "client-search"));
+            assertEquals(searchTop, top(find(ui, "client-page").getParent()), 1, "the page's frame lines up with the search");
+            assertEquals(searchTop, top(find(ui, "client-sound-check").getParent()), 1,
+                  "the preview's frame lines up with the search");
+            Actor chat = find(ui, "client-setting-" + GUIPreferences.SOUND_MUTE_CHAT);
+            reveal(ui, chat);
+            click(ui, chat);
+            assertFalse(store.getBoolean(GUIPreferences.SOUND_MUTE_CHAT), "the switch unmutes the chat at once");
+            assertTrue(find(ui, "client-setting-" + GUIPreferences.SOUND_MUTE_CHAT + "-changed").isVisible());
+            assertTrue(find(ui, "client-reset-" + ClientSettingsForm.AUDIO).isVisible());
+
+            click(ui, find(ui, "client-play-chat"));
+            assertEquals(List.of(SoundType.BING_CHAT), played);
+
+            click(ui, find(ui, "client-cancel"));
+            assertFalse(dialogs.isOpen(), "Cancel closes the settings");
+            assertTrue(store.getBoolean(GUIPreferences.SOUND_MUTE_CHAT), "Cancel puts the chat's mute back");
+            assertEquals(0, saved[0]);
+
+            view = dialogs.clientSettings(new ClientSettingsForm(store, new ClientPreferences(new PreferenceStore())), null, host);
+            ui.draw();
+            chat = find(ui, "client-setting-" + GUIPreferences.SOUND_MUTE_CHAT);
+            reveal(ui, chat);
+            click(ui, chat);
+            click(ui, find(ui, "client-ok"));
+            assertFalse(dialogs.isOpen(), "OK closes the settings");
+            assertFalse(store.getBoolean(GUIPreferences.SOUND_MUTE_CHAT), "OK keeps what was set");
+            assertEquals(1, saved[0], "OK stores the preferences");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theDisplayPageScalesAtOnceAndItsSampleFollowsTheMotion() {
+        UiTestStage.run(ui -> {
+            PreferenceStore store = new PreferenceStore();
+            store.setDefault(GUIPreferences.GUI_SCALE, 1f);
+            store.setDefault(GUIPreferences.BOARD_UI_SCALE, 1f);
+            store.setDefault(GUIPreferences.COLOR_BLIND_PALETTE, false);
+            store.setDefault(GUIPreferences.REDUCE_MOTION, false);
+            ClientSettingsView.Host host = (work, then) -> {
+                work.run();
+                then.run();
+            };
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            ClientSettingsForm form = new ClientSettingsForm(store, new ClientPreferences(new PreferenceStore()));
+            ClientSettingsView view = dialogs.clientSettings(form, form.pageOf(CommonSettingsPane.SETTINGS_MAIN),
+                  host);
+            ui.draw();
+            assertEquals(ClientSettingsForm.DISPLAY, view.pageId(), "the Swing dialog's main route opens Display");
+            float searchTop = top(find(ui, "client-search"));
+            assertEquals(searchTop, top(find(ui, "client-display-sample").getParent()), 1,
+                  "the sample's frame lines up with the search");
+            assertFalse(find(ui, "client-restart").isVisible(), "the language has not changed");
+
+            Slider scale = (Slider) find(ui, "client-setting-" + GUIPreferences.GUI_SCALE);
+            scale.setValue(130);
+            assertEquals(1.3f, store.getFloat(GUIPreferences.GUI_SCALE), 1e-6, "a scale set by keys applies at once");
+
+
+            Actor palette = find(ui, "client-setting-" + GUIPreferences.COLOR_BLIND_PALETTE);
+            reveal(ui, palette);
+            click(ui, palette);
+            assertTrue(store.getBoolean(GUIPreferences.COLOR_BLIND_PALETTE));
+            Actor motion = find(ui, "client-setting-" + GUIPreferences.REDUCE_MOTION);
+            reveal(ui, motion);
+            click(ui, motion);
+            assertTrue(store.getBoolean(GUIPreferences.REDUCE_MOTION));
+            assertEquals(Messages.getString("ClientSettings.sample.still"),
+                  ((Label) find(ui, "client-sample-motion")).getText().toString());
+
+
+            click(ui, find(ui, "client-cancel"));
+            assertEquals(1f, store.getFloat(GUIPreferences.GUI_SCALE), 1e-6, "Cancel puts the scale back");
+            assertFalse(store.getBoolean(GUIPreferences.COLOR_BLIND_PALETTE));
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void aColourTileOpensThePickerAndEscapeClosesOnlyThePicker() {
+        UiTestStage.run(ui -> {
+            String blue = PlayerColour.values()[0].getText();
+            PreferenceStore store = new PreferenceStore();
+            store.setDefault(GUIPreferences.MY_UNIT_COLOR, "255 0 0");
+            store.setDefault(blue, "16 32 48");
+            ClientSettingsView.Host host = (work, then) -> {
+                work.run();
+                then.run();
+            };
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            ClientSettingsForm form = new ClientSettingsForm(store, new ClientPreferences(new PreferenceStore()));
+            ClientSettingsView view = dialogs.clientSettings(form, form.pageOf(CommonSettingsPane.SETTINGS_OVERLAYS),
+                  host);
+            ui.draw();
+            assertEquals(ClientSettingsForm.TRACE, view.pageId(), "the Swing overlays route opens the trace image");
+
+            click(ui, find(ui, "client-group-" + ClientSettingsForm.COLOURS));
+            ui.draw();
+            click(ui, find(ui, "client-page-" + ClientSettingsForm.FORCES));
+            ui.draw();
+            assertEquals(ClientSettingsForm.FORCES, view.pageId());
+            assertEquals(top(find(ui, "client-search")), top(find(ui, "client-battlefield-sample").getParent()), 1,
+                  "the sample's frame lines up with the search");
+            Actor tile = find(ui, "client-setting-" + GUIPreferences.MY_UNIT_COLOR);
+            reveal(ui, tile);
+            click(ui, tile);
+            ui.draw();
+            Actor popover = find(ui, "client-color");
+            assertTrue(popover.isVisible() && popover.getStage() != null, "a click on the tile opens the picker");
+
+            click(ui, find(ui, "color-preset-0"));
+            ui.draw();
+            assertEquals("16 32 48", store.getString(GUIPreferences.MY_UNIT_COLOR), "a preset applies at once");
+            assertTrue(find(ui, "client-setting-" + GUIPreferences.MY_UNIT_COLOR + "-changed").isVisible());
+
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            ui.stage.keyUp(Input.Keys.ESCAPE);
+            ui.draw();
+            assertTrue(dialogs.isOpen(), "Escape closes the picker, not the settings");
+            assertFalse(popover.isVisible() && popover.getStage() != null);
+
+            click(ui, find(ui, "client-cancel"));
+            assertEquals("255 0 0", store.getString(GUIPreferences.MY_UNIT_COLOR), "Cancel puts the colour back");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void aReportPhraseIsAddedAndRemovedAsAChipAndThePreviewFindsIt() {
+        UiTestStage.run(ui -> {
+            PreferenceStore store = new PreferenceStore();
+            ClientPreferences client = new ClientPreferences(new PreferenceStore());
+            String shipped = client.getReportKeywords();
+            ClientSettingsView.Host host = (work, then) -> {
+                work.run();
+                then.run();
+            };
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            ClientSettingsForm form = new ClientSettingsForm(store, client);
+            ClientSettingsView view = dialogs.clientSettings(form, form.pageOf(CommonSettingsPane.SETTINGS_REPORT),
+                  host);
+            ui.draw();
+            assertEquals(ClientSettingsForm.REPORTS, view.pageId(), "the Swing report route opens the Reports page");
+            assertEquals(top(find(ui, "client-search")), top(find(ui, "client-report-sample").getParent()), 1,
+                  "the log's frame lines up with the search");
+
+            String name = "client-setting-" + ClientPreferences.REPORT_KEYWORDS;
+            int phrases = SettingsForm.lines(shipped).size();
+            assertNotNull(ui.stage.getRoot().findActor(name + "-chip-" + (phrases - 1)), "a chip a phrase");
+            UiTextField entry = (UiTextField) find(ui, name + "-entry");
+            entry.setText("Locust");
+            click(ui, find(ui, name + "-add"));
+            ui.draw();
+            assertEquals(shipped + "\nLocust", client.getReportKeywords(), "an added phrase applies at once");
+            assertNotNull(ui.stage.getRoot().findActor(name + "-chip-" + phrases));
+
+            Actor remove = find(ui, name + "-remove-0");
+            reveal(ui, remove);
+            click(ui, remove);
+            ui.draw();
+            assertFalse(client.getReportKeywords().startsWith(SettingsForm.lines(shipped).getFirst() + "\n"),
+                  "the chip's close removes its phrase");
+
+            click(ui, find(ui, "client-cancel"));
+            assertEquals(shipped, client.getReportKeywords(), "Cancel puts the phrases back");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void aSensorMovesUpTheRankingByItsArrowAndTheWarningsShowTheirPrompt() {
+        UiTestStage.run(ui -> {
+            List<String> sensors = SensorFamily.defaultOrder().stream().map(Enum::name).toList();
+            PreferenceStore store = new PreferenceStore();
+            store.setDefault(GUIPreferences.SENSOR_PREFERENCE_ORDER, String.join(",", sensors));
+            store.setDefault(GUIPreferences.NAG_FOR_PSR, true);
+            ClientSettingsView.Host host = (work, then) -> {
+                work.run();
+                then.run();
+            };
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            ClientSettingsForm form = new ClientSettingsForm(store, new ClientPreferences(new PreferenceStore()));
+            ClientSettingsView view = dialogs.clientSettings(form, ClientSettingsForm.AUTOMATION, host);
+            ui.draw();
+            assertEquals(ClientSettingsForm.AUTOMATION, view.pageId());
+            String name = "client-setting-" + GUIPreferences.SENSOR_PREFERENCE_ORDER + "-" + sensors.getFirst();
+            assertFalse(find(ui, name + "-up").isVisible(), "the first sensor cannot go higher");
+            Actor down = find(ui, name + "-down");
+            reveal(ui, down);
+            click(ui, down);
+            for (int frame = 0; frame < 200 && store.getString(GUIPreferences.SENSOR_PREFERENCE_ORDER)
+                  .startsWith(sensors.getFirst() + ","); frame++) {
+                ui.stage.act(.05f);
+            }
+            List<String> swapped = new ArrayList<>(sensors);
+            swapped.add(1, swapped.removeFirst());
+            assertEquals(String.join(",", swapped), store.getString(GUIPreferences.SENSOR_PREFERENCE_ORDER),
+                  "the arrow moves the sensor one place down and applies at once");
+            ui.draw();
+            assertTrue(find(ui, name + "-up").isVisible(), "the moved sensor can go back up");
+
+            click(ui, find(ui, "client-page-" + ClientSettingsForm.WARNINGS));
+            ui.draw();
+            assertEquals(ClientSettingsForm.WARNINGS, view.pageId());
+            assertEquals(top(find(ui, "client-search")), top(find(ui, "client-prompt-sample").getParent()), 1,
+                  "the prompt's frame lines up with the search");
+
+            click(ui, find(ui, "client-cancel"));
+            assertEquals(String.join(",", sensors), store.getString(GUIPreferences.SENSOR_PREFERENCE_ORDER),
+                  "Cancel puts the ranking back");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void aKeyIsBoundByPressingItAndEscapeKeepsTheOldOne() {
+        int key = KeyCommandBind.FIRE.key;
+        int modifiers = KeyCommandBind.FIRE.modifiers;
+        try {
+            UiTestStage.run(ui -> {
+                KeyCommandBind.FIRE.key = KeyCommandBind.FIRE.keyDefault;
+                KeyCommandBind.FIRE.modifiers = KeyCommandBind.FIRE.modifiersDefault;
+                int[] stored = { 0 };
+                ClientSettingsView.Host host = (work, then) -> {
+                    work.run();
+                    then.run();
+                };
+                LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+                ClientSettingsForm form = new ClientSettingsForm(new PreferenceStore(),
+                      new ClientPreferences(new PreferenceStore()), () -> stored[0]++);
+                ClientSettingsView view = dialogs.clientSettings(form, ClientSettingsForm.KEYS + "combat", host);
+                ui.draw();
+                assertEquals(ClientSettingsForm.KEYS + "combat", view.pageId());
+                assertEquals(top(find(ui, "client-search")), top(find(ui, "client-keyboard").getParent()), 1,
+                      "the keyboard's frame lines up with the search");
+                String fire = "client-setting-" + ClientSettingsForm.BIND + KeyCommandBind.FIRE.cmd;
+                Actor cap = find(ui, fire);
+                reveal(ui, cap);
+                assertFalse(find(ui, fire + "-restore").isVisible(), "a binding at its default has no way back");
+
+                click(ui, cap);
+                ui.stage.keyDown(Input.Keys.ESCAPE);
+                ui.draw();
+                assertTrue(dialogs.isOpen(), "Escape while a key is awaited keeps the settings open");
+                assertEquals(KeyCommandBind.FIRE.keyDefault, KeyCommandBind.FIRE.key, "and the binding as it was");
+
+                click(ui, cap);
+                ui.stage.keyDown(Input.Keys.F7);
+                ui.stage.keyUp(Input.Keys.F7);
+                ui.draw();
+                assertEquals(KeyEvent.VK_F7, KeyCommandBind.FIRE.key, "the pressed key binds at once");
+                assertEquals(0, KeyCommandBind.FIRE.modifiers);
+                assertEquals(1, stored[0], "the bindings are stored as they change");
+                assertTrue(find(ui, fire + "-restore").isVisible());
+
+                click(ui, find(ui, fire + "-unbind"));
+                assertEquals(0, KeyCommandBind.FIRE.key, "unbound");
+                assertFalse(find(ui, fire + "-unbind").isVisible());
+                click(ui, find(ui, fire + "-restore"));
+                assertEquals(KeyCommandBind.FIRE.keyDefault, KeyCommandBind.FIRE.key, "back to the default key");
+
+                click(ui, cap);
+                ui.stage.keyDown(Input.Keys.F8);
+                ui.draw();
+                click(ui, find(ui, "client-cancel"));
+                assertFalse(dialogs.isOpen());
+                assertEquals(KeyCommandBind.FIRE.keyDefault, KeyCommandBind.FIRE.key, "Cancel puts the binding back");
+                dialogs.dispose();
+            });
+        } finally {
+            KeyCommandBind.FIRE.key = key;
+            KeyCommandBind.FIRE.modifiers = modifiers;
+        }
+    }
+
+    @Test
     void theYesNoQuestionAnswersWithItsBoxAndEscapeAnswersNothing() {
         UiTestStage.run(ui -> {
             LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
@@ -996,6 +1320,10 @@ class LobbyNativeDialogsSmokeTest {
         clickAt(ui, Math.round(point.x), Math.round(point.y));
     }
 
+    /** The actor's top edge on the stage. */
+    private static float top(Actor actor) {
+        return actor.localToStageCoordinates(new Vector2(0, actor.getHeight())).y;
+    }
     private static void clickAt(UiTestStage ui, int x, int y) {
         ui.stage.mouseMoved(x, y);
         ui.stage.touchDown(x, y, 0, Input.Buttons.LEFT);

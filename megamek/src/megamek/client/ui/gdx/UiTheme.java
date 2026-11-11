@@ -221,7 +221,11 @@ public final class UiTheme implements Disposable {
           Map.entry("building", 0xE7EE), Map.entry("factory", 0xEBBC), Map.entry("tree", 0xE406),
           Map.entry("decal", 0xE243), Map.entry("stack", 0xF500), Map.entry("train", 0xE570), Map.entry("water", 0xF084),
           Map.entry("road", 0xEB91), Map.entry("bridge", 0xEAC6), Map.entry("fuel-tank", 0xEC13), Map.entry("rules", 0xF1C2),
-          Map.entry("car", 0xE531), Map.entry("animal", 0xE91D));
+          Map.entry("car", 0xE531), Map.entry("animal", 0xE91D),
+          // The settings rail: flight (the aerospace rules), volume_up (Audio), restart_alt (a page's reset),
+          // desktop_windows (Display), keyboard (Controls) and sports_esports (Gameplay)
+          Map.entry("flight", 0xE539), Map.entry("volume", 0xE050), Map.entry("restart", 0xF053),
+          Map.entry("display", 0xE30C), Map.entry("keyboard", 0xE312), Map.entry("gameplay", 0xEA28));
     /**
      * Icons the prototype draws filled. The shipped font has no filled named instance, so their outlines are closed:
      * every texel that the glyph's outline encloses becomes opaque.
@@ -1518,6 +1522,13 @@ public final class UiTheme implements Disposable {
         // The hub keeps hud-v3's mint ring, which the needle stops at, so the value inside stays on the plain base
         box("token-dial-hub", base, token(accent), tokens.size().get("selection.width"), hub / 2, null, 0, 0, hub);
         box("token-dial-knob", token(accent), base, 2, grip / 2, null, 0, 0, grip);
+        // UiColorPicker's: a white swatch the batch tints to the colour, its frame, and the handles' ring
+        float corner = tokens.radius().get("md");
+        box(UiColorPicker.SWATCH, Color.WHITE, null, 0, corner, null, 0, 0, 0);
+        // Square, as the field's and the strip's shaded quads are
+        box(UiColorPicker.FRAME, Color.CLEAR, control, border, 0, null, 0, 0, 0);
+        box(UiColorPicker.RING, Color.CLEAR, Color.WHITE, 2, UiColorPicker.HANDLE / 2, null, 0, 0,
+              UiColorPicker.HANDLE);
         PickerStyle picker = new PickerStyle();
         picker.discs = "token-dial";
         picker.accent = token(accent);

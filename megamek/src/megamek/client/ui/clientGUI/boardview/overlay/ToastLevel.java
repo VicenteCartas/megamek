@@ -76,8 +76,15 @@ public enum ToastLevel {
      * @return the display time in milliseconds
      */
     public int getDefaultDurationMs() {
-        int baseSeconds = Math.max(MIN_BASE_DURATION_SECONDS,
-              GUIPreferences.getInstance().getToastDurationSeconds());
-        return (baseSeconds + durationOffsetSeconds) * MILLIS_PER_SECOND;
+        return durationMs(GUIPreferences.getInstance().getToastDurationSeconds());
+    }
+
+    /**
+     * @param baseSeconds the player's base display time, such as the settings screen shows before it is stored
+     *
+     * @return this level's display time at that base, in milliseconds
+     */
+    public int durationMs(int baseSeconds) {
+        return (Math.max(MIN_BASE_DURATION_SECONDS, baseSeconds) + durationOffsetSeconds) * MILLIS_PER_SECOND;
     }
 }

@@ -82,6 +82,7 @@ import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyBoardPreviews;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyServices;
+import megamek.client.ui.settings.ClientSettingsForm;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.client.ui.util.PlayerColour;
@@ -506,6 +507,19 @@ public final class GpuLobbyWindow {
             return false;
         }
         window.tools.helpDocument(title, file);
+        return true;
+    }
+
+    /**
+     * EDT: shows the native Client Settings over {@code gui}'s lobby on the page of the Swing dialog's {@code route}.
+     * Returns false, showing nothing, when that lobby does not show, so the caller shows them otherwise.
+     */
+    public static boolean showClientSettings(ClientGUI gui, @Nullable String route) {
+        GpuLobbyWindow window = active;
+        if (window == null || window.closing || window.gui != gui) {
+            return false;
+        }
+        window.openSettings(route);
         return true;
     }
 
@@ -1190,12 +1204,28 @@ public final class GpuLobbyWindow {
         });
     }
 
-    /** Any thread: opens Client Settings over the lobby, whose window hides the menu bar that holds them. */
+    /** Any thread: opens the native Client Settings over the lobby, whose window hides the menu bar that holds them. */
     void openSettings() {
+        openSettings(null);
+    }
+
+    /**
+     * Any thread: opens the native Client Settings over the lobby on {@code page} ({@code ClientSettingsForm}'s page
+     * ids, which the Swing dialog's routes share), read on the Swing thread. The settings take effect as they change,
+     * so their writes and Cancel's going back run even while the lobby closes.
+     */
+    void openSettings(@Nullable String page) {
         SwingUtilities.invokeLater(() -> {
-            if (!closing && !swingDialogs.blocked()) {
-                gui.openClientSettings();
+            if (closing || swingDialogs.blocked()) {
+                return;
             }
+            ClientSettingsForm form = ClientSettingsForm.current();
+            GpuHost.post(() -> {
+                GpuLobbyScreen shown = screen;
+                if (shown != null) {
+                    shown.clientSettingsDialog(form, form.pageOf(page), ClientSettingsView.Host.swing(GpuHost::post));
+                }
+            });
         });
     }
 

@@ -13,10 +13,10 @@ import java.util.Set;
 import java.util.Vector;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import megamek.client.lobby.GameOptionsForm.Page;
-import megamek.client.lobby.GameOptionsForm.Row;
-import megamek.client.lobby.GameOptionsForm.Section;
 import megamek.client.ui.panels.GameOptionsCatalog;
+import megamek.client.ui.settings.SettingsForm.Page;
+import megamek.client.ui.settings.SettingsForm.Row;
+import megamek.client.ui.settings.SettingsForm.Section;
 import megamek.common.options.GameOptions;
 import megamek.common.options.IBasicOption;
 import megamek.common.options.IOption;
