@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.panels.CommonSettingsPane;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.client.ui.util.PlayerColour;
 import megamek.common.equipment.SensorFamily;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceStore;
@@ -60,6 +61,8 @@ class ClientSettingsFormTest {
         store.setDefault(GUIPreferences.ADVANCED_NO_SAVE_NAG, false);
         store.setDefault(GUIPreferences.NAG_FOR_PSR, true);
         store.setDefault(GUIPreferences.SENSOR_PREFERENCE_ORDER, SENSORS);
+        store.setDefault(GUIPreferences.MY_UNIT_COLOR, "255 0 0");
+        store.setDefault(GUIPreferences.BOARD_ECM_TRANSPARENCY, 128);
         store.addPreferenceChangeListener(event -> heard.add(event.getName()));
         client = new ClientPreferences(new PreferenceStore());
     }
@@ -147,7 +150,8 @@ class ClientSettingsFormTest {
         assertEquals(ClientSettingsForm.AUDIO, form.pageOf(CommonSettingsPane.SETTINGS_AUDIO));
         assertEquals(ClientSettingsForm.DISPLAY, form.pageOf(CommonSettingsPane.SETTINGS_MAIN));
         assertEquals(ClientSettingsForm.KEYBOARD, form.pageOf(CommonSettingsPane.SETTINGS_KEYBINDS));
-        assertNull(form.pageOf(CommonSettingsPane.SETTINGS_OVERLAYS));
+        assertEquals(ClientSettingsForm.BOARD, form.pageOf(CommonSettingsPane.SETTINGS_GAMEBOARD));
+        assertEquals(ClientSettingsForm.TRACE, form.pageOf(CommonSettingsPane.SETTINGS_OVERLAYS));
         assertNull(form.pageOf(null));
     }
 
@@ -383,5 +387,58 @@ class ClientSettingsFormTest {
         form.apply().run();
 
         assertEquals('\u03B1', client.getUnitStartChar());
+    }
+
+    @Test
+    void theBattlefieldAndColourPagesAreThere() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+
+        for (String page : List.of(ClientSettingsForm.BOARD, ClientSettingsForm.LABELS, ClientSettingsForm.MARKS,
+              ClientSettingsForm.TRACE, ClientSettingsForm.PALETTE, ClientSettingsForm.FORCES,
+              ClientSettingsForm.TACTICAL, ClientSettingsForm.MAP_TEXT)) {
+            assertNotNull(form.page(page), page);
+        }
+        SettingsForm.Page palette = form.page(ClientSettingsForm.PALETTE);
+        assertEquals(PlayerColour.values().length,
+              palette.sections().stream().mapToInt(section -> section.rows().size()).sum());
+        assertTrue(palette.sections().stream().flatMap(section -> section.rows().stream())
+              .allMatch(row -> row.kind() == SettingsForm.Kind.COLOR));
+    }
+
+    @Test
+    void aColourIsShownAsHexAndWrittenAsItsParts() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+        assertEquals("#ff0000", form.text(GUIPreferences.MY_UNIT_COLOR));
+
+        form.text(GUIPreferences.MY_UNIT_COLOR, "#00FF80");
+        assertEquals("#00ff80", form.text(GUIPreferences.MY_UNIT_COLOR));
+        form.text(GUIPreferences.MY_UNIT_COLOR, "blue-ish");
+        assertEquals("#00ff80", form.text(GUIPreferences.MY_UNIT_COLOR), "a text that is no colour is not taken");
+        form.apply().run();
+
+        assertEquals("0 255 128", store.getString(GUIPreferences.MY_UNIT_COLOR));
+        form.defaults(form.page(ClientSettingsForm.FORCES));
+        assertEquals("#ff0000", form.text(GUIPreferences.MY_UNIT_COLOR));
+    }
+
+    @Test
+    void aKeptColourReadsInEitherForm() {
+        assertEquals("#102030", ClientSettingsForm.colorOf("16 32 48", null));
+        assertEquals("#102030", ClientSettingsForm.colorOf("#102030", null));
+        assertEquals("#abcdef", ClientSettingsForm.colorOf("garbage", "#abcdef"));
+        assertEquals("#000000", ClientSettingsForm.colorOf(null, null));
+        assertEquals(-1, SettingsForm.rgb("#12345"));
+        assertEquals("#0a0b0c", SettingsForm.color(0x0A0B0C));
+    }
+
+    @Test
+    void anOpacityIsShownAsAPercentage() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+        assertEquals("50", form.text(GUIPreferences.BOARD_ECM_TRANSPARENCY));
+
+        form.text(GUIPreferences.BOARD_ECM_TRANSPARENCY, "25");
+        form.apply().run();
+
+        assertEquals(64, store.getInt(GUIPreferences.BOARD_ECM_TRANSPARENCY));
     }
 }

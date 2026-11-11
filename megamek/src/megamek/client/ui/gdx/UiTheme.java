@@ -1522,6 +1522,13 @@ public final class UiTheme implements Disposable {
         // The hub keeps hud-v3's mint ring, which the needle stops at, so the value inside stays on the plain base
         box("token-dial-hub", base, token(accent), tokens.size().get("selection.width"), hub / 2, null, 0, 0, hub);
         box("token-dial-knob", token(accent), base, 2, grip / 2, null, 0, 0, grip);
+        // UiColorPicker's: a white swatch the batch tints to the colour, its frame, and the handles' ring
+        float corner = tokens.radius().get("md");
+        box(UiColorPicker.SWATCH, Color.WHITE, null, 0, corner, null, 0, 0, 0);
+        // Square, as the field's and the strip's shaded quads are
+        box(UiColorPicker.FRAME, Color.CLEAR, control, border, 0, null, 0, 0, 0);
+        box(UiColorPicker.RING, Color.CLEAR, Color.WHITE, 2, UiColorPicker.HANDLE / 2, null, 0, 0,
+              UiColorPicker.HANDLE);
         PickerStyle picker = new PickerStyle();
         picker.discs = "token-dial";
         picker.accent = token(accent);

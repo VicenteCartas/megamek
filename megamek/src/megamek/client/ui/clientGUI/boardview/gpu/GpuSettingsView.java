@@ -13,6 +13,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
@@ -27,10 +28,12 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
+import megamek.client.ui.gdx.UiColorPicker;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiFormField;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiList;
+import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiSliderInput;
 import megamek.client.ui.gdx.UiTextField;
@@ -63,6 +66,9 @@ final class GpuSettingsView {
     /** The widest a choice or text field grows; a switch, slider or file picker takes the card's width. */
     private static final float FIELD_WIDTH = 320;
     private static final float READING_WIDTH = 52;
+    /** A colour tile's width and its swatch's height. */
+    private static final float TILE_WIDTH = 132;
+    private static final float TILE_SWATCH = 34;
 
     /** The search's texts: its placeholder and tooltip, what it says without and with matches, and the idle help. */
     record Texts(String search, String searchTip, String noMatches, String matches, String hint) { }
@@ -133,6 +139,11 @@ final class GpuSettingsView {
         void pick(Row row, String current, Consumer<String> then) {
         }
 
+        /** The colours a {@link Kind#COLOR} setting's picker offers at a click, as 0xRRGGBB. */
+        int[] presets() {
+            return new int[0];
+        }
+
         /** After the view showed the form anew, for the parts of the flavor and the footer. */
         void refreshed() {
         }
@@ -143,9 +154,13 @@ final class GpuSettingsView {
         }
     }
 
-    /** One shown setting: its control, its form field (null for a switch), its reading, picker and changed dot. */
+    /**
+     * One shown setting: its control, its form field (null for a switch), its reading, picker and changed dot, and
+     * the swatch of a colour.
+     */
     private record Control(Row row, Actor input, @Nullable UiFormField field, @Nullable Label reading,
-          @Nullable UiButton picker, Actor changed, @Nullable KeyControl key, @Nullable OrderControl order) { }
+          @Nullable UiButton picker, Actor changed, @Nullable KeyControl key, @Nullable OrderControl order,
+          @Nullable Image swatch) { }
 
     /**
      * A key binding's parts: the keycap that shows its keys and takes a new one on a click, its buttons back to the
@@ -198,6 +213,24 @@ final class GpuSettingsView {
     /** The modifier pressed alone while capturing, which binds when let go; -1 once a second joined it. */
     private int lonelyModifier;
     private final InputListener capture = new KeyCapture();
+    /** The colour picker, made at the first click on a swatch, and the colour setting it shows while open. */
+    private @Nullable UiPopover colorPopover;
+    private @Nullable UiColorPicker colorPicker;
+    private @Nullable Row picking;
+    private @Nullable Button pickingTile;
+    private Button.ButtonStyle tileStyle;
+    /** Closes the colour picker on Esc, before the dialog hears of it and closes. */
+    private final InputListener colorEscape = new InputListener() {
+        @Override
+        public boolean keyDown(InputEvent event, int keycode) {
+            if (keycode != Keys.ESCAPE || colorPopover == null || !colorPopover.isVisible()) {
+                return false;
+            }
+            event.cancel();
+            colorPopover.cancel();
+            return true;
+        }
+    };
 
     /**
      * @param bodyWidth  the width the body has, which decides whether the rail goes beside the page and whether a
@@ -415,6 +448,10 @@ final class GpuSettingsView {
 
     private void showPage() {
         endCapture();
+        if (colorPopover != null) {
+            // Its tile goes with the page
+            colorPopover.cancel();
+        }
         controls.clear();
         page.clearChildren();
         Page shown = current();
@@ -461,7 +498,19 @@ final class GpuSettingsView {
         if (!section.summary().isBlank()) {
             card.add(wrapped(plain(section.summary()), "small", "text.muted")).padTop(space("xs")).row();
         }
+        HorizontalGroup tiles = null;
         for (Row row : form.visibleRows(shown, section)) {
+            if (row.kind() == Kind.COLOR) {
+                // Colours side by side as swatches, rather than a line each
+                if (tiles == null) {
+                    tiles = new HorizontalGroup();
+                    tiles.wrap().space(space("sm")).wrapSpace(space("sm")).left().top();
+                    card.add(tiles).padTop(space("md")).row();
+                }
+                tiles.addActor(colorTile(row));
+                continue;
+            }
+            tiles = null;
             card.add(row(row)).padTop(space("md")).row();
             Actor after = flavor.afterRow(row);
             if (after != null) {
@@ -605,6 +654,13 @@ final class GpuSettingsView {
             key.problemCell = line.add((Label) null).colspan(line.getColumns()).left().growX();
         }
         line.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.enabled);
+        pointable(line, row);
+        controls.put(row.name(), new Control(row, input, field, reading, picker, changed, key, order, null));
+        return line;
+    }
+
+    /** The help strip and the flavor hear of {@code row} while the pointer is over {@code line}. */
+    private void pointable(Actor line, Row row) {
         line.addListener(new InputListener() {
             @Override
             public void enter(InputEvent event, float x, float y, int pointer, @Nullable Actor fromActor) {
@@ -622,8 +678,120 @@ final class GpuSettingsView {
                 }
             }
         });
-        controls.put(row.name(), new Control(row, input, field, reading, picker, changed, key, order));
-        return line;
+    }
+
+    // ---- Colours
+
+    /** The tile of a {@link Kind#COLOR} setting: its swatch over its name and changed dot; a click opens the picker. */
+    private Actor colorTile(Row row) {
+        String name = flavor.rowPrefix() + row.name();
+        if (tileStyle == null) {
+            tileStyle = new Button.ButtonStyle(kit.skin.get(UiTheme.TOKEN_PICTURE_CARD, Button.ButtonStyle.class));
+            // The tile whose picker is open keeps the selected card's accent edge
+            tileStyle.checked = kit.skin.getDrawable("token-card-selected");
+        }
+        Button tile = new Button(tileStyle);
+        tile.pad(space("sm"));
+        tile.setName(name);
+        Image swatch = new Image(kit.skin.getDrawable(UiColorPicker.SWATCH));
+        swatch.setName(name + "-swatch");
+        Label label = kit.typeLabel(row.label(), "small", "text.primary");
+        label.setEllipsis(true);
+        Image changed = new Image(kit.skin.getDrawable("token-dot"));
+        changed.setName(name + "-changed");
+        tile.add(swatch).colspan(2).growX().height(TILE_SWATCH).row();
+        tile.add(label).growX().minWidth(0).padTop(space("xs"));
+        tile.add(changed).padTop(space("xs")).padLeft(space("xs"));
+        UiKit.onChange(tile, () -> pickColor(row, tile));
+        pointable(tile, row);
+        controls.put(row.name(), new Control(row, tile, null, null, null, changed, null, null, swatch));
+        Container<Button> holder = new Container<>(tile);
+        holder.width(TILE_WIDTH);
+        return holder;
+    }
+
+    /** Opens the picker above or below {@code tile} on the colour of {@code row}. */
+    private void pickColor(Row row, Button tile) {
+        if (syncing || flavor.busy() || !form.editable(row.name())) {
+            return;
+        }
+        if (colorPopover == null) {
+            colorPopover = new UiPopover(kit, this::colorClosed, UiTheme.TOKEN);
+            colorPopover.setName(flavor.prefix() + "-color");
+            colorPicker = new UiColorPicker(kit, rgb -> color(rgb, false), rgb -> color(rgb, true));
+            colorPicker.presets(flavor.presets());
+            UiButton restore = kit.button("button-quiet" + UiTheme.COMPACT, "restart",
+                  Messages.getString("ClientSettings.colours.default"), null);
+            restore.setName(flavor.prefix() + "-color-default");
+            UiKit.onChange(restore, () -> {
+                if (picking != null && form.defaultText(picking.name()) != null) {
+                    int rgb = SettingsForm.rgb(form.defaultText(picking.name()));
+                    if (rgb >= 0) {
+                        colorPicker.value(rgb);
+                        color(rgb, true);
+                    }
+                }
+            });
+            Table content = new Table();
+            content.pad(space("md")).top().left().defaults().left();
+            content.add(colorPicker).row();
+            content.add(restore).padTop(space("sm")).row();
+            colorPopover.content(content);
+            dialog.layer().addActor(colorPopover);
+        }
+        picking = row;
+        if (pickingTile != null && pickingTile != tile) {
+            Button before = pickingTile;
+            sync(() -> before.setChecked(false));
+        }
+        pickingTile = tile;
+        sync(() -> tile.setChecked(true));
+        colorPicker.value(Math.max(0, SettingsForm.rgb(form.text(row.name()))));
+        colorPopover.header(row.label(), null);
+        colorPopover.openedFrom(tile);
+        colorPopover.showAnchored(tile, colorPicker.getPrefWidth() + 2 * space("md"));
+        Stage stage = tile.getStage();
+        if (stage != null) {
+            stage.removeCaptureListener(colorEscape);
+            stage.addCaptureListener(colorEscape);
+        }
+    }
+
+    /** The picker's colour: the form takes it; the flavor hears of it only once it is {@code settled}. */
+    private void color(int rgb, boolean settled) {
+        Row row = picking;
+        if (row == null) {
+            return;
+        }
+        Runnable change = () -> form.text(row.name(), SettingsForm.color(rgb));
+        if (settled) {
+            held = null;
+            changed(row, change);
+        } else {
+            held(row, change);
+        }
+    }
+
+    private void colorClosed() {
+        picking = null;
+        if (pickingTile != null) {
+            Button tile = pickingTile;
+            pickingTile = null;
+            sync(() -> tile.setChecked(false));
+        }
+        if (colorPopover != null && colorPopover.getStage() != null) {
+            colorPopover.getStage().removeCaptureListener(colorEscape);
+        }
+    }
+
+    /** For tests: the colour picker, null before the first click on a swatch. */
+    @Nullable UiColorPicker colorPicker() {
+        return colorPicker;
+    }
+
+    /** For tests: the picker's popover, null before the first click on a swatch. */
+    @Nullable UiPopover colorPopover() {
+        return colorPopover;
     }
 
     // ---- Rankings
@@ -958,6 +1126,15 @@ final class GpuSettingsView {
                 }
                 if (control.order() != null) {
                     control.order().show(disabled);
+                }
+                if (control.swatch() != null) {
+                    int rgb = Math.max(0, SettingsForm.rgb(form.text(name)));
+                    control.swatch().setColor((rgb >> 16 & 0xFF) / 255f, (rgb >> 8 & 0xFF) / 255f,
+                          (rgb & 0xFF) / 255f, 1);
+                    ((Button) control.input()).setDisabled(disabled);
+                    if (control.row().equals(picking) && colorPicker != null && colorPicker.value() != rgb) {
+                        colorPicker.value(rgb);
+                    }
                 }
                 control.changed().setVisible(form.changed(name));
             }

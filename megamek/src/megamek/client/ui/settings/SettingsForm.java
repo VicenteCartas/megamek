@@ -35,7 +35,30 @@ public abstract class SettingsForm {
          * A key and the modifiers held with it, as AWT keeps them, in the text {@link #key(int, int)} makes; "0,0" while
          * nothing is bound.
          */
-        KEY
+        KEY,
+        /** A colour, as its text {@code #rrggbb} in lower case. */
+        COLOR
+    }
+
+    /** @return the text of a {@link Kind#COLOR} row for the colour's red, green and blue */
+    public static String color(int rgb) {
+        return String.format("#%06x", rgb & 0xFFFFFF);
+    }
+
+    /** @return the red, green and blue of a {@link Kind#COLOR} row's text, or -1 when it is no colour */
+    public static int rgb(@Nullable String text) {
+        String hex = text == null ? "" : text.strip();
+        if (hex.startsWith("#")) {
+            hex = hex.substring(1);
+        }
+        if (hex.length() != 6) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(hex, 16);
+        } catch (NumberFormatException ex) {
+            return -1;
+        }
     }
 
     /** The text of a {@link Kind#KEY} row: the AWT key code and modifier mask, "0,0" for none. */

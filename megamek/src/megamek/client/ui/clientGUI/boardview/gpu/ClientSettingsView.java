@@ -7,9 +7,11 @@ import java.awt.event.KeyEvent;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -21,6 +23,8 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
+import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.utils.Align;
@@ -31,10 +35,12 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.audio.SoundType;
+import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.design.DesignTokens.Palette;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiColorPicker;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiFileDialog;
 import megamek.client.ui.gdx.UiKit;
@@ -43,6 +49,7 @@ import megamek.client.ui.settings.ClientSettingsForm;
 import megamek.client.ui.settings.SettingsForm;
 import megamek.client.ui.settings.SettingsForm.Page;
 import megamek.client.ui.settings.SettingsForm.Row;
+import megamek.client.ui.util.PlayerColour;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
 import megamek.logging.MMLogger;
@@ -104,7 +111,10 @@ final class ClientSettingsView {
           GUIPreferences.SOUND_MUTE_OTHERS_TURN);
     private static final Map<String, String> ICONS = Map.of(ClientSettingsForm.AUDIO, "volume",
           ClientSettingsForm.DISPLAY, "display", ClientSettingsForm.CONTROLS, "keyboard", ClientSettingsForm.GAMEPLAY,
-          "gameplay");
+          "gameplay", ClientSettingsForm.BATTLEFIELD, "map", ClientSettingsForm.COLOURS, "palette");
+    /** The pages whose preview is a stretch of battlefield in the colours and labels they set. */
+    private static final Set<String> BATTLEFIELD_SAMPLES = Set.of(ClientSettingsForm.LABELS,
+          ClientSettingsForm.FORCES, ClientSettingsForm.TACTICAL, ClientSettingsForm.MAP_TEXT);
     /** The scales, which take effect where the slider is let go, as they move the card under the pointer. */
     private static final Set<String> SCALES = Set.of(GUIPreferences.GUI_SCALE, GUIPreferences.BOARD_UI_SCALE);
 
@@ -123,6 +133,7 @@ final class ClientSettingsView {
     private PromptSample prompts;
     private PrincessSample princess;
     private RosterSample roster;
+    private BattlefieldSample battlefield;
     private Actor restart;
     private UiFileDialog files;
     private boolean applying;
@@ -201,7 +212,9 @@ final class ClientSettingsView {
             prompts = ClientSettingsForm.WARNINGS.equals(page.id()) ? new PromptSample(page) : null;
             princess = ClientSettingsForm.BOTS.equals(page.id()) ? new PrincessSample() : null;
             roster = ClientSettingsForm.UNITS.equals(page.id()) ? new RosterSample() : null;
-            for (Table preview : new Table[] { soundCheck, sample, keyboard, prompts, princess, roster }) {
+            battlefield = BATTLEFIELD_SAMPLES.contains(page.id()) ? new BattlefieldSample(page.id()) : null;
+            for (Table preview : new Table[] { soundCheck, sample, keyboard, prompts, princess, roster,
+                                               battlefield }) {
                 if (preview != null) {
                     return preview;
                 }
@@ -243,16 +256,26 @@ final class ClientSettingsView {
             if (files == null) {
                 files = new UiFileDialog(kit);
             }
+            boolean image = GUIPreferences.TRACE_OVERLAY_IMAGE_FILE.equals(row.name());
             Path at = Path.of(current.isBlank() ? "." : current).toAbsolutePath();
             Path directory = Files.isDirectory(at) ? at : at.getParent();
-            files.show(stage, new UiFileDialog.Options(row.label(), UiFileDialog.Mode.OPEN, "clientSettings.sounds",
-                        directory, "", new UiFileDialog.Filter(Messages.getString("ClientSettings.audio.files"),
-                        row.values())),
+            files.show(stage, new UiFileDialog.Options(row.label(), UiFileDialog.Mode.OPEN,
+                        image ? "clientSettings.trace" : "clientSettings.sounds", directory, "",
+                        new UiFileDialog.Filter(Messages.getString(image ? "ClientSettings.battlefield.trace.files"
+                              : "ClientSettings.audio.files"), row.values())),
                   path -> {
                       if (path != null) {
                           then.accept(relative(path));
                       }
                   });
+        }
+
+        @Override
+        int[] presets() {
+            // The players' shipped colours, as the palette page has them
+            return Arrays.stream(PlayerColour.values())
+                  .mapToInt(colour -> SettingsForm.rgb(form.defaultText(colour.getText())))
+                  .filter(rgb -> rgb >= 0).toArray();
         }
 
         @Override
@@ -331,6 +354,9 @@ final class ClientSettingsView {
         }
         if (roster != null) {
             roster.show();
+        }
+        if (battlefield != null) {
+            battlefield.show();
         }
         if (restart != null) {
             restart.setVisible(form.changed(ClientPreferences.LOCALE));
@@ -413,6 +439,235 @@ final class ClientSettingsView {
             Color color = new Color();
             Color.argb8888ToColor(color, tokens.color(role, Mode.DARK));
             return color;
+        }
+    }
+
+    /**
+     * The Labels and Colours pages' preview: a stretch of battlefield in what the page sets. The Labels and Forces
+     * pages show a unit of each side by its nameplate, in its side's colour (or its player's without team colours),
+     * named in the label style, with its damage tile; Forces adds the status colours on readouts. Tactical shows a
+     * move's legs and the weapon range bands, and Map Text the board's own writing on a dark hex field.
+     */
+    private final class BattlefieldSample extends Table {
+        /** A unit of each side: its side's colour, its player's, its chassis, model and pilot, and its damage. */
+        private record Unit(String side, PlayerColour player, String chassis, String model, String pilot,
+              String damage) { }
+
+        private static final List<Unit> UNITS = List.of(
+              new Unit(GUIPreferences.MY_UNIT_COLOR, PlayerColour.BLUE, "Atlas", "AS7-D", "Bulldog", ""),
+              new Unit(GUIPreferences.ALLY_UNIT_COLOR, PlayerColour.GREEN, "Centurion", "CN9-A", "Hatchet",
+                    GUIPreferences.PRECAUTION_COLOR),
+              new Unit(GUIPreferences.ENEMY_UNIT_COLOR, PlayerColour.RED, "Marauder", "MAD-3R", "Red Fox",
+                    GUIPreferences.WARNING_COLOR));
+        /** The status colours on readouts, each with how full it stands. */
+        private static final Map<String, Float> STATUS = Map.of(GUIPreferences.OK_COLOR, .92f,
+              GUIPreferences.PRECAUTION_COLOR, .64f, GUIPreferences.CAUTION_COLOR, .38f, GUIPreferences.WARNING_COLOR,
+              .14f);
+        /** The weapon bands, each as wide as its share of a weapon's reach. */
+        private static final Map<String, Integer> BANDS = Map.of(GUIPreferences.BOARD_FIELD_OF_FIRE_MIN_COLOR, 1,
+              GUIPreferences.BOARD_FIELD_OF_FIRE_SHORT_COLOR, 3, GUIPreferences.BOARD_FIELD_OF_FIRE_MEDIUM_COLOR, 3,
+              GUIPreferences.BOARD_FIELD_OF_FIRE_LONG_COLOR, 3, GUIPreferences.BOARD_FIELD_OF_FIRE_EXTREME_COLOR, 3);
+
+        private final String page;
+        /** Each part of the sample shows the form anew through its own step. */
+        private final List<Runnable> steps = new ArrayList<>();
+
+        BattlefieldSample(String page) {
+            this.page = page;
+            top();
+            setName("client-battlefield-sample");
+            defaults().left().growX();
+            add(kit.caption(Messages.getString("ClientSettings.battlefield.sample"), true)).row();
+            add(view.wrapped(Messages.getString("ClientSettings.battlefield.sample." + page), "small", "text.muted"))
+                  .padTop(space("xs")).row();
+            switch (page) {
+                case ClientSettingsForm.LABELS -> {
+                    plates();
+                    nameplates();
+                }
+                case ClientSettingsForm.FORCES -> {
+                    plates();
+                    status();
+                }
+                case ClientSettingsForm.TACTICAL -> {
+                    pills(ClientSettingsForm.TACTICAL, "movement");
+                    bands();
+                    pills(ClientSettingsForm.TACTICAL, "ranges");
+                }
+                default -> mapText();
+            }
+            show();
+        }
+
+        void show() {
+            steps.forEach(Runnable::run);
+        }
+
+        /** A unit of each side by its nameplate: a bar in its colour, its name, and its damage tile. */
+        private void plates() {
+            Table field = field();
+            for (Unit unit : UNITS) {
+                Table plate = kit.card();
+                plate.setName("client-sample-plate-" + unit.player().name().toLowerCase(Locale.ROOT));
+                plate.pad(space("xs"), space("xs"), space("xs"), space("sm"));
+                Image edge = swatch();
+                Label name = kit.typeLabel("", "body.strong", "text.primary");
+                name.setEllipsis(true);
+                Image damage = swatch();
+                plate.add(edge).width(space("xs")).growY().padRight(space("sm"));
+                plate.add(name).growX().minWidth(0);
+                plate.add(damage).size(space("md")).padLeft(space("sm"));
+                field.add(plate).growX().padTop(space("xs")).row();
+                steps.add(() -> {
+                    boolean teams = ClientSettingsForm.FORCES.equals(page)
+                          || form.bool(GUIPreferences.TEAM_COLORING);
+                    tint(edge, teams ? unit.side() : unit.player().getText());
+                    String style = form.text(GUIPreferences.UNIT_LABEL_STYLE);
+                    name.setText(name(style, unit));
+                    damage.setVisible(!unit.damage().isEmpty() && form.bool(GUIPreferences.SHOW_DAMAGE_LEVEL));
+                    if (damage.isVisible()) {
+                        tint(damage, unit.damage());
+                    }
+                });
+            }
+        }
+
+        /** When the nameplates show: the mode the page has. */
+        private void nameplates() {
+            Label mode = view.wrapped("", "small", "text.secondary");
+            mode.setName("client-sample-nameplates");
+            add(mode).padTop(space("md")).row();
+            steps.add(() -> {
+                String shown;
+                try {
+                    shown = NameplateMode.valueOf(form.text(GUIPreferences.NAMEPLATE_MODE)).toString();
+                } catch (IllegalArgumentException unknown) {
+                    shown = form.text(GUIPreferences.NAMEPLATE_MODE);
+                }
+                mode.setText(Messages.getString("ClientSettings.battlefield.sample.nameplates", shown));
+            });
+        }
+
+        /** The status colours on readouts as the HUD draws them. */
+        private void status() {
+            for (Row row : rows(ClientSettingsForm.FORCES, "status")) {
+                UiKit.Meter meter = kit.meter(row.label(), false, true);
+                meter.setName("client-sample-status-" + row.name());
+                add(meter).padTop(space("md")).row();
+                float share = STATUS.getOrDefault(row.name(), .5f);
+                steps.add(() -> meter.set(Math.round(share * 100) + "%", share, color(row.name())));
+            }
+        }
+
+        /** A section's colours as pills that read in them, such as a move's legs. */
+        private void pills(String pageId, String section) {
+            HorizontalGroup pills = new HorizontalGroup();
+            pills.wrap().space(space("xs")).wrapSpace(space("xs")).left();
+            for (Row row : rows(pageId, section)) {
+                Table pill = new Table();
+                pill.setName("client-sample-pill-" + row.name());
+                pill.setBackground(kit.skin.getDrawable(UiColorPicker.SWATCH));
+                pill.pad(space("xxs"), space("sm"), space("xxs"), space("sm"));
+                Label label = inked(kit.typeLabel(row.label(), "small", "text.primary"));
+                pill.add(label);
+                pills.addActor(pill);
+                steps.add(() -> {
+                    Color color = color(row.name());
+                    pill.setColor(color);
+                    label.setColor(contrast(color));
+                });
+            }
+            add(pills).padTop(space("md")).row();
+        }
+
+        /** The weapon bands from the firing unit outward, each as wide as its share of the reach. */
+        private void bands() {
+            Table bar = new Table();
+            bar.setName("client-sample-bands");
+            for (Row row : rows(ClientSettingsForm.TACTICAL, "ranges")) {
+                Integer share = BANDS.get(row.name());
+                if (share == null) {
+                    continue;
+                }
+                Image band = new Image(kit.skin.newDrawable("white"));
+                bar.add(band).expandX().fillX().prefWidth(share * 16).height(space("md"));
+                steps.add(() -> band.setColor(color(row.name())));
+            }
+            add(bar).padTop(space("md")).row();
+        }
+
+        /** The board's own writing in its colours on a dark hex field, and the map sheet's edge under it. */
+        private void mapText() {
+            Table field = field();
+            for (Row row : rows(ClientSettingsForm.MAP_TEXT, "text")) {
+                Label text = inked(kit.typeLabel(row.label(), "body.strong", "text.primary"));
+                text.setName("client-sample-text-" + row.name());
+                field.add(text).padTop(space("xs")).row();
+                steps.add(() -> text.setColor(color(row.name())));
+            }
+            for (Row row : rows(ClientSettingsForm.MAP_TEXT, "marks")) {
+                Image line = new Image(kit.skin.newDrawable("white"));
+                Label caption = kit.typeLabel(row.label(), "small", "text.secondary");
+                field.add(line).growX().height(2).padTop(space("sm")).row();
+                field.add(caption).padTop(space("xxs")).row();
+                steps.add(() -> line.setColor(color(row.name())));
+            }
+        }
+
+        /** A dark stretch of board the sample's units and writing stand on. */
+        private Table field() {
+            Table field = new Table();
+            field.setBackground(kit.skin.newDrawable(UiColorPicker.SWATCH, new Color(.06f, .08f, .08f, 1)));
+            field.pad(space("sm"));
+            field.top().left().defaults().left().growX();
+            add(field).padTop(space("md")).row();
+            return field;
+        }
+
+        private List<Row> rows(String pageId, String section) {
+            Page shown = form.page(pageId);
+            return shown == null ? List.of() : shown.sections().stream()
+                  .filter(each -> each.id().equals(pageId + '.' + section)).flatMap(each -> each.rows().stream()).toList();
+        }
+
+        private Image swatch() {
+            return new Image(kit.skin.getDrawable(UiColorPicker.SWATCH));
+        }
+
+        private void tint(Image image, String name) {
+            image.setColor(color(name));
+        }
+
+        private Color color(String name) {
+            int rgb = Math.max(0, SettingsForm.rgb(form.text(name)));
+            return new Color((rgb >> 16 & 0xFF) / 255f, (rgb >> 8 & 0xFF) / 255f, (rgb & 0xFF) / 255f, 1);
+        }
+
+        /** The unit's name as the label style has it; the status-only style shows none. */
+        private static String name(String style, Unit unit) {
+            String pilot = '"' + unit.pilot() + '"';
+            return switch (style) {
+                case "ABBREV" -> unit.model();
+                case "NICKNAME", "ONLY_NICKNAME" -> pilot;
+                case "NICKNAME_AND_ABBREVIATED" -> pilot + ' ' + unit.model();
+                case "CHASSIS" -> unit.chassis();
+                case "ONLY_STATUS" -> "";
+                default -> unit.chassis() + ' ' + unit.model();
+            };
+        }
+
+        /** The label in white ink, so its colour is the one it is given rather than a blend with its role's. */
+        private static Label inked(Label label) {
+            Label.LabelStyle style = new Label.LabelStyle(label.getStyle());
+            style.fontColor = Color.WHITE;
+            label.setStyle(style);
+            return label;
+        }
+
+        /** Dark ink on a light colour, light ink on a dark one. */
+        private static Color contrast(Color color) {
+            float luminance = .2126f * color.r + .7152f * color.g + .0722f * color.b;
+            return luminance > .55f ? new Color(.06f, .08f, .08f, 1) : Color.WHITE;
         }
     }
 

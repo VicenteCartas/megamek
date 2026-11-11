@@ -367,15 +367,32 @@ Done so far, in short:
   (shown as an on switch rather than "no nag") and the lobby backup moved here; the welcome on start, which the Swing
   dialog never had, is a warning too. Dropped: focus on the board (it requested focus on a Swing panel that the native
   window does not have) and animate move (it drives only the Legacy 2D board).
+- Client Settings, part 5 (Battlefield and Colours): a Battlefield group with Board (enhanced or classic graphics,
+  wrecks, hex coordinates, terrain names, their outline and map sheet edges), Unit Labels (label style, when the
+  nameplates show, colour by side, the damage tile), Battle Marks (artillery and bomb misses and drifts, drift arrows,
+  the demolition hazard, and how solid the attack arrows and ECM fields are, as percentages of the kept 0 to 255) and
+  Trace Image (the board editor's scanned map, its file, opacity, scale and origin); and a Colours group with Player
+  Colours, Forces (the sides' and the status colours), Moves and Ranges, and Map Text. A colour is a tile with its
+  swatch; a click opens `UiColorPicker`, a new shared widget (a saturation and value field, a hue strip, a hex field and
+  presets, the default player colours) in a popover that previews while dragging, applies on release, has a way back
+  to the default and closes on Escape without closing the settings. A preview shows a unit of each side by its
+  nameplate, the status colours, a move's legs and the range bands, or the map's text and marks, as the page sets
+  them. The Swing Game Board route opens Board and the Overlays route opens Trace Image. Dropped, as they only drive
+  the Legacy 2D board or have no meaning on the 3D one: the tileset, high-quality and high-performance graphics,
+  ambient-occlusion shadows, the shadow map, inclines, the level highlight, floating isometric, darkening at night,
+  translucent hidden units, damage decals, the unit valid, selected and text colours, the entity owner colour, soft
+  and auto centring, the fire-solution colours, TMM pips, the move fonts, every field-of-view setting, the unit
+  overview shadow colours, the planetary overlay's colours and switches, and the Swing mini map's options.
 
 Still open:
 
 1. The board's last Swing dialog, the `SWING_DIALOGS` allowlist in `GpuBoardWindow` (R6/U2): Client Settings
-   (`CommonSettingsDialog`). Audio, Display, Controls, Gameplay and the shared shell are native (see above). Still to port, in
-   their own PRs: Game Board, Overlays, Unit Display, Player Colours, Report, Mini Map, the rest of Settings (Main:
-   colours, window layout, logs, privacy, user files and the MegaMekLab path), Phase and the rest of Advanced. The last
-   of them removes the dialog from the allowlist. Until then, the native card has no page for those yet
-   and the Swing dialog stays only for the Legacy 2D window and the Swing-only client.
+   (`CommonSettingsDialog`). Audio, Display, Controls, Gameplay, Battlefield, Colours and the shared shell are native
+   (see above). Still to port: the rest of Unit Display, Report and Settings (Main: toasts, game summary images,
+   recording, window layout, logs, privacy, user files and the MegaMekLab path; the heat, tooltip, report and ruler
+   colours), Phase and the rest of Advanced. The last of them removes the dialog from the allowlist. Until then, the
+   native card has no page for those yet and the Swing dialog stays only for the Legacy 2D window and the Swing-only
+   client.
 2. The developer tool that is still a Swing window of its own, outside the allowlist because it is not a dialog over
    the battle: the shader editor (`GpuShaderEditor`), a `JFrame` with its compiled GLSL window and a reload
    confirmation.

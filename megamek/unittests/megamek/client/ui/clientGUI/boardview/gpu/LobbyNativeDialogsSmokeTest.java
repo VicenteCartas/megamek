@@ -66,6 +66,7 @@ import megamek.client.ui.gdx.UiTextField;
 import megamek.client.ui.panels.CommonSettingsPane;
 import megamek.client.ui.settings.ClientSettingsForm;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.client.ui.util.PlayerColour;
 import megamek.common.Hex;
 import megamek.common.OffBoardDirection;
 import megamek.common.Player;
@@ -742,6 +743,55 @@ class LobbyNativeDialogsSmokeTest {
             click(ui, find(ui, "client-cancel"));
             assertEquals(1f, store.getFloat(GUIPreferences.GUI_SCALE), 1e-6, "Cancel puts the scale back");
             assertFalse(store.getBoolean(GUIPreferences.COLOR_BLIND_PALETTE));
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void aColourTileOpensThePickerAndEscapeClosesOnlyThePicker() {
+        UiTestStage.run(ui -> {
+            String blue = PlayerColour.values()[0].getText();
+            PreferenceStore store = new PreferenceStore();
+            store.setDefault(GUIPreferences.MY_UNIT_COLOR, "255 0 0");
+            store.setDefault(blue, "16 32 48");
+            ClientSettingsView.Host host = (work, then) -> {
+                work.run();
+                then.run();
+            };
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            ClientSettingsForm form = new ClientSettingsForm(store, new ClientPreferences(new PreferenceStore()));
+            ClientSettingsView view = dialogs.clientSettings(form, form.pageOf(CommonSettingsPane.SETTINGS_OVERLAYS),
+                  host);
+            ui.draw();
+            assertEquals(ClientSettingsForm.TRACE, view.pageId(), "the Swing overlays route opens the trace image");
+
+            click(ui, find(ui, "client-group-" + ClientSettingsForm.COLOURS));
+            ui.draw();
+            click(ui, find(ui, "client-page-" + ClientSettingsForm.FORCES));
+            ui.draw();
+            assertEquals(ClientSettingsForm.FORCES, view.pageId());
+            assertEquals(top(find(ui, "client-search")), top(find(ui, "client-battlefield-sample").getParent()), 1,
+                  "the sample's frame lines up with the search");
+            Actor tile = find(ui, "client-setting-" + GUIPreferences.MY_UNIT_COLOR);
+            reveal(ui, tile);
+            click(ui, tile);
+            ui.draw();
+            Actor popover = find(ui, "client-color");
+            assertTrue(popover.isVisible() && popover.getStage() != null, "a click on the tile opens the picker");
+
+            click(ui, find(ui, "color-preset-0"));
+            ui.draw();
+            assertEquals("16 32 48", store.getString(GUIPreferences.MY_UNIT_COLOR), "a preset applies at once");
+            assertTrue(find(ui, "client-setting-" + GUIPreferences.MY_UNIT_COLOR + "-changed").isVisible());
+
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            ui.stage.keyUp(Input.Keys.ESCAPE);
+            ui.draw();
+            assertTrue(dialogs.isOpen(), "Escape closes the picker, not the settings");
+            assertFalse(popover.isVisible() && popover.getStage() != null);
+
+            click(ui, find(ui, "client-cancel"));
+            assertEquals("255 0 0", store.getString(GUIPreferences.MY_UNIT_COLOR), "Cancel puts the colour back");
             dialogs.dispose();
         });
     }

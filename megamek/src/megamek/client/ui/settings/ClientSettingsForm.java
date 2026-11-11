@@ -17,9 +17,13 @@ import java.util.Set;
 import jakarta.annotation.Nullable;
 import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
+import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.panels.CommonSettingsPane;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.client.ui.util.PlayerColour;
 import megamek.common.KeyBindParser;
 import megamek.common.enums.WeaponSortOrder;
 import megamek.common.equipment.SensorFamily;
@@ -32,8 +36,9 @@ import megamek.common.preference.PreferenceManager;
  * of cards. A change takes effect at once, so the player hears or sees it ({@link #apply}); Cancel puts back what the
  * settings were when the form opened ({@link #revert}), and Defaults or a page's reset go back to the shipped values.
  * <p>
- * The form keeps its values as text: "true" or "false" for a switch, the number for a slider, the path for a file, and
- * the key and its modifiers for a key binding ({@link Kind#KEY}). It reads the preferences and the key bindings once,
+ * The form keeps its values as text: "true" or "false" for a switch, the number for a slider, the path for a file, the
+ * colour as "#rrggbb" ({@link Kind#COLOR}), and the key and its modifiers for a key binding ({@link Kind#KEY}). It reads
+ * the preferences and the key bindings once,
  * when built, and writes them only through the {@link Runnable}s it hands out, which the caller runs on the Swing
  * thread, since the preferences' listeners update Swing views.
  * <p>
@@ -56,6 +61,20 @@ public final class ClientSettingsForm extends SettingsForm {
     public static final String AUTOMATION = "automation";
     public static final String BOTS = "bots";
     public static final String UNITS = "units";
+    /** The Battlefield category and its pages: how the 3D board draws the terrain, the units and the battle's marks. */
+    public static final String BATTLEFIELD = "battlefield";
+    public static final String BOARD = "board";
+    public static final String LABELS = "labels";
+    public static final String MARKS = "marks";
+    public static final String TRACE = "trace";
+    /** The Colours category and its pages. */
+    public static final String COLOURS = "colours";
+    public static final String PALETTE = "palette";
+    public static final String FORCES = "forces";
+    public static final String TACTICAL = "tactical";
+    public static final String MAP_TEXT = "mapText";
+    /** The images the board editor can trace over the board: those libGDX reads. */
+    static final List<String> IMAGE_EXTENSIONS = List.of("png", "jpg", "jpeg", "bmp");
     /** The ProtoMek point codes' first letters, as the client preferences keep them: A, Alpha and alpha. */
     static final List<String> UNIT_START_CHARS = List.of("65", "913", "945");
     /** The key bindings the Controls pages leave out: they scale the Swing interface, and the 3D board ignores them. */
@@ -66,7 +85,8 @@ public final class ClientSettingsForm extends SettingsForm {
     /** The Swing dialog's routes that lead to a native page under another id. */
     private static final Map<String, String> ROUTES = Map.of(CommonSettingsPane.SETTINGS_MAIN, DISPLAY,
           CommonSettingsPane.SETTINGS_MAIN + ".application", DISPLAY, CommonSettingsPane.SETTINGS_KEYBINDS, KEYBOARD,
-          CommonSettingsPane.SETTINGS_AIDISPLAY, BOTS);
+          CommonSettingsPane.SETTINGS_AIDISPLAY, BOTS, CommonSettingsPane.SETTINGS_GAMEBOARD, BOARD,
+          CommonSettingsPane.SETTINGS_OVERLAYS, TRACE);
     /** The Controls pages of key bindings, in order, each with its sections and the commands each lists. */
     private static final List<BindPage> BIND_PAGES = List.of(
           new BindPage("camera",
@@ -133,13 +153,14 @@ public final class ClientSettingsForm extends SettingsForm {
     static final List<String> SOUND_EXTENSIONS = List.of("wav", "aiff", "au");
 
     /**
-     * Where a setting is kept, and how. {@code inverted} shows a "mute" preference as a "play" switch, and
-     * {@code percent} a share kept as a fraction, such as a scale of 1.5, as a whole percentage.
+     * Where a setting is kept, and how. {@code inverted} shows a "mute" preference as a "play" switch,
+     * {@code percent} a share kept as a fraction, such as a scale of 1.5, as a whole percentage, and {@code alpha} an
+     * opacity kept from 0 to 255 as a percentage.
      */
     private record Setting(@Nullable IPreferenceStore store, String key, Kind kind, boolean inverted, boolean percent,
-          @Nullable KeyCommandBind bind) {
+          boolean alpha, @Nullable KeyCommandBind bind) {
         Setting(IPreferenceStore store, String key, Kind kind, boolean inverted, boolean percent) {
-            this(store, key, kind, inverted, percent, null);
+            this(store, key, kind, inverted, percent, false, null);
         }
     }
 
@@ -183,6 +204,14 @@ public final class ClientSettingsForm extends SettingsForm {
         pages.add(automation(gui, client));
         pages.add(bots(gui, client));
         pages.add(units(client));
+        pages.add(board(gui));
+        pages.add(labels(gui));
+        pages.add(marks(gui));
+        pages.add(trace(gui));
+        pages.add(palette(gui));
+        pages.add(forces(gui));
+        pages.add(tactical(gui));
+        pages.add(mapText(gui));
         for (Map.Entry<String, Setting> entry : settings.entrySet()) {
             String value = read(entry.getValue());
             if (entry.getValue().kind() == Kind.ORDER) {
@@ -400,6 +429,183 @@ public final class ClientSettingsForm extends SettingsForm {
               searchText(GAMEPLAY, category, title, Messages.getString("ClientSettings.gameplay.keywords")));
     }
 
+    /** How the 3D board draws its terrain and the labels on its hexes. */
+    private Page board(IPreferenceStore gui) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(BOARD, "terrain", "ClientSettings.battlefield.board.terrain",
+              row(gui, GUIPreferences.BOARD_GRAPHICS, Kind.CHOICE, "ClientSettings.battlefield.graphics",
+                    Arrays.stream(BoardGraphics.values()).map(Enum::name).toList(),
+                    List.of(Messages.getString("CommonMenuBar.viewGraphicsClassic"),
+                          Messages.getString("CommonMenuBar.viewGraphicsEnhanced"))),
+              flag(gui, GUIPreferences.SHOW_WRECKS, "wrecks")));
+        sections.add(section(BOARD, "hexes", "ClientSettings.battlefield.board.hexes",
+              flag(gui, GUIPreferences.SHOW_COORDS, "coords"),
+              flag(gui, GUIPreferences.SHOW_HEX_TYPES, "hexTypes"),
+              flag(gui, GUIPreferences.HEX_LABEL_OUTLINE, "outline"),
+              flag(gui, GUIPreferences.SHOW_MAP_SHEETS, "mapSheets")));
+        return battlefieldPage(BOARD, sections);
+    }
+
+    /** How the units are named and marked on the board. */
+    private Page labels(IPreferenceStore gui) {
+        List<Section> sections = new ArrayList<>();
+        List<LabelDisplayStyle> styles = List.of(LabelDisplayStyle.values());
+        List<NameplateMode> modes = List.of(NameplateMode.values());
+        sections.add(section(LABELS, "names", "ClientSettings.battlefield.labels.names",
+              row(gui, GUIPreferences.UNIT_LABEL_STYLE, Kind.CHOICE, "ClientSettings.battlefield.labelStyle",
+                    styles.stream().map(Enum::name).toList(), styles.stream()
+                          .map(style -> Messages.getString("ClientSettings.battlefield.labelStyle." + style.name()))
+                          .toList()),
+              row(gui, GUIPreferences.NAMEPLATE_MODE, Kind.CHOICE, "ClientSettings.battlefield.nameplates",
+                    modes.stream().map(Enum::name).toList(), modes.stream().map(NameplateMode::toString).toList())));
+        sections.add(section(LABELS, "status", "ClientSettings.battlefield.labels.status",
+              flag(gui, GUIPreferences.TEAM_COLORING, "teamColours"),
+              flag(gui, GUIPreferences.SHOW_DAMAGE_LEVEL, "damage")));
+        return battlefieldPage(LABELS, sections);
+    }
+
+    /** What the battle leaves on the board: where shells and bombs fell, charges, vectors and jamming. */
+    private Page marks(IPreferenceStore gui) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(MARKS, "strikes", "ClientSettings.battlefield.marks.strikes",
+              flag(gui, GUIPreferences.SHOW_ARTILLERY_MISSES, "artilleryMisses"),
+              flag(gui, GUIPreferences.SHOW_ARTILLERY_DRIFTS, "artilleryDrifts"),
+              flag(gui, GUIPreferences.SHOW_ARTILLERY_DRIFT_ARROWS, "driftArrows"),
+              flag(gui, GUIPreferences.SHOW_BOMB_MISSES, "bombMisses"),
+              flag(gui, GUIPreferences.SHOW_BOMB_DRIFTS, "bombDrifts"),
+              flag(gui, GUIPreferences.BOARD_DEMOLITION_CHARGE_HAZARD_OUTLINE, "charges")));
+        sections.add(section(MARKS, "strength", "ClientSettings.battlefield.marks.strength",
+              alpha(gui, GUIPreferences.BOARD_ATTACK_ARROW_TRANSPARENCY, "ClientSettings.battlefield.vectors",
+                    "ClientSettings.battlefield.vectors.help"),
+              alpha(gui, GUIPreferences.BOARD_ECM_TRANSPARENCY, "ClientSettings.battlefield.ecm",
+                    "ClientSettings.battlefield.ecm.help")));
+        return battlefieldPage(MARKS, sections);
+    }
+
+    /** The board editor's trace image: a scanned map laid over the board to trace. */
+    private Page trace(IPreferenceStore gui) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(TRACE, "image", "ClientSettings.battlefield.trace.image",
+              row(gui, GUIPreferences.SHOW_TRACE_OVERLAY, Kind.BOOLEAN, false, "ClientSettings.battlefield.traceShown",
+                    "ClientSettings.battlefield.traceShown.help", List.of()),
+              row(gui, GUIPreferences.TRACE_OVERLAY_IMAGE_FILE, Kind.FILE, false,
+                    "CommonSettingsDialog.TraceOverlayImageFile", "CommonSettingsDialog.TraceOverlayImageFile.tooltip",
+                    IMAGE_EXTENSIONS),
+              alpha(gui, GUIPreferences.TRACE_OVERLAY_TRANSPARENCY, "CommonSettingsDialog.TraceOverlayTransparency",
+                    "CommonSettingsDialog.TraceOverlayTransparency.tooltip")));
+        sections.add(section(TRACE, "placement", "ClientSettings.battlefield.trace.placement",
+              row(gui, GUIPreferences.TRACE_OVERLAY_SCALE, Kind.SLIDER, false, "CommonSettingsDialog.TraceOverlayScale",
+                    "CommonSettingsDialog.TraceOverlayScale.tooltip", List.of("30", "150"), List.of("%")),
+              row(gui, GUIPreferences.TRACE_OVERLAY_ORIGIN_X, Kind.SLIDER, false,
+                    "CommonSettingsDialog.TraceOverlayOriginX", "CommonSettingsDialog.TraceOverlayOriginX.tooltip",
+                    List.of("-1000", "2000", "5"), List.of("px")),
+              row(gui, GUIPreferences.TRACE_OVERLAY_ORIGIN_Y, Kind.SLIDER, false,
+                    "CommonSettingsDialog.TraceOverlayOriginY", "CommonSettingsDialog.TraceOverlayOriginY.tooltip",
+                    List.of("-1000", "2000", "5"), List.of("px"))));
+        return battlefieldPage(TRACE, sections);
+    }
+
+    /** A Battlefield switch; its texts are {@code ClientSettings.battlefield.<name>} and its ".help". */
+    private Row flag(IPreferenceStore gui, String key, String name) {
+        String labelKey = "ClientSettings.battlefield." + name;
+        return row(gui, key, Kind.BOOLEAN, false, labelKey, labelKey + ".help", List.of());
+    }
+
+    /** An opacity kept from 0 to 255, on a slider in percent. */
+    private Row alpha(IPreferenceStore gui, String key, String labelKey, String helpKey) {
+        return row(new Setting(gui, key, Kind.SLIDER, false, false, true, null), labelKey, helpKey,
+              List.of("0", "100"), List.of("%"));
+    }
+
+    /** A Battlefield page; its id picks its texts. */
+    private Page battlefieldPage(String id, List<Section> sections) {
+        String title = Messages.getString("ClientSettings.battlefield." + id);
+        String category = Messages.getString("ClientSettings.battlefield");
+        return new Page(id, title, BATTLEFIELD, category, false, List.copyOf(sections),
+              searchText(BATTLEFIELD, category, title, Messages.getString("ClientSettings.battlefield.keywords")));
+    }
+
+    /** The players' colours, which their units, labels, reports and chat show. */
+    private Page palette(IPreferenceStore gui) {
+        Row[] colours = Arrays.stream(PlayerColour.values())
+              .map(colour -> colour(gui, colour.getText(), colour.toString(), "ClientSettings.colours.player.help"))
+              .toArray(Row[]::new);
+        return coloursPage(PALETTE, List.of(section(PALETTE, "players", "ClientSettings.colours.palette.players",
+              colours)));
+    }
+
+    /** The sides' colours and the status colours of damage and warnings. */
+    private Page forces(IPreferenceStore gui) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(FORCES, "sides", "ClientSettings.colours.forces.sides",
+              colour(gui, GUIPreferences.MY_UNIT_COLOR, "mine"),
+              colour(gui, GUIPreferences.ALLY_UNIT_COLOR, "ally"),
+              colour(gui, GUIPreferences.ENEMY_UNIT_COLOR, "enemy")));
+        sections.add(section(FORCES, "status", "ClientSettings.colours.forces.status",
+              colour(gui, GUIPreferences.OK_COLOR, "ok"),
+              colour(gui, GUIPreferences.PRECAUTION_COLOR, "precaution"),
+              colour(gui, GUIPreferences.CAUTION_COLOR, "caution"),
+              colour(gui, GUIPreferences.WARNING_COLOR, "warning")));
+        return coloursPage(FORCES, sections);
+    }
+
+    /** The colours of planned moves and of weapon and sensor ranges. */
+    private Page tactical(IPreferenceStore gui) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(TACTICAL, "movement", "ClientSettings.colours.tactical.movement",
+              colour(gui, GUIPreferences.BOARD_MOVE_DEFAULT_COLOR, "walk"),
+              colour(gui, GUIPreferences.BOARD_MOVE_RUN_COLOR, "run"),
+              colour(gui, GUIPreferences.BOARD_MOVE_JUMP_COLOR, "jump"),
+              colour(gui, GUIPreferences.BOARD_MOVE_BACK_COLOR, "back"),
+              colour(gui, GUIPreferences.BOARD_MOVE_MASC_COLOR, "boost"),
+              colour(gui, GUIPreferences.BOARD_MOVE_SPRINT_COLOR, "sprint"),
+              colour(gui, GUIPreferences.BOARD_MOVE_ILLEGAL_COLOR, "illegal")));
+        sections.add(section(TACTICAL, "ranges", "ClientSettings.colours.tactical.ranges",
+              colour(gui, GUIPreferences.BOARD_FIELD_OF_FIRE_MIN_COLOR, "minimum"),
+              colour(gui, GUIPreferences.BOARD_FIELD_OF_FIRE_SHORT_COLOR, "short"),
+              colour(gui, GUIPreferences.BOARD_FIELD_OF_FIRE_MEDIUM_COLOR, "medium"),
+              colour(gui, GUIPreferences.BOARD_FIELD_OF_FIRE_LONG_COLOR, "long"),
+              colour(gui, GUIPreferences.BOARD_FIELD_OF_FIRE_EXTREME_COLOR, "extreme"),
+              colour(gui, GUIPreferences.BOARD_SENSOR_RANGE_COLOR, "sensor"),
+              colour(gui, GUIPreferences.BOARD_VISUAL_RANGE_COLOR, "visual")));
+        return coloursPage(TACTICAL, sections);
+    }
+
+    /** The colours of what is written and drawn on the map itself. */
+    private Page mapText(IPreferenceStore gui) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(MAP_TEXT, "text", "ClientSettings.colours.mapText.text",
+              colour(gui, GUIPreferences.BOARD_TEXT_COLOR, "boardText"),
+              colour(gui, GUIPreferences.BOARD_SPACE_TEXT_COLOR, "spaceText"),
+              colour(gui, GUIPreferences.BOARD_BUILDING_TEXT_COLOR, "buildingText"),
+              colour(gui, GUIPreferences.BOARD_LOW_FOLIAGE_COLOR, "lowFoliage")));
+        sections.add(section(MAP_TEXT, "marks", "ClientSettings.colours.mapText.marks",
+              colour(gui, GUIPreferences.BOARD_MAP_SHEET_COLOR, "mapSheet"),
+              colour(gui, GUIPreferences.BOARD_DEMOLITION_CHARGE_COLOR, "charge")));
+        return coloursPage(MAP_TEXT, sections);
+    }
+
+    /** A colour; its texts are {@code ClientSettings.colours.<name>} and its ".help". */
+    private Row colour(IPreferenceStore gui, String key, String name) {
+        String labelKey = "ClientSettings.colours." + name;
+        return row(gui, key, Kind.COLOR, false, labelKey, labelKey + ".help", List.of());
+    }
+
+    private Row colour(IPreferenceStore gui, String key, String label, String helpKey) {
+        Setting setting = new Setting(gui, key, Kind.COLOR, false, false);
+        settings.put(key, setting);
+        String help = Messages.getString(helpKey);
+        return new Row(key, label, help, Kind.COLOR, List.of(), List.of(), Set.of(), searchText(key, label, help));
+    }
+
+    /** A Colours page; its id picks its texts. */
+    private Page coloursPage(String id, List<Section> sections) {
+        String title = Messages.getString("ClientSettings.colours." + id);
+        String category = Messages.getString("ClientSettings.colours");
+        return new Page(id, title, COLOURS, category, false, List.copyOf(sections),
+              searchText(COLOURS, category, title, Messages.getString("ClientSettings.colours.keywords")));
+    }
+
     /** A Controls page of key bindings, each a row named {@link #BIND} and its command. */
     private Page binds(BindPage page) {
         List<Section> sections = new ArrayList<>();
@@ -434,7 +640,7 @@ public final class ClientSettingsForm extends SettingsForm {
     }
 
     private Row bind(KeyCommandBind bind) {
-        Setting setting = new Setting(null, BIND + bind.cmd, Kind.KEY, false, false, bind);
+        Setting setting = new Setting(null, BIND + bind.cmd, Kind.KEY, false, false, false, bind);
         settings.put(setting.key(), setting);
         String label = Messages.getString("KeyBinds.cmdNames." + bind.cmd);
         String help = Messages.getString("KeyBinds.cmdDesc." + bind.cmd);
@@ -526,6 +732,12 @@ public final class ClientSettingsForm extends SettingsForm {
             text = key(keyCode(text), keyModifiers(text));
         } else if (setting.kind() == Kind.ORDER) {
             text = order(text, row(name).values());
+        } else if (setting.kind() == Kind.COLOR) {
+            int rgb = rgb(text);
+            if (rgb < 0) {
+                return;
+            }
+            text = color(rgb);
         }
         values.put(name, text == null ? "" : text);
     }
@@ -658,9 +870,13 @@ public final class ClientSettingsForm extends SettingsForm {
         if (setting.percent()) {
             return Integer.toString(Math.round(store.getFloat(setting.key()) * 100));
         }
+        if (setting.alpha()) {
+            return Integer.toString(percentOf(store.getInt(setting.key())));
+        }
         return switch (setting.kind()) {
             case BOOLEAN -> Boolean.toString(store.getBoolean(setting.key()) != setting.inverted());
             case SLIDER, INTEGER, INTEGER_CHOICE -> Integer.toString(store.getInt(setting.key()));
+            case COLOR -> colorOf(store.getString(setting.key()), store.getDefaultString(setting.key()));
             default -> Objects.requireNonNullElse(store.getString(setting.key()), "");
         };
     }
@@ -677,11 +893,44 @@ public final class ClientSettingsForm extends SettingsForm {
         if (setting.percent()) {
             return Integer.toString(Math.round(store.getDefaultFloat(setting.key()) * 100));
         }
+        if (setting.alpha()) {
+            return Integer.toString(percentOf(store.getDefaultInt(setting.key())));
+        }
         return switch (setting.kind()) {
             case BOOLEAN -> Boolean.toString(store.getDefaultBoolean(setting.key()) != setting.inverted());
             case SLIDER, INTEGER, INTEGER_CHOICE -> Integer.toString(store.getDefaultInt(setting.key()));
+            case COLOR -> colorOf(store.getDefaultString(setting.key()), null);
             default -> Objects.requireNonNullElse(store.getDefaultString(setting.key()), "");
         };
+    }
+
+    /** @return the share of 255 an opacity is, in whole percent */
+    private static int percentOf(int alpha) {
+        return Math.round(Math.clamp(alpha, 0, 255) * 100 / 255f);
+    }
+
+    /**
+     * @return the colour the preferences keep as its red, green and blue ("255 128 0", as {@link GUIPreferences} writes
+     *       it) or as a hex text, as the form's text; {@code fallback}'s colour, or black, when it is neither
+     */
+    static String colorOf(@Nullable String kept, @Nullable String fallback) {
+        String text = Objects.requireNonNullElse(kept, "").strip();
+        String[] parts = text.split("\\s+");
+        if (parts.length == 3) {
+            try {
+                int red = Math.clamp(Integer.parseInt(parts[0]), 0, 255);
+                int green = Math.clamp(Integer.parseInt(parts[1]), 0, 255);
+                int blue = Math.clamp(Integer.parseInt(parts[2]), 0, 255);
+                return color(red << 16 | green << 8 | blue);
+            } catch (NumberFormatException ignored) {
+                // Not three numbers; try it as a hex text
+            }
+        }
+        int rgb = rgb(text);
+        if (rgb >= 0) {
+            return color(rgb);
+        }
+        return fallback == null ? color(0) : colorOf(fallback, null);
     }
 
     /** Writes with the preference's own type, as its listeners expect the old and new values typed. */
@@ -702,9 +951,18 @@ public final class ClientSettingsForm extends SettingsForm {
             store.setValue(setting.key(), Integer.parseInt(value) / 100f);
             return;
         }
+        if (setting.alpha()) {
+            store.setValue(setting.key(), Math.round(Integer.parseInt(value) * 255 / 100f));
+            return;
+        }
         switch (setting.kind()) {
             case BOOLEAN -> store.setValue(setting.key(), Boolean.parseBoolean(value) != setting.inverted());
             case SLIDER, INTEGER, INTEGER_CHOICE -> store.setValue(setting.key(), Integer.parseInt(value));
+            case COLOR -> {
+                // As GUIPreferences keeps a colour: its red, green and blue
+                int rgb = rgb(value);
+                store.setValue(setting.key(), (rgb >> 16 & 0xFF) + " " + (rgb >> 8 & 0xFF) + " " + (rgb & 0xFF));
+            }
             default -> store.setValue(setting.key(), value);
         }
     }
