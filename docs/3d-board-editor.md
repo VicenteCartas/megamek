@@ -18,6 +18,8 @@ The editor's Menu also has the old editor's file and help commands (parity batch
 
 A plain left-click on the sky or anywhere outside the map clears the current selection and hex details.
 
+In Select, a click takes what is drawn under the pointer (`GpuTerrain.editorPick`). A placed object is selected itself, with its group. Anything else selects its hex and, in Layers, the layer that was struck: Building, Bridge, Fuel tank, Heavy industry, Vegetation (a tree) or Water (a liquid's surface). Every other surface selects Ground, including roads, pavement and rough terrain. Trees and industrial cover are solid for this click, so a click on a tree selects the tree's hex; the hover outline still follows walkable levels only. `GpuEditorPickHandleSmokeTest` clicks each of these.
+
 Fuel tanks have one card under **Industry**. Their weights may differ across connected hexes, and their models have no
 building interiors. The former Buildings → Tank farm card and four obsolete Heavy Industrial A–D cards are removed
 from the palette; the obsolete industrial designs also leave the building design picker, while saved maps retain them.
@@ -36,14 +38,27 @@ the neighbour. Step back narrows the upper walls, floors and roof together. This
 hex; `.board2` saves it only for Step back, as `building.appearance.profile: "stepped"`.
 
 A building whose **Class** is Hangar has no interior floors by default, draws its kit's `hangar` variant where the
-kit has one (the Variant row shows it; any other can be chosen) and has a **Hangar doors** section: a click on a
-side of its hex diagram gives the hex a large door in the wall facing that side, as high as the building, or takes
-it away, and each door has a height row (1 to the building's levels). A side the building continues across is
-refused. Doors of one height side by side along a straight wall, in this hex or the next, draw as one wide door, so
-a door two hexes wide is two hexes' doors (Square footprints have the long straight walls). `.board2` saves them as
-`building.appearance.doors`, heights by direction (`{"n": 3, "se": 2}`). The 3D views draw them
-(`models/buildings/README.md`, Large doors); rules and the 2D views ignore them. Limitations: doors are set in the
-panel, not by clicking walls in the view.
+kit has one (the Variant row shows it; any other can be chosen) and has large doors, edited in two places that show
+the same thing.
+
+- **On the building** (the designer, with the Select tool on one of its hexes): every wall of every hex has a handle
+  at its foot. `+` adds a door there; a door's handle raises or lowers it by a level and removes it; where two doors
+  meet at a corner, a link handle joins them into one opening or parts them there. Each door is outlined on its
+  wall, a wide door as one frame. Handles of walls that face away from the view are hidden, and all of them when
+  the building is small on screen.
+- **In the Edit panel** (**Hangar doors**, for the selected hex): a click on a side of the hex diagram adds a door as
+  high as the building, or takes it away; doors that are not one opening are drawn apart. Each door has a height
+  row, and each pair of doors that meet at a corner, in this hex or the next, a row that says whether they are one
+  opening.
+
+Two doors can be linked when their sides share a corner: side by side in one hex, or across two hexes. Linked doors
+are one opening: they take the lower of their heights, rise and fall together, and along a straight wall draw as one
+wide door (Square footprints and Angled bands have the long straight walls); at a bend each keeps its jambs. Doors
+are never linked by themselves. A side the building continues across has no wall, so no door. This is the model of
+the building rules and of MegaMekLab's and MekBay's designers (a door: hex, side, height, link group), without the
+level a door starts at: these stand on the ground. `.board2` saves `building.appearance.doors`, heights by direction
+(`{"n": 3, "se": 2}`), and `building.appearance.doorLinks`, the group of each linked door (`{"n": 1, "ne": 1}`). The
+3D views draw the doors (`models/buildings/README.md`, Large doors); rules and the 2D views ignore them.
 
 Domed buildings derive their layout from connected hexes and heights. Broad clusters fit separate domes; narrow
 level runs form continuous corridors, including bends and junctions. Raised peaks can support taller domes.
@@ -254,7 +269,7 @@ The catalog contains the existing building manifest designs, individual prop mod
 
 Components specify `receiver` (defaults to the component ID) for the Layers hierarchy, and `category`, of which only `Structures` is read (the height join of structures). Rubble is a Feature; painting it does not change the hex theme. The industry component declares `receiver: "industrial"` to match its existing support identifier. Numeric fields can specify `min`, `max` and `step` for their sliders; these are UI metadata and do not replace game-rule validation. `height: true` exposes a field in Hex section. Discrete `choices` provide readable selectors instead of unexplained numeric codes; road choices also declare their linked `material`.
 
-Components also declare `presets`: complete, validated terrain recipes with stable IDs and readable labels. `replaceExisting: false` makes a recipe additive within its component. An asset entry may name another `model` and its `colours` (see Colour slots): the three ponds are the freeform, sport-2 and sport-4 pools in their pond colours. A palette entry is one real object a user places, or a stamp: no palette ID is a `layouts.json` key, rotated and baked duplicates are gone, and terrain-owned scenery (rubble, geysers, fortifications) is painted through its terrain, not offered as a prop. `BoardSceneryTest` checks these rules and the palette objects per section.
+Components also declare `presets`: complete, validated terrain recipes with stable IDs and readable labels. `replaceExisting: false` makes a recipe additive within its component. A palette entry is one real object a user places, or a stamp: no palette ID is a `layouts.json` key, rotated and baked duplicates are gone, and terrain-owned scenery (rubble, geysers, fortifications) is painted through its terrain, not offered as a prop. `BoardSceneryTest` checks these rules and the palette objects per section.
 
 `categories` lists the Assets start page in order: an `id`, an `icon` (one hex in the `.board2` hex form) and its `sections`; the Theme category has `themes` (the special themes Dirt and Rock) instead. An optional `subcategories` object takes sections off the category's page and behind one card: subcategory id to its section ids (`"trains":["maglev-stock","rail-stock"]`). Names are message keys `BoardEditor.palette.<category>[.<subcategory or section>]`. A preset, variant or asset is on the palette when it names a `section` (`category/section`, or a list: a decal with a purpose is in its purpose section and under Decals, one entry shown twice); without one it has no card and stays loadable. Entries sharing a `family` are one card: assets a picker, variants a gallery. Cards follow data order (presets, variants, assets). A preset's `settings` are optional fields the Brush offers; painting a preset gives a hex that lacks it the preset's terrain outside its component (Hazardous liquid, `water:1;hazardous_liquid:1`, adds its water to a dry hex and keeps a lake's depth), except that the Lava preset makes the hex's magma liquid and removes a hazardous liquid, and Water removes magma, crust too (the two liquids replace each other); `hexes` makes it a multi-hex blueprint, with the terrain of each neighbour by direction N to NW. A choice field with `brush: true` is a Brush row. A variant's `pieces` picks its model by the building's weight and exits. The palette has ten categories; a decal with a purpose can appear in both its purpose section and Decals. For example:
 
