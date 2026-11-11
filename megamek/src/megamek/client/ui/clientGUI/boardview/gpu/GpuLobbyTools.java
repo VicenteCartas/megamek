@@ -1154,15 +1154,18 @@ final class GpuLobbyTools {
     /** Any thread: reads {@code file} into a document as {@code read} reads it, and shows it over what shows. */
     private void showDocument(String title, File file, boolean grid,
           java.util.function.Function<String, HelpDocument> read) {
-        HelpDocument document;
-        try {
-            document = read.apply(Files.readString(file.toPath()));
-        } catch (Exception failure) {
-            LOGGER.error(failure, "The lobby could not read the document {}", file);
-            document = new HelpDocument(List.of());
-        }
-        HelpDocument shown = document;
+        HelpDocument shown = readDocument(file, read);
         open(dialogs -> dialogs.document(title, shown, grid));
+    }
+
+    /** Any thread: {@code file} read into a document as {@code read} reads it; an unreadable one reads empty. */
+    static HelpDocument readDocument(File file, java.util.function.Function<String, HelpDocument> read) {
+        try {
+            return read.apply(Files.readString(file.toPath()));
+        } catch (Exception failure) {
+            LOGGER.error(failure, "Could not read the document {}", file);
+            return new HelpDocument(List.of());
+        }
     }
 
     // ---- Auto-resolve ----

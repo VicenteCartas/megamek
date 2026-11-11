@@ -1442,7 +1442,10 @@ public class ClientGUI extends AbstractClientGUI
                 break;
             case HELP_SKINNING:
                 if (inLounge()) {
-                    showSkinningHowTo();
+                    if (!GpuLobbyWindow.showHelp(this, Messages.getString("ClientGUI.skinningHelpPath.title"),
+                          new File(Messages.getString("ClientGUI.skinningHelpPath")))) {
+                        showSkinningHowTo();
+                    }
                 } else if (!GpuBoardWindow.showHelp(this, Messages.getString("ClientGUI.skinningHelpPath.title"),
                       new File(Messages.getString("ClientGUI.skinningHelpPath")))) {
                     logger.warn("No battle window to show the skinning help over");
@@ -1450,7 +1453,10 @@ public class ClientGUI extends AbstractClientGUI
                 break;
             case HELP_CONTENTS:
                 if (inLounge()) {
-                    showHelp();
+                    if (!GpuLobbyWindow.showHelp(this, Messages.getString("CommonMenuBar.HelpMenu"),
+                          new File(MMConstants.MEGAMEK_README_FILE_PATH))) {
+                        showHelp();
+                    }
                 } else if (!GpuBoardWindow.showHelp(this, Messages.getString("CommonMenuBar.HelpMenu"),
                       new File(MMConstants.MEGAMEK_README_FILE_PATH))) {
                     logger.warn("No battle window to show the help over");

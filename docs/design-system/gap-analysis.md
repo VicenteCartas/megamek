@@ -319,6 +319,8 @@ Done so far, in short:
   card on the start screen, in the lobby and in battle, asking for its archive in each scene's file dialog and showing
   its result natively (`GpuBugReport`). The start screen's About is the native About card. The battle's Swing
   allowlist no longer keeps any message box.
+- Help: the start screen's Contents and Skinning how-to and the lobby's Help contents open the same native document
+  card the battle shows its help in (`LobbyNativeDialogs.document`), so no scene opens the Swing help any more.
 
 Still open:
 
@@ -328,9 +330,6 @@ Still open:
    the battle: the shader editor (`GpuShaderEditor`), a `JFrame` with its compiled GLSL window and a reload
    confirmation.
 3. Swing surfaces still shown by the native scenes:
-   - Help contents and Skinning on the start screen (`MMReadMeHelpDialog`, `HelpDialog`), and Help contents in the
-     lobby (`ClientGUI.showHelp` before the battle). The native help viewer is only the battle HUD's
-     `GpuHelpDialog`; it should become a shared card the start screen and lobby open too.
    - The Legacy 2D window of the editor's 2D Preview and the preview's 2D Board (`GpuBoardWindow.boardWindow2D`): a
      Swing `BoardView` with a Swing menu bar, Client Settings and `MMAboutDialog`. Kept by decision (see Native
      window); listed so the menu's dialogs are not forgotten.
