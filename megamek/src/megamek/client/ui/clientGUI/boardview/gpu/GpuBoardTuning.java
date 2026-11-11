@@ -119,6 +119,8 @@ final class GpuBoardTuning {
     /** Windowed or Fullscreen; the view switches the window and shows its state here every frame. */
     private final SelectBox<String> displayMode;
     private Consumer<Boolean> displayModeChange = fullscreen -> { };
+    private GpuAtmosphereControls.Editor conditionsEditor;
+    private Consumer<Runnable> materialPalette;
     private final List<Control> renderResolution;
     private final Label renderSize;
     /** The window's physical pixels, which the render resolution's scene size is shown for. */
@@ -533,9 +535,10 @@ final class GpuBoardTuning {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 conditions.setChecked(false);
+                if (conditionsEditor == null) { return; }
                 conditions.setDisabled(true);
                 var application = Gdx.app;
-                source.editPlanetaryConditions(settings -> application.postRunnable(() -> {
+                source.editPlanetaryConditions(conditionsEditor, settings -> application.postRunnable(() -> {
                     if (source.isClosed()) { return; }
                     conditions.setDisabled(false);
                     if (settings != null) { applyConditions(settings); }
@@ -733,8 +736,9 @@ final class GpuBoardTuning {
         palette.addListener(new ChangeListener() {
             @Override public void changed(ChangeEvent event, Actor actor) {
                 palette.setChecked(false);
-                Runnable reload = source == null ? null : GpuBoardTuning.this::requestAssetReload;
-                javax.swing.SwingUtilities.invokeLater(() -> GpuMaterialPalette.show(reload));
+                if (materialPalette != null) {
+                    materialPalette.accept(source == null ? null : GpuBoardTuning.this::requestAssetReload);
+                }
             }
         });
         rows.add(palette).colspan(3).left().row();
@@ -1236,6 +1240,19 @@ final class GpuBoardTuning {
               status.allocatedBytes() / 1048576.0, pages.capacity() * status.pageBytes() / 1048576.0,
               pages.occupied() * status.pageBytes() / 1048576.0, pages.occupied(), pages.capacity(),
               pages.stale(), pages.building(), status.capacityReason(), coverage));
+    }
+
+    /** Sets the window's conditions editor, which "Planetary conditions..." opens. */
+    void conditionsEditor(GpuAtmosphereControls.Editor editor) {
+        conditionsEditor = editor;
+    }
+
+    /**
+     * Sets what "Material palette..." opens, on this thread: the window's palette card, given the board's Reload assets
+     * or null without a board.
+     */
+    void materialPalette(Consumer<Runnable> open) {
+        materialPalette = open;
     }
 
     /** The view switches the window when the user picks a display mode: true for Fullscreen. */

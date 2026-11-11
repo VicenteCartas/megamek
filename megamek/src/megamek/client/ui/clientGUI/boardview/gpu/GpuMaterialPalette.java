@@ -1,12 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.awt.BorderLayout;
-import java.awt.Dimension;
-import java.awt.FlowLayout;
-import java.awt.GridLayout;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -18,210 +12,404 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Stream;
-import javax.swing.ImageIcon;
-import javax.swing.JButton;
-import javax.swing.JComboBox;
-import javax.swing.JFrame;
-import javax.swing.JLabel;
-import javax.swing.JPanel;
-import javax.swing.JScrollPane;
-import javax.swing.SwingConstants;
-import javax.swing.SwingUtilities;
-import javax.swing.WindowConstants;
 
-import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
+import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
+import com.badlogic.gdx.utils.Align;
+import megamek.client.ui.Messages;
+import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.gdx.UiDialog;
+import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiPictureCard;
+import megamek.client.ui.gdx.UiSegmented;
+import megamek.client.ui.gdx.UiSelect;
 
 /**
- * Tuning → Terrain → Material palette: every board material ({@link GpuMaterialMaps#boardTextures}) side by side, each
- * on a flat tile, a cube or a sphere as the game draws it (GpuMaterialSwatches). Swing, on the EDT; the render thread
- * draws a few swatches a frame. Each opening rereads the folder.
+ * Tuning → Terrain → Material palette: every board material ({@link GpuMaterialMaps#boardTextures}) side by side as a
+ * gallery card over the battle, each on a flat tile, a cube or a sphere as the game draws it (GpuMaterialSwatches). GPU
+ * thread: a few swatches are drawn at the start of each frame, on the chosen shape first and then on the others, so the
+ * gallery fills in as it is watched and a change of shape shows the drawn ones at once. Opening and Reload assets
+ * reread the folder.
  */
 final class GpuMaterialPalette {
-    private static final int COLUMNS = 6, PER_FRAME = 4;
-    private static final String BYTES = "bytes", MODIFIED = "modified";
-    private static GpuMaterialPalette shown;
+    /** The card's width: six swatches side by side, with the card's padding and the scroll bar. */
+    static final float WIDTH = 6 * (GpuMaterialSwatches.SIZE + 12) + 96;
+    private static final int PER_FRAME = 4;
 
     /** How the swatches are laid out; an order by look ({@code drawn}) sorts the drawn ones, the rest follow by folder. */
-    private enum Order {
-        FOLDER("Folder", false), SIMILARITY("Similarity", true), BRIGHTNESS("Brightness", true), SIZE("Map size", false),
-        CHANGED("Recently changed", false);
+    enum Order {
+        FOLDER(false), SIMILARITY(true), BRIGHTNESS(true), SIZE(false), CHANGED(false);
 
-        private final String title;
         private final boolean drawn;
-        Order(String title, boolean drawn) { this.title = title; this.drawn = drawn; }
-        @Override
-        public String toString() { return title; }
+
+        Order(boolean drawn) {
+            this.drawn = drawn;
+        }
+
+        String title() {
+            return Messages.getString("GpuBoard.palette.order." + name().toLowerCase(Locale.ROOT));
+        }
     }
 
-    private final JFrame window = new JFrame("MegaMek — Material palette");
-    private final JComboBox<GpuMaterialSwatches.Shape> shape = new JComboBox<>(GpuMaterialSwatches.Shape.values());
-    private final JComboBox<Order> order = new JComboBox<>(Order.values());
-    private final JLabel status = new JLabel();
-    private final JPanel grid = new JPanel(new GridLayout(0, COLUMNS, 6, 6));
-    /** The current pass's swatches, by name. */
-    private final List<JLabel> labels = new ArrayList<>();
-    /** The current render pass; a newer one (another shape, a reopening) or closing the window ends the older. */
-    private final AtomicInteger pass = new AtomicInteger();
-    /** The board's Reload assets, run on the render thread; null without a board. */
-    private Runnable reloadAssets;
+    /** A material's files on disk: its {@code .tres} and every {@code <stem>_*.png} beside it. */
+    record Material(String name, long bytes, long modified, int maps, int albedo) {
+        /** The material's name without its folder. */
+        String title() {
+            return name.substring(name.lastIndexOf('/') + 1);
+        }
 
-    /** Opens the palette, or brings it to the front, and draws every material on disk. */
-    static void show(Runnable reloadAssets) {
-        if (shown == null) { shown = new GpuMaterialPalette(); }
-        shown.reloadAssets = reloadAssets;
-        shown.window.setVisible(true);
-        shown.window.toFront();
-        shown.render();
+        /** Its path, then the albedo's size, its bytes on disk, how many maps and when it last changed. */
+        String detail() {
+            String amount = bytes < 1_000_000 ? (bytes + 500) / 1000 + " KB"
+                  : String.format(Locale.ROOT, "%.1f MB", bytes / 1e6);
+            String files = Messages.getString("GpuBoard.palette.files", amount, String.valueOf(maps),
+                  String.format(Locale.ROOT, "%tF %<tR", modified));
+            return name + "\n" + (albedo > 0
+                  ? Messages.getString("GpuBoard.palette.albedo", String.valueOf(albedo)) + ", " + files : files);
+        }
+
+        static Material read(String name) {
+            File resource = new File(GpuMaterialMaps.boardTextures(), name + ".tres");
+            String stem = resource.getName().substring(0, resource.getName().length() - ".tres".length());
+            File[] maps = resource.getParentFile().listFiles((folder, file) -> file.startsWith(stem + "_")
+                  && file.endsWith(".png"));
+            maps = maps == null ? new File[0] : maps;
+            long bytes = resource.length(), modified = resource.lastModified();
+            for (File map : maps) {
+                bytes += map.length();
+                modified = Math.max(modified, map.lastModified());
+            }
+            File albedo = new File(resource.getParentFile(), stem + "_albedo.png");
+            return new Material(name, bytes, modified, maps.length, albedo.isFile() ? GpuMaterialMaps.size(albedo)[0] : 0);
+        }
     }
 
-    private GpuMaterialPalette() {
-        window.setDefaultCloseOperation(WindowConstants.HIDE_ON_CLOSE);
-        window.addWindowListener(new WindowAdapter() {
-            @Override public void windowClosing(WindowEvent event) { pass.incrementAndGet(); }
-        });
-        shape.addActionListener(event -> render());
-        order.setToolTipText("<html>Folder: by path. Similarity: each swatch next to the drawn swatch it looks most "
-              + "like.<br>Brightness: darkest first, as drawn. Map size: most bytes on disk first. Recently changed: "
-              + "newest file first.</html>");
-        order.addActionListener(event -> arrange());
-        JButton reload = new JButton("Reload assets");
-        reload.setToolTipText("Reload the board's assets from disk, as Tuning's Reload assets does, and draw the "
-              + "palette again from the files on disk.");
-        reload.addActionListener(event -> {
-            if (reloadAssets != null) { Gdx.app.postRunnable(reloadAssets); }
+    /** A material drawn on one shape: its image (for the orders by look) and texture, or why it could not be drawn. */
+    private record Swatch(BufferedImage image, Texture texture, String failure) {}
+
+    /** One material in the gallery: its card and its swatch on each shape drawn so far, kept until Reload or Close. */
+    private final class Tile {
+        final Material material;
+        final Table cell = new Table();
+        final UiPictureCard card;
+        final TextTooltip tip;
+        final Swatch[] swatches = new Swatch[GpuMaterialSwatches.Shape.values().length];
+
+        Tile(Material material) {
+            this.material = material;
+            card = new UiPictureCard(kit, Messages.getString("GpuBoard.palette.pending"), 1);
+            card.setName("palette-" + material.name());
+            tip = kit.tip(card, true);
+            tip.getActor().setText(material.detail());
+            Label title = kit.typeLabel(material.title(), "small", "text.secondary");
+            title.setEllipsis(true);
+            title.setAlignment(Align.center);
+            cell.add(card).width(GpuMaterialSwatches.SIZE).row();
+            cell.add(title).width(GpuMaterialSwatches.SIZE).padTop(space("xxs"));
+        }
+
+        void draw(GpuMaterialSwatches renderer, GpuMaterialSwatches.Shape on) {
+            try {
+                BufferedImage image = renderer.render(material.name(), on);
+                swatches[on.ordinal()] = new Swatch(image, GpuStartScreen.texture(image, false), null);
+            } catch (RuntimeException failure) {
+                swatches[on.ordinal()] = new Swatch(null, null, material.name() + ": " + failure.getMessage());
+            }
+        }
+
+        /** Shows its swatch on {@code on}, or that it is still to be drawn. */
+        void show(GpuMaterialSwatches.Shape on) {
+            Swatch swatch = swatches[on.ordinal()];
+            if (swatch == null) {
+                card.picture(null, 1, Messages.getString("GpuBoard.palette.pending"));
+                tip.getActor().setText(material.detail());
+            } else if (swatch.texture() == null) {
+                card.picture(null, 1, Messages.getString("GpuBoard.palette.failed"));
+                tip.getActor().setText(swatch.failure());
+            } else {
+                card.picture(new TextureRegionDrawable(swatch.texture()), 1, null);
+                tip.getActor().setText(material.detail());
+            }
+        }
+
+        BufferedImage image(GpuMaterialSwatches.Shape on) {
+            Swatch swatch = swatches[on.ordinal()];
+            return swatch == null ? null : swatch.image();
+        }
+
+        void release() {
+            for (int index = 0; index < swatches.length; index++) {
+                if (swatches[index] != null && swatches[index].texture() != null) {
+                    swatches[index].texture().dispose();
+                }
+                swatches[index] = null;
+            }
+        }
+    }
+
+    private final UiKit kit;
+    private final Table grid = new Table();
+    private final Label status;
+    private final UiSegmented shape;
+    private final UiSelect order;
+    private final int columns;
+    private final Consumer<Runnable> nextFrame;
+    private final List<Tile> tiles = new ArrayList<>();
+    /** The current render pass; a newer one (Reload assets) or closing the card ends the older. */
+    private int pass;
+    private boolean closed;
+
+    /**
+     * @param bodyWidth    the width the card's body has in this window
+     * @param reloadAssets the board's Reload assets, on this thread; null without a board
+     * @param close        closes the card
+     * @param nextFrame    runs its work at the start of the next frame, with the default framebuffer bound
+     */
+    GpuMaterialPalette(UiKit kit, UiDialog dialog, float bodyWidth, Runnable reloadAssets, Runnable close,
+          Consumer<Runnable> nextFrame) {
+        this.kit = kit;
+        this.nextFrame = nextFrame;
+        float gap = space("md");
+        columns = Math.max(1, (int) ((bodyWidth + gap) / (GpuMaterialSwatches.SIZE + gap)));
+        Table body = dialog.body();
+        body.top().left();
+        GpuMaterialSwatches.Shape[] shapes = GpuMaterialSwatches.Shape.values();
+        String[] shapeNames = new String[shapes.length];
+        for (int index = 0; index < shapes.length; index++) {
+            shapeNames[index] = Messages.getString("GpuBoard.palette.shape."
+                  + shapes[index].name().toLowerCase(Locale.ROOT));
+        }
+        shape = kit.tokenSegmented(true, shapeNames);
+        shape.setName("palette-shape");
+        shape.select(0);
+        UiKit.onChange(shape, this::showShape);
+        String[] orderNames = new String[Order.values().length];
+        for (Order each : Order.values()) {
+            orderNames[each.ordinal()] = each.title();
+        }
+        order = kit.tokenSelect(true, orderNames);
+        order.setName("palette-order");
+        kit.tip(order, true).getActor().setText(Messages.getString("GpuBoard.palette.order.tooltip"));
+        UiKit.onChange(order, this::arrange);
+        Table bar = new Table();
+        bar.add(kit.formField(Messages.getString("GpuBoard.palette.shape"), shape)).left();
+        bar.add(kit.formField(Messages.getString("GpuBoard.palette.order"), order)).left().padLeft(space("lg"))
+              .width(space("xxxl") * 4);
+        bar.add().growX();
+        body.add(bar).growX().row();
+        grid.top().left();
+        grid.setName("palette-grid");
+        body.add(grid).growX().padTop(space("lg")).row();
+        var reload = dialog.tool(Messages.getString("GpuBoard.palette.reload"), () -> {
+            if (reloadAssets != null) {
+                reloadAssets.run();
+            }
             render();
         });
-        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 5));
-        toolbar.add(new JLabel("Shape"));
-        toolbar.add(shape);
-        toolbar.add(new JLabel("Order"));
-        toolbar.add(order);
-        toolbar.add(reload);
-        toolbar.add(status);
-        JScrollPane scroll = new JScrollPane(grid);
-        scroll.getVerticalScrollBar().setUnitIncrement(32);
-        window.add(toolbar, BorderLayout.NORTH);
-        window.add(scroll, BorderLayout.CENTER);
-        window.setSize(COLUMNS * (GpuMaterialSwatches.SIZE + 14) + 40, 900);
-        window.setLocationByPlatform(true);
+        reload.setName("palette-reload");
+        kit.tip(reload, true).getActor().setText(Messages.getString("GpuBoard.palette.reload.tooltip"));
+        status = kit.typeLabel("", "small", "text.muted");
+        status.setName("palette-status");
+        dialog.leading().add(status).left();
+        dialog.primary(Messages.getString("Close"), close).setName("palette-close");
+        render();
     }
 
+    private static float space(String name) {
+        return DesignTokens.shipped().space().get(name);
+    }
+
+    /** GPU thread, once the card has closed: ends the pass and gives the textures back. */
+    void dispose() {
+        closed = true;
+        pass++;
+        tiles.forEach(Tile::release);
+        tiles.clear();
+    }
+
+    /**
+     * Rereads the folder and draws every material, a few a frame: on the chosen shape first, then on the others, so a
+     * later change of shape shows them at once.
+     */
     private void render() {
-        List<String> names = materials();
-        List<JLabel> cells = new ArrayList<>();
-        for (String name : names) {
-            JLabel label = new JLabel(name.substring(name.lastIndexOf('/') + 1), SwingConstants.CENTER);
-            files(label, name);
-            label.setVerticalTextPosition(SwingConstants.BOTTOM);
-            label.setHorizontalTextPosition(SwingConstants.CENTER);
-            label.setPreferredSize(new Dimension(GpuMaterialSwatches.SIZE + 8, GpuMaterialSwatches.SIZE + 24));
-            cells.add(label);
-        }
-        labels.clear();
-        labels.addAll(cells);
+        tiles.forEach(Tile::release);
+        tiles.clear();
+        materials().stream().map(Material::read).map(Tile::new).forEach(tiles::add);
         arrange();
-        int number = pass.incrementAndGet();
-        var chosen = (GpuMaterialSwatches.Shape) shape.getSelectedItem();
-        status.setText("Drawing " + names.size() + " materials…");
-        Gdx.app.postRunnable(new Runnable() {
-            private GpuMaterialSwatches swatches;
-            private int next;
+        int number = ++pass;
+        List<Tile> drawing = List.copyOf(tiles);
+        status.setText(drawing.isEmpty()
+              ? Messages.getString("GpuBoard.palette.empty", GpuMaterialMaps.boardTextures().getPath())
+              : Messages.getString("GpuBoard.palette.drawing", drawing.size()));
+        if (drawing.isEmpty()) {
+            return;
+        }
+        nextFrame.accept(new Runnable() {
+            private GpuMaterialSwatches renderer;
 
             @Override
             public void run() {
-                if (pass.get() != number) { dispose(); return; }
-                if (swatches == null) { swatches = new GpuMaterialSwatches(); }
-                for (int end = Math.min(names.size(), next + PER_FRAME); next < end; next++) {
-                    String name = names.get(next);
-                    JLabel label = cells.get(next);
-                    try {
-                        var icon = new ImageIcon(swatches.render(name, chosen));
-                        SwingUtilities.invokeLater(() -> label.setIcon(icon));
-                    } catch (RuntimeException failure) {
-                        SwingUtilities.invokeLater(() -> label.setToolTipText(name + ": " + failure.getMessage()));
+                if (pass != number || closed) {
+                    release();
+                    return;
+                }
+                if (renderer == null) {
+                    renderer = new GpuMaterialSwatches();
+                }
+                GpuMaterialSwatches.Shape chosen = selectedShape();
+                boolean wasComplete = drawn(drawing, chosen) == drawing.size();
+                for (int count = 0; count < PER_FRAME; count++) {
+                    Tile tile = next(drawing, chosen);
+                    if (tile == null) {
+                        break;
+                    }
+                    GpuMaterialSwatches.Shape on = tile.swatches[chosen.ordinal()] == null ? chosen : missing(tile);
+                    tile.draw(renderer, on);
+                    if (on == chosen) {
+                        tile.show(chosen);
                     }
                 }
-                int drawn = next;
-                SwingUtilities.invokeLater(() -> {
-                    if (pass.get() != number) { return; }
-                    status.setText(drawn + " of " + names.size() + " materials");
-                    if (drawn == names.size() && ((Order) order.getSelectedItem()).drawn) { arrange(); }
-                });
-                if (next < names.size()) { Gdx.app.postRunnable(this); } else { dispose(); }
+                if (!wasComplete) {
+                    showProgress();
+                    if (drawn(drawing, chosen) == drawing.size() && selectedOrder().drawn) {
+                        arrange();
+                    }
+                }
+                if (next(drawing, chosen) != null) {
+                    nextFrame.accept(this);
+                    return;
+                }
+                release();
             }
 
-            private void dispose() {
-                if (swatches != null) { swatches.dispose(); swatches = null; }
+            private void release() {
+                if (renderer != null) {
+                    renderer.dispose();
+                    renderer = null;
+                }
             }
         });
+    }
+
+    /** The next material to draw: one still missing on {@code chosen}, else one missing on another shape. */
+    private static Tile next(List<Tile> drawing, GpuMaterialSwatches.Shape chosen) {
+        for (Tile tile : drawing) {
+            if (tile.swatches[chosen.ordinal()] == null) {
+                return tile;
+            }
+        }
+        for (Tile tile : drawing) {
+            if (missing(tile) != null) {
+                return tile;
+            }
+        }
+        return null;
+    }
+
+    private static GpuMaterialSwatches.Shape missing(Tile tile) {
+        for (GpuMaterialSwatches.Shape each : GpuMaterialSwatches.Shape.values()) {
+            if (tile.swatches[each.ordinal()] == null) {
+                return each;
+            }
+        }
+        return null;
+    }
+
+    /** How many of {@code drawing} are done on {@code on}, drawn or failed. */
+    private static int drawn(List<Tile> drawing, GpuMaterialSwatches.Shape on) {
+        return (int) drawing.stream().filter(tile -> tile.swatches[on.ordinal()] != null).count();
+    }
+
+    private GpuMaterialSwatches.Shape selectedShape() {
+        return GpuMaterialSwatches.Shape.values()[Math.max(0, shape.getSelectedIndex())];
+    }
+
+    /** Another shape: the swatches already drawn on it show at once, the rest as the pass reaches them. */
+    private void showShape() {
+        GpuMaterialSwatches.Shape chosen = selectedShape();
+        tiles.forEach(tile -> tile.show(chosen));
+        if (!tiles.isEmpty()) {
+            showProgress();
+        }
+        if (selectedOrder().drawn) {
+            arrange();
+        }
+    }
+
+    private void showProgress() {
+        status.setText(Messages.getString("GpuBoard.palette.progress",
+              String.valueOf(drawn(tiles, selectedShape())), String.valueOf(tiles.size())));
+    }
+
+    private Order selectedOrder() {
+        return Order.values()[Math.max(0, order.getSelectedIndex())];
     }
 
     /** Lays the swatches out in the chosen order (a pass re-sorts when it ends, for an order by look). */
     private void arrange() {
-        grid.removeAll();
-        (switch ((Order) order.getSelectedItem()) {
-            case FOLDER -> labels;
-            case SIMILARITY -> similar(labels);
-            case BRIGHTNESS -> brightness(labels);
-            case SIZE -> labels.stream().sorted(Comparator.comparingLong(label -> -(long) label.getClientProperty(BYTES)))
-                  .toList();
-            case CHANGED -> labels.stream()
-                  .sorted(Comparator.comparingLong(label -> -(long) label.getClientProperty(MODIFIED))).toList();
-        }).forEach(grid::add);
-        grid.revalidate();
-        grid.repaint();
+        grid.clearChildren();
+        float gap = space("md");
+        GpuMaterialSwatches.Shape chosen = selectedShape();
+        List<Tile> ordered = order(tiles, selectedOrder(), tile -> tile.material, tile -> tile.image(chosen));
+        for (int index = 0; index < ordered.size(); index++) {
+            grid.add(ordered.get(index).cell).top().padRight(index % columns == columns - 1 ? 0 : gap)
+                  .padBottom(gap);
+            if (index % columns == columns - 1) {
+                grid.row();
+            }
+        }
     }
 
     /**
-     * The material's files on disk, its {@code .tres} and every {@code <name>_*.png} beside it: their bytes and newest
-     * change for the orders, and with the albedo's size in its tooltip.
+     * {@code items} in {@code order}: by folder as given, by look from their drawn {@code image} (null while undrawn,
+     * which then follow by folder), or by their {@code material}'s files.
      */
-    private static void files(JLabel label, String name) {
-        File resource = new File(GpuMaterialMaps.boardTextures(), name + ".tres");
-        String stem = resource.getName().substring(0, resource.getName().length() - ".tres".length());
-        File[] maps = resource.getParentFile().listFiles((folder, file) -> file.startsWith(stem + "_")
-              && file.endsWith(".png"));
-        long bytes = resource.length(), modified = resource.lastModified();
-        for (File map : maps == null ? new File[0] : maps) {
-            bytes += map.length();
-            modified = Math.max(modified, map.lastModified());
-        }
-        File albedo = new File(resource.getParentFile(), stem + "_albedo.png");
-        String size = albedo.isFile() ? GpuMaterialMaps.size(albedo)[0] + " px albedo, " : "";
-        label.putClientProperty(BYTES, bytes);
-        label.putClientProperty(MODIFIED, modified);
-        String amount = bytes < 1_000_000 ? (bytes + 500) / 1000 + " KB"
-              : String.format(Locale.ROOT, "%.1f MB", bytes / 1e6);
-        label.setToolTipText(String.format(Locale.ROOT, "<html>%s<br>%s%s in %d maps, changed %tF %<tR</html>", name,
-              size, amount, maps == null ? 0 : maps.length, modified));
+    static <T> List<T> order(List<T> items, Order order, Function<T, Material> material,
+          Function<T, BufferedImage> image) {
+        return switch (order) {
+            case FOLDER -> List.copyOf(items);
+            case SIMILARITY -> similar(items, image);
+            case BRIGHTNESS -> brightness(items, image);
+            case SIZE -> items.stream()
+                  .sorted(Comparator.comparingLong(item -> -material.apply(item).bytes())).toList();
+            case CHANGED -> items.stream()
+                  .sorted(Comparator.comparingLong(item -> -material.apply(item).modified())).toList();
+        };
     }
 
     /**
      * The drawn swatches from the darkest to the brightest: the mean luminance of the material's own pixels, without
      * the backdrop (the swatch's corner colour) that a cutout or a sphere leaves; the rest follow.
      */
-    private static List<JLabel> brightness(List<JLabel> labels) {
-        Map<JLabel, Double> brightness = new LinkedHashMap<>();
-        for (JLabel label : labels) {
-            if (label.getIcon() instanceof ImageIcon icon && icon.getImage() instanceof BufferedImage image) {
+    private static <T> List<T> brightness(List<T> items, Function<T, BufferedImage> images) {
+        Map<T, Double> brightness = new LinkedHashMap<>();
+        for (T item : items) {
+            BufferedImage image = images.apply(item);
+            if (image != null) {
                 int backdrop = image.getRGB(0, 0), count = 0;
                 double sum = 0;
                 for (int y = 0; y < image.getHeight(); y++) {
                     for (int x = 0; x < image.getWidth(); x++) {
                         int rgb = image.getRGB(x, y);
-                        if (rgb == backdrop) { continue; }
+                        if (rgb == backdrop) {
+                            continue;
+                        }
                         sum += .299 * (rgb >> 16 & 255) + .587 * (rgb >> 8 & 255) + .114 * (rgb & 255);
                         count++;
                     }
                 }
-                brightness.put(label, count == 0 ? 0 : sum / count);
+                brightness.put(item, count == 0 ? 0 : sum / count);
             }
         }
-        List<JLabel> result = new ArrayList<>(brightness.keySet().stream()
+        List<T> result = new ArrayList<>(brightness.keySet().stream()
               .sorted(Comparator.comparingDouble(brightness::get)).toList());
-        labels.stream().filter(label -> !brightness.containsKey(label)).forEach(result::add);
+        items.stream().filter(item -> !brightness.containsKey(item)).forEach(result::add);
         return result;
     }
 
@@ -229,20 +417,23 @@ final class GpuMaterialPalette {
      * The drawn swatches as one chain from the darkest, each followed by the remaining one it looks most like (nearest
      * {@link #look}); swatches not drawn yet follow by folder.
      */
-    private static List<JLabel> similar(List<JLabel> labels) {
-        Map<JLabel, float[]> looks = new LinkedHashMap<>();
-        List<JLabel> undrawn = new ArrayList<>();
-        for (JLabel label : labels) {
-            if (label.getIcon() instanceof ImageIcon icon && icon.getImage() instanceof BufferedImage image) {
-                looks.put(label, look(image));
-            } else { undrawn.add(label); }
+    private static <T> List<T> similar(List<T> items, Function<T, BufferedImage> images) {
+        Map<T, float[]> looks = new LinkedHashMap<>();
+        List<T> undrawn = new ArrayList<>();
+        for (T item : items) {
+            BufferedImage image = images.apply(item);
+            if (image != null) {
+                looks.put(item, look(image));
+            } else {
+                undrawn.add(item);
+            }
         }
-        List<JLabel> chain = new ArrayList<>();
-        JLabel last = looks.keySet().stream().min(Comparator.comparingDouble(label -> sum(looks.get(label)))).orElse(null);
+        List<T> chain = new ArrayList<>();
+        T last = looks.keySet().stream().min(Comparator.comparingDouble(item -> sum(looks.get(item)))).orElse(null);
         while (last != null) {
             float[] previous = looks.remove(last);
             chain.add(last);
-            last = looks.keySet().stream().min(Comparator.comparingDouble(label -> distance(previous, looks.get(label))))
+            last = looks.keySet().stream().min(Comparator.comparingDouble(item -> distance(previous, looks.get(item))))
                   .orElse(null);
         }
         chain.addAll(undrawn);
@@ -261,7 +452,11 @@ final class GpuMaterialPalette {
                     int rgb = image.getRGB(x, y);
                     double red = rgb >> 16 & 255, green = rgb >> 8 & 255, blue = rgb & 255;
                     double value = .299 * red + .587 * green + .114 * blue;
-                    r += red; g += green; b += blue; luminance += value; square += value * value;
+                    r += red;
+                    g += green;
+                    b += blue;
+                    luminance += value;
+                    square += value * value;
                     count++;
                 }
             }
@@ -276,18 +471,22 @@ final class GpuMaterialPalette {
 
     private static double sum(float[] look) {
         double sum = 0;
-        for (float value : look) { sum += value; }
+        for (float value : look) {
+            sum += value;
+        }
         return sum;
     }
 
     private static double distance(float[] a, float[] b) {
         double sum = 0;
-        for (int index = 0; index < a.length; index++) { sum += (a[index] - b[index]) * (a[index] - b[index]); }
+        for (int index = 0; index < a.length; index++) {
+            sum += (a[index] - b[index]) * (a[index] - b[index]);
+        }
         return sum;
     }
 
     /** Every {@code .tres} under the board's material folder, by its path there without the extension. */
-    private static List<String> materials() {
+    static List<String> materials() {
         Path root = GpuMaterialMaps.boardTextures().toPath();
         try (Stream<Path> files = Files.walk(root)) {
             return files.filter(path -> path.toString().endsWith(".tres"))
@@ -296,5 +495,23 @@ final class GpuMaterialPalette {
         } catch (IOException failure) {
             return List.of();
         }
+    }
+
+    // ---- For the tests ----
+
+    int tileCount() {
+        return tiles.size();
+    }
+
+    /** The materials with a swatch on the chosen shape. */
+    int drawnCount() {
+        GpuMaterialSwatches.Shape chosen = selectedShape();
+        return (int) tiles.stream().filter(tile -> tile.swatches[chosen.ordinal()] != null
+              && tile.swatches[chosen.ordinal()].texture() != null).count();
+    }
+
+    /** The materials with a swatch on every shape. */
+    int completeCount() {
+        return (int) tiles.stream().filter(tile -> missing(tile) == null).count();
     }
 }

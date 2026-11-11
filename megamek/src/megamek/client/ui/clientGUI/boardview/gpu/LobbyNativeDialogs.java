@@ -12,6 +12,7 @@ import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
@@ -104,6 +105,7 @@ final class LobbyNativeDialogs {
     private LobbyNetworkInfoView networkInfoView;
     private LobbyNovaNetworkView novaNetworkView;
     private LobbyConditionsView conditionsView;
+    private GpuMaterialPalette paletteView;
     private LobbyGameOptionsView optionsView;
     private LobbyRandomMapView randomMapView;
     private LobbyVictoryView victoryView;
@@ -262,11 +264,36 @@ final class LobbyNativeDialogs {
 
     /** Opens the planetary conditions. */
     LobbyConditionsView conditions(PlanetaryConditionsForm form, LobbyConditionsView.Host host) {
+        return conditions(form, host, () -> { });
+    }
+
+    /** Opens the planetary conditions; {@code closed} runs once they close, confirmed or not. */
+    LobbyConditionsView conditions(PlanetaryConditionsForm form, LobbyConditionsView.Host host, Runnable closed) {
         UiDialog dialog = begin(Messages.getString("PlanetaryConditionsDialog.title"), "dialog.md", false,
-              () -> conditionsView = null);
+              () -> {
+                  conditionsView = null;
+                  closed.run();
+              });
         conditionsView = new LobbyConditionsView(kit, dialog, form, host, this::close);
         show(dialog);
         return conditionsView;
+    }
+
+    /**
+     * Opens the Tuning's material palette, a gallery of every board material drawn as the game draws it.
+     *
+     * @param reloadAssets the board's Reload assets, on this thread; null without a board
+     */
+    GpuMaterialPalette materialPalette(Runnable reloadAssets) {
+        UiDialog dialog = begin(Messages.getString("GpuBoard.palette.title"), GpuMaterialPalette.WIDTH, false,
+              () -> {
+                  paletteView.dispose();
+                  paletteView = null;
+              });
+        paletteView = new GpuMaterialPalette(kit, dialog, bodyWidth(dialog, GpuMaterialPalette.WIDTH), reloadAssets,
+              this::close, Gdx.app::postRunnable);
+        show(dialog);
+        return paletteView;
     }
 
     /**

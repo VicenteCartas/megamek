@@ -9,26 +9,21 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.awt.AWTEvent;
-import java.awt.Component;
-import java.awt.Container;
-import java.awt.Toolkit;
-import java.awt.event.AWTEventListener;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
-import java.awt.event.WindowEvent;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.swing.JButton;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -52,9 +47,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.Pools;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.boardeditor.BoardEditorSession;
-import megamek.client.ui.clientGUI.CancelAction;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTestStage;
@@ -79,7 +72,7 @@ import org.lwjgl.system.windows.User32;
  * utility row and opens the panel at its place, one dialog at a time; every control of the model's two pages has its
  * hud-v3 control on the panel, which edits the model, group by group, and shows the model's own changes; the Camera
  * page sets the fixed sun and the board camera's framing; the Display page's UI scale is saved; Defaults restores both
- * pages and the UI scale; "Planetary conditions…" opens the existing Swing editor.
+ * pages and the UI scale; "Planetary conditions…" opens the window's native editor.
  */
 @Tag("on-demand")
 class GpuTuningPanelSmokeTest {
@@ -1041,11 +1034,13 @@ class GpuTuningPanelSmokeTest {
                 }
                 hud.capture("tuning-atmosphere-effects");
 
-                // Planetary conditions: the model's button asks the source for the editor, one at a time.
+                // Planetary conditions: the model's button opens the window's editor, one at a time.
                 UiButton conditions = hud.find("tuning-planetary-conditions");
                 assertEquals("PLANETARY CONDITIONS…", conditions.getText().toString());
+                GpuAtmosphereControls.Editor editor = (initial, confirmed, closed) -> { };
+                hud.tuning.conditionsEditor(editor);
                 hud.click(conditions);
-                verify(hud.source).editPlanetaryConditions(any());
+                verify(hud.source).editPlanetaryConditions(same(editor), any());
                 assertTrue(conditions.isDisabled(), "while its editor is open");
 
                 // Defaults restores the page and the extra effect controls.
@@ -1109,48 +1104,37 @@ class GpuTuningPanelSmokeTest {
     }
 
     @Test
-    void planetaryConditionsOpensTheExistingDialog() throws Exception {
+    void planetaryConditionsOpensTheWindowsEditor() throws Exception {
         CountDownLatch opened = new CountDownLatch(1);
-        CountDownLatch closed = new CountDownLatch(1);
-        AWTEventListener answer = event -> {
-            if (event instanceof WindowEvent window && window.getWindow() instanceof PlanetaryConditionsDialog dialog) {
-                if (window.getID() == WindowEvent.WINDOW_OPENED) {
-                    opened.countDown();
-                    SwingUtilities.invokeLater(() -> cancel(dialog));
-                } else if (window.getID() == WindowEvent.WINDOW_CLOSED) {
-                    closed.countDown();
-                }
-            }
-        };
+        AtomicBoolean onSwing = new AtomicBoolean();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            Toolkit.getDefaultToolkit().addAWTEventListener(answer, AWTEvent.WINDOW_EVENT_MASK);
-            try {
-                GpuHudTestStage.run(harness -> {
-                    GpuHudState state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
-                    GpuTuningPanel panel = new GpuTuningPanel(harness.kit, fixture.source, state, new BoardCamera(),
-                          new GpuBoardTuning(harness.theme.skin, fixture.source));
-                    harness.window.addActor(panel.actor());
-                    panel.actor().setSize(harness.width(), harness.height());
-                    state.dialog = GpuHudState.Dialog.TUNING;
-                    GpuHud.Inputs inputs = new GpuHud.Inputs(null, GpuHud.HudView.EMPTY, null, null,
-                          GpuHud.Metrics.of(harness.width(), harness.height()), List.of());
-                    panel.update(inputs);
-                    harness.draw();
-                    UiButton tab = harness.stage.getRoot().findActor("tuning-atmosphere-tab");
-                    clickOn(harness, tab);
-                    panel.update(inputs);
-                    harness.draw();
-                    UiButton conditions = harness.stage.getRoot().findActor("tuning-planetary-conditions");
-                    clickOn(harness, conditions);
-                    assertTrue(opened.await(30, TimeUnit.SECONDS), "the Swing planetary conditions editor opens");
-                    panel.update(inputs);
-                    harness.draw();
-                    assertTrue(conditions.isDisabled(), "one editor at a time");
-                    assertTrue(closed.await(30, TimeUnit.SECONDS), "the test closes it");
+            GpuHudTestStage.run(harness -> {
+                GpuHudState state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
+                GpuBoardTuning tuning = new GpuBoardTuning(harness.theme.skin, fixture.source);
+                tuning.conditionsEditor((initial, confirmed, closed) -> {
+                    onSwing.set(SwingUtilities.isEventDispatchThread());
+                    opened.countDown();
                 });
-            } finally {
-                Toolkit.getDefaultToolkit().removeAWTEventListener(answer);
-            }
+                GpuTuningPanel panel = new GpuTuningPanel(harness.kit, fixture.source, state, new BoardCamera(), tuning);
+                harness.window.addActor(panel.actor());
+                panel.actor().setSize(harness.width(), harness.height());
+                state.dialog = GpuHudState.Dialog.TUNING;
+                GpuHud.Inputs inputs = new GpuHud.Inputs(null, GpuHud.HudView.EMPTY, null, null,
+                      GpuHud.Metrics.of(harness.width(), harness.height()), List.of());
+                panel.update(inputs);
+                harness.draw();
+                UiButton tab = harness.stage.getRoot().findActor("tuning-atmosphere-tab");
+                clickOn(harness, tab);
+                panel.update(inputs);
+                harness.draw();
+                UiButton conditions = harness.stage.getRoot().findActor("tuning-planetary-conditions");
+                clickOn(harness, conditions);
+                assertTrue(opened.await(30, TimeUnit.SECONDS), "the window's planetary conditions editor opens");
+                assertTrue(onSwing.get(), "the editor opens on the Swing thread, where the preview lives");
+                panel.update(inputs);
+                harness.draw();
+                assertTrue(conditions.isDisabled(), "one editor at a time");
+            });
         }
     }
 
@@ -1224,28 +1208,5 @@ class GpuTuningPanelSmokeTest {
               actor.localToStageCoordinates(new Vector2(actor.getWidth() / 2, actor.getHeight() / 2)));
         harness.stage.touchDown((int) point.x, (int) point.y, 0, Input.Buttons.LEFT);
         harness.stage.touchUp((int) point.x, (int) point.y, 0, Input.Buttons.LEFT);
-    }
-
-    /** Presses the dialog's own Cancel button, or closes it without one. */
-    private static void cancel(PlanetaryConditionsDialog dialog) {
-        for (JButton button : buttons(dialog)) {
-            if (button.getAction() instanceof CancelAction) {
-                button.doClick();
-                return;
-            }
-        }
-        dialog.dispose();
-    }
-
-    private static List<JButton> buttons(Container parent) {
-        List<JButton> buttons = new ArrayList<>();
-        for (Component child : parent.getComponents()) {
-            if (child instanceof JButton button) {
-                buttons.add(button);
-            } else if (child instanceof Container container) {
-                buttons.addAll(buttons(container));
-            }
-        }
-        return buttons;
     }
 }
