@@ -15,6 +15,7 @@ import javax.xml.parsers.DocumentBuilder;
 import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.client.ui.Messages;
+import megamek.client.ui.PackageBugReportAction;
 import megamek.common.Player;
 import megamek.common.containers.MunitionTree;
 import megamek.common.game.Game;
@@ -54,7 +55,8 @@ public final class LobbyFiles {
         EXPORT_FORCE(true),
         EXPORT_STATS(true),
         SAVE_GAME(true),
-        LOAD_GAME(false);
+        LOAD_GAME(false),
+        SAVE_BUG_REPORT(true);
 
         private final boolean save;
 
@@ -163,7 +165,18 @@ public final class LobbyFiles {
             case SAVE_GAME, LOAD_GAME -> new Ask(route, new File(MMConstants.SAVEGAME_DIR).getAbsoluteFile(),
                   Messages.getString(route.save() ? "Lobby.files.saveGame" : "Lobby.files.loadGame"),
                   Messages.getString("Lobby.files.saveGames"), List.of(SAVE_GZ, SAVE), null);
+            case SAVE_BUG_REPORT -> new Ask(route, PackageBugReportAction.archiveDirectory().getAbsoluteFile(),
+                  PackageBugReportAction.chooserTitle(), PackageBugReportAction.chooserFilter(), List.of("zip"),
+                  PackageBugReportAction.suggestedArchiveName());
         };
+    }
+
+    /**
+     * Asks where the bug report archive goes, as {@link PackageBugReportAction}'s chooser does, and hands the file to
+     * {@code chosen}, or null when cancelled.
+     */
+    public void saveBugReport(Consumer<File> chosen) {
+        chooser.choose(ask(Route.SAVE_BUG_REPORT, null), chosen);
     }
 
     // ---- The game

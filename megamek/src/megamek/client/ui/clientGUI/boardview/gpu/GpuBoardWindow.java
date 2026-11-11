@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.AWTEvent;
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dialog;
 import java.awt.FileDialog;
@@ -53,6 +54,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
 import jakarta.annotation.Nullable;
+import megamek.client.Client;
 import megamek.client.lobby.GameMasterUnitTools;
 import megamek.client.lobby.LobbyGameMaster;
 import megamek.client.lobby.UnitDamageForm;
@@ -357,7 +359,7 @@ public final class GpuBoardWindow {
                     }
                 };
             } else {
-                JOptionPane.showMessageDialog(owner, Messages.getString("GpuBoard.alreadyOpen"));
+                alreadyOpen(owner);
             }
             return;
         }
@@ -424,7 +426,7 @@ public final class GpuBoardWindow {
                 active.close(false);
                 active.afterClose = () -> openEditor(owner, file, chooseFile);
             } else {
-                JOptionPane.showMessageDialog(owner, Messages.getString("GpuBoard.alreadyOpen"));
+                alreadyOpen(owner);
             }
             return;
         }
@@ -464,7 +466,7 @@ public final class GpuBoardWindow {
                 active.close(false);
                 active.afterClose = () -> editCopy(owner, session);
             } else {
-                JOptionPane.showMessageDialog(owner, Messages.getString("GpuBoard.alreadyOpen"));
+                alreadyOpen(owner);
             }
             return;
         }
@@ -689,10 +691,10 @@ public final class GpuBoardWindow {
                         open(gui, view, panel);
                     }
                 };
-                JOptionPane.showMessageDialog(active.swingWindow, Messages.getString("GpuBoard.gameWaitsForEditor"));
+                noticeOrSwing(active.swingWindow, Messages.getString("BoardEditor.edit3D"),
+                      Messages.getString("GpuBoard.gameWaitsForEditor"));
             } else if (active.gui != gui || (gui == null && active.initialView != view)) {
-                JOptionPane.showMessageDialog(gui == null ? null : gui.getFrame(),
-                      Messages.getString("GpuBoard.alreadyOpen"));
+                alreadyOpen(gui == null ? null : gui.getFrame());
             } else if (!active.closing) {
                 active.focus(false);
             } else {
@@ -849,6 +851,45 @@ public final class GpuBoardWindow {
             }
         });
     }
+
+    /**
+     * Any thread: shows {@code text} as a native message, or as an error with {@code error}, over this window's scene.
+     * Returns false, showing nothing, while the window is not presented or closes, so the caller shows it in Swing.
+     */
+    private boolean notice(String title, String text, boolean error) {
+        if (!presented || closing || battleView == null) {
+            return false;
+        }
+        post(battle -> {
+            LobbyNativeDialogs cards = battle.cards();
+            if (cards == null) {
+                return;
+            }
+            if (error) {
+                cards.error(title, text, Messages.getString("Ok.text"), null, null);
+            } else {
+                cards.message(title, text);
+            }
+        });
+        focus(false);
+        return true;
+    }
+
+    /**
+     * EDT: tells the user that the open native window keeps the one asked for from opening, in that window when it
+     * shows, else in Swing over {@code owner}.
+     */
+    static void alreadyOpen(@Nullable Component owner) {
+        noticeOrSwing(owner, Messages.getString("CommonMenuBar.viewGpuBoard"),
+              Messages.getString("GpuBoard.alreadyOpen"));
+    }
+
+    private static void noticeOrSwing(@Nullable Component owner, String title, String text) {
+        GpuBoardWindow window = active;
+        if (window == null || !window.notice(title, text, false)) {
+            JOptionPane.showMessageDialog(owner, text, title, JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
     private void present() {
         if (closing) {
             return;
@@ -906,6 +947,7 @@ public final class GpuBoardWindow {
                         preview ? this::requestEditor : null);
             if (source instanceof GpuMapSource map) {
                 map.fileDialogs(() -> nativeOwner, busy -> post(battle -> battle.setInputBlocked(busy || modalOpen)));
+                map.notices(this::notice);
             }
             startupTimer.stop();
             // The board shown is the likeliest next one: the shader warm-up prepares it first from now on.
@@ -971,16 +1013,13 @@ public final class GpuBoardWindow {
     }
 
     /**
-     * A Swing surface the user kept over the battle window: one of {@link #SWING_DIALOGS}; a file chooser (user item
-     * 21); the game master's choice of the player to reinforce from a file (a modal player list; U2, GM tools); or a
-     * message box the user kept, known by its title, as it has no class of its own (see
-     * {@link #approvedMessageBoxes}).
+     * A Swing surface the user kept over the battle window: one of {@link #SWING_DIALOGS}, or a file chooser (user item
+     * 21), which the system file dialog falls back to. The message boxes the battle once kept (the exit's save
+     * question, the bug report and its result, and the unit file version check) and the player to reinforce are
+     * native now.
      */
     private static boolean approved(Dialog dialog) {
-        return SWING_DIALOGS.stream().anyMatch(type -> type.isInstance(dialog)) || shows(dialog, JFileChooser.class)
-              || dialog instanceof megamek.client.ui.dialogs.PlayerListDialog players && players.isModal()
-              || shows(dialog, JOptionPane.class)
-                    && approvedMessageBoxes().stream().anyMatch(title -> title.equals(dialog.getTitle()));
+        return SWING_DIALOGS.stream().anyMatch(type -> type.isInstance(dialog)) || shows(dialog, JFileChooser.class);
     }
 
     /** Whether the dialog opens inside a kept surface: owned by one, or while one shows modally. */
@@ -994,20 +1033,7 @@ public final class GpuBoardWindow {
               && window instanceof Dialog open && open.isModal() && approved(open));
     }
 
-    /** The titles of the message boxes the user kept in Swing, in the client's language. */
-    private static List<String> approvedMessageBoxes() {
-        megamek.client.ui.BugReportMessages bugReport = new megamek.client.ui.BugReportMessages();
-        return List.of(
-              // D11: the exit's save question
-              Messages.getString("ClientGUI.gameSaveFirst"),
-              // R6: the bug report, and the result of its package (a file the player saves, user item 21)
-              bugReport.get("title"), bugReport.get("package.result.title"),
-              // User item 21: the version check of the unit file a game master reinforces from
-              Messages.getString("MULParser.versionWarning.newerVersion.title"),
-              Messages.getString("MULParser.versionWarning.olderVersion.title"));
-    }
-
-    /** Whether a Swing dialog shows a component of the type, as a message box or a file chooser does. */
+    /** Whether a Swing dialog shows a component of the type, as a file chooser does. */
     private static boolean shows(Dialog dialog, Class<?> type) {
         return dialog instanceof JDialog swing && List.of(swing.getContentPane().getComponents()).stream()
               .anyMatch(type::isInstance);
@@ -1506,6 +1532,23 @@ public final class GpuBoardWindow {
         GpuBattleTools tools = battleTools(gui);
         if (tools != null) {
             tools.about();
+        }
+        return tools != null;
+    }
+
+    /**
+     * EDT: shows Report a Bug natively over the battle window of {@code client}, the client of a menu bar, which knows
+     * no {@link ClientGUI}; false, showing nothing, when no battle window of that client asks its prompts.
+     */
+    public static boolean showBugReport(@Nullable Client client) {
+        GpuBoardWindow window = active;
+        ClientGUI gui = window == null ? null : window.gui;
+        if (client == null || gui == null || gui.getClient() != client) {
+            return false;
+        }
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.bugReport();
         }
         return tools != null;
     }

@@ -33,6 +33,8 @@
 package megamek.client.ui.util;
 
 import java.awt.Component;
+import java.util.function.BiConsumer;
+import java.util.function.BiPredicate;
 import javax.swing.JOptionPane;
 
 import megamek.SuiteConstants;
@@ -64,23 +66,35 @@ public final class MULVersionValidator {
      * @return {@code true} if loading should proceed, {@code false} if it must be aborted
      */
     public static boolean isCorrectVersion(final Component parent, final MULParser parser) {
+        return isCorrectVersion(parser,
+              (text, title) -> JOptionPane.showMessageDialog(parent, text, title, JOptionPane.ERROR_MESSAGE),
+              (text, title) -> JOptionPane.showConfirmDialog(parent, text, title, JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION);
+    }
+
+    /**
+     * {@link #isCorrectVersion(Component, MULParser)} with the caller's own prompts, such as a client's native ones.
+     *
+     * @param refuse tells the user why a newer MUL is refused, given its text and title
+     * @param proceed asks the user whether to load an older MUL, given its text and title; true to proceed
+     *
+     * @return {@code true} if loading should proceed, {@code false} if it must be aborted
+     */
+    public static boolean isCorrectVersion(final MULParser parser, final BiConsumer<String, String> refuse,
+          final BiPredicate<String, String> proceed) {
         if (parser.isNewerVersion()) {
             final String fileVersion = (parser.getFileVersion() == null) ? "?" : parser.getFileVersion().toString();
-            JOptionPane.showMessageDialog(parent,
-                  Messages.getString("MULParser.versionWarning.newerVersion", fileVersion, SuiteConstants.VERSION),
-                  Messages.getString("MULParser.versionWarning.newerVersion.title"),
-                  JOptionPane.ERROR_MESSAGE);
+            refuse.accept(Messages.getString("MULParser.versionWarning.newerVersion", fileVersion,
+                        SuiteConstants.VERSION),
+                  Messages.getString("MULParser.versionWarning.newerVersion.title"));
             return false;
         }
 
         if (parser.isOlderVersion()) {
             final String fileVersion = (parser.getFileVersion() == null) ? "?" : parser.getFileVersion().toString();
-            final int choice = JOptionPane.showConfirmDialog(parent,
-                  Messages.getString("MULParser.versionWarning.olderVersion", fileVersion, SuiteConstants.VERSION),
-                  Messages.getString("MULParser.versionWarning.olderVersion.title"),
-                  JOptionPane.YES_NO_OPTION,
-                  JOptionPane.WARNING_MESSAGE);
-            return choice == JOptionPane.YES_OPTION;
+            return proceed.test(Messages.getString("MULParser.versionWarning.olderVersion", fileVersion,
+                        SuiteConstants.VERSION),
+                  Messages.getString("MULParser.versionWarning.olderVersion.title"));
         }
 
         return true;

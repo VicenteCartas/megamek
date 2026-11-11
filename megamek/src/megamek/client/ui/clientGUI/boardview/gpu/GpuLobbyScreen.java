@@ -551,7 +551,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
             @Override
             public void reportBug() {
-                window.runMenuItem(Messages.getString("CommonMenuBar.helpReportBug"));
+                window.reportBug();
             }
 
             @Override

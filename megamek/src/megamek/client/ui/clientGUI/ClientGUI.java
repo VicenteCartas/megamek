@@ -1468,9 +1468,10 @@ public class ClientGUI extends AbstractClientGUI
                 break;
             case FILE_UNITS_REINFORCE:
                 ignoreHotKeys = true;
-                PlayerListDialog pld = new PlayerListDialog(frame, client, true);
-                pld.setVisible(true);
-                loadListFile(pld.getSelected(), true);
+                Optional<Player> reinforced = choosePlayerToReinforce();
+                if (reinforced != null) {
+                    loadListFile(reinforced.orElse(null), true);
+                }
                 ignoreHotKeys = false;
                 break;
             case FILE_UNITS_REINFORCE_RAT:
@@ -2934,6 +2935,33 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     /**
+     * EDT: the game master's choice of the player to reinforce from a unit file, asked in the native battle window, or
+     * in the modal Swing player list without it.
+     *
+     * @return the player chosen, empty when none was (which the caller reports), or null when the native choice was
+     *       cancelled
+     */
+    @SuppressWarnings("OptionalAssignedToNull")
+    private @Nullable Optional<Player> choosePlayerToReinforce() {
+        List<Player> players = PlayerListDialog.sortedPlayerList(client.getGame());
+        List<DialogRow> rows = players.stream()
+              .map(player -> new DialogRow(player.getName(),
+                    PlayerListDialog.details(client, player, true).trim(), null, true))
+              .toList();
+        DialogAnswer answer = askRows(null, Messages.getString("PlayerListDialog.title"), rows, false, List.of(),
+              null, List.of(Messages.getString("Okay"), Messages.getString("Cancel")), 1);
+        if (answer == null) {
+            PlayerListDialog dialog = new PlayerListDialog(frame, client, true);
+            dialog.setVisible(true);
+            return Optional.ofNullable(dialog.getSelected());
+        }
+        if (answer.button() != 0) {
+            return null;
+        }
+        return answer.selected().isEmpty() ? Optional.empty() : Optional.of(players.get(answer.selected().getFirst()));
+    }
+
+    /**
      * EDT: asks for a text in this client's native battle window and waits for the answer, as a modal dialog does.
      * With {@code min} or {@code max} set, the text must be an integer in that range. Button 0 confirms, the others
      * and Esc ({@code cancelButton}, or -1 for a close box) cancel.
@@ -3356,7 +3384,10 @@ public class ClientGUI extends AbstractClientGUI
         // Read the units from the file.
         final MULParser parser = new MULParser(unitFile,
               (GameOptions) getClient().getGame().getOptions());
-        if (!MULVersionValidator.isCorrectVersion(frame, parser)) {
+        if (!MULVersionValidator.isCorrectVersion(parser,
+              (text, title) -> message(text, title, JOptionPane.ERROR_MESSAGE),
+              (text, title) -> confirm(text, title, JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
+                    == JOptionPane.YES_OPTION)) {
             return -1;
         }
         final Vector<Entity> loadedUnits = parser.getEntities();

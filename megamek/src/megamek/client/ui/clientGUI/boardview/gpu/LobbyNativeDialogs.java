@@ -927,6 +927,40 @@ final class LobbyNativeDialogs {
         return dialog;
     }
 
+    /**
+     * Report a Bug: the steps, the button that packages the game and the logs, which runs {@code report}, and the
+     * repositories' links, in place of whatever shows.
+     */
+    UiDialog bugReport(Runnable report) {
+        UiDialog dialog = begin(GpuBugReport.title(), "dialog.lg", false, () -> { });
+        GpuBugReport.fill(kit, dialog, GpuBugReport.Guide.shipped(), report, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /**
+     * What the bug report archive holds, over whatever shows: the issue button and the copy button each close it, then
+     * run their action.
+     */
+    UiDialog bugReportPackaged(String title, String text, String issueLabel, Runnable issueForm, String copyLabel,
+          Runnable copyFile, String closeLabel) {
+        UiDialog dialog = begin(title, "dialog.md", true, () -> { });
+        var label = kit.typeLabel(text, "body", "text.primary");
+        label.setWrap(true);
+        dialog.body().add(label).growX().left();
+        dialog.secondary(closeLabel, this::close).setName("bug-report-result-close");
+        dialog.secondary(copyLabel, () -> {
+            close();
+            copyFile.run();
+        }).setName("bug-report-result-copy");
+        dialog.primary(issueLabel, () -> {
+            close();
+            issueForm.run();
+        }).setName("bug-report-result-issue");
+        show(dialog);
+        return dialog;
+    }
+
     /** Shows {@code text} with an OK button over whatever shows, as an alert. */    UiDialog message(String title, String text) {
         UiDialog dialog = begin(title, "dialog.sm", true, () -> { });
         var label = kit.typeLabel(text, "body", "text.primary");
