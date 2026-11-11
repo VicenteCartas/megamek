@@ -6,17 +6,24 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuSettingsView.space;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import javax.swing.SwingUtilities;
 
+import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.audio.SoundType;
+import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.design.DesignTokens.Mode;
+import megamek.client.ui.design.DesignTokens.Palette;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiFileDialog;
@@ -25,6 +32,7 @@ import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.settings.ClientSettingsForm;
 import megamek.client.ui.settings.SettingsForm.Page;
 import megamek.client.ui.settings.SettingsForm.Row;
+import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
 import megamek.logging.MMLogger;
 
@@ -34,7 +42,8 @@ import megamek.logging.MMLogger;
  * card. Each page has a reset to its shipped values in its header and, where it helps, a preview beside it: the
  * Audio page a sound check that plays each alert. The footer has Defaults, which resets every page, OK, which keeps the
  * changes and stores the preferences, and Cancel, which puts back what the settings were when the card opened; closing
- * the card any other way cancels too.
+ * the card any other way cancels too. The Display page's preview is a unit's readout as the HUD draws it, in the
+ * palette and motion the page sets.
  * <p>
  * GPU thread. The preferences are written on the Swing thread through the {@link Host}, since their listeners update
  * Swing views.
@@ -81,7 +90,10 @@ final class ClientSettingsView {
           GUIPreferences.SOUND_MUTE_CHAT, "myTurn",
           GUIPreferences.SOUND_MUTE_MY_TURN, "otherTurns",
           GUIPreferences.SOUND_MUTE_OTHERS_TURN);
-    private static final Map<String, String> ICONS = Map.of(ClientSettingsForm.AUDIO, "volume");
+    private static final Map<String, String> ICONS = Map.of(ClientSettingsForm.AUDIO, "volume",
+          ClientSettingsForm.DISPLAY, "display");
+    /** The scales, which take effect where the slider is let go, as they move the card under the pointer. */
+    private static final Set<String> SCALES = Set.of(GUIPreferences.GUI_SCALE, GUIPreferences.BOARD_UI_SCALE);
 
     private final UiKit kit;
     private final Stage stage;
@@ -93,6 +105,8 @@ final class ClientSettingsView {
     private final UiButton ok;
     private UiButton reset;
     private Table soundCheck;
+    private DisplaySample sample;
+    private Actor restart;
     private UiFileDialog files;
     private boolean applying;
     private boolean pending;
@@ -165,12 +179,27 @@ final class ClientSettingsView {
         @Override
         @Nullable Actor preview(Page page) {
             soundCheck = ClientSettingsForm.AUDIO.equals(page.id()) ? soundCheck() : null;
-            return soundCheck;
+            sample = ClientSettingsForm.DISPLAY.equals(page.id()) ? new DisplaySample() : null;
+            return soundCheck != null ? soundCheck : sample;
+        }
+
+        @Override
+        void marks(Row row, Table marks) {
+            if (ClientPreferences.LOCALE.equals(row.name())) {
+                restart = kit.chip(Messages.getString("ClientSettings.display.restart"), UiKit.Tone.WARN, true);
+                restart.setName("client-restart");
+                marks.add(restart).padLeft(space("sm"));
+            }
         }
 
         @Override
         void changed(Row row) {
             apply();
+        }
+
+        @Override
+        boolean live(Row row) {
+            return !SCALES.contains(row.name());
         }
 
         @Override
@@ -252,7 +281,91 @@ final class ClientSettingsView {
                 }
             }
         }
+        if (sample != null) {
+            sample.show();
+        }
+        if (restart != null) {
+            restart.setVisible(form.changed(ClientPreferences.LOCALE));
+        }
         defaults.setDisabled(form.pages().stream().noneMatch(form::customized));
+    }
+
+    /**
+     * The Display page's preview: a unit's readout as the HUD draws it, its bars in the status colors of the palette
+     * the page sets, and its heat rising and falling unless motion is reduced.
+     */
+    private final class DisplaySample extends Table {
+        private final UiKit.Meter armor;
+        private final UiKit.Meter heat;
+        private final UiKit.Meter structure;
+        private final Label motion;
+        private Color success;
+        private Color warning;
+        private Color danger;
+        private float clock;
+
+        DisplaySample() {
+            top();
+            setName("client-display-sample");
+            defaults().left().growX();
+            add(kit.caption(Messages.getString("ClientSettings.sample"), true)).row();
+            add(view.wrapped(Messages.getString("ClientSettings.sample.summary"), "small", "text.muted"))
+                  .padTop(space("xs")).row();
+            armor = kit.meter(Messages.getString("ClientSettings.sample.armor"), false, true);
+            heat = kit.meter(Messages.getString("ClientSettings.sample.heat"), false, true);
+            structure = kit.meter(Messages.getString("ClientSettings.sample.structure"), false, true);
+            armor.setName("client-sample-armor");
+            heat.setName("client-sample-heat");
+            structure.setName("client-sample-structure");
+            add(armor).padTop(space("md")).row();
+            add(heat).padTop(space("md")).row();
+            add(structure).padTop(space("md")).row();
+            motion = view.wrapped("", "small", "text.secondary");
+            motion.setName("client-sample-motion");
+            add(motion).padTop(space("lg")).row();
+            show();
+        }
+
+        /** Shows the page's palette and motion as the form has them now. */
+        void show() {
+            DesignTokens tokens = DesignTokens.shipped(form.bool(GUIPreferences.COLOR_BLIND_PALETTE)
+                  ? Palette.COLORBLIND : Palette.STANDARD);
+            success = color(tokens, "status.success");
+            warning = color(tokens, "status.warning");
+            danger = color(tokens, "status.danger");
+            armor.set("92%", 0.92f, success);
+            structure.set("18%", 0.18f, danger);
+            if (!moving()) {
+                clock = 0;
+            }
+            heatAt(clock);
+            motion.setText(Messages.getString(moving() ? "ClientSettings.sample.moving"
+                  : "ClientSettings.sample.still"));
+        }
+
+        @Override
+        public void act(float delta) {
+            super.act(delta);
+            if (moving()) {
+                clock += delta;
+                heatAt(clock);
+            }
+        }
+
+        private boolean moving() {
+            return !form.bool(GUIPreferences.REDUCE_MOTION);
+        }
+
+        private void heatAt(float time) {
+            float share = 0.55f + 0.25f * MathUtils.sin(time * 1.6f);
+            heat.set(Math.round(share * 30) + " / 30", share, warning);
+        }
+
+        private static Color color(DesignTokens tokens, String role) {
+            Color color = new Color();
+            Color.argb8888ToColor(color, tokens.color(role, Mode.DARK));
+            return color;
+        }
     }
 
     /**

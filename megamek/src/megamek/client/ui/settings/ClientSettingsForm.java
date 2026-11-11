@@ -12,7 +12,10 @@ import java.util.Set;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.panels.CommonSettingsPane;
+import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.IPreferenceStore;
+import megamek.common.preference.PreferenceManager;
 
 /**
  * The Client Settings without a toolkit: the player's own preferences, which the native settings view shows as pages
@@ -26,20 +29,33 @@ import megamek.common.preference.IPreferenceStore;
 public final class ClientSettingsForm extends SettingsForm {
     /** The pages' ids, which the old routes of the Swing dialog lead to. */
     public static final String AUDIO = "audio";
+    public static final String DISPLAY = "display";
+    /** The languages MegaMek has texts in, as the client preferences keep them; the first is the default. */
+    static final List<String> LOCALES = List.of("en", "de", "ru", "es");
+    /** The Swing dialog's routes that lead to a native page under another id. */
+    private static final Map<String, String> ROUTES = Map.of(CommonSettingsPane.SETTINGS_MAIN, DISPLAY,
+          CommonSettingsPane.SETTINGS_MAIN + ".application", DISPLAY);
     /** The extensions a notification sound can have: those Java plays. */
     static final List<String> SOUND_EXTENSIONS = List.of("wav", "aiff", "au");
 
-    /** Where a setting is kept, and how. {@code inverted} shows a "mute" preference as a "play" switch. */
-    private record Setting(IPreferenceStore store, String key, Kind kind, boolean inverted) { }
+    /**
+     * Where a setting is kept, and how. {@code inverted} shows a "mute" preference as a "play" switch, and
+     * {@code percent} a share kept as a fraction, such as a scale of 1.5, as a whole percentage.
+     */
+    private record Setting(IPreferenceStore store, String key, Kind kind, boolean inverted, boolean percent) { }
 
     private final List<Page> pages = new ArrayList<>();
     private final Map<String, Setting> settings = new LinkedHashMap<>();
     private final Map<String, String> values = new HashMap<>();
     private final Map<String, String> started = new HashMap<>();
 
-    /** @param gui the GUI preferences, {@link GUIPreferences#getInstance()} outside the tests */
-    public ClientSettingsForm(IPreferenceStore gui) {
+    /**
+     * @param gui    the GUI preferences, {@link GUIPreferences#getInstance()} outside the tests
+     * @param client the client preferences, {@link PreferenceManager#getClientPreferences()} outside the tests
+     */
+    public ClientSettingsForm(IPreferenceStore gui, ClientPreferences client) {
         pages.add(audio(gui));
+        pages.add(display(gui, client));
         for (Map.Entry<String, Setting> entry : settings.entrySet()) {
             String value = read(entry.getValue());
             values.put(entry.getKey(), value);
@@ -49,7 +65,7 @@ public final class ClientSettingsForm extends SettingsForm {
 
     /** The form over the player's preferences; Swing thread. */
     public static ClientSettingsForm current() {
-        return new ClientSettingsForm(GUIPreferences.getInstance());
+        return new ClientSettingsForm(GUIPreferences.getInstance(), PreferenceManager.getClientPreferences());
     }
 
     /**
@@ -57,7 +73,11 @@ public final class ClientSettingsForm extends SettingsForm {
      *       whose page is not native yet opens the first page
      */
     public @Nullable String pageOf(@Nullable String route) {
-        return route != null && page(route) != null ? route : null;
+        if (route == null) {
+            return null;
+        }
+        String page = ROUTES.getOrDefault(route, route);
+        return page(page) != null ? page : null;
     }
 
     // ---- The pages
@@ -89,6 +109,29 @@ public final class ClientSettingsForm extends SettingsForm {
               searchText(AUDIO, title, Messages.getString("ClientSettings.audio.keywords")));
     }
 
+    private Page display(IPreferenceStore gui, ClientPreferences client) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(DISPLAY, "scale", "ClientSettings.display.scale",
+              percent(gui, GUIPreferences.GUI_SCALE, "ClientSettings.display.guiScale", List.of("70", "240", "10")),
+              percent(gui, GUIPreferences.BOARD_UI_SCALE, "ClientSettings.display.hudScale",
+                    List.of("50", "100", "5"))));
+        List<String> languages = List.of(Messages.getString("CommonSettingsDialog.locale.English"),
+              Messages.getString("CommonSettingsDialog.locale.Deutsch"),
+              Messages.getString("CommonSettingsDialog.locale.Russian"),
+              Messages.getString("CommonSettingsDialog.locale.Spanish"));
+        sections.add(section(DISPLAY, "language", "ClientSettings.display.language",
+              row(client, ClientPreferences.LOCALE, Kind.CHOICE, "ClientSettings.display.language", LOCALES,
+                    languages)));
+        sections.add(section(DISPLAY, "access", "ClientSettings.display.access",
+              row(gui, GUIPreferences.COLOR_BLIND_PALETTE, Kind.BOOLEAN, false,
+                    "CommonSettingsDialog.colorBlindPalette", "ClientSettings.display.colorBlind.help", List.of()),
+              row(gui, GUIPreferences.REDUCE_MOTION, Kind.BOOLEAN, false, "CommonSettingsDialog.reduceMotion",
+                    "ClientSettings.display.reduceMotion.help", List.of())));
+        String title = Messages.getString("ClientSettings.display");
+        return new Page(DISPLAY, title, "", "", false, List.copyOf(sections),
+              searchText(DISPLAY, title, Messages.getString("ClientSettings.display.keywords")));
+    }
+
     private Section section(String page, String id, String key, Row... rows) {
         String title = Messages.getString(key + ".title");
         String summary = Messages.getString(key + ".summary");
@@ -97,10 +140,27 @@ public final class ClientSettingsForm extends SettingsForm {
 
     private Row row(IPreferenceStore store, String key, Kind kind, boolean inverted, String labelKey, String helpKey,
           List<String> parameters) {
-        settings.put(key, new Setting(store, key, kind, inverted));
+        return row(new Setting(store, key, kind, inverted, false), labelKey, helpKey, parameters, List.of());
+    }
+
+    /** A choice; its label's key with ".help" is its help's. */
+    private Row row(IPreferenceStore store, String key, Kind kind, String labelKey, List<String> values,
+          List<String> labels) {
+        return row(new Setting(store, key, kind, false, false), labelKey, labelKey + ".help", values, labels);
+    }
+
+    /** A slider of a fraction kept as a float, shown as a percentage; its label's key with ".help" is its help's. */
+    private Row percent(IPreferenceStore store, String key, String labelKey, List<String> range) {
+        return row(new Setting(store, key, Kind.SLIDER, false, true), labelKey, labelKey + ".help", range,
+              List.of("%"));
+    }
+
+    private Row row(Setting setting, String labelKey, String helpKey, List<String> parameters, List<String> labels) {
+        settings.put(setting.key(), setting);
         String label = Messages.getString(labelKey);
         String help = Messages.getString(helpKey);
-        return new Row(key, label, help, kind, parameters, List.of(), Set.of(), searchText(key, label, help));
+        return new Row(setting.key(), label, help, setting.kind(), parameters, labels, Set.of(),
+              searchText(setting.key(), label, help, String.join(" ", labels)));
     }
 
     // ---- Values
@@ -142,7 +202,11 @@ public final class ClientSettingsForm extends SettingsForm {
             } catch (NumberFormatException ex) {
                 return;
             }
+            int step = row.step();
+            number = row.min() + Math.round((number - row.min()) / (float) step) * step;
             text = Integer.toString(Math.clamp(number, row.min(), row.max()));
+        } else if (setting.kind() == Kind.CHOICE && !row(name).values().contains(text)) {
+            return;
         }
         values.put(name, text == null ? "" : text);
     }
@@ -214,6 +278,12 @@ public final class ClientSettingsForm extends SettingsForm {
 
     private static String read(Setting setting) {
         IPreferenceStore store = setting.store();
+        if (store instanceof ClientPreferences client && ClientPreferences.LOCALE.equals(setting.key())) {
+            return language(client.getLocaleString());
+        }
+        if (setting.percent()) {
+            return Integer.toString(Math.round(store.getFloat(setting.key()) * 100));
+        }
         return switch (setting.kind()) {
             case BOOLEAN -> Boolean.toString(store.getBoolean(setting.key()) != setting.inverted());
             case SLIDER, INTEGER, INTEGER_CHOICE -> Integer.toString(store.getInt(setting.key()));
@@ -223,6 +293,12 @@ public final class ClientSettingsForm extends SettingsForm {
 
     private static String defaultOf(Setting setting) {
         IPreferenceStore store = setting.store();
+        if (store instanceof ClientPreferences && ClientPreferences.LOCALE.equals(setting.key())) {
+            return LOCALES.getFirst();
+        }
+        if (setting.percent()) {
+            return Integer.toString(Math.round(store.getDefaultFloat(setting.key()) * 100));
+        }
         return switch (setting.kind()) {
             case BOOLEAN -> Boolean.toString(store.getDefaultBoolean(setting.key()) != setting.inverted());
             case SLIDER, INTEGER, INTEGER_CHOICE -> Integer.toString(store.getDefaultInt(setting.key()));
@@ -233,10 +309,25 @@ public final class ClientSettingsForm extends SettingsForm {
     /** Writes with the preference's own type, as its listeners expect the old and new values typed. */
     private static void write(Setting setting, String value) {
         IPreferenceStore store = setting.store();
+        if (store instanceof ClientPreferences client && ClientPreferences.LOCALE.equals(setting.key())) {
+            // Through the client preferences, which keep the locale they hand out as well
+            client.setLocale(value);
+            return;
+        }
+        if (setting.percent()) {
+            store.setValue(setting.key(), Integer.parseInt(value) / 100f);
+            return;
+        }
         switch (setting.kind()) {
             case BOOLEAN -> store.setValue(setting.key(), Boolean.parseBoolean(value) != setting.inverted());
             case SLIDER, INTEGER, INTEGER_CHOICE -> store.setValue(setting.key(), Integer.parseInt(value));
             default -> store.setValue(setting.key(), value);
         }
+    }
+
+    /** The language of a kept locale such as "de" or "en_US"; one MegaMek has no texts in reads as the default. */
+    private static String language(String locale) {
+        String language = locale.split("_", 2)[0].strip();
+        return LOCALES.contains(language) ? language : LOCALES.getFirst();
     }
 }

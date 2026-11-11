@@ -55,6 +55,7 @@ import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.PortraitCatalog;
 import megamek.client.lobby.SbfStatsForm;
+import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.audio.SoundType;
 import megamek.client.ui.gdx.UiDialog;
@@ -82,6 +83,7 @@ import megamek.common.orders.UnitOrders;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.planetaryConditions.Weather;
+import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceStore;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -655,7 +657,7 @@ class LobbyNativeDialogsSmokeTest {
                 }
             };
             LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
-            ClientSettingsView view = dialogs.clientSettings(new ClientSettingsForm(store),
+            ClientSettingsView view = dialogs.clientSettings(new ClientSettingsForm(store, new ClientPreferences(new PreferenceStore())),
                   CommonSettingsPane.SETTINGS_AUDIO, host);
             ui.draw();
             assertEquals(ClientSettingsForm.AUDIO, view.pageId());
@@ -681,7 +683,7 @@ class LobbyNativeDialogsSmokeTest {
             assertTrue(store.getBoolean(GUIPreferences.SOUND_MUTE_CHAT), "Cancel puts the chat's mute back");
             assertEquals(0, saved[0]);
 
-            view = dialogs.clientSettings(new ClientSettingsForm(store), null, host);
+            view = dialogs.clientSettings(new ClientSettingsForm(store, new ClientPreferences(new PreferenceStore())), null, host);
             ui.draw();
             chat = find(ui, "client-setting-" + GUIPreferences.SOUND_MUTE_CHAT);
             reveal(ui, chat);
@@ -690,6 +692,53 @@ class LobbyNativeDialogsSmokeTest {
             assertFalse(dialogs.isOpen(), "OK closes the settings");
             assertFalse(store.getBoolean(GUIPreferences.SOUND_MUTE_CHAT), "OK keeps what was set");
             assertEquals(1, saved[0], "OK stores the preferences");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theDisplayPageScalesAtOnceAndItsSampleFollowsTheMotion() {
+        UiTestStage.run(ui -> {
+            PreferenceStore store = new PreferenceStore();
+            store.setDefault(GUIPreferences.GUI_SCALE, 1f);
+            store.setDefault(GUIPreferences.BOARD_UI_SCALE, 1f);
+            store.setDefault(GUIPreferences.COLOR_BLIND_PALETTE, false);
+            store.setDefault(GUIPreferences.REDUCE_MOTION, false);
+            ClientSettingsView.Host host = (work, then) -> {
+                work.run();
+                then.run();
+            };
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            ClientSettingsForm form = new ClientSettingsForm(store, new ClientPreferences(new PreferenceStore()));
+            ClientSettingsView view = dialogs.clientSettings(form, form.pageOf(CommonSettingsPane.SETTINGS_MAIN),
+                  host);
+            ui.draw();
+            assertEquals(ClientSettingsForm.DISPLAY, view.pageId(), "the Swing dialog's main route opens Display");
+            float searchTop = top(find(ui, "client-search"));
+            assertEquals(searchTop, top(find(ui, "client-display-sample").getParent()), 1,
+                  "the sample's frame lines up with the search");
+            assertFalse(find(ui, "client-restart").isVisible(), "the language has not changed");
+
+            Slider scale = (Slider) find(ui, "client-setting-" + GUIPreferences.GUI_SCALE);
+            scale.setValue(130);
+            assertEquals(1.3f, store.getFloat(GUIPreferences.GUI_SCALE), 1e-6, "a scale set by keys applies at once");
+
+
+            Actor palette = find(ui, "client-setting-" + GUIPreferences.COLOR_BLIND_PALETTE);
+            reveal(ui, palette);
+            click(ui, palette);
+            assertTrue(store.getBoolean(GUIPreferences.COLOR_BLIND_PALETTE));
+            Actor motion = find(ui, "client-setting-" + GUIPreferences.REDUCE_MOTION);
+            reveal(ui, motion);
+            click(ui, motion);
+            assertTrue(store.getBoolean(GUIPreferences.REDUCE_MOTION));
+            assertEquals(Messages.getString("ClientSettings.sample.still"),
+                  ((Label) find(ui, "client-sample-motion")).getText().toString());
+
+
+            click(ui, find(ui, "client-cancel"));
+            assertEquals(1f, store.getFloat(GUIPreferences.GUI_SCALE), 1e-6, "Cancel puts the scale back");
+            assertFalse(store.getBoolean(GUIPreferences.COLOR_BLIND_PALETTE));
             dialogs.dispose();
         });
     }

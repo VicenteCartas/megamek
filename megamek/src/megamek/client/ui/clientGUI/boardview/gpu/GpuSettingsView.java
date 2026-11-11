@@ -57,7 +57,7 @@ final class GpuSettingsView {
     private static final float PREVIEW_WIDTH = 280;
     /** The widest a choice or text field grows; a switch, slider or file picker takes the card's width. */
     private static final float FIELD_WIDTH = 320;
-    private static final float READING_WIDTH = 44;
+    private static final float READING_WIDTH = 52;
 
     /** The search's texts: its placeholder and tooltip, what it says without and with matches, and the idle help. */
     record Texts(String search, String searchTip, String noMatches, String matches, String hint) { }
@@ -112,6 +112,14 @@ final class GpuSettingsView {
         void changed(Row row) {
         }
 
+        /**
+         * Whether the setting's slider tells of each value as it is dragged; one that does not, such as a scale that
+         * would move the slider under the pointer, tells only of where it is let go.
+         */
+        boolean live(Row row) {
+            return true;
+        }
+
         /** Asks for a file for a {@link Kind#FILE} setting; {@code then} gets the path, unless none was picked. */
         void pick(Row row, String current, Consumer<String> then) {
         }
@@ -151,6 +159,8 @@ final class GpuSettingsView {
     private SettingsForm form;
     private String pageId = "";
     private boolean syncing;
+    /** The slider setting held down whose flavor has not heard of its change yet ({@link Flavor#live}). */
+    private @Nullable Row held;
 
     /**
      * @param bodyWidth  the width the body has, which decides whether the rail goes beside the page and whether a
@@ -457,12 +467,32 @@ final class GpuSettingsView {
                 line.add(field).width(fieldWidth).left();
             }
             case SLIDER -> {
-                Slider slider = new Slider(row.min(), row.max(), 1, false, kit.tokenSliderStyle());
+                Slider slider = new Slider(row.min(), row.max(), row.step(), false, kit.tokenSliderStyle());
                 new UiSliderInput(slider);
                 slider.setValue(number(form.text(row.name()), row.min()));
-                UiKit.onChange(slider, () -> changed(row, () -> form.text(row.name(),
-                      Integer.toString(Math.round(slider.getValue())))));
-                reading = kit.typeLabel(form.text(row.name()), "body", "text.primary");
+                UiKit.onChange(slider, () -> {
+                    Runnable change = () -> form.text(row.name(), Integer.toString(Math.round(slider.getValue())));
+                    if (slider.isDragging() && !flavor.live(row)) {
+                        held(row, change);
+                    } else {
+                        changed(row, change);
+                    }
+                });
+                slider.addListener(new InputListener() {
+                    @Override
+                    public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
+                        return true;
+                    }
+
+                    @Override
+                    public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
+                        if (row.equals(held)) {
+                            held = null;
+                            changed(row, () -> { });
+                        }
+                    }
+                });
+                reading = kit.typeLabel(form.text(row.name()) + row.unit(), "body", "text.primary");
                 reading.setAlignment(Align.right);
                 Table bar = new Table();
                 bar.add(slider).growX().minWidth(0);
@@ -544,6 +574,16 @@ final class GpuSettingsView {
         }
     }
 
+    /** A change of a slider's setting while it is held: the form takes it and the page shows it, but not the flavor. */
+    private void held(Row row, Runnable change) {
+        if (syncing || flavor.busy()) {
+            return;
+        }
+        change.run();
+        held = row;
+        refresh();
+    }
+
     /** A change of a setting by its control: the form takes it, the flavor hears of it, and the page shows it. */
     private void changed(Row row, Runnable change) {
         if (syncing || flavor.busy()) {
@@ -595,7 +635,7 @@ final class GpuSettingsView {
                     }
                 }
                 if (control.reading() != null) {
-                    control.reading().setText(form.text(name));
+                    control.reading().setText(form.text(name) + control.row().unit());
                 }
                 if (control.picker() != null) {
                     control.picker().setDisabled(disabled);

@@ -320,7 +320,8 @@ Done so far, in short:
   its result natively (`GpuBugReport`). The start screen's About is the native About card. The battle's Swing
   allowlist no longer keeps any message box.
 - Help: the start screen's Contents and Skinning how-to and the lobby's Help contents open the same native document
-  card the battle shows its help in (`LobbyNativeDialogs.document`), so no scene opens the Swing help any more.- Client Settings, part 1 (shell and Audio): a native settings card, `GpuSettingsView`, shared with the Game Options,
+  card the battle shows its help in (`LobbyNativeDialogs.document`), so no scene opens the Swing help any more.
+- Client Settings, part 1 (shell and Audio): a native settings card, `GpuSettingsView`, shared with the Game Options,
   which moved onto it and took its look. A rail of groups with icons and a search on the left, the group's pages as
   tabs, section cards in the middle, a live preview on the right and a help strip that follows the pointer. The model
   is toolkit-free: `SettingsForm` (shared with `GameOptionsForm`) and `ClientSettingsForm`, which reads the GUI
@@ -329,12 +330,23 @@ Done so far, in short:
   pads play each alert as the game will. Nothing on Audio was dropped. The start screen, the lobby's gear, the
   battle's View menu, the map editor's and preview's View menu and the "my turn" sound prompt's Settings link all
   open the native card. A route whose page is not native yet opens it on its first page.
+- Client Settings, part 2 (Display): the Display page's Scale, Language and Accessibility. Scale has two sliders,
+  shown as percentages: Menus and lobby (`GUIScale`, which the start screen and the lobby apply at once) and Battle
+  HUD (`BoardUiScale`, the Tuning panel's UI scale, which the battle and the map editor apply at once). A scale
+  applies where its slider is let go, so the card does not rescale under the pointer. Language changes the client
+  preferences' locale and shows a "Restart to apply" chip until MegaMek starts again. The colour-blind palette and
+  Reduce motion apply to each screen as it opens. The page's preview is a live sample: a unit's armour, heat and
+  structure bars in the status colours of the palette that is set, with the heat bar moving unless motion is
+  reduced. The Swing dialog's main route opens Display. Dropped as 2D-only: the UI theme, Classic themes and the
+  skin file (the native screens draw the design tokens), and "Expand option sections" (the native settings and
+  options have no collapsible sections). User files and the MegaMekLab path move to the Interface page.
 
 Still open:
 
 1. The board's last Swing dialog, the `SWING_DIALOGS` allowlist in `GpuBoardWindow` (R6/U2): Client Settings
-   (`CommonSettingsDialog`). Audio and the shared shell are native (see above). Still to port, in their own PRs: Game
-   Board, Overlays, Unit Display, Player Colours, Report, Mini Map, Settings (Main), Phase and Advanced. The last
+   (`CommonSettingsDialog`). Audio, Display and the shared shell are native (see above). Still to port, in their own
+   PRs: Game Board, Overlays, Unit Display, Player Colours, Report, Mini Map, the rest of Settings (Main: colours,
+   window layout, unit defaults, logs, privacy, user files and the MegaMekLab path), Phase and Advanced. The last
    of them removes the dialog from the allowlist. Until then, the native card has no page for those yet
    and the Swing dialog stays only for the Legacy 2D window and the Swing-only client.
 2. The developer tool that is still a Swing window of its own, outside the allowlist because it is not a dialog over

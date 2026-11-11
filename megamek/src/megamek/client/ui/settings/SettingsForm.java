@@ -19,7 +19,10 @@ public abstract class SettingsForm {
     /** How a row is edited. */
     public enum Kind {
         BOOLEAN, INTEGER, INTEGER_CHOICE, FLOAT, STRING, CHOICE,
-        /** A whole number on a slider; the row's values are its minimum and maximum. */
+        /**
+         * A whole number on a slider; the row's values are its minimum, maximum and optionally its step, and its one
+         * label, if any, the unit its reading shows.
+         */
         SLIDER,
         /** A file's path; the row's values are the extensions it takes, without the dot. */
         FILE
@@ -34,7 +37,7 @@ public abstract class SettingsForm {
      * @param kind       how it is edited
      * @param values     the values a choice offers, in order (the numbers as text for an integer choice), a slider's
      *                   minimum and maximum, or a file's extensions
-     * @param labels     the shown names of a choice's values
+     * @param labels     the shown names of a choice's values, or a slider's unit
      * @param tags       the form's own marks for the row, such as the Game Options' important or unofficial rules
      * @param searchText the normalized text a search matches against
      */
@@ -59,6 +62,16 @@ public abstract class SettingsForm {
         /** @return a slider's maximum */
         public int max() {
             return Integer.parseInt(values.get(1));
+        }
+
+        /** @return the distance between a slider's values, 1 unless it has its own */
+        public int step() {
+            return values.size() > 2 ? Integer.parseInt(values.get(2)) : 1;
+        }
+
+        /** @return the unit a slider's reading shows after its value, such as "%", or blank */
+        public String unit() {
+            return labels.isEmpty() ? "" : labels.getFirst();
         }
     }
 
