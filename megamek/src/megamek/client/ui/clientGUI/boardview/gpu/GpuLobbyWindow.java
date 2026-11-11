@@ -496,6 +496,19 @@ public final class GpuLobbyWindow {
         return true;
     }
 
+    /**
+     * EDT: shows the HTML guide {@code file} natively over {@code gui}'s lobby, as the battle window shows it. Returns
+     * false, showing nothing, when that lobby does not show, so the caller shows the Swing help.
+     */
+    public static boolean showHelp(ClientGUI gui, String title, File file) {
+        GpuLobbyWindow window = active;
+        if (window == null || window.closing || window.gui != gui) {
+            return false;
+        }
+        window.tools.helpDocument(title, file);
+        return true;
+    }
+
     private void close() {
         closing = true;
         GpuHost.end(scene);

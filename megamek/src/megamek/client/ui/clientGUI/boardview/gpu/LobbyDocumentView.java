@@ -26,8 +26,8 @@ import megamek.client.ui.gdx.UiTheme;
 
 /**
  * A help document or battle report a chapter at a time: the chapters down a rail at the left, the chapter that shows
- * at the right under its title, and Previous and Next in the footer. A chapter's topics are cards, side by side in a
- * guide; a list of short items reads as tags, code as a code chip, and a report's lines as events, each the line that
+ * at the right under its title, and Previous and Next in the footer. A guide's topics are sections, each heading over
+ * its text at the page's full width, a report's are cards; a list of short items reads as tags, code as a code chip, and a report's lines as events, each the line that
  * starts it over its indented details, edged in the colour of the unit that acts.
  * <p>
  * GPU thread.
@@ -52,7 +52,7 @@ final class LobbyDocumentView {
     private int shown;
 
     /**
-     * @param grid whether the chapters' topics stand two by two, as a guide's do, rather than one under another
+     * @param grid whether the document is a guide, its topics full-width sections, rather than a report of cards
      */
     LobbyDocumentView(UiKit kit, UiDialog dialog, HelpDocument document, boolean grid, boolean motion,
           Runnable close) {
@@ -174,8 +174,6 @@ final class LobbyDocumentView {
         if (!free.isEmpty()) {
             content.band(blocks(free)).padBottom(space("md"));
         }
-        Table cards = null;
-        int inRow = 0;
         while (at < blocks.size()) {
             Block head = blocks.get(at++);
             List<Block> topic = new ArrayList<>();
@@ -183,7 +181,6 @@ final class LobbyDocumentView {
                 topic.add(blocks.get(at++));
             }
             if (head.kind() == Kind.CALLOUT) {
-                cards = null;
                 content.band(callout(head.text())).padBottom(space("md"));
                 if (!topic.isEmpty()) {
                     content.band(blocks(topic)).padBottom(space("md"));
@@ -193,23 +190,11 @@ final class LobbyDocumentView {
             if (topic.isEmpty()) {
                 continue;
             }
-            Table card = card(head, topic);
-            if (!grid) {
-                content.band(card).padBottom(space("md"));
-                continue;
+            if (grid) {
+                content.band(section(head, topic)).padBottom(space("lg"));
+            } else {
+                content.band(card(head, topic)).padBottom(space("md"));
             }
-            if (cards == null || inRow == 2) {
-                cards = new Table();
-                cards.top().left();
-                content.band(cards).padBottom(space("md"));
-                inRow = 0;
-            }
-            cards.add(card).growX().uniformX().fill().top().minWidth(0)
-                  .padLeft(inRow == 0 ? 0 : space("md") / 2).padRight(inRow == 0 ? space("md") / 2 : 0);
-            inRow++;
-        }
-        if (cards != null && inRow == 1) {
-            cards.add().growX().uniformX().padLeft(space("md") / 2);
         }
     }
 
@@ -227,6 +212,21 @@ final class LobbyDocumentView {
         label.setAlignment(Align.center);
         banner.add(label).growX().minWidth(0);
         return banner;
+    }
+
+    /** A guide's topic: its title as a section heading over its blocks, the page's full width. */
+    private Table section(Block head, List<Block> topic) {
+        Table section = new Table();
+        section.setName("document-section");
+        section.top().left();
+        Label title = kit.roleTypeLabel("headline", head.text(), "accent.primary");
+        title.setWrap(true);
+        if (head.color() != null) {
+            title.setColor(Color.valueOf(head.color()));
+        }
+        section.add(title).growX().minWidth(0).left().row();
+        section.add(blocks(topic)).growX().minWidth(0).left().padTop(space("sm")).row();
+        return section;
     }
 
     /** A topic: its title over its blocks, on a card. */
@@ -263,7 +263,7 @@ final class LobbyDocumentView {
                     while (at < blocks.size() && blocks.get(at).kind() == Kind.BULLET) {
                         run.add(blocks.get(at++));
                     }
-                    column.add(tags(run) ? tags(run, grid ? 2 : 3) : bullets(run)).padTop(gap).row();
+                    column.add(tags(run) ? tags(run, 3) : bullets(run)).padTop(gap).row();
                     continue;
                 }
                 case LINE -> {

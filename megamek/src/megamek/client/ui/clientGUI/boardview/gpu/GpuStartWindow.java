@@ -38,6 +38,7 @@ import com.badlogic.gdx.utils.Os;
 import com.badlogic.gdx.utils.SharedLibraryLoader;
 import jakarta.annotation.Nullable;
 import megamek.client.Client;
+import megamek.client.lobby.HelpDocument;
 import megamek.client.lobby.LobbyError;
 import megamek.client.lobby.LobbyFiles;
 import megamek.client.ui.Messages;
@@ -479,6 +480,20 @@ public final class GpuStartWindow {
             return false;
         }
         window.post(() -> window.screen.dialogs.about());
+        return true;
+    }
+
+    /**
+     * EDT: shows the HTML guide {@code file} natively on the start screen, in the card the lobby and the battle show
+     * help in; false, showing nothing, when the start screen is not open.
+     */
+    public static boolean showHelp(String title, File file) {
+        GpuStartWindow window = open;
+        if (window == null) {
+            return false;
+        }
+        HelpDocument document = GpuLobbyTools.readDocument(file, HelpDocument::guide);
+        window.post(() -> window.screen.dialogs.document(title, document, true));
         return true;
     }
 

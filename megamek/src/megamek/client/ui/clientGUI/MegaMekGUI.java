@@ -763,8 +763,18 @@ public class MegaMekGUI implements IPreferenceChangeListener {
                 randomArmyDialog.setVisible(true);
             }
             case SETTINGS -> showSettings();
-            case HELP_CONTENTS -> new MMReadMeHelpDialog(frame).setVisible(true);
-            case HELP_SKINNING -> showSkinningHowTo();
+            case HELP_CONTENTS -> {
+                if (!GpuStartWindow.showHelp(Messages.getString("CommonMenuBar.HelpMenu"),
+                      new File(MMConstants.MEGAMEK_README_FILE_PATH))) {
+                    new MMReadMeHelpDialog(frame).setVisible(true);
+                }
+            }
+            case HELP_SKINNING -> {
+                if (!GpuStartWindow.showHelp(Messages.getString("ClientGUI.skinningHelpPath.title"),
+                      new File(Messages.getString("ClientGUI.skinningHelpPath")))) {
+                    showSkinningHowTo();
+                }
+            }
             case REPORT_BUG -> {
                 if (!GpuStartWindow.showBugReport(this::currentTotalWarfareClient)) {
                     BugReportDialog.showWithGameTools(frame, this::currentTotalWarfareClient);
