@@ -42,11 +42,11 @@ import megamek.client.ui.gdx.UiTheme;
  * button, before Help and Menu in gameplay, and its panel below that row, 360 wide and ending at least 70 above the
  * window's bottom, whose pages scroll. The Board and Atmosphere pages show the two pages of the
  * {@link GpuBoardTuning} model row by row in the hud-v3 look: captions, sliders with their readings, checkboxes,
- * choices, the mode, preset and weather buttons, notes, and "Planetary conditions…", whose model button opens the Swing
- * editor through {@link GpuBoardSource#editPlanetaryConditions}. The Camera page holds the fixed sun and the board
- * camera's framing on selection and on movement. The model keeps every value and rule: an edit here goes to the model's
- * own control, which applies it, and each frame the open panel shows the model's state. Deleting this class and its
- * block in GpuHud removes the tool; the model keeps its defaults.
+ * choices, the mode, preset and weather buttons, notes, and "Planetary conditions…", whose model button opens the
+ * native conditions card through {@link GpuBoardSource#editPlanetaryConditions}. The Camera page holds the fixed sun and
+ * the board camera's framing on selection and on movement. The model keeps every value and rule: an edit here goes to
+ * the model's own control, which applies it, and each frame the open panel shows the model's state. Deleting this class
+ * and its block in GpuHud removes the tool; the model keeps its defaults.
  */
 final class GpuTuningPanel implements GpuHud.Component {
     private static final float WIDTH = 360;

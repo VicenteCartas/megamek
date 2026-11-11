@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -52,6 +53,7 @@ import com.badlogic.gdx.utils.Os;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.SharedLibraryLoader;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
@@ -66,6 +68,7 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.units.Entity;
 import megamek.common.weapons.handlers.AreaEffectHelper;
 import megamek.logging.MMLogger;
@@ -466,6 +469,14 @@ class GpuBattleView extends ApplicationAdapter {
         ui = source instanceof GpuBoardSource game
               ? new GpuHud(game, theme.skin, annotationBatch, boardCamera, tuning, history)
               : new GpuMapHud(source, theme.skin, annotationBatch, boardCamera, tuning, history, () -> terrain);
+        var application = Gdx.app;
+        tuning.conditionsEditor((initial, confirmed, closed) -> editConditions(application, initial, confirmed, closed));
+        tuning.materialPalette(reload -> {
+            LobbyNativeDialogs dialogs = cards();
+            if (dialogs != null) {
+                dialogs.materialPalette(reload);
+            }
+        });
         installInput(new InputMultiplexer(ui.stage(), boardInput) {
             // The HUD's Stage takes the presses on its widgets; every key goes through BoardInput, which asks the
             // HUD first (C.4), so no key reaches the Stage twice.
@@ -3831,6 +3842,37 @@ class GpuBattleView extends ApplicationAdapter {
      * GPU thread: the battle's own cards over its HUD, such as the Game Master's damage card; null before the HUD
      * stands or once the view is gone.
      */
+    /** Swing thread: opens the Tuning's planetary conditions as the window's native card (U2). */
+    private void editConditions(Application application, PlanetaryConditions initial,
+          Consumer<PlanetaryConditions> confirmed, Runnable closed) {
+        PlanetaryConditionsForm form = new PlanetaryConditionsForm(initial);
+        LobbyConditionsView.Host host = new LobbyConditionsView.Host() {
+            @Override
+            public void send(PlanetaryConditions conditions) {
+                confirmed.accept(conditions);
+            }
+
+            @Override
+            public void edt(Runnable work, Runnable then) {
+                SwingUtilities.invokeLater(() -> {
+                    try {
+                        work.run();
+                    } finally {
+                        application.postRunnable(then);
+                    }
+                });
+            }
+        };
+        application.postRunnable(() -> {
+            LobbyNativeDialogs cards = cards();
+            if (cards == null) {
+                closed.run();
+            } else {
+                cards.conditions(form, host, closed);
+            }
+        });
+    }
+
     LobbyNativeDialogs cards() {
         if (ui == null || disposed) {
             return null;
