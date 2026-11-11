@@ -10,6 +10,7 @@ import java.util.function.Consumer;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
+import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
@@ -143,6 +144,8 @@ final class GpuSettingsView {
     private final Table page = new Table();
     private final ScrollPane pageScroll;
     private final Container<Actor> preview = new Container<>();
+    private Cell<HorizontalGroup> tabsCell;
+    private Cell<ScrollPane> pageCell;
     private final Label help;
     private final Map<String, Control> controls = new LinkedHashMap<>();
     private SettingsForm form;
@@ -206,8 +209,10 @@ final class GpuSettingsView {
         pageScroll.setFadeScrollBars(false);
         Table column = new Table();
         column.top().left().defaults().left().growX();
-        column.add(tabs).row();
-        column.add(pageScroll).grow().padTop(space("sm")).row();
+        tabsCell = column.add(tabs);
+        column.row();
+        pageCell = column.add(pageScroll).grow();
+        column.row();
 
         help = kit.typeLabel(texts.hint(), "small", "text.secondary");
         help.setWrap(true);
@@ -320,11 +325,13 @@ final class GpuSettingsView {
         Page shown = current();
         List<Page> listed = form.searching() ? visible : shown == null ? List.of()
               : groups(visible).getOrDefault(shown.group(), List.of());
-        if (listed.size() < 2 && !form.searching()) {
-            tabs.setVisible(false);
+        boolean tabsShown = listed.size() >= 2 || form.searching();
+        // A hidden row would still take its height, and the page would sit lower than the rail and the preview
+        tabsCell.setActor(tabsShown ? tabs : null);
+        pageCell.padTop(tabsShown ? space("sm") : 0);
+        if (!tabsShown) {
             return;
         }
-        tabs.setVisible(true);
         for (Page each : listed) {
             UiButton tab = kit.button("button-toggle" + UiTheme.COMPACT, null, each.title(), null);
             tab.setName(flavor.prefix() + "-page-" + each.id());
@@ -385,7 +392,12 @@ final class GpuSettingsView {
             first = false;
         }
         if (previews) {
-            preview.setActor(flavor.preview(shown));
+            Actor shownPreview = flavor.preview(shown);
+            preview.setActor(shownPreview);
+            // The preview sits in the same rounded frame as the rail and the page
+            preview.setBackground(shownPreview == null ? null
+                  : kit.skin.get(UiTheme.TOKEN_LIST, ScrollPane.ScrollPaneStyle.class).background);
+            preview.pad(shownPreview == null ? 0 : space("md"));
         }
         pageScroll.layout();
         pageScroll.setScrollY(0);
@@ -393,7 +405,9 @@ final class GpuSettingsView {
     }
 
     private Table card(Page shown, Section section) {
-        Table card = kit.plainPanel();
+        Table card = kit.card();
+        card.pad(space("md"));
+        card.top();
         card.defaults().left().growX();
         card.add(kit.caption(section.title(), true)).row();
         if (!section.summary().isBlank()) {

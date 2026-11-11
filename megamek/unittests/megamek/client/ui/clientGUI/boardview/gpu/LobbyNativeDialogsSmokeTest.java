@@ -662,7 +662,10 @@ class LobbyNativeDialogsSmokeTest {
             assertNotNull(ui.stage.getRoot().findActor("client-group-" + ClientSettingsForm.AUDIO));
             assertFalse(find(ui, "client-reset-" + ClientSettingsForm.AUDIO).isVisible(),
                   "a page at its defaults offers no reset");
-
+            float searchTop = top(find(ui, "client-search"));
+            assertEquals(searchTop, top(find(ui, "client-page").getParent()), 1, "the page's frame lines up with the search");
+            assertEquals(searchTop, top(find(ui, "client-sound-check").getParent()), 1,
+                  "the preview's frame lines up with the search");
             Actor chat = find(ui, "client-setting-" + GUIPreferences.SOUND_MUTE_CHAT);
             reveal(ui, chat);
             click(ui, chat);
@@ -1066,6 +1069,10 @@ class LobbyNativeDialogsSmokeTest {
         clickAt(ui, Math.round(point.x), Math.round(point.y));
     }
 
+    /** The actor's top edge on the stage. */
+    private static float top(Actor actor) {
+        return actor.localToStageCoordinates(new Vector2(0, actor.getHeight())).y;
+    }
     private static void clickAt(UiTestStage ui, int x, int y) {
         ui.stage.mouseMoved(x, y);
         ui.stage.touchDown(x, y, 0, Input.Buttons.LEFT);

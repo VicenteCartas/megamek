@@ -205,7 +205,8 @@ final class ClientSettingsView {
 
     /** The Audio page's preview: a pad per alert that plays it, and whether it plays in the game. */
     private Table soundCheck() {
-        Table panel = kit.plainPanel();
+        Table panel = new Table();
+        panel.top();
         panel.setName("client-sound-check");
         panel.defaults().left().growX();
         panel.add(kit.caption(Messages.getString("ClientSettings.soundCheck"), true)).row();
