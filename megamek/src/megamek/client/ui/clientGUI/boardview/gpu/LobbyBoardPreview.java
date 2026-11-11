@@ -89,6 +89,11 @@ final class LobbyBoardPreview extends Table implements Disposable {
     private boolean focusOnReady;
 
     LobbyBoardPreview(UiKit kit, Runnable close) {
+        this(kit, Messages.getString("Lobby.map.backToLayout"), close);
+    }
+
+    /** An inspection whose back button reads {@code back} and runs {@code close}. */
+    LobbyBoardPreview(UiKit kit, String back, Runnable close) {
         this.kit = kit;
         hexCard = new GpuMapHexCard(kit);
         setName("map-inspection-panel");
@@ -121,9 +126,10 @@ final class LobbyBoardPreview extends Table implements Disposable {
         // The shared utility buttons clear the previous field's focus; this view then takes camera keys.
         UiKit.onChange(controls, this::focus);
         header.add(controls).padLeft(gap);
-        UiButton back = GpuUtilityBar.utility(kit, "chevron-left", "Lobby.map.backToLayout", "map-inspection-close");
-        UiKit.onChange(back, close);
-        header.add(back).height(GpuUtilityBar.HEIGHT).padLeft(gap);
+        UiButton backButton = GpuUtilityBar.compact(kit, kit.button("hud-utility", "chevron-left", back, null));
+        backButton.setName("map-inspection-close");
+        UiKit.onChange(backButton, close);
+        header.add(backButton).height(GpuUtilityBar.HEIGHT).padLeft(gap);
         overlay.add(header).growX().row();
         overlay.add().grow().row();
         Label hint = kit.typeLabel(Messages.getString("Lobby.map.inspectControls"), "small", "text.primary");
