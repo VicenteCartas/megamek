@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Vector;
@@ -21,6 +22,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import megamek.MMConstants;
 import megamek.client.ui.Messages;
+import megamek.client.ui.PackageBugReportAction;
 import megamek.common.Player;
 import megamek.common.containers.MunitionTree;
 import megamek.common.equipment.EquipmentType;
@@ -136,6 +138,24 @@ class LobbyFilesTest {
         answer(null);
         files.loadGame(loads::add);
         assertEquals(List.of(loaded), loads, "the chosen save is passed on; a cancel loads nothing");
+    }
+
+    @Test
+    void aBugReportAsksForAZipArchiveAndPassesTheChoiceOrTheCancelOn() {
+        LobbyFiles.Ask ask = files.ask(LobbyFiles.Route.SAVE_BUG_REPORT, null);
+        assertTrue(ask.save());
+        assertEquals(PackageBugReportAction.archiveDirectory().getAbsoluteFile(), ask.directory());
+        assertEquals(PackageBugReportAction.chooserTitle(), ask.title());
+        assertEquals(PackageBugReportAction.chooserFilter(), ask.filterName());
+        assertEquals(List.of("zip"), ask.extensions());
+        assertTrue(ask.name().startsWith("MegaMek-BugReport") && ask.name().endsWith(".zip"), ask.name());
+
+        File chosen = answer("report.zip");
+        answer(null);
+        List<File> archives = new ArrayList<>();
+        files.saveBugReport(archives::add);
+        files.saveBugReport(archives::add);
+        assertEquals(Arrays.asList(chosen, null), archives, "the choice, then the cancel as null");
     }
 
     @Test

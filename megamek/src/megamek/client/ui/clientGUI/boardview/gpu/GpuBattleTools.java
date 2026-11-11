@@ -39,6 +39,7 @@ import megamek.client.lobby.NetworkInformationForm;
 import megamek.client.lobby.NovaNetworkForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.ui.Messages;
+import megamek.client.ui.PackageBugReportAction;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
@@ -302,6 +303,12 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
     /** Shows About MegaMek. */
     void about() {
         open(LobbyNativeDialogs::about);
+    }
+
+    /** Shows Report a Bug; its button packages this client's game and the logs. */
+    void bugReport() {
+        PackageBugReportAction packaging = GpuBugReport.packaging(gui::getClient, files, this::open);
+        open(dialogs -> GpuBugReport.open(dialogs, packaging));
     }
 
     // ---- The Game Master's cards ----

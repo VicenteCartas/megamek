@@ -46,6 +46,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
+import javax.swing.AbstractAction;
+import javax.swing.Action;
 import javax.swing.ButtonGroup;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JMenu;
@@ -61,6 +63,7 @@ import megamek.client.ui.CopySystemDataAction;
 import megamek.client.ui.Messages;
 import megamek.client.ui.PackageBugReportAction;
 import megamek.client.ui.ShowBugReportDialogAction;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuUiLibraryWindow;
 import megamek.client.ui.design.swing.SwingUiLibrary;
 import megamek.client.ui.util.KeyCommandBind;
@@ -383,8 +386,17 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         // A null client is a supported state and yields a logs-only archive.
         // This must stay a lambda rather than the method reference clientSupplier::get, which would capture the
         // placeholder supplier installed above and ignore whatever setClientSupplier later provides.
-        menu.add(new ShowBugReportDialogAction(this, new CopySystemDataAction(),
-              new PackageBugReportAction(this, () -> clientSupplier.get())));
+        // Over a native battle window the item shows the native Report a Bug instead.
+        ShowBugReportDialogAction reportBug = new ShowBugReportDialogAction(this, new CopySystemDataAction(),
+              new PackageBugReportAction(this, () -> clientSupplier.get()));
+        menu.add(new AbstractAction(String.valueOf(reportBug.getValue(Action.NAME))) {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                if (!GpuBoardWindow.showBugReport(clientSupplier.get())) {
+                    reportBug.actionPerformed(event);
+                }
+            }
+        });
         menu.add(new CopySystemDataAction());
 
         menu.addSeparator();

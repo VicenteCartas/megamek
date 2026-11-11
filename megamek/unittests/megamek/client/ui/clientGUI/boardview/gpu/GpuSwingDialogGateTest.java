@@ -50,7 +50,6 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import megamek.MMConstants;
 import megamek.client.ui.Base64Image;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.BugReportDialog;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.GifRecordingMode;
@@ -64,7 +63,6 @@ import megamek.client.ui.dialogs.BotCommands.HexTargetPicker;
 import megamek.client.ui.dialogs.ChoiceDialog;
 import megamek.client.ui.dialogs.ConfirmDialog;
 import megamek.client.ui.dialogs.MMDialogs.MMNarrativeStoryDialog;
-import megamek.client.ui.dialogs.PlayerListDialog;
 import megamek.client.ui.dialogs.SliderDialog;
 import megamek.client.ui.dialogs.TurretFacingDialog;
 import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
@@ -100,14 +98,12 @@ import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay;
 import megamek.client.ui.panels.phaseDisplay.TargetingPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.VictoryHexPropertiesPane;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
-import megamek.client.ui.util.MULVersionValidator;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.equipment.Cargo;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.ObjectiveMarker;
 import megamek.common.event.GameScriptedMessageEvent;
-import megamek.common.loaders.MULParser;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.AbstractBuildingEntity;
@@ -538,43 +534,40 @@ class GpuSwingDialogGateTest {
             // The exit's save question (D11), from the client's own exit: asked natively now, Swing's without the window
             doCallRealMethod().when(declaring.gui).handleExit();
             preferences.setValue(GUIPreferences.ADVANCED_NO_SAVE_NAG, false);
+            // The drive presents its own window; the one presented above would see the Legacy 2D client's box
+            gate.dismiss();
             gate.drive("D11: the exit's save question", DialogKind.MESSAGE, MESSAGE_BOX, () -> {
                 declaring.gui.handleExit();
                 return null;
             });
             gate.present();
-            // The bug report (R6)
-            assertTrue(gate.raised(() -> {
-                new BugReportDialog(frame, null).show();
-                return null;
-            }, MESSAGE_BOX), "R6: the bug report");
-            // A game master's reinforcements: the player to reinforce, then the unit file's version check
-            MULParser older = mock(MULParser.class);
-            when(older.isOlderVersion()).thenReturn(true);
-            assertTrue(gate.raised(() -> MULVersionValidator.isCorrectVersion(frame, older), MESSAGE_BOX),
-                  "Item 21: the version check of a reinforcement file");
-            PlayerListDialog players = onSwing(() -> new PlayerListDialog(frame, declaring.client, true));
-            FutureTask<Void> choosing = new FutureTask<>(() -> {
-                players.setVisible(true);
+            // Client Settings shown modally: a dialog it opens is part of it, whatever its owner. The bug report, the
+            // unit file version check and the player to reinforce are native cards now.
+            CommonSettingsDialog modalSettings = onSwing(() -> {
+                CommonSettingsDialog dialog = new CommonSettingsDialog(frame);
+                dialog.setModal(true);
+                return dialog;
+            });
+            FutureTask<Void> showing = new FutureTask<>(() -> {
+                modalSettings.setVisible(true);
                 return null;
             });
-            SwingUtilities.invokeLater(choosing);
-            Window chooser = gate.awaitShowing(players::equals);
-            assertTrue(onSwing(chooser::isAlwaysOnTop), "U2, GM tools: the player to reinforce");
-            // While it shows modally, a dialog it opens is part of it, whatever its owner
+            SwingUtilities.invokeLater(showing);
+            Window kept = gate.awaitShowing(modalSettings::equals);
+            assertTrue(onSwing(kept::isAlwaysOnTop), "R6: Client Settings, modally");
             assertTrue(gate.raised(() -> {
-                JDialog inside = new JDialog(frame, "Reinforcement detail");
+                JDialog inside = new JDialog(frame, "Settings detail");
                 inside.setSize(120, 80);
                 inside.setVisible(true);
                 return null;
-            }, window -> window instanceof JDialog dialog && "Reinforcement detail".equals(dialog.getTitle())),
+            }, window -> window instanceof JDialog dialog && "Settings detail".equals(dialog.getTitle())),
                   "A dialog opened inside a kept modal dialog");
             onSwing(() -> {
-                players.setVisible(false);
-                players.dispose();
+                modalSettings.setVisible(false);
+                modalSettings.dispose();
                 return null;
             });
-            choosing.get(WAIT_SECONDS, SECONDS);
+            showing.get(WAIT_SECONDS, SECONDS);
             assertEquals(List.of(), gate.errors, "No kept surface is reported");
         } finally {
             preferences.setValue(GUIPreferences.ADVANCED_NO_SAVE_NAG, noSaveNag);

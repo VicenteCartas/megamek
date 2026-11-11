@@ -313,6 +313,12 @@ Done so far, in short:
   native conditions card, its material palette is a native gallery card, and the map editor's and preview's Print
   picks its file with `SystemFileDialog`. The unit cache's progress, Refresh and Rebuild are a native Unit cache page
   under the start screen's Tools (#58), and the Swing loading window no longer opens at startup.
+- The native scenes' message boxes and choosers: the map editor's Print failure, Board Tagger report, "already open"
+  and "the game waits for the editor" notices are native cards; the game master's player to reinforce is a native
+  row picker, and a reinforcement file's version warning a native message and confirmation. Report a Bug is a native
+  card on the start screen, in the lobby and in battle, asking for its archive in each scene's file dialog and showing
+  its result natively (`GpuBugReport`). The start screen's About is the native About card. The battle's Swing
+  allowlist no longer keeps any message box.
 
 Still open:
 
@@ -321,13 +327,10 @@ Still open:
 2. The developer tool that is still a Swing window of its own, outside the allowlist because it is not a dialog over
    the battle: the shader editor (`GpuShaderEditor`), a `JFrame` with its compiled GLSL window and a reload
    confirmation.
-3. Swing message boxes and choosers still shown by the native scenes:
-   - The map editor's and preview's Print failure: a Swing message box.
-   - The map editor's Run Board Tagger report (`GpuMapSource.runBoardTagger`).
-   - `GpuBoardWindow`'s "already open" and "the game waits for the editor" messages.
-   - The message boxes the battle keeps (`approvedMessageBoxes`): the exit's save question, the bug report and its
-     result, and the unit file version warnings for the game master's reinforcements, plus the modal
-     `PlayerListDialog` choosing the player to reinforce.
+3. Swing surfaces still shown by the native scenes:
+   - Help contents and Skinning on the start screen (`MMReadMeHelpDialog`, `HelpDialog`), and Help contents in the
+     lobby (`ClientGUI.showHelp` before the battle). The native help viewer is only the battle HUD's
+     `GpuHelpDialog`; it should become a shared card the start screen and lobby open too.
    - The Legacy 2D window of the editor's 2D Preview and the preview's 2D Board (`GpuBoardWindow.boardWindow2D`): a
      Swing `BoardView` with a Swing menu bar, Client Settings and `MMAboutDialog`. Kept by decision (see Native
      window); listed so the menu's dialogs are not forgotten.
