@@ -41,7 +41,8 @@ import com.badlogic.gdx.utils.Array;
  * preferences. All paths use the host filesystem, including Windows drives/UNC paths and Unix roots/symlinks.
  */
 public final class UiFileDialog implements AutoCloseable {
-    public enum Mode { OPEN, SAVE }
+    /** FOLDER lists only folders and chooses one: the selected folder, or the folder shown. */
+    public enum Mode { OPEN, SAVE, FOLDER }
 
     /** Extensions have no leading dot. An empty list accepts any regular file. */
     public record Filter(String description, List<String> extensions) {
@@ -84,6 +85,7 @@ public final class UiFileDialog implements AutoCloseable {
     private final Label status;
     private final TextTooltip statusTip;
     private final Label filterLabel;
+    private final Table nameRow = new Table();
     private final UiButton back, forward, up, accept;
     private final List<Actor> tabOrder = new ArrayList<>();
     private final List<Path> history = new ArrayList<>();
@@ -178,10 +180,9 @@ public final class UiFileDialog implements AutoCloseable {
         filterLabel = ui.label("", "hud-small", 12, UiTheme.MUTED);
         filterLabel.setEllipsis(true);
         body.add(filterLabel).minWidth(0).padTop(10).row();
-        Table file = new Table();
-        file.add(ui.label(UiKit.text("FileDialog.name"), "hud-small", 13, UiTheme.TEXT)).padRight(10);
-        file.add(name).height(32).growX().minWidth(0);
-        body.add(file).padTop(8).row();
+        nameRow.add(ui.label(UiKit.text("FileDialog.name"), "hud-small", 13, UiTheme.TEXT)).padRight(10);
+        nameRow.add(name).height(32).growX().minWidth(0);
+        body.add(nameRow).padTop(8).row();
         status = ui.label("", "hud-small", 12, UiTheme.MUTED);
         status.setEllipsis(true);
         status.setName("file-status");
@@ -220,7 +221,12 @@ public final class UiFileDialog implements AutoCloseable {
         location.setText(""); name.setText(options.fileName()); search.setText("");
         entries.clearItems(); places.clearChildren(); lastClick = null;
         filterLabel.setText(options.filter().description());
-        accept.setText(UiTheme.upper(UiKit.text(options.mode() == Mode.OPEN ? "FileDialog.open" : "FileDialog.save")));
+        accept.setText(UiTheme.upper(UiKit.text(switch (options.mode()) {
+            case OPEN -> "FileDialog.open";
+            case SAVE -> "FileDialog.save";
+            case FOLDER -> "FileDialog.chooseFolder";
+        })));
+        nameRow.setVisible(options.mode() != Mode.FOLDER);
         Table dialog = ui.dialog(options.title(), () -> finish(null));
         dialog.setName("file-dialog-card");
         dialog.setTouchable(Touchable.enabled);
@@ -230,7 +236,7 @@ public final class UiFileDialog implements AutoCloseable {
         stage.addActor(layer);
         layer.open(true);
         layer.validate();
-        stage.setKeyboardFocus(name);
+        stage.setKeyboardFocus(options.mode() == Mode.FOLDER ? entries : name);
         work(() -> {
             String remembered = preferences.get(options.preferenceKey(), "");
             Path initial = FileDialogPaths.initial(remembered, options.directory());
@@ -314,7 +320,8 @@ public final class UiFileDialog implements AutoCloseable {
         Path selected = entries.getSelected() == null ? null : entries.getSelected().path();
         String query = FileDialogPaths.search(search.getText());
         Array<FileDialogPaths.Entry> visible = new Array<>();
-        listing.stream().filter(entry -> FileDialogPaths.search(entry.name()).contains(query)).forEach(visible::add);
+        listing.stream().filter(entry -> options.mode() != Mode.FOLDER || entry.directory())
+              .filter(entry -> FileDialogPaths.search(entry.name()).contains(query)).forEach(visible::add);
         updating = true;
         entries.setItems(visible);
         entries.getSelection().clear();
@@ -347,6 +354,10 @@ public final class UiFileDialog implements AutoCloseable {
     private void submit() {
         if (directory == null || pending != null) { return; }
         var selected = entries.getSelected();
+        if (options.mode() == Mode.FOLDER) {
+            finish(selected != null && selected.directory() ? selected.path() : directory);
+            return;
+        }
         if (selected != null && selected.directory()) {
             navigate(selected.path(), -1); return;
         }

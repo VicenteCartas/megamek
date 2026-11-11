@@ -179,14 +179,11 @@ public final class GpuBoardWindow {
     /** Volatile so that {@link #ask} and {@link #dialogPendingFor} read it without the class monitor. */
     private static volatile GpuBoardWindow active;
     /**
-     * The Swing windows the user kept over the battle window (rebuild plan R9, closed by Z1), each with its decision:
-     * R6 and swing-inventory Q1 (the menu-level dialogs stay Swing for now); U2's conditions editor is native now.
-     * Message boxes and file choosers have no class of their own; {@link #approved} names the kept ones. Everything
-     * else is native.
+     * The Swing windows the user kept over the battle window (rebuild plan R9, closed by Z1). The last, Client Settings
+     * (R6), is native now, so none is left. Message boxes and file choosers have no class of their own;
+     * {@link #approved} names the kept ones. Everything else is native.
      */
-    private static final List<Class<? extends Dialog>> SWING_DIALOGS = List.of(
-          // R6: Client Settings, which hold the real settings (user item 3)
-          megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog.class);
+    private static final List<Class<? extends Dialog>> SWING_DIALOGS = List.of();
     private final ClientGUI gui;
     private final BoardClientState initialView;
     private final Supplier<JComponent> panel;

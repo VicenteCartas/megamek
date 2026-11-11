@@ -65,6 +65,7 @@ import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.gdx.UiTextField;
 import megamek.client.ui.panels.CommonSettingsPane;
 import megamek.client.ui.settings.ClientSettingsForm;
+import megamek.client.ui.settings.SettingsForm;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.Hex;
@@ -792,6 +793,48 @@ class LobbyNativeDialogsSmokeTest {
 
             click(ui, find(ui, "client-cancel"));
             assertEquals("255 0 0", store.getString(GUIPreferences.MY_UNIT_COLOR), "Cancel puts the colour back");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void aReportPhraseIsAddedAndRemovedAsAChipAndThePreviewFindsIt() {
+        UiTestStage.run(ui -> {
+            PreferenceStore store = new PreferenceStore();
+            ClientPreferences client = new ClientPreferences(new PreferenceStore());
+            String shipped = client.getReportKeywords();
+            ClientSettingsView.Host host = (work, then) -> {
+                work.run();
+                then.run();
+            };
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            ClientSettingsForm form = new ClientSettingsForm(store, client);
+            ClientSettingsView view = dialogs.clientSettings(form, form.pageOf(CommonSettingsPane.SETTINGS_REPORT),
+                  host);
+            ui.draw();
+            assertEquals(ClientSettingsForm.REPORTS, view.pageId(), "the Swing report route opens the Reports page");
+            assertEquals(top(find(ui, "client-search")), top(find(ui, "client-report-sample").getParent()), 1,
+                  "the log's frame lines up with the search");
+
+            String name = "client-setting-" + ClientPreferences.REPORT_KEYWORDS;
+            int phrases = SettingsForm.lines(shipped).size();
+            assertNotNull(ui.stage.getRoot().findActor(name + "-chip-" + (phrases - 1)), "a chip a phrase");
+            UiTextField entry = (UiTextField) find(ui, name + "-entry");
+            entry.setText("Locust");
+            click(ui, find(ui, name + "-add"));
+            ui.draw();
+            assertEquals(shipped + "\nLocust", client.getReportKeywords(), "an added phrase applies at once");
+            assertNotNull(ui.stage.getRoot().findActor(name + "-chip-" + phrases));
+
+            Actor remove = find(ui, name + "-remove-0");
+            reveal(ui, remove);
+            click(ui, remove);
+            ui.draw();
+            assertFalse(client.getReportKeywords().startsWith(SettingsForm.lines(shipped).getFirst() + "\n"),
+                  "the chip's close removes its phrase");
+
+            click(ui, find(ui, "client-cancel"));
+            assertEquals(shipped, client.getReportKeywords(), "Cancel puts the phrases back");
             dialogs.dispose();
         });
     }

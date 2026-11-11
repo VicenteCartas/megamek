@@ -23,10 +23,12 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.VerticalGroup;
 import com.badlogic.gdx.utils.Align;
 import jakarta.annotation.Nullable;
 import megamek.client.bot.princess.BehaviorSettings;
@@ -36,6 +38,7 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.audio.SoundType;
 import megamek.client.ui.clientGUI.boardview.NameplateMode;
+import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.design.DesignTokens.Palette;
@@ -111,7 +114,8 @@ final class ClientSettingsView {
           GUIPreferences.SOUND_MUTE_OTHERS_TURN);
     private static final Map<String, String> ICONS = Map.of(ClientSettingsForm.AUDIO, "volume",
           ClientSettingsForm.DISPLAY, "display", ClientSettingsForm.CONTROLS, "keyboard", ClientSettingsForm.GAMEPLAY,
-          "gameplay", ClientSettingsForm.BATTLEFIELD, "map", ClientSettingsForm.COLOURS, "palette");
+          "gameplay", ClientSettingsForm.BATTLEFIELD, "map", ClientSettingsForm.COLOURS, "palette",
+          ClientSettingsForm.MESSAGES, "chat", ClientSettingsForm.FILES, "folder");
     /** The pages whose preview is a stretch of battlefield in the colours and labels they set. */
     private static final Set<String> BATTLEFIELD_SAMPLES = Set.of(ClientSettingsForm.LABELS,
           ClientSettingsForm.FORCES, ClientSettingsForm.TACTICAL, ClientSettingsForm.MAP_TEXT);
@@ -134,6 +138,9 @@ final class ClientSettingsView {
     private PrincessSample princess;
     private RosterSample roster;
     private BattlefieldSample battlefield;
+    private ToastSample toasts;
+    private ReportSample reports;
+    private LogSample logs;
     private Actor restart;
     private UiFileDialog files;
     private boolean applying;
@@ -213,8 +220,11 @@ final class ClientSettingsView {
             princess = ClientSettingsForm.BOTS.equals(page.id()) ? new PrincessSample() : null;
             roster = ClientSettingsForm.UNITS.equals(page.id()) ? new RosterSample() : null;
             battlefield = BATTLEFIELD_SAMPLES.contains(page.id()) ? new BattlefieldSample(page.id()) : null;
+            toasts = ClientSettingsForm.NOTIFICATIONS.equals(page.id()) ? new ToastSample() : null;
+            reports = ClientSettingsForm.REPORTS.equals(page.id()) ? new ReportSample() : null;
+            logs = ClientSettingsForm.LOGS.equals(page.id()) ? new LogSample() : null;
             for (Table preview : new Table[] { soundCheck, sample, keyboard, prompts, princess, roster,
-                                               battlefield }) {
+                                               battlefield, toasts, reports, logs }) {
                 if (preview != null) {
                     return preview;
                 }
@@ -239,6 +249,13 @@ final class ClientSettingsView {
                 restart.setName("client-restart");
                 marks.add(restart).padLeft(space("sm"));
             }
+            if (ClientPreferences.USER_DIR.equals(row.name()) && form.userDirOverridden()) {
+                Actor launcher = kit.chip(Messages.getString("ClientSettings.files.launcher"), UiKit.Tone.WARN, true);
+                launcher.setName("client-launcher");
+                kit.tip(launcher, true).getActor()
+                      .setText(Messages.getString("CommonSettingsDialog.userDir.launcherOverride"));
+                marks.add(launcher).padLeft(space("sm"));
+            }
         }
 
         @Override
@@ -257,15 +274,22 @@ final class ClientSettingsView {
                 files = new UiFileDialog(kit);
             }
             boolean image = GUIPreferences.TRACE_OVERLAY_IMAGE_FILE.equals(row.name());
+            boolean folder = row.kind() == SettingsForm.Kind.FOLDER;
+            boolean program = ClientPreferences.MML_PATH.equals(row.name());
             Path at = Path.of(current.isBlank() ? "." : current).toAbsolutePath();
             Path directory = Files.isDirectory(at) ? at : at.getParent();
-            files.show(stage, new UiFileDialog.Options(row.label(), UiFileDialog.Mode.OPEN,
-                        image ? "clientSettings.trace" : "clientSettings.sounds", directory, "",
-                        new UiFileDialog.Filter(Messages.getString(image ? "ClientSettings.battlefield.trace.files"
-                              : "ClientSettings.audio.files"), row.values())),
+            String key = folder ? "clientSettings.folders" : program ? "clientSettings.programs"
+                  : image ? "clientSettings.trace" : "clientSettings.sounds";
+            String kind = folder ? "ClientSettings.files.folders" : program ? "ClientSettings.files.programs"
+                  : image ? "ClientSettings.battlefield.trace.files" : "ClientSettings.audio.files";
+            files.show(stage, new UiFileDialog.Options(row.label(),
+                        folder ? UiFileDialog.Mode.FOLDER : UiFileDialog.Mode.OPEN, key, directory, "",
+                        new UiFileDialog.Filter(Messages.getString(kind), row.values())),
                   path -> {
                       if (path != null) {
-                          then.accept(relative(path));
+                          // Folders and programs are kept whole: the user directory is shared between installs
+                          then.accept(folder || program ? path.toAbsolutePath().normalize().toString()
+                                : relative(path));
                       }
                   });
         }
@@ -357,6 +381,15 @@ final class ClientSettingsView {
         }
         if (battlefield != null) {
             battlefield.show();
+        }
+        if (toasts != null) {
+            toasts.show();
+        }
+        if (reports != null) {
+            reports.show();
+        }
+        if (logs != null) {
+            logs.show();
         }
         if (restart != null) {
             restart.setVisible(form.changed(ClientPreferences.LOCALE));
@@ -872,6 +905,250 @@ final class ClientSettingsView {
             int start = Integer.parseInt(form.text(ClientPreferences.UNIT_START_CHAR).isBlank() ? "65"
                   : form.text(ClientPreferences.UNIT_START_CHAR));
             point.setText(Messages.getString("ClientSettings.roster.point", String.valueOf((char) start)));
+        }
+    }
+
+    /**
+     * The Notifications page's preview: a round of the battle's own toast cards, each staying as long as the page sets
+     * for its level, and the reports dripping in after them when the page shows reports as toasts.
+     */
+    private final class ToastSample extends Table {
+        /** The round's toasts: when each shows after the round starts, in seconds, its level and its text. */
+        private record Shot(float at, ToastLevel level, String key) { }
+
+        private static final List<Shot> ROUND = List.of(new Shot(0, ToastLevel.INFO, "info"),
+              new Shot(0.6f, ToastLevel.WARNING, "warning"), new Shot(1.2f, ToastLevel.ERROR, "error"));
+        private static final List<String> REPORTS = List.of("report1", "report2");
+
+        private final GpuToastStack stack = new GpuToastStack(new GpuHudKit(kit.skin), null, null, true);
+        private final VerticalGroup toasts = (VerticalGroup) stack.actor();
+        private final UiButton play;
+        private final Label timing;
+        private final Label off;
+        private long next;
+
+        ToastSample() {
+            top();
+            setName("client-toast-sample");
+            defaults().left().growX();
+            add(kit.caption(Messages.getString("ClientSettings.toastSample"), true)).row();
+            add(view.wrapped(Messages.getString("ClientSettings.toastSample.summary"), "small", "text.muted"))
+                  .padTop(space("xs")).row();
+            play = kit.button("button-secondary", "replay", Messages.getString("ClientSettings.toastSample.play"),
+                  null);
+            play.setName("client-toast-play");
+            UiKit.onChange(play, this::play);
+            add(play).padTop(space("md")).row();
+            timing = view.wrapped("", "small", "text.secondary");
+            timing.setName("client-toast-timing");
+            add(timing).padTop(space("sm")).row();
+            off = view.wrapped(Messages.getString("ClientSettings.toastSample.off"), "small", "text.muted");
+            off.setName("client-toast-off");
+            add(off).padTop(space("md")).row();
+            toasts.setName("client-toast-stack");
+            toasts.fill();
+            add(toasts).padTop(space("md")).row();
+            show();
+            play();
+        }
+
+        /** Clears the toasts on show and plays a round as the page sets it. */
+        void play() {
+            clearActions();
+            toasts.clearChildren();
+            if (!form.bool(GUIPreferences.TOAST_ENABLED)) {
+                return;
+            }
+            int base = seconds(GUIPreferences.TOAST_DURATION_SECONDS);
+            for (Shot shot : ROUND) {
+                later(shot.at(), shot.level(), shot.key(), base);
+            }
+            if (form.bool(GUIPreferences.TOAST_REPORT_EVENTS)) {
+                float at = ROUND.getLast().at();
+                for (String report : REPORTS) {
+                    at += seconds(GUIPreferences.TOAST_DRIP_SECONDS);
+                    later(at, ToastLevel.INFO, report, base);
+                }
+            }
+        }
+
+        private void later(float at, ToastLevel level, String key, int base) {
+            long id = next++;
+            String text = Messages.getString("ClientSettings.toastSample." + key);
+            addAction(Actions.delay(at, Actions.run(() -> toasts.addActor(
+                  stack.toast(new GpuToasts.Toast(id, level, text, null, level.durationMs(base)))))));
+        }
+
+        void show() {
+            boolean on = form.bool(GUIPreferences.TOAST_ENABLED);
+            int base = seconds(GUIPreferences.TOAST_DURATION_SECONDS);
+            String text = Messages.getString("ClientSettings.toastSample.timing",
+                  ToastLevel.INFO.durationMs(base) / 1000, ToastLevel.WARNING.durationMs(base) / 1000,
+                  ToastLevel.ERROR.durationMs(base) / 1000);
+            if (form.bool(GUIPreferences.TOAST_REPORT_EVENTS)) {
+                text += " " + Messages.getString("ClientSettings.toastSample.drip",
+                      seconds(GUIPreferences.TOAST_DRIP_SECONDS));
+            }
+            timing.setText(text);
+            timing.setVisible(on);
+            off.setVisible(!on);
+            play.setDisabled(!on);
+            if (!on) {
+                clearActions();
+                toasts.clearChildren();
+            }
+        }
+
+        /** A number of seconds as the form has it, one at the least as the game takes it. */
+        private int seconds(String name) {
+            try {
+                return Math.max(1, Integer.parseInt(form.text(name).trim()));
+            } catch (NumberFormatException ex) {
+                return 1;
+            }
+        }
+    }
+
+    /**
+     * The Reports page's preview: a stretch of the battle log, its lines that the picked search preset finds lit and
+     * those the picked filter preset hides dimmed. Each button steps through its presets as the log's own do.
+     */
+    private final class ReportSample extends Table {
+        private static final int LINES = 6;
+
+        private final UiButton search;
+        private final UiButton filter;
+        private final Label tally;
+        private final List<Label> lines = new ArrayList<>();
+        private int searched;
+        /** The picked filter preset, or -1 for none. */
+        private int filtered = -1;
+
+        ReportSample() {
+            top();
+            setName("client-report-sample");
+            defaults().left().growX();
+            add(kit.caption(Messages.getString("ClientSettings.reportSample"), true)).row();
+            add(view.wrapped(Messages.getString("ClientSettings.reportSample.summary"), "small", "text.muted"))
+                  .padTop(space("xs")).row();
+            search = kit.button("button-secondary" + UiTheme.COMPACT, "search", "", null);
+            search.setName("client-report-search");
+            UiKit.onChange(search, () -> {
+                searched++;
+                show();
+            });
+            filter = kit.button("button-secondary" + UiTheme.COMPACT, "filter", "", null);
+            filter.setName("client-report-filter");
+            UiKit.onChange(filter, () -> {
+                filtered++;
+                show();
+            });
+            add(search).padTop(space("md")).row();
+            add(filter).padTop(space("sm")).row();
+            Table card = kit.card();
+            card.pad(space("md"));
+            card.defaults().left().growX();
+            for (int i = 0; i < LINES; i++) {
+                Label line = view.wrapped(Messages.getString("ClientSettings.reportSample.line" + i), "small",
+                      "text.secondary");
+                line.setName("client-report-line-" + i);
+                lines.add(line);
+                card.add(line).padTop(i == 0 ? 0 : space("xs")).row();
+            }
+            add(card).padTop(space("md")).row();
+            tally = view.wrapped("", "small", "text.muted");
+            tally.setName("client-report-tally");
+            add(tally).padTop(space("sm")).row();
+            show();
+        }
+
+        void show() {
+            List<String> searches = SettingsForm.lines(form.text(ClientPreferences.REPORT_KEYWORDS));
+            List<String> filters = SettingsForm.lines(form.text(ClientPreferences.REPORT_FILTER_KEYWORDS));
+            searched = searches.isEmpty() ? 0 : Math.floorMod(searched, searches.size());
+            if (filtered >= filters.size()) {
+                filtered = -1;
+            }
+            String query = searches.isEmpty() ? "" : searches.get(searched).toLowerCase(Locale.ROOT);
+            String words = filtered < 0 ? "" : filters.get(filtered);
+            search.setText(kit.cased("button", Messages.getString("ClientSettings.reportSample.search",
+                  searches.isEmpty() ? Messages.getString("ClientSettings.lines.none") : searches.get(searched))));
+            search.setDisabled(searches.isEmpty());
+            filter.setText(kit.cased("button", Messages.getString("ClientSettings.reportSample.filter",
+                  words.isEmpty() ? Messages.getString("ClientSettings.reportSample.all") : words)));
+            filter.setDisabled(filters.isEmpty());
+            int found = 0;
+            int hidden = 0;
+            for (Label line : lines) {
+                String plain = line.getText().toString().toLowerCase(Locale.ROOT);
+                boolean hit = !query.isEmpty() && plain.contains(query);
+                boolean passes = words.isEmpty() || Arrays.stream(words.split("\\s+"))
+                      .anyMatch(word -> plain.contains(word.toLowerCase(Locale.ROOT)));
+                found += hit ? 1 : 0;
+                hidden += passes ? 0 : 1;
+                line.setColor(UiTheme.tokenColor(hit ? "accent.primary" : "text.secondary"));
+                line.getColor().a = passes ? 1 : 0.3f;
+            }
+            tally.setText(Messages.getString("ClientSettings.reportSample.tally", found, hidden));
+        }
+    }
+
+    /** The Logs page's preview: the files a game writes today, named as the page sets them. */
+    private final class LogSample extends Table {
+        private final Label game;
+        private final Label resolve;
+        private final Label data;
+
+        LogSample() {
+            top();
+            setName("client-log-sample");
+            defaults().left().growX();
+            add(kit.caption(Messages.getString("ClientSettings.logSample"), true)).row();
+            add(view.wrapped(Messages.getString("ClientSettings.logSample.summary"), "small", "text.muted"))
+                  .padTop(space("xs")).row();
+            Table card = kit.card();
+            card.pad(space("md"));
+            card.defaults().left();
+            card.add(kit.icon("folder", 18, UiTheme.tokenColor("accent.primary"))).padRight(space("sm"));
+            card.add(view.wrapped(PreferenceManager.getClientPreferences().getLogDirectory(), "label",
+                  "text.primary")).growX().row();
+            game = file(card, "client-log-game");
+            resolve = file(card, "client-log-resolve");
+            data = file(card, "client-log-data");
+            add(card).padTop(space("md")).row();
+            show();
+        }
+
+        private Label file(Table card, String name) {
+            card.add(kit.icon("report", 16, UiTheme.tokenColor("text.muted"))).padTop(space("sm"))
+                  .padRight(space("sm"));
+            Label label = view.wrapped("", "small", "text.secondary");
+            label.setName(name);
+            card.add(label).padTop(space("sm")).growX().row();
+            return label;
+        }
+
+        void show() {
+            boolean keep = form.bool(ClientPreferences.GAME_LOG_KEEP);
+            game.setText(keep ? stamped(form.text(ClientPreferences.GAME_LOG_FILENAME))
+                  : Messages.getString("ClientSettings.logSample.notKept"));
+            game.setColor(UiTheme.tokenColor(keep ? "text.secondary" : "text.muted"));
+            resolve.setText(stamped(form.text(ClientPreferences.AUTO_RESOLVE_GAME_LOG_FILENAME)));
+            boolean dataLog = form.bool(ClientPreferences.DATA_LOGGING);
+            data.setText(Messages.getString(dataLog ? "ClientSettings.logSample.data"
+                  : "ClientSettings.logSample.noData"));
+            data.setColor(UiTheme.tokenColor(dataLog ? "text.secondary" : "text.muted"));
+        }
+
+        /** The file name with the date and time stamp before its extension, as the game names the file today. */
+        private String stamped(String name) {
+            String stamp = form.bool(ClientPreferences.STAMP_FILENAMES)
+                  ? ClientSettingsForm.stamp(form.text(ClientPreferences.STAMP_FORMAT)) : null;
+            if (stamp == null) {
+                return name;
+            }
+            int dot = name.lastIndexOf('.');
+            return dot < 0 ? name + stamp : name.substring(0, dot) + stamp + name.substring(dot);
         }
     }
 

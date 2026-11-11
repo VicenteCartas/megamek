@@ -37,7 +37,17 @@ public abstract class SettingsForm {
          */
         KEY,
         /** A colour, as its text {@code #rrggbb} in lower case. */
-        COLOR
+        COLOR,
+        /** A folder's path. */
+        FOLDER,
+        /** A list of phrases, each once, as their text one per line. */
+        LINES
+    }
+
+    /** @return the phrases of a {@link Kind#LINES} row's text: each line stripped, without blank or repeated ones */
+    public static List<String> lines(@Nullable String text) {
+        return text == null ? List.of()
+              : text.lines().map(String::strip).filter(line -> !line.isEmpty()).distinct().toList();
     }
 
     /** @return the text of a {@link Kind#COLOR} row for the colour's red, green and blue */

@@ -510,20 +510,17 @@ class GpuSwingDialogGateTest {
         try (Declaring declaring = Declaring.create(); Gate gate = new Gate(declaring.gui, declaring.fixture)) {
             JFrame frame = declaring.frame;
             gate.present();
-            // A kept window (Client Settings) and a dialog it owns. LOS, Help, the network information, the Nova
-            // network view and the developer conditions editor have native cards now.
+            // Client Settings are native now: their Swing dialog is no longer kept, so it is reported. Being modal, it
+            // is still raised so it cannot hide behind the battle and lock the window. LOS, Help, the network
+            // information, the Nova network view and the developer conditions editor have native cards too.
             CommonSettingsDialog settings = onSwing(() -> new CommonSettingsDialog(frame));
-            assertTrue(gate.raised(() -> {
+            gate.raised(() -> {
                 settings.setVisible(true);
                 return null;
-            }, CommonSettingsDialog.class::isInstance), "R6: Client Settings");
-            assertTrue(gate.raised(() -> {
-                JDialog detail = new JDialog(settings, "Help detail");
-                detail.setSize(120, 80);
-                detail.setVisible(true);
-                return null;
-            }, window -> window.getOwner() == settings), "A dialog Client Settings owns");
-            assertEquals(List.of(), gate.errors, "A dialog a kept window owns is part of it");
+            }, CommonSettingsDialog.class::isInstance);
+            assertEquals(1, gate.errors.size(), "Client Settings' Swing dialog is reported");
+            assertTrue(gate.errors.getFirst().contains(CommonSettingsDialog.class.getName()), gate.errors.toString());
+            gate.errors.clear();
             onSwing(() -> {
                 settings.dispose();
                 return null;
@@ -541,33 +538,6 @@ class GpuSwingDialogGateTest {
                 return null;
             });
             gate.present();
-            // Client Settings shown modally: a dialog it opens is part of it, whatever its owner. The bug report, the
-            // unit file version check and the player to reinforce are native cards now.
-            CommonSettingsDialog modalSettings = onSwing(() -> {
-                CommonSettingsDialog dialog = new CommonSettingsDialog(frame);
-                dialog.setModal(true);
-                return dialog;
-            });
-            FutureTask<Void> showing = new FutureTask<>(() -> {
-                modalSettings.setVisible(true);
-                return null;
-            });
-            SwingUtilities.invokeLater(showing);
-            Window kept = gate.awaitShowing(modalSettings::equals);
-            assertTrue(onSwing(kept::isAlwaysOnTop), "R6: Client Settings, modally");
-            assertTrue(gate.raised(() -> {
-                JDialog inside = new JDialog(frame, "Settings detail");
-                inside.setSize(120, 80);
-                inside.setVisible(true);
-                return null;
-            }, window -> window instanceof JDialog dialog && "Settings detail".equals(dialog.getTitle())),
-                  "A dialog opened inside a kept modal dialog");
-            onSwing(() -> {
-                modalSettings.setVisible(false);
-                modalSettings.dispose();
-                return null;
-            });
-            showing.get(WAIT_SECONDS, SECONDS);
             assertEquals(List.of(), gate.errors, "No kept surface is reported");
         } finally {
             preferences.setValue(GUIPreferences.ADVANCED_NO_SAVE_NAG, noSaveNag);

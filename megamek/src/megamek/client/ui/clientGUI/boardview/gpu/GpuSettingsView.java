@@ -160,7 +160,7 @@ final class GpuSettingsView {
      */
     private record Control(Row row, Actor input, @Nullable UiFormField field, @Nullable Label reading,
           @Nullable UiButton picker, Actor changed, @Nullable KeyControl key, @Nullable OrderControl order,
-          @Nullable Image swatch) { }
+          @Nullable Image swatch, @Nullable LinesControl lines) { }
 
     /**
      * A key binding's parts: the keycap that shows its keys and takes a new one on a click, its buttons back to the
@@ -536,6 +536,7 @@ final class GpuSettingsView {
         UiButton picker = null;
         KeyControl key = null;
         OrderControl order = null;
+        LinesControl lines = null;
         switch (row.kind()) {
             case BOOLEAN -> {
                 UiChoice toggle = kit.toggleSwitch(row.label(), form.bool(row.name()));
@@ -590,7 +591,7 @@ final class GpuSettingsView {
                 field = kit.formField(row.label(), bar);
                 line.add(field).growX().minWidth(0);
             }
-            case FILE -> {
+            case FILE, FOLDER -> {
                 UiTextField path = kit.input(form.text(row.name()), true);
                 UiKit.onChange(path, () -> changed(row, () -> form.text(row.name(), path.getText())));
                 picker = kit.button("button-secondary" + UiTheme.COMPACT, "folder", null, null);
@@ -627,6 +628,12 @@ final class GpuSettingsView {
                 field = kit.formField(row.label(), order.list);
                 line.add(field).growX().minWidth(0);
             }
+            case LINES -> {
+                lines = new LinesControl(row, name);
+                input = lines.root;
+                field = kit.formField(row.label(), lines.root);
+                line.add(field).growX().minWidth(0);
+            }
             case KEY -> {
                 key = keyControl(row, name);
                 input = key.cap;
@@ -646,7 +653,7 @@ final class GpuSettingsView {
         // Beside a field's input rather than its label
         line.add(marks).left().top().padTop(field == null ? size("control.sm") / 2 - changed.getPrefHeight() / 2
               : size("control.sm") / 2 + space("xs"));
-        if (row.kind() != Kind.SLIDER && row.kind() != Kind.FILE && row.kind() != Kind.KEY && row.kind() != Kind.ORDER) {
+        if (!List.of(Kind.SLIDER, Kind.FILE, Kind.FOLDER, Kind.KEY, Kind.ORDER, Kind.LINES).contains(row.kind())) {
             line.add().expandX();
         }
         if (key != null) {
@@ -655,7 +662,7 @@ final class GpuSettingsView {
         }
         line.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.enabled);
         pointable(line, row);
-        controls.put(row.name(), new Control(row, input, field, reading, picker, changed, key, order, null));
+        controls.put(row.name(), new Control(row, input, field, reading, picker, changed, key, order, null, lines));
         return line;
     }
 
@@ -704,7 +711,7 @@ final class GpuSettingsView {
         tile.add(changed).padTop(space("xs")).padLeft(space("xs"));
         UiKit.onChange(tile, () -> pickColor(row, tile));
         pointable(tile, row);
-        controls.put(row.name(), new Control(row, tile, null, null, null, changed, null, null, swatch));
+        controls.put(row.name(), new Control(row, tile, null, null, null, changed, null, null, swatch, null));
         Container<Button> holder = new Container<>(tile);
         holder.width(TILE_WIDTH);
         return holder;
@@ -863,6 +870,117 @@ final class GpuSettingsView {
                     item.findActor(item.getName() + "-down").setVisible(place < items.size());
                 }
             }
+        }
+    }
+
+    // ---- Phrases
+
+    /**
+     * A list of phrases ({@link Kind#LINES}): a chip per phrase, each with a button that removes it, over a field and
+     * an Add button (or Enter) that adds the typed phrase. A change goes to the form, and the chips then show the
+     * form's list.
+     */
+    private final class LinesControl {
+        final Table root = new Table();
+        private final Table chips = new Table();
+        private final UiTextField entry;
+        private final UiButton add;
+        private final Row row;
+        private final String name;
+        private final List<UiButton> removes = new ArrayList<>();
+        private @Nullable String shown;
+        private boolean disabled;
+
+        LinesControl(Row row, String name) {
+            this.row = row;
+            this.name = name;
+            entry = kit.input("", true);
+            entry.setName(name + "-entry");
+            entry.setMessageText(Messages.getString("ClientSettings.lines.placeholder"));
+            entry.setTextFieldListener((field, typed) -> {
+                if (typed == '\r' || typed == '\n') {
+                    add();
+                }
+            });
+            add = kit.button("button-secondary" + UiTheme.COMPACT, "add",
+                  Messages.getString("ClientSettings.lines.add"), null);
+            add.setName(name + "-add");
+            UiKit.onChange(add, this::add);
+            Table adding = new Table();
+            adding.add(entry).growX().minWidth(0);
+            adding.add(add).padLeft(space("xs"));
+            chips.left().top();
+            root.left().top();
+            root.add(chips).growX().minWidth(0).left().row();
+            root.add(adding).growX().minWidth(0).padTop(space("xs"));
+        }
+
+        private void add() {
+            if (disabled || syncing || flavor.busy()) {
+                return;
+            }
+            String phrase = entry.getText().strip();
+            if (phrase.isEmpty()) {
+                return;
+            }
+            List<String> phrases = new ArrayList<>(SettingsForm.lines(form.text(row.name())));
+            if (!phrases.contains(phrase)) {
+                phrases.add(phrase);
+            }
+            entry.setText("");
+            changed(row, () -> form.text(row.name(), String.join("\n", phrases)));
+        }
+
+        private void remove(String phrase) {
+            if (disabled || syncing || flavor.busy()) {
+                return;
+            }
+            List<String> phrases = new ArrayList<>(SettingsForm.lines(form.text(row.name())));
+            phrases.remove(phrase);
+            changed(row, () -> form.text(row.name(), String.join("\n", phrases)));
+        }
+
+        /** Shows the form's phrases and whether they can change. */
+        void show(boolean disabled) {
+            this.disabled = disabled;
+            entry.setDisabled(disabled);
+            add.setDisabled(disabled);
+            String value = form.text(row.name());
+            if (!value.equals(shown)) {
+                shown = value;
+                fill(SettingsForm.lines(value));
+            }
+            removes.forEach(remove -> remove.setDisabled(disabled));
+        }
+
+        /** The chips wrap into as many lines as the field's width needs. */
+        private void fill(List<String> phrases) {
+            chips.clearChildren();
+            removes.clear();
+            if (phrases.isEmpty()) {
+                chips.add(kit.typeLabel(Messages.getString("ClientSettings.lines.none"), "small", "text.muted"))
+                      .left();
+                return;
+            }
+            HorizontalGroup group = new HorizontalGroup();
+            group.wrap().space(space("xs")).wrapSpace(space("xs")).left().rowLeft();
+            for (int index = 0; index < phrases.size(); index++) {
+                String phrase = phrases.get(index);
+                Table chip = new Table();
+                chip.setBackground(kit.skin.getDrawable(UiTheme.TOKEN_CHIP + "accent"));
+                chip.pad(0, space("md"), 0, space("xxs"));
+                chip.setName(name + "-chip-" + index);
+                Label text = kit.typeLabel(phrase, "small", "text.primary");
+                chip.add(text);
+                UiButton remove = kit.button("button-quiet" + UiTheme.COMPACT, "close", null, null);
+                remove.setName(name + "-remove-" + index);
+                kit.tip(remove, true).getActor().setText(Messages.getString("ClientSettings.lines.remove", phrase));
+                UiKit.onChange(remove, () -> remove(phrase));
+                removes.add(remove);
+                chip.add(remove).padLeft(space("xxs"));
+                group.addActor(chip);
+            }
+            chips.add(group).growX().minWidth(0).left();
         }
     }
 
@@ -1126,6 +1244,9 @@ final class GpuSettingsView {
                 }
                 if (control.order() != null) {
                     control.order().show(disabled);
+                }
+                if (control.lines() != null) {
+                    control.lines().show(disabled);
                 }
                 if (control.swatch() != null) {
                     int rgb = Math.max(0, SettingsForm.rgb(form.text(name)));

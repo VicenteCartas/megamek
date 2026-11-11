@@ -63,6 +63,11 @@ class ClientSettingsFormTest {
         store.setDefault(GUIPreferences.SENSOR_PREFERENCE_ORDER, SENSORS);
         store.setDefault(GUIPreferences.MY_UNIT_COLOR, "255 0 0");
         store.setDefault(GUIPreferences.BOARD_ECM_TRANSPARENCY, 128);
+        store.setDefault(GUIPreferences.TOAST_ENABLED, true);
+        store.setDefault(GUIPreferences.TOAST_REPORT_EVENTS, true);
+        store.setDefault(GUIPreferences.TOAST_DURATION_SECONDS, 3);
+        store.setDefault(GUIPreferences.TOAST_DRIP_SECONDS, 2);
+        store.setDefault(GUIPreferences.USE_CAMO_OVERLAY, true);
         store.addPreferenceChangeListener(event -> heard.add(event.getName()));
         client = new ClientPreferences(new PreferenceStore());
     }
@@ -399,10 +404,90 @@ class ClientSettingsFormTest {
             assertNotNull(form.page(page), page);
         }
         SettingsForm.Page palette = form.page(ClientSettingsForm.PALETTE);
-        assertEquals(PlayerColour.values().length,
-              palette.sections().stream().mapToInt(section -> section.rows().size()).sum());
-        assertTrue(palette.sections().stream().flatMap(section -> section.rows().stream())
-              .allMatch(row -> row.kind() == SettingsForm.Kind.COLOR));
+        SettingsForm.Section players = palette.sections().getFirst();
+        assertEquals(PlayerColour.values().length, players.rows().size());
+        assertTrue(players.rows().stream().allMatch(row -> row.kind() == SettingsForm.Kind.COLOR));
+        assertEquals(GUIPreferences.USE_CAMO_OVERLAY, palette.sections().getLast().rows().getFirst().name());
+    }
+
+    @Test
+    void theMessagesAndFilesPagesAreThereAndTheOldRoutesFindThem() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+
+        for (String page : List.of(ClientSettingsForm.NOTIFICATIONS, ClientSettingsForm.REPORTS,
+              ClientSettingsForm.LOGS, ClientSettingsForm.FOLDERS)) {
+            assertNotNull(form.page(page), page);
+        }
+        assertEquals(ClientSettingsForm.REPORTS, form.pageOf(CommonSettingsPane.SETTINGS_REPORT));
+        assertEquals(ClientSettingsForm.LOGS, form.pageOf(CommonSettingsPane.SETTINGS_ADVANCED));
+        assertEquals(ClientSettingsForm.AUTOMATION, form.pageOf(CommonSettingsPane.SETTINGS_AUTODISPLAY));
+    }
+
+    @Test
+    void aToastTimingIsSetOnlyWhileItsToastsShow() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+        form.bool(GUIPreferences.TOAST_ENABLED, true);
+        form.bool(GUIPreferences.TOAST_REPORT_EVENTS, true);
+        assertTrue(form.editable(GUIPreferences.TOAST_DURATION_SECONDS));
+        assertTrue(form.editable(GUIPreferences.TOAST_DRIP_SECONDS));
+
+        form.bool(GUIPreferences.TOAST_REPORT_EVENTS, false);
+        assertTrue(form.editable(GUIPreferences.TOAST_DURATION_SECONDS));
+        assertFalse(form.editable(GUIPreferences.TOAST_DRIP_SECONDS), "no reports drip in");
+
+        form.bool(GUIPreferences.TOAST_ENABLED, false);
+        assertFalse(form.editable(GUIPreferences.TOAST_DURATION_SECONDS));
+        assertFalse(form.editable(GUIPreferences.TOAST_REPORT_EVENTS));
+    }
+
+    @Test
+    void aPhraseListIsKeptOnePhraseALineWithoutBlanksOrRepeats() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+
+        form.text(ClientPreferences.REPORT_KEYWORDS, " Hit \n\nFalls\nHit\n  \nPilot Skill ");
+        assertEquals("Hit\nFalls\nPilot Skill", form.text(ClientPreferences.REPORT_KEYWORDS));
+        form.apply().run();
+
+        assertEquals("Hit\nFalls\nPilot Skill", client.getReportKeywords());
+        assertEquals(List.of("Hit", "Falls"), SettingsForm.lines("Hit\r\nFalls\r\n"));
+        assertEquals(List.of(), SettingsForm.lines(null));
+    }
+
+    @Test
+    void aStampFormatThatIsNoPatternIsNotWritten() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+        String kept = client.getStampFormat();
+        assertNotNull(ClientSettingsForm.stamp(kept));
+
+        form.text(ClientPreferences.STAMP_FORMAT, "{broken");
+        assertNotNull(form.error(ClientPreferences.STAMP_FORMAT));
+        form.text(ClientPreferences.GAME_LOG_FILENAME, "  ");
+        assertNotNull(form.error(ClientPreferences.GAME_LOG_FILENAME));
+        form.apply().run();
+
+        assertEquals(kept, client.getStampFormat());
+        assertEquals("gamelog.html", client.getGameLogFilename());
+        assertNull(ClientSettingsForm.stamp("{broken"));
+    }
+
+    @Test
+    void theLogNameAndStampFormatFollowTheirSwitches() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+
+        form.bool(ClientPreferences.GAME_LOG_KEEP, false);
+        form.bool(ClientPreferences.STAMP_FILENAMES, false);
+        assertFalse(form.editable(ClientPreferences.GAME_LOG_FILENAME));
+        assertFalse(form.editable(ClientPreferences.STAMP_FORMAT));
+        form.bool(ClientPreferences.GAME_LOG_KEEP, true);
+        form.bool(ClientPreferences.STAMP_FILENAMES, true);
+        assertTrue(form.editable(ClientPreferences.GAME_LOG_FILENAME));
+        assertTrue(form.editable(ClientPreferences.STAMP_FORMAT));
+    }
+
+    @Test
+    void theTilesetKeepsTheCurrentOne() {
+        assertTrue(ClientSettingsForm.tilesets("mine.tileset").contains("mine.tileset"));
+        assertFalse(ClientSettingsForm.tilesets("notATileset.txt").contains("notATileset.txt"));
     }
 
     @Test

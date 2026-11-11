@@ -3,6 +3,10 @@ package megamek.client.ui.settings;
 
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.io.File;
+import java.time.DateTimeException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -24,6 +28,7 @@ import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.panels.CommonSettingsPane;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.PlayerColour;
+import megamek.common.Configuration;
 import megamek.common.KeyBindParser;
 import megamek.common.enums.WeaponSortOrder;
 import megamek.common.equipment.SensorFamily;
@@ -73,6 +78,16 @@ public final class ClientSettingsForm extends SettingsForm {
     public static final String FORCES = "forces";
     public static final String TACTICAL = "tactical";
     public static final String MAP_TEXT = "mapText";
+    /** The Messages category and its pages: the board's toasts and the round report's presets. */
+    public static final String MESSAGES = "messages";
+    public static final String NOTIFICATIONS = "notifications";
+    public static final String REPORTS = "reports";
+    /** The Files category and its pages: the logs MegaMek writes and the folders and programs it uses. */
+    public static final String FILES = "files";
+    public static final String LOGS = "logs";
+    public static final String FOLDERS = "folders";
+    /** The extension of the 3D board's tileset files. */
+    static final String TILESET = ".tileset";
     /** The images the board editor can trace over the board: those libGDX reads. */
     static final List<String> IMAGE_EXTENSIONS = List.of("png", "jpg", "jpeg", "bmp");
     /** The ProtoMek point codes' first letters, as the client preferences keep them: A, Alpha and alpha. */
@@ -83,10 +98,19 @@ public final class ClientSettingsForm extends SettingsForm {
     /** The languages MegaMek has texts in, as the client preferences keep them; the first is the default. */
     static final List<String> LOCALES = List.of("en", "de", "ru", "es");
     /** The Swing dialog's routes that lead to a native page under another id. */
-    private static final Map<String, String> ROUTES = Map.of(CommonSettingsPane.SETTINGS_MAIN, DISPLAY,
-          CommonSettingsPane.SETTINGS_MAIN + ".application", DISPLAY, CommonSettingsPane.SETTINGS_KEYBINDS, KEYBOARD,
-          CommonSettingsPane.SETTINGS_AIDISPLAY, BOTS, CommonSettingsPane.SETTINGS_GAMEBOARD, BOARD,
-          CommonSettingsPane.SETTINGS_OVERLAYS, TRACE);
+    private static final Map<String, String> ROUTES = Map.ofEntries(
+          Map.entry(CommonSettingsPane.SETTINGS_MAIN, DISPLAY),
+          Map.entry(CommonSettingsPane.SETTINGS_MAIN + ".application", DISPLAY),
+          Map.entry(CommonSettingsPane.SETTINGS_KEYBINDS, KEYBOARD),
+          Map.entry(CommonSettingsPane.SETTINGS_AIDISPLAY, BOTS),
+          Map.entry(CommonSettingsPane.SETTINGS_GAMEBOARD, BOARD),
+          Map.entry(CommonSettingsPane.SETTINGS_OVERLAYS, TRACE),
+          Map.entry(CommonSettingsPane.SETTINGS_REPORT, REPORTS),
+          Map.entry(CommonSettingsPane.SETTINGS_UNITDISPLAY, LABELS),
+          Map.entry(CommonSettingsPane.SETTINGS_MINIMAP, BOARD),
+          Map.entry(CommonSettingsPane.SETTINGS_BUTTONORDER, KEYBOARD),
+          Map.entry(CommonSettingsPane.SETTINGS_AUTODISPLAY, AUTOMATION),
+          Map.entry(CommonSettingsPane.SETTINGS_ADVANCED, LOGS));
     /** The Controls pages of key bindings, in order, each with its sections and the commands each lists. */
     private static final List<BindPage> BIND_PAGES = List.of(
           new BindPage("camera",
@@ -182,6 +206,7 @@ public final class ClientSettingsForm extends SettingsForm {
     private final Map<String, String> values = new HashMap<>();
     private final Map<String, String> started = new HashMap<>();
     private final Runnable bindsChanged;
+    private final boolean userDirOverridden;
 
     /** A form over the preferences whose changed key bindings are not stored, as in the tests. */
     public ClientSettingsForm(IPreferenceStore gui, ClientPreferences client) {
@@ -196,6 +221,7 @@ public final class ClientSettingsForm extends SettingsForm {
      */
     public ClientSettingsForm(IPreferenceStore gui, ClientPreferences client, Runnable bindsChanged) {
         this.bindsChanged = bindsChanged;
+        userDirOverridden = client.isUserDirOverridden();
         pages.add(audio(gui));
         pages.add(display(gui, client));
         pages.add(keyboard(gui));
@@ -204,7 +230,7 @@ public final class ClientSettingsForm extends SettingsForm {
         pages.add(automation(gui, client));
         pages.add(bots(gui, client));
         pages.add(units(client));
-        pages.add(board(gui));
+        pages.add(board(gui, client));
         pages.add(labels(gui));
         pages.add(marks(gui));
         pages.add(trace(gui));
@@ -212,6 +238,10 @@ public final class ClientSettingsForm extends SettingsForm {
         pages.add(forces(gui));
         pages.add(tactical(gui));
         pages.add(mapText(gui));
+        pages.add(notifications(gui));
+        pages.add(reports(client));
+        pages.add(logs(client));
+        pages.add(folders(client));
         for (Map.Entry<String, Setting> entry : settings.entrySet()) {
             String value = read(entry.getValue());
             if (entry.getValue().kind() == Kind.ORDER) {
@@ -399,6 +429,10 @@ public final class ClientSettingsForm extends SettingsForm {
               row(client, ClientPreferences.SHOW_AUTO_RESOLVE_PANEL, Kind.BOOLEAN, false,
                     "ClientSettings.gameplay.autoResolve", "CommonSettingsDialog.showAutoResolvePanel.tooltip",
                     List.of())));
+        sections.add(section(BOTS, "hosting", "ClientSettings.gameplay.bots.hosting",
+              row(client, ClientPreferences.IP_ADDRESSES_IN_CHAT, Kind.BOOLEAN, false,
+                    "ClientSettings.gameplay.ipInChat", "CommonSettingsDialog.showIPAddressesInChat.tooltip",
+                    List.of())));
         return gameplayPage(BOTS, sections);
     }
 
@@ -430,13 +464,17 @@ public final class ClientSettingsForm extends SettingsForm {
     }
 
     /** How the 3D board draws its terrain and the labels on its hexes. */
-    private Page board(IPreferenceStore gui) {
+    private Page board(IPreferenceStore gui, ClientPreferences client) {
         List<Section> sections = new ArrayList<>();
+        List<String> tilesets = tilesets(client.getMapTileset());
         sections.add(section(BOARD, "terrain", "ClientSettings.battlefield.board.terrain",
               row(gui, GUIPreferences.BOARD_GRAPHICS, Kind.CHOICE, "ClientSettings.battlefield.graphics",
                     Arrays.stream(BoardGraphics.values()).map(Enum::name).toList(),
                     List.of(Messages.getString("CommonMenuBar.viewGraphicsClassic"),
                           Messages.getString("CommonMenuBar.viewGraphicsEnhanced"))),
+              row(client, ClientPreferences.MAP_TILESET, Kind.CHOICE, "ClientSettings.battlefield.tileset",
+                    tilesets, tilesets.stream().map(name -> name.substring(0, name.length() - TILESET.length()))
+                          .toList()),
               flag(gui, GUIPreferences.SHOW_WRECKS, "wrecks")));
         sections.add(section(BOARD, "hexes", "ClientSettings.battlefield.board.hexes",
               flag(gui, GUIPreferences.SHOW_COORDS, "coords"),
@@ -531,7 +569,109 @@ public final class ClientSettingsForm extends SettingsForm {
               .map(colour -> colour(gui, colour.getText(), colour.toString(), "ClientSettings.colours.player.help"))
               .toArray(Row[]::new);
         return coloursPage(PALETTE, List.of(section(PALETTE, "players", "ClientSettings.colours.palette.players",
-              colours)));
+              colours), section(PALETTE, "camo", "ClientSettings.colours.palette.camo",
+              row(gui, GUIPreferences.USE_CAMO_OVERLAY, Kind.BOOLEAN, false, "ClientSettings.colours.camoOverlay",
+                    "ClientSettings.colours.camoOverlay.help", List.of()))));
+    }
+
+    /**
+     * @return the tileset files the 3D board can draw: those MegaMek ships and those in the user's data folder, with
+     *       {@code current} too when it is in neither, so the choice keeps it
+     */
+    static List<String> tilesets(@Nullable String current) {
+        Set<String> names = new LinkedHashSet<>();
+        for (File folder : List.of(Configuration.hexesDir(),
+              new File(Configuration.userDataDir(), Configuration.hexesDir().toString()))) {
+            String[] found = folder.list((directory, name) -> name.endsWith(TILESET));
+            if (found != null) {
+                Arrays.stream(found).sorted().forEach(names::add);
+            }
+        }
+        if (current != null && current.endsWith(TILESET)) {
+            names.add(current);
+        }
+        return List.copyOf(names);
+    }
+
+    // ---- Messages
+
+    /** The board's toasts: whether they show, which, and for how long. */
+    private Page notifications(IPreferenceStore gui) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(NOTIFICATIONS, "toasts", "ClientSettings.messages.notifications.toasts",
+              row(gui, GUIPreferences.TOAST_ENABLED, Kind.BOOLEAN, false, "ClientSettings.messages.toasts",
+                    "CommonSettingsDialog.toastEnabled.tooltip", List.of()),
+              row(gui, GUIPreferences.TOAST_REPORT_EVENTS, Kind.BOOLEAN, false, "ClientSettings.messages.reportToasts",
+                    "CommonSettingsDialog.toastReportEvents.tooltip", List.of())));
+        sections.add(section(NOTIFICATIONS, "timing", "ClientSettings.messages.notifications.timing",
+              row(gui, GUIPreferences.TOAST_DURATION_SECONDS, Kind.SLIDER, false, "ClientSettings.messages.duration",
+                    "CommonSettingsDialog.toastDurationSeconds.tooltip",                     List.of("1", "10"), List.of("s")),
+              row(gui, GUIPreferences.TOAST_DRIP_SECONDS, Kind.SLIDER, false, "ClientSettings.messages.drip",
+                                        "CommonSettingsDialog.toastDripSeconds.tooltip", List.of("1", "10"), List.of("s"))));
+        return messagesPage(NOTIFICATIONS, sections);
+    }
+
+    /** The round report's search and filter presets. */
+    private Page reports(ClientPreferences client) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(REPORTS, "search", "ClientSettings.messages.reports.search",
+              row(client, ClientPreferences.REPORT_KEYWORDS, Kind.LINES, false,
+                    "ClientSettings.messages.searchPresets", "CommonSettingsDialog.reportKeywords.tooltip", List.of())));
+        sections.add(section(REPORTS, "filters", "ClientSettings.messages.reports.filters",
+              row(client, ClientPreferences.REPORT_FILTER_KEYWORDS, Kind.LINES, false,
+                    "ClientSettings.messages.filterPresets", "CommonSettingsDialog.reportFilterKeywords.tooltip",
+                    List.of())));
+        return messagesPage(REPORTS, sections);
+    }
+
+    /** A Messages page; its id picks its texts. */
+    private Page messagesPage(String id, List<Section> sections) {
+        String title = Messages.getString("ClientSettings.messages." + id);
+        String category = Messages.getString("ClientSettings.messages");
+        return new Page(id, title, MESSAGES, category, false, List.copyOf(sections),
+              searchText(MESSAGES, category, title, Messages.getString("ClientSettings.messages.keywords")));
+    }
+
+    // ---- Files
+
+    /** The logs MegaMek writes, and the date and time their names and the saved games' can carry. */
+    private Page logs(ClientPreferences client) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(LOGS, "game", "ClientSettings.files.logs.game",
+              row(client, ClientPreferences.GAME_LOG_KEEP, Kind.BOOLEAN, false, "ClientSettings.files.keepLog",
+                    "ClientSettings.files.keepLog.help", List.of()),
+              row(client, ClientPreferences.GAME_LOG_FILENAME, Kind.STRING, false, "ClientSettings.files.logName",
+                    "ClientSettings.files.logName.help", List.of()),
+              row(client, ClientPreferences.AUTO_RESOLVE_GAME_LOG_FILENAME, Kind.STRING, false,
+                    "ClientSettings.files.autoResolveName", "ClientSettings.files.autoResolveName.help", List.of()),
+              row(client, ClientPreferences.DATA_LOGGING, Kind.BOOLEAN, false, "ClientSettings.files.dataLog",
+                    "ClientSettings.files.dataLog.help", List.of())));
+        sections.add(section(LOGS, "stamps", "ClientSettings.files.logs.stamps",
+              row(client, ClientPreferences.STAMP_FILENAMES, Kind.BOOLEAN, false, "ClientSettings.files.stamp",
+                    "ClientSettings.files.stamp.help", List.of()),
+              row(client, ClientPreferences.STAMP_FORMAT, Kind.STRING, false, "ClientSettings.files.stampFormat",
+                    "ClientSettings.files.stampFormat.help", List.of())));
+        return filesPage(LOGS, sections);
+    }
+
+    /** The folder of the player's own files, and MegaMekLab, which prints unit lists. */
+    private Page folders(ClientPreferences client) {
+        List<Section> sections = new ArrayList<>();
+        sections.add(section(FOLDERS, "data", "ClientSettings.files.folders.data",
+              row(client, ClientPreferences.USER_DIR, Kind.FOLDER, false, "ClientSettings.files.userDir",
+                    "CommonSettingsDialog.userDir.tooltip", List.of())));
+        sections.add(section(FOLDERS, "programs", "ClientSettings.files.folders.programs",
+              row(client, ClientPreferences.MML_PATH, Kind.FILE, false, "ClientSettings.files.mml",
+                    "CommonSettingsDialog.mmlPath.tooltip", List.of())));
+        return filesPage(FOLDERS, sections);
+    }
+
+    /** A Files page; its id picks its texts. */
+    private Page filesPage(String id, List<Section> sections) {
+        String title = Messages.getString("ClientSettings.files." + id);
+        String category = Messages.getString("ClientSettings.files");
+        return new Page(id, title, FILES, category, false, List.copyOf(sections),
+              searchText(FILES, category, title, Messages.getString("ClientSettings.files.keywords")));
     }
 
     /** The sides' colours and the status colours of damage and warnings. */
@@ -732,6 +872,8 @@ public final class ClientSettingsForm extends SettingsForm {
             text = key(keyCode(text), keyModifiers(text));
         } else if (setting.kind() == Kind.ORDER) {
             text = order(text, row(name).values());
+        } else if (setting.kind() == Kind.LINES) {
+            text = String.join("\n", lines(text));
         } else if (setting.kind() == Kind.COLOR) {
             int rgb = rgb(text);
             if (rgb < 0) {
@@ -742,9 +884,31 @@ public final class ClientSettingsForm extends SettingsForm {
         values.put(name, text == null ? "" : text);
     }
 
+    /**
+     * Whether the setting can change now: the toasts' details only while toasts show (and the gap between report
+     * toasts only while those show), the game log's name only while it is kept, the stamp's format only while files
+     * are stamped, and the user's folder not while the launcher sets it for this run.
+     */
     @Override
     public boolean editable(String name) {
-        return settings.containsKey(name);
+        if (!settings.containsKey(name)) {
+            return false;
+        }
+        return switch (name) {
+            case GUIPreferences.TOAST_REPORT_EVENTS, GUIPreferences.TOAST_DURATION_SECONDS ->
+                  bool(GUIPreferences.TOAST_ENABLED);
+            case GUIPreferences.TOAST_DRIP_SECONDS -> bool(GUIPreferences.TOAST_ENABLED)
+                  && bool(GUIPreferences.TOAST_REPORT_EVENTS);
+            case ClientPreferences.GAME_LOG_FILENAME -> bool(ClientPreferences.GAME_LOG_KEEP);
+            case ClientPreferences.STAMP_FORMAT -> bool(ClientPreferences.STAMP_FILENAMES);
+            case ClientPreferences.USER_DIR -> !userDirOverridden;
+            default -> true;
+        };
+    }
+
+    /** @return whether the launcher sets the user's folder for this run, so the form cannot change it */
+    public boolean userDirOverridden() {
+        return userDirOverridden;
     }
 
     @Override
@@ -765,14 +929,18 @@ public final class ClientSettingsForm extends SettingsForm {
     }
 
     /**
-     * A key binding's problem: Ctrl+C and Ctrl+V stay copy and paste, and a key an exclusive or menu command has
-     * cannot be another command's too, as only one of them would act.
+     * A setting's problem: a log's name must not be blank, nor the stamp's format other than a date and time pattern.
+     * A key binding's: Ctrl+C and Ctrl+V stay copy and paste, and a key an exclusive or menu command has cannot be
+     * another command's too, as only one of them would act.
      */
     @Override
     public @Nullable String error(String name) {
         Setting setting = settings.get(name);
-        if (setting == null || setting.bind() == null) {
+        if (setting == null) {
             return null;
+        }
+        if (setting.bind() == null) {
+            return problem(name, values.get(name));
         }
         String value = values.get(name);
         int code = keyCode(value);
@@ -792,6 +960,27 @@ public final class ClientSettingsForm extends SettingsForm {
             }
         }
         return null;
+    }
+
+    /** @return the problem of a preference's {@code value}, which is then not written, or null */
+    private static @Nullable String problem(String key, @Nullable String value) {
+        String text = Objects.requireNonNullElse(value, "");
+        return switch (key) {
+            case ClientPreferences.GAME_LOG_FILENAME, ClientPreferences.AUTO_RESOLVE_GAME_LOG_FILENAME ->
+                  text.isBlank() ? Messages.getString("ClientSettings.files.logName.error") : null;
+            case ClientPreferences.STAMP_FORMAT -> stamp(text) == null
+                  ? Messages.getString("ClientSettings.files.stampFormat.error") : null;
+            default -> null;
+        };
+    }
+
+    /** @return the date and time stamp {@code format} gives now, or null when it is no date and time pattern */
+    public static @Nullable String stamp(String format) {
+        try {
+            return DateTimeFormatter.ofPattern(format).format(LocalDateTime.now());
+        } catch (IllegalArgumentException | DateTimeException ex) {
+            return null;
+        }
     }
 
     /** @return the key of the command as the form has it, or as it is bound for one the form leaves out */
@@ -815,9 +1004,10 @@ public final class ClientSettingsForm extends SettingsForm {
         pages.forEach(this::defaults);
     }
 
-    /** Resets the page's settings to their shipped defaults. */
+    /** Resets the page's settings to their shipped defaults, but for a user's folder the launcher sets. */
     public void defaults(Page page) {
         page.sections().stream().flatMap(section -> section.rows().stream())
+              .filter(row -> !(userDirOverridden && ClientPreferences.USER_DIR.equals(row.name())))
               .forEach(row -> values.put(row.name(), defaultOf(settings.get(row.name()))));
     }
 
@@ -842,7 +1032,8 @@ public final class ClientSettingsForm extends SettingsForm {
             boolean binds = false;
             for (Setting setting : all) {
                 String value = written.get(setting.key());
-                if (value != null && !value.equals(read(setting))) {
+                if (value != null && !value.equals(read(setting))
+                      && (setting.bind() != null || problem(setting.key(), value) == null)) {
                     write(setting, value);
                     binds |= setting.bind() != null;
                 }
@@ -867,6 +1058,10 @@ public final class ClientSettingsForm extends SettingsForm {
         if (store instanceof ClientPreferences client && ClientPreferences.LOCALE.equals(setting.key())) {
             return language(client.getLocaleString());
         }
+        if (store instanceof ClientPreferences client && ClientPreferences.USER_DIR.equals(setting.key())) {
+            // The folder in effect, which the launcher may set for this run
+            return client.getUserDir();
+        }
         if (setting.percent()) {
             return Integer.toString(Math.round(store.getFloat(setting.key()) * 100));
         }
@@ -877,6 +1072,7 @@ public final class ClientSettingsForm extends SettingsForm {
             case BOOLEAN -> Boolean.toString(store.getBoolean(setting.key()) != setting.inverted());
             case SLIDER, INTEGER, INTEGER_CHOICE -> Integer.toString(store.getInt(setting.key()));
             case COLOR -> colorOf(store.getString(setting.key()), store.getDefaultString(setting.key()));
+            case LINES -> String.join("\n", lines(store.getString(setting.key())));
             default -> Objects.requireNonNullElse(store.getString(setting.key()), "");
         };
     }
@@ -900,6 +1096,7 @@ public final class ClientSettingsForm extends SettingsForm {
             case BOOLEAN -> Boolean.toString(store.getDefaultBoolean(setting.key()) != setting.inverted());
             case SLIDER, INTEGER, INTEGER_CHOICE -> Integer.toString(store.getDefaultInt(setting.key()));
             case COLOR -> colorOf(store.getDefaultString(setting.key()), null);
+            case LINES -> String.join("\n", lines(store.getDefaultString(setting.key())));
             default -> Objects.requireNonNullElse(store.getDefaultString(setting.key()), "");
         };
     }
@@ -945,6 +1142,15 @@ public final class ClientSettingsForm extends SettingsForm {
         if (store instanceof ClientPreferences client && ClientPreferences.LOCALE.equals(setting.key())) {
             // Through the client preferences, which keep the locale they hand out as well
             client.setLocale(value);
+            return;
+        }
+        if (store instanceof ClientPreferences client && ClientPreferences.USER_DIR.equals(setting.key())) {
+            // Without trailing separators, and never the launcher's folder as the player's own
+            client.setUserDir(value);
+            return;
+        }
+        if (store instanceof ClientPreferences client && ClientPreferences.MML_PATH.equals(setting.key())) {
+            client.setMmlPath(value);
             return;
         }
         if (setting.percent()) {
