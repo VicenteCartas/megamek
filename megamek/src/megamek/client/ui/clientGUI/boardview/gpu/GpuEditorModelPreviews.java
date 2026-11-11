@@ -36,9 +36,8 @@ import megamek.logging.MMLogger;
 /** A page-sized, disposable preview queue: CPU model decoding off-thread; one upload/render per UI frame. */
 final class GpuEditorModelPreviews implements Disposable {
     private static final MMLogger LOGGER = MMLogger.create(GpuEditorModelPreviews.class);
-    /** A model in these colours; for a route asset its layout of {@code sides} and {@code tracks}, from above when {@code top}. */
-    private record Request(String asset, megamek.common.board.BoardDecoration.Colours colours, int sides, int tracks, boolean top,
-          Image target) { }
+    /** A model; for a route asset its layout of {@code sides} and {@code tracks}, from above when {@code top}. */
+    private record Request(String asset, int sides, int tracks, boolean top, Image target) { }
     private final java.util.concurrent.ExecutorService worker = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "board-editor-previews"); thread.setDaemon(true); return thread;
     });
@@ -68,17 +67,14 @@ final class GpuEditorModelPreviews implements Disposable {
     /** Its display program links with the editor's first frames, for framebuffer objects. */
     GpuEditorModelPreviews() { GpuGlsl.offscreen(() -> display = new GpuSceneDisplay()); }
 
-    void add(String asset, Image target) { add(asset, megamek.common.board.BoardDecoration.Colours.NONE, target); }
-
-    /** A preview of the model in these colours, as a palette entry places it; a route's shows a N-S straight. */
-    void add(String asset, megamek.common.board.BoardDecoration.Colours colours, Image target) {
-        queue.add(new Request(asset, colours, megamek.common.board.RailRoute.side(0) | megamek.common.board.RailRoute.side(3), 0,
-              false, target));
+    /** A preview of the model, as a palette entry places it; a route's shows a N-S straight. */
+    void add(String asset, Image target) {
+        queue.add(new Request(asset, megamek.common.board.RailRoute.side(0) | megamek.common.board.RailRoute.side(3), 0, false, target));
     }
 
     /** A route of {@code kind} on its flat carrier with these sides and track pieces, seen from above (the junction card). */
     void add(megamek.common.board.RailRoute.Kind kind, int sides, int tracks, Image target) {
-        queue.add(new Request(kind.asset, megamek.common.board.BoardDecoration.Colours.NONE, sides, tracks, true, target));
+        queue.add(new Request(kind.asset, sides, tracks, true, target));
     }
 
     /** The previews still to draw. */
@@ -115,7 +111,7 @@ final class GpuEditorModelPreviews implements Disposable {
             }
         }
         if (pending == null && current == null && !queue.isEmpty()) {
-            current = queue.removeFirst(); String asset = current.asset(); var colours = current.colours();
+            current = queue.removeFirst(); String asset = current.asset();
             int sides = current.sides(), tracks = current.tracks();
             pending = worker.submit(() -> {
                 File root = new File(Configuration.dataDir(), "models/board");
@@ -130,9 +126,7 @@ final class GpuEditorModelPreviews implements Disposable {
                     // A design stands alone, two levels high: one of each module, its closed sides' pieces.
                     if (custom.isFile()) { return ConnectedKit.model(GpuBuilding.kit(asset), 0, 2, new int[6], 0, 0, asset); }
                 }
-                var data = RigidGlb.loadLods(RigidGlb.source(root, asset), asset.startsWith("buildings/") ? root.getParentFile().toPath() : root.toPath()).getFirst();
-                RigidGlb.recolour(data, colours);
-                return data;
+                return RigidGlb.loadLods(RigidGlb.source(root, asset), asset.startsWith("buildings/") ? root.getParentFile().toPath() : root.toPath()).getFirst();
             });
         }
     }

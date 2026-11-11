@@ -730,7 +730,7 @@ class RigidGlbTest {
     @Test
     void theJsonLevelCountIsTheDecodedLevels() {
         var root = megamek.common.Configuration.dataDir().toPath().resolve("models/board");
-        var expected = java.util.Map.of("scenery/vehicles/car", 1, "scenery/maglev/cab", 2, "fungus/cliff-cups", 3,
+        var expected = java.util.Map.of("scenery/roofs/ledge", 1, "scenery/maglev/cab", 2, "fungus/cliff-cups", 3,
               "vegetation/tree-broad", 4, "mars/brain-lobes", 4);
         for (var entry : expected.entrySet()) {
             var file = megamek.common.board.BoardModelBounds.file(root.toFile(), entry.getKey());

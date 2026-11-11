@@ -119,12 +119,11 @@ public final class BoardEditorBlueprint {
     public record Snap(String set, List<Connector> connectors, double radius, double angleTolerance) { }
     /**
      * A palette object. {@code layout}, when not null, makes it a stamp: painting places that scenery layout's
-     * objects as one new group, and no object of this id is ever created. Otherwise painting places {@code model} (the
-     * id, unless the entry names another model) in {@code colours}: a pond is the pool of its outline in pond colours.
+     * objects as one new group, and no object of this id is ever created. Otherwise painting places the model of its id.
      * A decal's card shows its image by path convention ({@link BoardDecalArt#image}); {@code thumbnail} is a stamp's.
      */
     public record Asset(String id, String label, String kind, String thumbnail, Snap snap, String layout,
-          String model, BoardDecoration.Colours colours, List<String> sections, String family) { }
+          List<String> sections, String family) { }
     /** One palette entry; {@code key} is the session's brush key: "owner/presetId", a variant id or an asset id. */
     public record Entry(String key, String owner, String label, Preset preset, Variant variant, Asset asset) {
         public List<String> sections() {
@@ -311,18 +310,13 @@ public final class BoardEditorBlueprint {
         checkSkins(variants);
         for (JsonNode entry : root.withArray("assets")) {
             Asset asset;
-            // Reuse the document's key, transform and colour validation; the catalog cannot escape the asset root.
+            // Reuse the document's key and transform validation; the catalog cannot escape the asset root.
             try {
-                List<String> colours = new ArrayList<>();
-                for (JsonNode colour : entry.withArray("colours")) { colours.add(colour.isNull() ? null : colour.asText()); }
                 asset = new Asset(required(entry, "id"), required(entry, "label"), required(entry, "kind"),
                       entry.path("thumbnail").asText(), snap(entry),
                       entry.hasNonNull("layout") ? entry.get("layout").asText() : null,
-                      entry.path("model").asText(entry.path("id").asText()), new BoardDecoration.Colours(colours),
                       sections(entry, sections), entry.path("family").asText(null));
                 new BoardDecoration("check", asset.kind(), asset.id(), null, 0, 0, 0, false, 1,
-                      BoardDecoration.Placement.ground(), 0).withColours(asset.colours());
-                new BoardDecoration("check", asset.kind(), asset.model(), null, 0, 0, 0, false, 1,
                       BoardDecoration.Placement.ground(), 0);
             } catch (IllegalArgumentException failure) { throw new IOException("Invalid asset " + entry.path("id"), failure); }
             if (assets.putIfAbsent(asset.id(), asset) != null) { throw new IOException("Duplicate asset " + asset.id()); }
@@ -537,12 +531,6 @@ public final class BoardEditorBlueprint {
 
     /** The category of a section path ("category/section"). */
     public static String categoryOf(String section) { return section.substring(0, section.indexOf('/')); }
-
-    /** The palette asset a placed object came from: the alias whose model and label match (a pond), else its own asset. */
-    public Asset assetOf(BoardDecoration object) {
-        return assets.values().stream().filter(a -> !a.model().equals(a.id()) && a.model().equals(object.asset())
-              && a.label().equals(object.name())).findFirst().orElseGet(() -> assets.get(object.asset()));
-    }
 
     /**
      * The design that stands for a legacy art token: the variant whose one selector is {@code token}'s type and level

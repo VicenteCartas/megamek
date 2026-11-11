@@ -156,7 +156,7 @@ class GpuSceneryColourSmokeTest {
                   objects.stream().filter(o -> !o.asset().equals("vegetation/tree-broad")).map(o -> o.asset() + o.colours().slots()).toList());
             for (var object : objects) {
                 // Every coat or paint is its family's one mesh in that coat's colours.
-                assertFalse(object.asset().matches("scenery/(vehicles/car-.*|farm/(hen|rooster|bison)-.*|parks/pond-.*)"), object.asset());
+                assertFalse(object.asset().matches("scenery/(vehicles/car-(?!hatchback|wagon|minivan).*|farm/(hen|rooster|bison)-.*)"), object.asset());
                 if (!object.colours().slots().isEmpty()) { recoloured++; }
             }
         }
@@ -519,7 +519,7 @@ class GpuSceneryColourSmokeTest {
         board.setHex(edit, new Hex(0, "rough:1", ""));
         BoardScene edited = BoardScenes.scene(board);
         var lot = board.getHex(cars).duplicate();
-        var car = lot.getDecorations().stream().filter(o -> o.asset().equals("scenery/vehicles/car") && !o.colours().slots().isEmpty())
+        var car = lot.getDecorations().stream().filter(o -> o.asset().startsWith("scenery/vehicles/car") && !o.colours().slots().isEmpty())
               .findFirst().orElseThrow();
         lot.setDecorations(lot.getDecorations().stream().map(o -> o != car ? o
               : o.transform(o.x() + .08, o.y(), o.rotation(), o.mirror(), o.scale(), o.placement())).toList());

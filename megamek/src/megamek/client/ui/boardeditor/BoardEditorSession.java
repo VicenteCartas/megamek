@@ -933,21 +933,18 @@ public final class BoardEditorSession {
                     paintTemplate = new Hex(0); sampledHex = null;
                     // A stamp brush keeps only its id; each press stamps the layout's members (BoardSceneryLayouts.stamp).
                     if (design.layout() == null) {
-                        // An alias entry (a pond drawn as a pool model) keeps its palette label as the object's name.
-                        paintTemplate.setDecorations(List.of(new BoardDecoration("brush", design.kind(), design.model(),
-                              design.model().equals(design.id()) ? null : design.label(),
+                        paintTemplate.setDecorations(List.of(new BoardDecoration("brush", design.kind(), design.id(), null,
                               0, 0, 0, false, 1, BoardDecoration.Placement.surface("ground", "top",
                                     // A maglev is suspended a level up, a billboard's panel on its legs; a rail lies on the ground.
                                     megamek.common.board.RailRoute.Kind.of(design.id()) == megamek.common.board.RailRoute.Kind.MAGLEV ? 1
-                                          : BoardBillboard.ASSET.equals(design.model()) ? BoardBillboard.DEFAULT_LEVELS : 0), 0, false)
-                              .withColours(design.colours())
-                              .withBillboard(BoardBillboard.ASSET.equals(design.model())
+                                          : BoardBillboard.ASSET.equals(design.id()) ? BoardBillboard.DEFAULT_LEVELS : 0), 0, false)
+                              .withBillboard(BoardBillboard.ASSET.equals(design.id())
                                     ? BoardBillboard.DEFAULT.with("decal0", BoardBillboard.RANDOM) : BoardBillboard.DEFAULT)));
                     }
-                    if (BuildingVolumes.of(design.model()).present()) {
+                    if (BuildingVolumes.of(design.id()).present()) {
                         var building = paintTemplate.getDecorations().getFirst();
                         paintTemplate = new Hex(0, "building:2;bldg_cf:60;bldg_elev:3;bldg_basement_type:1", null);
-                        paintTemplate.setDecorations(List.of(building.withLevels(BuildingVolumes.of(design.model()).modular() ? 3 : 0)));
+                        paintTemplate.setDecorations(List.of(building.withLevels(BuildingVolumes.of(design.id()).modular() ? 3 : 0)));
                     }
                     levelHeight = false; wayOffset = RailRoute.Kind.of(design.id()) == RailRoute.Kind.MAGLEV ? 1 : 0;
                     wayPillars = wayOffset > 0;
@@ -3236,7 +3233,7 @@ public final class BoardEditorSession {
     /**
      * Whether the renderer has the object's art: a decal's image, a stamp's catalog entry, or else the model the
      * renderer draws for the object's own asset, a file or a generator's, such as a route marker's track
-     * (BoardGenerator#exists; a palette alias such as a pond has no art of its own).
+     * (BoardGenerator#exists).
      */
     private boolean assetExists(BoardDecoration object) {
         if (object.kind().equals("decal")) {
@@ -3324,24 +3321,19 @@ public final class BoardEditorSession {
 
     /**
      * {@code object} as the member {@code key} of its palette family (Edit's Type row): the same object with the member's
-     * model. Its name is the member's label when the member is an alias (a pond), else its own unless that was the old
-     * alias's label; its colours are the member's when it defines some, else its own unless they were the old member's.
+     * model.
      */
     private BoardDecoration familyMember(BoardDecoration object, String key) {
-        var from = blueprint.assetOf(object);
+        var from = blueprint.asset(object.asset());
         var to = blueprint.asset(key);
         var fromEntry = from == null ? null : blueprint.entry(from.id());
         var toEntry = to == null ? null : blueprint.entry(key);
         require(fromEntry != null && toEntry != null && blueprint.card(fromEntry) == blueprint.card(toEntry)
               && blueprint.card(toEntry).picker() && to.layout() == null, Messages.getString("BoardEditor.familyMemberOnly"));
-        boolean fromAlias = !from.model().equals(from.id());
-        String name = !to.model().equals(to.id()) ? to.label() : fromAlias && from.label().equals(object.name()) ? null : object.name();
-        var colours = !to.colours().slots().isEmpty() ? to.colours()
-              : object.colours().equals(from.colours()) ? BoardDecoration.Colours.NONE : object.colours();
-        return new BoardDecoration(object.id(), object.kind(), to.model(), name, object.x(), object.y(), object.rotation(),
+        return new BoardDecoration(object.id(), object.kind(), to.id(), object.name(), object.x(), object.y(), object.rotation(),
               object.mirror(), object.scale(), object.placement(), object.drawOrder(), object.clipToHex(), object.rotationX(),
-              object.rotationY(), object.group(), object.bare(), object.connections(), object.stretch(), colours,
-              object.tracks(), object.pillars(), to.model().equals(object.asset()) ? object.uid() : null, object.levels());
+              object.rotationY(), object.group(), object.bare(), object.connections(), object.stretch(), object.colours(),
+              object.tracks(), object.pillars(), to.id().equals(object.asset()) ? object.uid() : null, object.levels());
     }
 
     private void setVariant(Hex hex, String owner, String value) {

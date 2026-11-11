@@ -73,9 +73,10 @@ class BoardSceneryTest {
                     trees++;
                 } else {
                     assertEquals(authored, component, "Only the park trees draw their species and heading");
-                    // The remaining furniture meshes cannot carry duplicate copies of the shared trees.
+                    // The remaining furniture meshes cannot carry duplicate copies of the shared trees: where one
+                    // has plant cards, they are its flowers and shrubs, and it stands lower than any tree.
                     var data = RigidGlb.loadLods(new FileHandle(root.resolve(component.asset() + ".glb").toFile()), root).getFirst();
-                    for (var material : data.materials) { assertFalse(material.id.endsWith("-cutout"), entry.name); }
+                    assertTrue(plantTop(data) < 12, entry.name + " bakes no tree in");
                 }
                 if (authored.asset().equals("scenery/parks/picnic-table")) { picnicTables++; }
             }
@@ -440,26 +441,43 @@ class BoardSceneryTest {
         return BoardSceneryLayouts.layout(layout).components().stream().filter(c -> !c.decal()).toList();
     }
 
-    @Test
-    void parkingBarrierPaintIsPartOfItsLowConcreteSurface() {
-        var data = load("scenery/vehicles/parking-barrier");
-        assertEquals(1, data.materials.size);
-        assertEquals(1, data.meshes.first().parts.length);
-        assertTrue(data.meshes.first().parts[0].indices.length / 3 <= 80);
-        int paint = 0, ground = 0;
-        float[] values = data.meshes.first().vertices;
-        for (int i = 0; i < values.length; i += RigidGlb.STRIDE) {
-            float x = Math.abs(values[i] - 24), y = values[i + 1], z = values[i + 2];
-            assertTrue(x <= 1.4001f && Math.abs(y) <= 12.5001f && z >= 0 && z <= 2.1001f);
-            if (z == 0) { ground++; }
-            if (values[i + 6] < .2f || values[i + 6] > .8f) {
-                paint++;
-                assertTrue(Math.abs(z - 2.1f) < .0001f ||
-                      z >= .2799f && Math.abs(x - (1.4f - (z - .28f) * .85f / 1.82f)) < .0001f,
-                      "Hazard paint belongs on the top or sloped concrete, with no floating panels");
+    /** The top of a model's plant cards (its cutout materials' parts); 0 without any. */
+    private static float plantTop(com.badlogic.gdx.graphics.g3d.model.data.ModelData data) {
+        java.util.Set<String> cards = new java.util.HashSet<>();
+        var open = new java.util.ArrayDeque<com.badlogic.gdx.graphics.g3d.model.data.ModelNode>();
+        data.nodes.forEach(open::add);
+        while (!open.isEmpty()) {
+            var node = open.pop();
+            if (node.children != null) { open.addAll(List.of(node.children)); }
+            if (node.parts == null) { continue; }
+            for (var part : node.parts) { if (part.materialId.endsWith("-cutout")) { cards.add(part.meshPartId); } }
+        }
+        float top = 0;
+        for (var mesh : data.meshes) {
+            for (var part : mesh.parts) {
+                if (!cards.contains(part.id)) { continue; }
+                for (short index : part.indices) { top = Math.max(top, mesh.vertices[(index & 0xFFFF) * RigidGlb.STRIDE + 2]); }
             }
         }
-        assertTrue(paint > 30 && ground >= 4);
+        return top;
+    }
+
+    @Test
+    void parkingBarrierIsARowOfLowStripedBlocksAlongItsHexSide() {
+        var data = load("scenery/vehicles/parking-barrier");
+        // Its own picture: concrete and hazard stripes.
+        assertEquals(1, data.materials.size);
+        int triangles = 0, ground = 0;
+        for (var mesh : data.meshes) {
+            for (var part : mesh.parts) { triangles += part.indices.length / 3; }
+            float[] values = mesh.vertices;
+            for (int i = 0; i < values.length; i += RigidGlb.STRIDE) {
+                float x = Math.abs(values[i] - 24), y = values[i + 1], z = values[i + 2];
+                assertTrue(x <= 1.4001f && Math.abs(y) <= 12.5001f && z >= 0 && z <= 2.1001f);
+                if (z == 0) { ground++; }
+            }
+        }
+        assertTrue(triangles <= 80 && ground >= 4);
     }
 
     @Test
@@ -595,11 +613,9 @@ class BoardSceneryTest {
                     assertEquals(1, rides.size(), asset.id() + " rides one route kind: " + rides);
                 }
             }
-            if (asset.layout() == null && asset.kind().equals("prop") && !generated(asset.model())) {
-                // A palette entry may place another model in other colours, as a pond is a pool in pond colours.
-                var model = (asset.model().startsWith("buildings/") ? root.getParent() : root).resolve(asset.model() + ".glb").toFile();
-                assertTrue(model.isFile(), asset.id() + " places " + asset.model());
-                assertTrue(asset.colours().slots().size() <= RigidGlb.colourSlots(model).size(), asset.id());
+            if (asset.layout() == null && asset.kind().equals("prop") && !generated(asset.id())) {
+                var model = (asset.id().startsWith("buildings/") ? root.getParent() : root).resolve(asset.id() + ".glb").toFile();
+                assertTrue(model.isFile(), asset.id() + " has its model");
             }
             // A tree takes its winter form on snow, so the -snow trees stay out of the palette.
             if (!asset.sections().isEmpty() && asset.kind().equals("prop")) { assertFalse(asset.id().endsWith("-snow"), asset.id()); }

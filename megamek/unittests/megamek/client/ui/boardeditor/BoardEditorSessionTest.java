@@ -1214,13 +1214,14 @@ class BoardEditorSessionTest {
               .stretch());
     }
 
-    @Test void slotColoursAreObjectValuesThatPalettePresetsDuplicatesAndUndoKeep() {
+    @Test void slotColoursAreObjectValuesThatDuplicatesAndUndoKeep() {
         var session = session();
-        // A palette pond is the freeform pool placed in the pond colours.
-        send(session, Action.ASSET, "", "scenery/parks/pond-1"); session.pointer(at, .2, .1, false); session.finishStroke();
+        // A pool recoloured in all four of its slots.
+        send(session, Action.ASSET, "", "scenery/pools/freeform"); session.pointer(at, .2, .1, false); session.finishStroke();
+        var colours = java.util.List.of("#63753d", "#63753d", "#63753d", "#94c7ab");
+        for (int slot = 0; slot < 4; slot++) { send(session, Action.OBJECT_VALUE, "colour" + slot, colours.get(slot)); }
         var pond = session.snapshot().objects().getFirst();
-        assertEquals("scenery/pools/freeform", pond.asset());
-        assertEquals(java.util.List.of("#63753d", "#63753d", "#63753d", "#94c7ab"), pond.colours().slots());
+        assertEquals(colours, pond.colours().slots());
         send(session, Action.OBJECT_VALUE, "colour3", "#E0F2FA");
         var clear = session.snapshot().objects().getFirst();
         assertEquals("#e0f2fa", clear.colours().slot(3));

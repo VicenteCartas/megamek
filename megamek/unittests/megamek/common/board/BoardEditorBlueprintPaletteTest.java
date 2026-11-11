@@ -254,21 +254,10 @@ class BoardEditorBlueprintPaletteTest {
                     Hex hex = board.getHex(x, y);
                     hex.getAppearance().values().stream().filter(design -> design.variant() != null && !pillars.contains(design.variant()))
                           .forEach(design -> assertNotNull(BLUEPRINT.variant(design.variant()), file + ": " + design.variant()));
-                    hex.getDecorations().forEach(object -> assertNotNull(BLUEPRINT.assetOf(object), file + ": " + object.asset()));
+                    hex.getDecorations().forEach(object -> assertNotNull(BLUEPRINT.asset(object.asset()), file + ": " + object.asset()));
                 }
             }
         }
-    }
-
-    @Test
-    void aPlacedPondIsTheKidneyPondAliasOfItsPoolModel() {
-        var pond = BLUEPRINT.asset("scenery/parks/pond-1");
-        assertEquals(pond, BLUEPRINT.assetOf(placed(pond.model(), pond.label())));
-        assertEquals(BLUEPRINT.asset(pond.model()), BLUEPRINT.assetOf(placed(pond.model(), null)));
-    }
-
-    private static BoardDecoration placed(String asset, String name) {
-        return new BoardDecoration("o", "prop", asset, name, 0, 0, 0, false, 1, BoardDecoration.Placement.ground(), 0);
     }
 
     /**

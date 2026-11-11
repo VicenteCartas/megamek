@@ -92,7 +92,7 @@ class BoardLegacyImportTest {
         var roadside = board.getHex(trees).getDecorations();
         assertFalse(roadside.isEmpty());
         assertTrue(roadside.stream().allMatch(o -> o.placement().equals(BoardDecoration.Placement.ground())), roadside.toString());
-        var cars = board.getHex(parked).getDecorations().stream().filter(o -> o.asset().equals("scenery/vehicles/car")).toList();
+        var cars = board.getHex(parked).getDecorations().stream().filter(o -> o.asset().startsWith("scenery/vehicles/car")).toList();
         assertFalse(cars.isEmpty());
         assertTrue(cars.stream().allMatch(o -> o.placement().receiver().terrain().equals("bridge")));
 
@@ -312,7 +312,7 @@ class BoardLegacyImportTest {
         for (int x = 0; x < codes.length; x++) {
             var objects = board.getHex(x, 0).getDecorations();
             var plates = objects.stream().filter(o -> o.kind().equals("decal")).toList();
-            var cars = objects.stream().filter(o -> o.asset().equals("scenery/vehicles/car")).toList();
+            var cars = objects.stream().filter(o -> o.asset().startsWith("scenery/vehicles/car")).toList();
             assertTrue(plates.size() == 1 || plates.size() == 2, codes[x]);
             assertEquals(1, objects.stream().map(BoardDecoration::group).distinct().count(), "One car-park group");
             // 00-07 get their lane as a road and stand beside it; 98/99 have no lane and stand back to back.
@@ -320,7 +320,7 @@ class BoardLegacyImportTest {
             // The cars keep their paint: the same colours as the legacy key's car rows.
             var rows = BoardSceneryLayouts.layout(TilesetScenery.resolve(legacy.getHex(x, 0), false).scenery().models()
                   .getFirst()).components();
-            assertEquals(rows.stream().filter(r -> r.asset().equals("scenery/vehicles/car")).map(r -> r.colours().slots()).sorted(
+            assertEquals(rows.stream().filter(r -> r.asset().startsWith("scenery/vehicles/car")).map(r -> r.colours().slots()).sorted(
                   java.util.Comparator.comparing(Object::toString)).toList(), cars.stream().map(c -> c.colours().slots())
                   .sorted(java.util.Comparator.comparing(Object::toString)).toList());
             for (var car : cars) {

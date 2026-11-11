@@ -1187,7 +1187,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     /** A model card's preview; false for no model card (null). */
     private boolean model(GpuEditorThumbnail card, Image image) {
         if (card == null) { return false; }
-        draw(card.id(), image, () -> models.add(card.asset(), card.colours(), image));
+        draw(card.id(), image, () -> models.add(card.asset(), image));
         return true;
     }
 
@@ -2421,7 +2421,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         heading(objectLabel(object));
         boolean authored = BuildingVolumes.of(object.asset()).present();
         // An object of a picker family swaps to another member in place: Type.
-        var asset = blueprint.assetOf(object);
+        var asset = blueprint.asset(object.asset());
         var entry = asset == null ? null : blueprint.entry(asset.id());
         var family = entry == null ? null : blueprint.card(entry);
         if (family != null && family.picker()) {

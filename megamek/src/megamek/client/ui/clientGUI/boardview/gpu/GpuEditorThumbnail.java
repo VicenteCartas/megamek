@@ -21,12 +21,11 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Configuration;
-import megamek.common.board.BoardDecoration.Colours;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.logging.MMLogger;
 
 /**
- * A palette card that shows a model: the entry's {@code id} and the {@code asset} drawn in {@code colours}.
+ * A palette card that shows a model: the entry's {@code id} and the {@code asset} drawn.
  * <p>
  * A card the editor draws (a model's, a sample board's) has a picture by its id ({@link #picture}): the shipped one, else
  * the one the editor kept in the user's folder when it first drew the card ({@link #cache}). The editor draws a card only
@@ -37,7 +36,7 @@ import megamek.logging.MMLogger;
  * run it (Gradle {@code bakeEditorThumbnails}) after changing what the palette shows, or the palette keeps the old
  * picture. Reload assets forgets the kept ones ({@link #clearCache}).
  */
-record GpuEditorThumbnail(String id, String asset, Colours colours) {
+record GpuEditorThumbnail(String id, String asset) {
     private static final MMLogger LOGGER = MMLogger.create(GpuEditorThumbnail.class);
     /** A change of at most this many levels in every channel of every pixel is a redraw of the same picture. */
     private static final int SAME = 2;
@@ -45,13 +44,13 @@ record GpuEditorThumbnail(String id, String asset, Colours colours) {
     /** An object's card, unless it has a picture of its own or is a decal. */
     static GpuEditorThumbnail of(BoardEditorBlueprint.Asset asset) {
         return asset.thumbnail().isEmpty() && asset.kind().equals("prop")
-              ? new GpuEditorThumbnail(asset.id(), asset.model(), asset.colours()) : null;
+              ? new GpuEditorThumbnail(asset.id(), asset.id()) : null;
     }
 
     /** A design's card, unless it has a picture of its own or shows a sample board (a design without a model, a generated building). */
     static GpuEditorThumbnail of(BoardEditorBlueprint.Variant variant) {
         return variant.thumbnail().isEmpty() && !variant.asset().isEmpty() && !BoardMultiHexBuilding.supports(variant.asset())
-              ? new GpuEditorThumbnail(variant.id(), variant.asset(), Colours.NONE) : null;
+              ? new GpuEditorThumbnail(variant.id(), variant.asset()) : null;
     }
 
     /** A category tile's id. */
@@ -126,7 +125,7 @@ record GpuEditorThumbnail(String id, String asset, Colours colours) {
                 blueprint.assets().forEach(asset -> cards.add(of(asset)));
                 blueprint.variants().forEach(variant -> cards.add(of(variant)));
                 cards.removeIf(java.util.Objects::isNull);
-                cards.forEach(card -> models.add(card.asset(), card.colours(), image(card.id())));
+                cards.forEach(card -> models.add(card.asset(), image(card.id())));
                 blueprint.categories().forEach(category -> samples.add(category, image(category(category.id()))));
                 java.util.stream.Stream.of(List.of("grass"), BoardArtwork.themes(), blueprint.specialThemes())
                       .flatMap(List::stream).distinct().forEach(theme -> sample(theme, "", ""));

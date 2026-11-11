@@ -159,13 +159,11 @@ class BoardEditorPaletteCommandsTest {
         send(session, Action.OBJECT_VALUE, "rotation", "30");
         send(session, Action.OBJECT_VALUE, "scale", "1.5");
         BoardDecoration pond = objects(session, at).getFirst();
-        assertEquals("Kidney pond", pond.name());
         send(session, Action.OBJECT_VALUE, "asset", POOL);
         BoardDecoration pool = objects(session, at).getFirst();
         assertEquals(List.of(pond.id(), POOL, pond.x(), pond.y(), 30.0, 1.5),
               List.of(pool.id(), pool.asset(), pool.x(), pool.y(), pool.rotation(), pool.scale()));
-        assertNull(pool.name(), "The pond's alias name goes with it");
-        assertEquals(BoardDecoration.Colours.NONE, pool.colours(), "The pond's colours were its member's");
+        assertEquals(BoardDecoration.Colours.NONE, pool.colours(), "The pool is in its own colours");
         send(session, Action.OBJECT_VALUE, "asset", "scenery/vehicles/car");
         assertEquals(POOL, objects(session, at).getFirst().asset(), "A car is no pool");
         send(session, Action.UNDO, "", "");

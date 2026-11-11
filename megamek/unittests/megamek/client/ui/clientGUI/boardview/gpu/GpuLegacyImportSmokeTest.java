@@ -212,7 +212,7 @@ class GpuLegacyImportSmokeTest {
                   .filter(java.util.Objects::nonNull).toList();
             assertTrue(objects.stream().anyMatch(o -> o.asset().startsWith("decal/car-park/")), park.getBoardNum()
                   + ": its rows of bays, " + objects);
-            assertTrue(objects.stream().anyMatch(o -> o.asset().equals("scenery/vehicles/car")), park.getBoardNum()
+            assertTrue(objects.stream().anyMatch(o -> o.asset().startsWith("scenery/vehicles/car")), park.getBoardNum()
                   + ": its seated cars, " + objects);
         }
         var failure = new AtomicReference<Throwable>();
@@ -297,7 +297,7 @@ class GpuLegacyImportSmokeTest {
                         for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
                             for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
                                 if (ROOF_PARK.equals(GpuTestSupport.field(prop, "coords"))
-                                      && ((ModelInstance) GpuTestSupport.field(prop, "instance")).nodes.first().id.equals("car")) {
+                                      && ((ModelInstance) GpuTestSupport.field(prop, "instance")).nodes.first().id.startsWith("car")) {
                                     roofCars.add(((BoundingBox) GpuTestSupport.field(prop, "bounds")).min.z);
                                 }
                             }
