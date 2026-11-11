@@ -25,7 +25,36 @@ public abstract class SettingsForm {
          */
         SLIDER,
         /** A file's path; the row's values are the extensions it takes, without the dot. */
-        FILE
+        FILE,
+        /**
+         * A key and the modifiers held with it, as AWT keeps them, in the text {@link #key(int, int)} makes; "0,0" while
+         * nothing is bound.
+         */
+        KEY
+    }
+
+    /** The text of a {@link Kind#KEY} row: the AWT key code and modifier mask, "0,0" for none. */
+    public static String key(int code, int modifiers) {
+        return code == 0 ? "0,0" : code + "," + modifiers;
+    }
+
+    /** @return the AWT key code of a {@link Kind#KEY} row's text, 0 when unbound or unreadable */
+    public static int keyCode(String text) {
+        return keyPart(text, 0);
+    }
+
+    /** @return the AWT modifier mask of a {@link Kind#KEY} row's text */
+    public static int keyModifiers(String text) {
+        return keyPart(text, 1);
+    }
+
+    private static int keyPart(String text, int part) {
+        String[] parts = text == null ? new String[0] : text.split(",", 2);
+        try {
+            return parts.length == 2 ? Integer.parseInt(parts[part].strip()) : 0;
+        } catch (NumberFormatException ex) {
+            return 0;
+        }
     }
 
     /**
@@ -202,6 +231,11 @@ public abstract class SettingsForm {
     public boolean valid() {
         return pages().stream().flatMap(page -> page.sections().stream()).flatMap(section -> section.rows().stream())
               .allMatch(row -> error(row.name()) == null);
+    }
+
+    /** @return the setting's shipped value as its text, or null when the form keeps no default for it */
+    public @Nullable String defaultText(String name) {
+        return null;
     }
 
     /** @return whether the setting differs from the value the form started from */

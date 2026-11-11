@@ -340,13 +340,28 @@ Done so far, in short:
   reduced. The Swing dialog's main route opens Display. Dropped as 2D-only: the UI theme, Classic themes and the
   skin file (the native screens draw the design tokens), and "Expand option sections" (the native settings and
   options have no collapsible sections). User files and the MegaMekLab path move to the Interface page.
+- Client Settings, part 3 (Controls): a Controls group with a Keyboard page and seven pages of key bindings (Camera,
+  Turn, Movement, Combat, Panels, Overlays, Game), each in sections, so every command has one place and a command
+  added later shows under Game's Other until it gets one. A binding is a keycap: click it, then press the key with
+  any of Ctrl, Alt and Shift held, or press and let go a modifier alone to bind it. Esc or a click elsewhere keeps the
+  old key. Each binding has a way back to its default key and an unbind button. A key that an exclusive or menu
+  command shares with another, and Ctrl+C or Ctrl+V, show their problem under the binding in red without blocking OK,
+  as the Swing editor did. Bindings apply at once and are stored (`KeyBindParser.writeKeyBindings`) when one changes;
+  Cancel puts them back. The preview is a keyboard that lights the page's keys, the pointed binding's key and
+  modifiers, and a key bound twice in red, and lists the page's keys it has no cap for. The Keyboard page has the key
+  repeat delay and rate (from Advanced) and the tooltip delay, which the native screens' tooltips now follow as well
+  as Swing's. The Swing Key Binds route opens Keyboard, and the map editor's menus follow new bindings. Dropped: the
+  Swing GUI scale up and down bindings (the native scales are the Display page's sliders), the move-step delay
+  and the tooltip distance option (both drive only the Legacy 2D board), the Tab navigation option (a keycap takes
+  Tab like any other key while it awaits one, and Tab moves the focus otherwise) and the tooltip dismiss delay
+  (native tooltips stay while pointed and close when the pointer leaves).
 
 Still open:
 
 1. The board's last Swing dialog, the `SWING_DIALOGS` allowlist in `GpuBoardWindow` (R6/U2): Client Settings
-   (`CommonSettingsDialog`). Audio, Display and the shared shell are native (see above). Still to port, in their own
-   PRs: Game Board, Overlays, Unit Display, Player Colours, Report, Mini Map, the rest of Settings (Main: colours,
-   window layout, unit defaults, logs, privacy, user files and the MegaMekLab path), Phase and Advanced. The last
+   (`CommonSettingsDialog`). Audio, Display, Controls and the shared shell are native (see above). Still to port, in
+   their own PRs: Game Board, Overlays, Unit Display, Player Colours, Report, Mini Map, the rest of Settings (Main:
+   colours, window layout, unit defaults, logs, privacy, user files and the MegaMekLab path), Phase and Advanced. The last
    of them removes the dialog from the allowlist. Until then, the native card has no page for those yet
    and the Swing dialog stays only for the Legacy 2D window and the Swing-only client.
 2. The developer tool that is still a Swing window of its own, outside the allowlist because it is not a dialog over

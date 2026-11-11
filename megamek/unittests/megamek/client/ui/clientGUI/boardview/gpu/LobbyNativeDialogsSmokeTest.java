@@ -11,6 +11,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
@@ -64,6 +65,7 @@ import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.gdx.UiTextField;
 import megamek.client.ui.panels.CommonSettingsPane;
 import megamek.client.ui.settings.ClientSettingsForm;
+import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Hex;
 import megamek.common.OffBoardDirection;
 import megamek.common.Player;
@@ -741,6 +743,67 @@ class LobbyNativeDialogsSmokeTest {
             assertFalse(store.getBoolean(GUIPreferences.COLOR_BLIND_PALETTE));
             dialogs.dispose();
         });
+    }
+
+    @Test
+    void aKeyIsBoundByPressingItAndEscapeKeepsTheOldOne() {
+        int key = KeyCommandBind.FIRE.key;
+        int modifiers = KeyCommandBind.FIRE.modifiers;
+        try {
+            UiTestStage.run(ui -> {
+                KeyCommandBind.FIRE.key = KeyCommandBind.FIRE.keyDefault;
+                KeyCommandBind.FIRE.modifiers = KeyCommandBind.FIRE.modifiersDefault;
+                int[] stored = { 0 };
+                ClientSettingsView.Host host = (work, then) -> {
+                    work.run();
+                    then.run();
+                };
+                LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+                ClientSettingsForm form = new ClientSettingsForm(new PreferenceStore(),
+                      new ClientPreferences(new PreferenceStore()), () -> stored[0]++);
+                ClientSettingsView view = dialogs.clientSettings(form, ClientSettingsForm.KEYS + "combat", host);
+                ui.draw();
+                assertEquals(ClientSettingsForm.KEYS + "combat", view.pageId());
+                assertEquals(top(find(ui, "client-search")), top(find(ui, "client-keyboard").getParent()), 1,
+                      "the keyboard's frame lines up with the search");
+                String fire = "client-setting-" + ClientSettingsForm.BIND + KeyCommandBind.FIRE.cmd;
+                Actor cap = find(ui, fire);
+                reveal(ui, cap);
+                assertFalse(find(ui, fire + "-restore").isVisible(), "a binding at its default has no way back");
+
+                click(ui, cap);
+                ui.stage.keyDown(Input.Keys.ESCAPE);
+                ui.draw();
+                assertTrue(dialogs.isOpen(), "Escape while a key is awaited keeps the settings open");
+                assertEquals(KeyCommandBind.FIRE.keyDefault, KeyCommandBind.FIRE.key, "and the binding as it was");
+
+                click(ui, cap);
+                ui.stage.keyDown(Input.Keys.F7);
+                ui.stage.keyUp(Input.Keys.F7);
+                ui.draw();
+                assertEquals(KeyEvent.VK_F7, KeyCommandBind.FIRE.key, "the pressed key binds at once");
+                assertEquals(0, KeyCommandBind.FIRE.modifiers);
+                assertEquals(1, stored[0], "the bindings are stored as they change");
+                assertTrue(find(ui, fire + "-restore").isVisible());
+
+                click(ui, find(ui, fire + "-unbind"));
+                assertEquals(0, KeyCommandBind.FIRE.key, "unbound");
+                assertFalse(find(ui, fire + "-unbind").isVisible());
+                click(ui, find(ui, fire + "-restore"));
+                assertEquals(KeyCommandBind.FIRE.keyDefault, KeyCommandBind.FIRE.key, "back to the default key");
+
+                click(ui, cap);
+                ui.stage.keyDown(Input.Keys.F8);
+                ui.draw();
+                click(ui, find(ui, "client-cancel"));
+                assertFalse(dialogs.isOpen());
+                assertEquals(KeyCommandBind.FIRE.keyDefault, KeyCommandBind.FIRE.key, "Cancel puts the binding back");
+                dialogs.dispose();
+            });
+        } finally {
+            KeyCommandBind.FIRE.key = key;
+            KeyCommandBind.FIRE.modifiers = modifiers;
+        }
     }
 
     @Test

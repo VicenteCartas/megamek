@@ -17,6 +17,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.scenes.scene2d.ui.TooltipManager;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TransformDrawable;
 import com.badlogic.gdx.utils.BufferUtils;
@@ -484,6 +485,11 @@ public final class GpuHost {
         }
     }
 
+    /** GPU thread: the window's tooltips show after the delay the player set. */
+    static void tooltipDelay() {
+        TooltipManager.getInstance().initialTime = Math.max(0, GUIPreferences.getInstance().getTooltipDelay()) / 1000f;
+    }
+
     /** The window's listener: hands each frame to the scene and switches scenes between frames. */
     private static final class Root implements ApplicationListener {
         /** The scene's own input, which {@link #GUARD} passes events to. */
@@ -495,6 +501,7 @@ public final class GpuHost {
             application = (Lwjgl3Application) Gdx.app;
             // Its one program links as the window opens, never beside a board's frames.
             marker = new LinkMarker();
+            tooltipDelay();
         }
 
         @Override

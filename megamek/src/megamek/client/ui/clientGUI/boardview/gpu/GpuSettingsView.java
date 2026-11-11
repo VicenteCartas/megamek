@@ -1,15 +1,18 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import com.badlogic.gdx.Input.Keys;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
+import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
@@ -41,7 +44,8 @@ import megamek.client.ui.settings.SettingsForm.Section;
  * The settings screen the game options and the Client Settings share, built for the stage rather than after a Swing
  * form: the search on top of a rail of icon tiles, one per group of pages, with how many of its parts match while
  * searching; the pages of the chosen group as tabs above the page, every matching page while searching; the page as
- * cards, one per section, of switches, sliders with their reading, choices, fields and file pickers, each with a dot
+ * cards, one per section, of switches, sliders with their reading, choices, fields, file pickers and keys to bind, each
+ * with a dot
  * while it differs from where it started; a help strip at the foot that tells about the setting under the pointer; and
  * a preview beside the page when the {@link Flavor} has one. The values and rules are the {@link SettingsForm}'s; the
  * flavor brings the rest: the icons, the marks, what goes beside the rail and the page, what a change does at once and
@@ -108,6 +112,10 @@ final class GpuSettingsView {
             return null;
         }
 
+        /** The setting under the pointer, null once the pointer left it; for a preview that shows it. */
+        void pointed(@Nullable Row row) {
+        }
+
         /** After the form took a change from a control. */
         void changed(Row row) {
         }
@@ -136,7 +144,29 @@ final class GpuSettingsView {
 
     /** One shown setting: its control, its form field (null for a switch), its reading, picker and changed dot. */
     private record Control(Row row, Actor input, @Nullable UiFormField field, @Nullable Label reading,
-          @Nullable UiButton picker, Actor changed) { }
+          @Nullable UiButton picker, Actor changed, @Nullable KeyControl key) { }
+
+    /**
+     * A key binding's parts: the keycap that shows its keys and takes a new one on a click, its buttons back to the
+     * default and to unbind, and its problem under the line, which shows only while it has one.
+     */
+    private static final class KeyControl {
+        final UiButton cap;
+        final Table caps = new Table();
+        final UiButton restore;
+        final UiButton unbind;
+        final Label problem;
+        Cell<Label> problemCell;
+        /** What the keycap shows now, so it is built anew only when that changes. */
+        String shown = "";
+
+        KeyControl(UiButton cap, UiButton restore, UiButton unbind, Label problem) {
+            this.cap = cap;
+            this.restore = restore;
+            this.unbind = unbind;
+            this.problem = problem;
+        }
+    }
 
     private final UiKit kit;
     private final UiDialog dialog;
@@ -161,6 +191,12 @@ final class GpuSettingsView {
     private boolean syncing;
     /** The slider setting held down whose flavor has not heard of its change yet ({@link Flavor#live}). */
     private @Nullable Row held;
+    /** The key binding waiting for its new key, and the stage that hears the keys meanwhile. */
+    private @Nullable Row capturing;
+    private @Nullable Stage captureStage;
+    /** The modifier pressed alone while capturing, which binds when let go; -1 once a second joined it. */
+    private int lonelyModifier;
+    private final InputListener capture = new KeyCapture();
 
     /**
      * @param bodyWidth  the width the body has, which decides whether the rail goes beside the page and whether a
@@ -377,6 +413,7 @@ final class GpuSettingsView {
     // ---- The page
 
     private void showPage() {
+        endCapture();
         controls.clear();
         page.clearChildren();
         Page shown = current();
@@ -447,6 +484,7 @@ final class GpuSettingsView {
         UiFormField field = null;
         Label reading = null;
         UiButton picker = null;
+        KeyControl key = null;
         switch (row.kind()) {
             case BOOLEAN -> {
                 UiChoice toggle = kit.toggleSwitch(row.label(), form.bool(row.name()));
@@ -532,6 +570,14 @@ final class GpuSettingsView {
                 field = kit.formField(row.label(), text);
                 line.add(field).width(fieldWidth).left();
             }
+            case KEY -> {
+                key = keyControl(row, name);
+                input = key.cap;
+                line.add(wrapped(row.label(), "body", "text.primary")).growX().minWidth(0);
+                line.add(key.cap).padLeft(space("sm"));
+                line.add(key.restore).padLeft(space("xs"));
+                line.add(key.unbind).padLeft(space("xxs"));
+            }
         }
         input.setName(name);
         Table marks = new Table();
@@ -543,8 +589,12 @@ final class GpuSettingsView {
         // Beside a field's input rather than its label
         line.add(marks).left().top().padTop(field == null ? size("control.sm") / 2 - changed.getPrefHeight() / 2
               : size("control.sm") / 2 + space("xs"));
-        if (row.kind() != Kind.SLIDER && row.kind() != Kind.FILE) {
+        if (row.kind() != Kind.SLIDER && row.kind() != Kind.FILE && row.kind() != Kind.KEY) {
             line.add().expandX();
+        }
+        if (key != null) {
+            line.row();
+            key.problemCell = line.add((Label) null).colspan(line.getColumns()).left().growX();
         }
         line.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.enabled);
         line.addListener(new InputListener() {
@@ -552,6 +602,7 @@ final class GpuSettingsView {
             public void enter(InputEvent event, float x, float y, int pointer, @Nullable Actor fromActor) {
                 if (pointer == -1) {
                     help.setText(flavor.help(row));
+                    flavor.pointed(row);
                 }
             }
 
@@ -559,11 +610,190 @@ final class GpuSettingsView {
             public void exit(InputEvent event, float x, float y, int pointer, @Nullable Actor toActor) {
                 if (pointer == -1 && (toActor == null || !toActor.isDescendantOf(line))) {
                     help.setText(flavor.texts().hint());
+                    flavor.pointed(null);
                 }
             }
         });
-        controls.put(row.name(), new Control(row, input, field, reading, picker, changed));
+        controls.put(row.name(), new Control(row, input, field, reading, picker, changed, key));
         return line;
+    }
+
+    // ---- Key bindings
+
+    /** A key binding's keycap, which takes the next key on a click, and its buttons back to the default and to unbind. */
+    private KeyControl keyControl(Row row, String name) {
+        UiButton cap = kit.button("button-secondary" + UiTheme.COMPACT, null, null, null);
+        kit.tip(cap, true).getActor().setText(Messages.getString("ClientSettings.controls.capture.tooltip"));
+        UiKit.onChange(cap, () -> {
+            if (row.equals(capturing)) {
+                endCapture();
+                refresh();
+            } else {
+                capture(row);
+            }
+        });
+        UiButton restore = kit.button("button-quiet" + UiTheme.COMPACT, "restart", null, null);
+        restore.setName(name + "-restore");
+        kit.tip(restore, true).getActor().setText(Messages.getString("ClientSettings.controls.restore"));
+        UiKit.onChange(restore, () -> {
+            String shipped = form.defaultText(row.name());
+            if (shipped != null) {
+                changed(row, () -> form.text(row.name(), shipped));
+            }
+        });
+        UiButton unbind = kit.button("button-quiet" + UiTheme.COMPACT, "close", null, null);
+        unbind.setName(name + "-unbind");
+        kit.tip(unbind, true).getActor().setText(Messages.getString("ClientSettings.controls.unbind"));
+        UiKit.onChange(unbind, () -> changed(row, () -> form.text(row.name(), SettingsForm.key(0, 0))));
+        Label problem = wrapped("", "small", "status.danger");
+        problem.setName(name + "-problem");
+        KeyControl key = new KeyControl(cap, restore, unbind, problem);
+        cap.add(key.caps);
+        return key;
+    }
+
+    /** Shows the binding as the form has it: its keys, or that it waits for one, with its problem and buttons. */
+    private void showKey(Control control, boolean disabled) {
+        KeyControl key = control.key();
+        String name = control.row().name();
+        String value = form.text(name);
+        String problem = form.error(name);
+        boolean waiting = control.row().equals(capturing);
+        String shown = waiting ? "?" : value + '|' + problem;
+        if (!shown.equals(key.shown)) {
+            key.shown = shown;
+            key.caps.clearChildren();
+            if (waiting) {
+                key.caps.add(kit.edgeChip(Messages.getString("ClientSettings.controls.press"), "accent"));
+            } else if (SettingsForm.keyCode(value) == 0) {
+                key.caps.add(kit.typeLabel(Messages.getString("ClientSettings.controls.unbound"), "small",
+                      "text.muted"));
+            } else {
+                for (String part : keyParts(SettingsForm.keyCode(value), SettingsForm.keyModifiers(value))) {
+                    key.caps.add(kit.edgeChip(part, problem == null ? "neutral" : "danger"))
+                          .padLeft(key.caps.getCells().isEmpty() ? 0 : space("xxs"));
+                }
+            }
+            key.problem.setText(problem == null ? "" : problem);
+            key.problemCell.setActor(problem == null ? null : key.problem);
+            key.problemCell.padTop(problem == null ? 0 : space("xxs"));
+        }
+        key.cap.setDisabled(disabled);
+        String shipped = form.defaultText(name);
+        key.restore.setVisible(!disabled && shipped != null && !shipped.equals(value));
+        key.unbind.setVisible(!disabled && SettingsForm.keyCode(value) != 0);
+    }
+
+    /** The keys of a binding as a keycap shows them, one cap each: its modifiers in a fixed order, then its key. */
+    static List<String> keyParts(int code, int modifiers) {
+        List<String> parts = new ArrayList<>();
+        for (int mask : new int[] { KeyEvent.CTRL_DOWN_MASK, KeyEvent.ALT_DOWN_MASK, KeyEvent.SHIFT_DOWN_MASK,
+                                    KeyEvent.META_DOWN_MASK }) {
+            if ((modifiers & mask) != 0) {
+                parts.add(KeyEvent.getModifiersExText(mask));
+            }
+        }
+        parts.add(KeyEvent.getKeyText(code));
+        return parts;
+    }
+
+    /** Waits for the binding's new key: the stage's keys come here first until one binds, Esc or a click elsewhere. */
+    private void capture(Row row) {
+        Control control = controls.get(row.name());
+        Stage stage = page.getStage();
+        if (control == null || stage == null || flavor.busy() || !form.editable(row.name())) {
+            return;
+        }
+        endCapture();
+        capturing = row;
+        lonelyModifier = 0;
+        captureStage = stage;
+        stage.addCaptureListener(capture);
+        // Typed characters go to the keycap rather than to the search
+        stage.setKeyboardFocus(control.input());
+        refresh();
+    }
+
+    /** Stops waiting for a key, without a change. */
+    private void endCapture() {
+        if (captureStage != null) {
+            captureStage.removeCaptureListener(capture);
+        }
+        captureStage = null;
+        capturing = null;
+    }
+
+    /** The key the binding waited for: it takes it. */
+    private void captured(int code, int modifiers) {
+        Row row = capturing;
+        endCapture();
+        if (row != null) {
+            changed(row, () -> form.text(row.name(), SettingsForm.key(code, modifiers)));
+        }
+    }
+
+    /**
+     * The keys while a binding waits for one, ahead of every other listener of the stage, so neither Esc closes the
+     * card nor Tab moves the focus: a key with the modifiers held binds; a modifier let go alone binds itself; Esc
+     * keeps the binding as it was. A click outside the keycap stops waiting too, and goes on to what it hit.
+     */
+    private final class KeyCapture extends InputListener {
+        @Override
+        public boolean keyDown(InputEvent event, int keycode) {
+            if (capturing == null) {
+                return false;
+            }
+            event.cancel();
+            if (keycode == Keys.ESCAPE) {
+                endCapture();
+                refresh();
+                return true;
+            }
+            int awt = GpuBattleView.awtKey(keycode);
+            if (modifier(awt)) {
+                lonelyModifier = lonelyModifier == 0 ? awt : -1;
+            } else if (awt != KeyEvent.VK_UNDEFINED) {
+                captured(awt, GpuBattleView.modifiers());
+            }
+            return true;
+        }
+
+        @Override
+        public boolean keyUp(InputEvent event, int keycode) {
+            if (capturing == null) {
+                return false;
+            }
+            event.cancel();
+            int awt = GpuBattleView.awtKey(keycode);
+            if (modifier(awt) && awt == lonelyModifier) {
+                captured(awt, 0);
+            }
+            return true;
+        }
+
+        @Override
+        public boolean keyTyped(InputEvent event, char character) {
+            if (capturing == null) {
+                return false;
+            }
+            event.cancel();
+            return true;
+        }
+
+        @Override
+        public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
+            Control control = capturing == null ? null : controls.get(capturing.name());
+            if (control != null && !event.getTarget().isDescendantOf(control.input())) {
+                endCapture();
+                refresh();
+            }
+            return false;
+        }
+
+        private static boolean modifier(int awt) {
+            return awt == KeyEvent.VK_SHIFT || awt == KeyEvent.VK_CONTROL || awt == KeyEvent.VK_ALT
+                  || awt == KeyEvent.VK_META;
+        }
     }
 
     private static int number(String text, int fallback) {
@@ -642,6 +872,9 @@ final class GpuSettingsView {
                 }
                 if (control.field() != null) {
                     control.field().error(form.error(name));
+                }
+                if (control.key() != null) {
+                    showKey(control, disabled);
                 }
                 control.changed().setVisible(form.changed(name));
             }

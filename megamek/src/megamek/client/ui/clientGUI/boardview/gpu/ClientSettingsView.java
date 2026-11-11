@@ -3,12 +3,19 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuSettingsView.space;
 
+import java.awt.event.KeyEvent;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Consumer;
 import javax.swing.SwingUtilities;
+import javax.swing.ToolTipManager;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.MathUtils;
@@ -16,6 +23,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.utils.Align;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -30,6 +38,7 @@ import megamek.client.ui.gdx.UiFileDialog;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.settings.ClientSettingsForm;
+import megamek.client.ui.settings.SettingsForm;
 import megamek.client.ui.settings.SettingsForm.Page;
 import megamek.client.ui.settings.SettingsForm.Row;
 import megamek.common.preference.ClientPreferences;
@@ -43,7 +52,8 @@ import megamek.logging.MMLogger;
  * Audio page a sound check that plays each alert. The footer has Defaults, which resets every page, OK, which keeps the
  * changes and stores the preferences, and Cancel, which puts back what the settings were when the card opened; closing
  * the card any other way cancels too. The Display page's preview is a unit's readout as the HUD draws it, in the
- * palette and motion the page sets.
+ * palette and motion the page sets. A page of key bindings shows a keyboard with the keys it binds, the pointed
+ * binding's keys lit and a key bound twice in red.
  * <p>
  * GPU thread. The preferences are written on the Swing thread through the {@link Host}, since their listeners update
  * Swing views.
@@ -91,7 +101,7 @@ final class ClientSettingsView {
           GUIPreferences.SOUND_MUTE_MY_TURN, "otherTurns",
           GUIPreferences.SOUND_MUTE_OTHERS_TURN);
     private static final Map<String, String> ICONS = Map.of(ClientSettingsForm.AUDIO, "volume",
-          ClientSettingsForm.DISPLAY, "display");
+          ClientSettingsForm.DISPLAY, "display", ClientSettingsForm.CONTROLS, "keyboard");
     /** The scales, which take effect where the slider is let go, as they move the card under the pointer. */
     private static final Set<String> SCALES = Set.of(GUIPreferences.GUI_SCALE, GUIPreferences.BOARD_UI_SCALE);
 
@@ -106,6 +116,7 @@ final class ClientSettingsView {
     private UiButton reset;
     private Table soundCheck;
     private DisplaySample sample;
+    private KeyboardSample keyboard;
     private Actor restart;
     private UiFileDialog files;
     private boolean applying;
@@ -180,7 +191,15 @@ final class ClientSettingsView {
         @Nullable Actor preview(Page page) {
             soundCheck = ClientSettingsForm.AUDIO.equals(page.id()) ? soundCheck() : null;
             sample = ClientSettingsForm.DISPLAY.equals(page.id()) ? new DisplaySample() : null;
-            return soundCheck != null ? soundCheck : sample;
+            keyboard = binds(page) ? new KeyboardSample(page) : null;
+            return soundCheck != null ? soundCheck : sample != null ? sample : keyboard;
+        }
+
+        @Override
+        void pointed(@Nullable Row row) {
+            if (keyboard != null) {
+                keyboard.point(row);
+            }
         }
 
         @Override
@@ -284,6 +303,9 @@ final class ClientSettingsView {
         if (sample != null) {
             sample.show();
         }
+        if (keyboard != null) {
+            keyboard.show();
+        }
         if (restart != null) {
             restart.setVisible(form.changed(ClientPreferences.LOCALE));
         }
@@ -368,6 +390,198 @@ final class ClientSettingsView {
         }
     }
 
+    /** Whether the page binds keys: a page of the Controls but their Keyboard. */
+    private static boolean binds(Page page) {
+        return ClientSettingsForm.CONTROLS.equals(page.categoryId()) && !ClientSettingsForm.KEYBOARD.equals(page.id());
+    }
+
+    /**
+     * A key binding page's preview: a keyboard whose keys the page binds glow, the pointed binding's key and modifiers
+     * lit and a key bound twice in red; the page's keys the keyboard lacks are listed under it.
+     */
+    private final class KeyboardSample extends Table {
+        /** A key's width, in the width of a letter's key. */
+        private record Key(int code, String label, float width) { }
+
+        private static final float UNIT = 18;
+        private static final float GAP = 2;
+        private static final int NONE = KeyEvent.VK_UNDEFINED;
+        private static final List<List<Key>> MAIN = List.of(
+              keys("Esc:" + KeyEvent.VK_ESCAPE, "|0.5", "F1:" + KeyEvent.VK_F1, "F2:" + KeyEvent.VK_F2,
+                    "F3:" + KeyEvent.VK_F3, "F4:" + KeyEvent.VK_F4, "|0.5", "F5:" + KeyEvent.VK_F5,
+                    "F6:" + KeyEvent.VK_F6, "F7:" + KeyEvent.VK_F7, "F8:" + KeyEvent.VK_F8, "|0.5",
+                    "F9:" + KeyEvent.VK_F9, "F10:" + KeyEvent.VK_F10, "F11:" + KeyEvent.VK_F11,
+                    "F12:" + KeyEvent.VK_F12),
+              keys("`:" + KeyEvent.VK_BACK_QUOTE, "1", "2", "3", "4", "5", "6", "7", "8", "9", "0",
+                    "-:" + KeyEvent.VK_MINUS, "=:" + KeyEvent.VK_EQUALS, "\u2190:" + KeyEvent.VK_BACK_SPACE + ":2"),
+              keys("Tab:" + KeyEvent.VK_TAB + ":1.5", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P",
+                    "[:" + KeyEvent.VK_OPEN_BRACKET, "]:" + KeyEvent.VK_CLOSE_BRACKET,
+                    "\\:" + KeyEvent.VK_BACK_SLASH + ":1.5"),
+              keys("Caps:" + KeyEvent.VK_CAPS_LOCK + ":1.75", "A", "S", "D", "F", "G", "H", "J", "K", "L",
+                    ";:" + KeyEvent.VK_SEMICOLON, "':" + KeyEvent.VK_QUOTE, "Enter:" + KeyEvent.VK_ENTER + ":2.25"),
+              keys("Shift:" + KeyEvent.VK_SHIFT + ":2.25", "Z", "X", "C", "V", "B", "N", "M",
+                    ",:" + KeyEvent.VK_COMMA, ".:" + KeyEvent.VK_PERIOD, "/:" + KeyEvent.VK_SLASH,
+                    "Shift:" + KeyEvent.VK_SHIFT + ":2.75"),
+              keys("Ctrl:" + KeyEvent.VK_CONTROL + ":1.5", "Meta:" + KeyEvent.VK_META + ":1.25",
+                    "Alt:" + KeyEvent.VK_ALT + ":1.5", " :" + KeyEvent.VK_SPACE + ":6.5",
+                    "Alt:" + KeyEvent.VK_ALT + ":1.5", "Meta:" + KeyEvent.VK_META + ":1.25",
+                    "Ctrl:" + KeyEvent.VK_CONTROL + ":1.5"));
+        /** The keys beside the letters: the editing block, the arrows and the keypad's plus and minus. */
+        private static final List<List<Key>> SIDE = List.of(
+              keys("Ins:" + KeyEvent.VK_INSERT + ":1.25", "Home:" + KeyEvent.VK_HOME + ":1.25",
+                    "PgUp:" + KeyEvent.VK_PAGE_UP + ":1.25", "|0.75", "|1", "\u2191:" + KeyEvent.VK_UP, "|1",
+                    "|0.75", "-:" + KeyEvent.VK_SUBTRACT),
+              keys("Del:" + KeyEvent.VK_DELETE + ":1.25", "End:" + KeyEvent.VK_END + ":1.25",
+                    "PgDn:" + KeyEvent.VK_PAGE_DOWN + ":1.25", "|0.75", "\u2190:" + KeyEvent.VK_LEFT,
+                    "\u2193:" + KeyEvent.VK_DOWN, "\u2192:" + KeyEvent.VK_RIGHT, "|0.75", "+:" + KeyEvent.VK_ADD));
+        private static final Set<Integer> SHOWN = new HashSet<>();
+
+        static {
+            for (List<List<Key>> block : List.of(MAIN, SIDE)) {
+                block.forEach(line -> line.forEach(key -> SHOWN.add(key.code())));
+            }
+        }
+
+        private final Page page;
+        /** Each shown key's caps (a modifier has two), by its key code. */
+        private final Map<Integer, List<Table>> caps = new HashMap<>();
+        private final Label others;
+        private @Nullable Row pointed;
+
+        KeyboardSample(Page page) {
+            this.page = page;
+            top();
+            setName("client-keyboard");
+            defaults().left();
+            add(kit.caption(Messages.getString("ClientSettings.keys"), true)).growX().row();
+            add(view.wrapped(Messages.getString("ClientSettings.keys.summary"), "small", "text.muted"))
+                  .growX().padTop(space("xs")).row();
+            add(block(MAIN)).padTop(space("md")).row();
+            add(block(SIDE)).padTop(space("sm")).row();
+            others = view.wrapped("", "small", "text.secondary");
+            others.setName("client-keyboard-others");
+            add(others).growX().padTop(space("md")).row();
+            show();
+        }
+
+        /**
+         * Keys from "label:code:width", a label alone for a letter or a digit, or "|width" for a gap; the code is
+         * the AWT key code.
+         */
+        private static List<Key> keys(String... specs) {
+            List<Key> keys = new ArrayList<>();
+            for (String spec : specs) {
+                if (spec.startsWith("|")) {
+                    keys.add(new Key(NONE, "", Float.parseFloat(spec.substring(1))));
+                    continue;
+                }
+                int colon = spec.indexOf(':', 1);
+                if (colon < 0) {
+                    keys.add(new Key(spec.charAt(0), spec, 1));
+                    continue;
+                }
+                String[] rest = spec.substring(colon + 1).split(":");
+                keys.add(new Key(Integer.parseInt(rest[0]), spec.substring(0, colon),
+                      rest.length > 1 ? Float.parseFloat(rest[1]) : 1));
+            }
+            return keys;
+        }
+
+        private Table block(List<List<Key>> lines) {
+            Table block = new Table();
+            block.left();
+            for (List<Key> line : lines) {
+                Table keys = new Table();
+                keys.left();
+                for (Key key : line) {
+                    float width = key.width() * UNIT - GAP;
+                    if (key.code() == NONE) {
+                        keys.add().width(width).padRight(GAP);
+                        continue;
+                    }
+                    Table cap = new Table();
+                    cap.pad(0);
+                    cap.setName("client-key-" + key.code());
+                    Label label = kit.typeLabel(key.label(), "caption", "text.secondary");
+                    label.setAlignment(Align.center);
+                    cap.add(label).grow();
+                    caps.computeIfAbsent(key.code(), code -> new ArrayList<>()).add(cap);
+                    keys.add(cap).width(width).height(UNIT).padRight(GAP);
+                }
+                block.add(keys).left().padBottom(GAP).row();
+            }
+            return block;
+        }
+
+        /** Lights the binding under the pointer, or none. */
+        void point(@Nullable Row row) {
+            pointed = row != null && row.name().startsWith(ClientSettingsForm.BIND) ? row : null;
+            show();
+        }
+
+        /** Shows the page's bindings as the form has them now. */
+        void show() {
+            Set<Integer> bound = new HashSet<>();
+            Set<Integer> twice = new HashSet<>();
+            Set<String> unshown = new TreeSet<>();
+            for (SettingsForm.Section section : page.sections()) {
+                for (Row row : section.rows()) {
+                    int code = SettingsForm.keyCode(form.text(row.name()));
+                    if (!row.name().startsWith(ClientSettingsForm.BIND) || code == 0) {
+                        continue;
+                    }
+                    bound.add(code);
+                    if (form.error(row.name()) != null) {
+                        twice.add(code);
+                    }
+                    if (!SHOWN.contains(code)) {
+                        unshown.add(KeyEvent.getKeyText(code));
+                    }
+                }
+            }
+            Set<Integer> lit = new HashSet<>();
+            if (pointed != null) {
+                String value = form.text(pointed.name());
+                int code = SettingsForm.keyCode(value);
+                if (code != 0) {
+                    lit.add(code);
+                    int modifiers = SettingsForm.keyModifiers(value);
+                    for (int[] modifier : new int[][] { { KeyEvent.CTRL_DOWN_MASK, KeyEvent.VK_CONTROL },
+                                                        { KeyEvent.ALT_DOWN_MASK, KeyEvent.VK_ALT },
+                                                        { KeyEvent.SHIFT_DOWN_MASK, KeyEvent.VK_SHIFT },
+                                                        { KeyEvent.META_DOWN_MASK, KeyEvent.VK_META } }) {
+                        if ((modifiers & modifier[0]) != 0) {
+                            lit.add(modifier[1]);
+                        }
+                    }
+                }
+            }
+            for (Map.Entry<Integer, List<Table>> key : caps.entrySet()) {
+                int code = key.getKey();
+                String tone;
+                if (twice.contains(code)) {
+                    tone = lit.contains(code) ? "danger-lit" : "danger-over";
+                } else if (lit.contains(code)) {
+                    tone = "accent-lit";
+                } else if (bound.contains(code)) {
+                    tone = "accent-over";
+                } else {
+                    tone = "neutral";
+                }
+                for (Table cap : key.getValue()) {
+                    cap.setBackground(kit.skin.getDrawable(UiTheme.TOKEN_CHIP + tone));
+                    cap.pad(0);
+                    Label label = (Label) cap.getChildren().first();
+                    Label.LabelStyle style = label.getStyle();
+                    style.fontColor = UiTheme.tokenColor("neutral".equals(tone) ? "text.muted" : "text.primary");
+                    label.setStyle(style);
+                }
+            }
+            others.setText(unshown.isEmpty() ? ""
+                  : Messages.getString("ClientSettings.keys.others", String.join(", ", unshown)));
+        }
+    }
+
     /**
      * Writes what is set into the preferences, so it takes effect at once; while a write is under way, the next waits
      * for it and writes what is set by then.
@@ -381,7 +595,8 @@ final class ClientSettingsView {
             return;
         }
         applying = true;
-        host.edt(form.apply(), () -> {
+        host.edt(swing(form.apply()), () -> {
+            GpuHost.tooltipDelay();
             applying = false;
             if (pending) {
                 pending = false;
@@ -395,11 +610,22 @@ final class ClientSettingsView {
             return;
         }
         confirmed = true;
-        Runnable writer = form.apply();
+        Runnable writer = swing(form.apply());
         host.edt(() -> {
             writer.run();
             host.save();
-        }, close);
+        }, () -> {
+            GpuHost.tooltipDelay();
+            close.run();
+        });
+    }
+
+    /** The writer, then the Swing tooltips' delay as it wrote it. */
+    private static Runnable swing(Runnable writer) {
+        return () -> {
+            writer.run();
+            ToolTipManager.sharedInstance().setInitialDelay(GUIPreferences.getInstance().getTooltipDelay());
+        };
     }
 
     /** As the card closes: unless OK closed it, the settings go back to what they were when it opened. */
@@ -413,7 +639,7 @@ final class ClientSettingsView {
             files = null;
         }
         if (!confirmed) {
-            host.edt(form.revert(), () -> { });
+            host.edt(swing(form.revert()), GpuHost::tooltipDelay);
         }
     }
 

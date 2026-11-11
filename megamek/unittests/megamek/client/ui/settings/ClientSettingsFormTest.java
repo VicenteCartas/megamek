@@ -7,13 +7,20 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.panels.CommonSettingsPane;
+import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceStore;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -21,9 +28,16 @@ class ClientSettingsFormTest {
     private PreferenceStore store;
     private ClientPreferences client;
     private final List<String> heard = new ArrayList<>();
+    /** The bindings as they were before the test, which writes into the shared commands. */
+    private final Map<KeyCommandBind, int[]> binds = new EnumMap<>(KeyCommandBind.class);
 
     @BeforeEach
     void setUp() {
+        for (KeyCommandBind bind : KeyCommandBind.values()) {
+            binds.put(bind, new int[] { bind.key, bind.modifiers });
+            bind.key = bind.keyDefault;
+            bind.modifiers = bind.modifiersDefault;
+        }
         store = new PreferenceStore();
         store.setDefault(GUIPreferences.MASTER_VOLUME, 80);
         store.setDefault(GUIPreferences.SOUND_MUTE_CHAT, true);
@@ -37,8 +51,19 @@ class ClientSettingsFormTest {
         store.setDefault(GUIPreferences.BOARD_UI_SCALE, 1f);
         store.setDefault(GUIPreferences.COLOR_BLIND_PALETTE, false);
         store.setDefault(GUIPreferences.REDUCE_MOTION, false);
+        store.setDefault(GUIPreferences.ADVANCED_KEY_REPEAT_DELAY, 0);
+        store.setDefault(GUIPreferences.ADVANCED_KEY_REPEAT_RATE, 20);
+        store.setDefault(GUIPreferences.TOOLTIP_DELAY, 1000);
         store.addPreferenceChangeListener(event -> heard.add(event.getName()));
         client = new ClientPreferences(new PreferenceStore());
+    }
+
+    @AfterEach
+    void tearDown() {
+        binds.forEach((bind, key) -> {
+            bind.key = key[0];
+            bind.modifiers = key[1];
+        });
     }
 
     @Test
@@ -115,6 +140,7 @@ class ClientSettingsFormTest {
 
         assertEquals(ClientSettingsForm.AUDIO, form.pageOf(CommonSettingsPane.SETTINGS_AUDIO));
         assertEquals(ClientSettingsForm.DISPLAY, form.pageOf(CommonSettingsPane.SETTINGS_MAIN));
+        assertEquals(ClientSettingsForm.KEYBOARD, form.pageOf(CommonSettingsPane.SETTINGS_KEYBINDS));
         assertNull(form.pageOf(CommonSettingsPane.SETTINGS_OVERLAYS));
         assertNull(form.pageOf(null));
     }
@@ -183,5 +209,115 @@ class ClientSettingsFormTest {
         form.search("blind");
         assertEquals(List.of(ClientSettingsForm.DISPLAY), form.visiblePages().stream().map(SettingsForm.Page::id)
               .toList());
+    }
+
+    @Test
+    void everyCommandHasItsPlaceOnce() {
+        assertTrue(ClientSettingsForm.unlisted().isEmpty(), () -> "not on a Controls page: "
+              + ClientSettingsForm.unlisted());
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+        List<String> rows = form.pages().stream().flatMap(page -> page.sections().stream())
+              .flatMap(section -> section.rows().stream()).map(SettingsForm.Row::name)
+              .filter(name -> name.startsWith(ClientSettingsForm.BIND)).toList();
+
+        for (KeyCommandBind bind : KeyCommandBind.values()) {
+            long times = rows.stream().filter((ClientSettingsForm.BIND + bind.cmd)::equals).count();
+            assertEquals(ClientSettingsForm.DROPPED_BINDS.contains(bind) ? 0 : 1, times, bind.cmd);
+        }
+    }
+
+    @Test
+    void theShippedBindingsHaveNoProblem() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+
+        for (KeyCommandBind bind : KeyCommandBind.values()) {
+            if (!ClientSettingsForm.DROPPED_BINDS.contains(bind)) {
+                assertNull(form.error(ClientSettingsForm.BIND + bind.cmd), bind.cmd);
+            }
+        }
+    }
+
+    @Test
+    void aBindingIsWrittenAndPutBackAndTheBindingsAreStoredOnce() {
+        AtomicInteger stored = new AtomicInteger();
+        ClientSettingsForm form = new ClientSettingsForm(store, client, stored::incrementAndGet);
+        String name = ClientSettingsForm.BIND + KeyCommandBind.FIRE.cmd;
+        String shipped = SettingsForm.key(KeyCommandBind.FIRE.keyDefault, KeyCommandBind.FIRE.modifiersDefault);
+
+        assertEquals(shipped, form.text(name));
+        assertEquals(shipped, form.defaultText(name));
+        form.text(name, SettingsForm.key(KeyEvent.VK_F7, InputEvent.SHIFT_DOWN_MASK));
+        assertTrue(form.changed(name));
+        form.apply().run();
+
+        assertEquals(KeyEvent.VK_F7, KeyCommandBind.FIRE.key);
+        assertEquals(InputEvent.SHIFT_DOWN_MASK, KeyCommandBind.FIRE.modifiers);
+        assertEquals(1, stored.get());
+        form.apply().run();
+        assertEquals(1, stored.get(), "bindings already held are not stored again");
+        form.bool(GUIPreferences.REDUCE_MOTION, true);
+        form.apply().run();
+        assertEquals(1, stored.get(), "only a changed binding stores them");
+
+        form.revert().run();
+        assertEquals(KeyCommandBind.FIRE.keyDefault, KeyCommandBind.FIRE.key);
+        assertEquals(2, stored.get());
+    }
+
+    @Test
+    void anUnboundCommandReadsAsNoKey() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+        String name = ClientSettingsForm.BIND + KeyCommandBind.FIRE.cmd;
+
+        form.text(name, SettingsForm.key(0, InputEvent.CTRL_DOWN_MASK));
+        assertEquals("0,0", form.text(name));
+        assertNull(form.error(name));
+        form.apply().run();
+        assertEquals(0, KeyCommandBind.FIRE.key);
+        assertTrue(form.customized(name));
+    }
+
+    @Test
+    void aKeyAnExclusiveCommandHasIsAClash() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+        String fire = ClientSettingsForm.BIND + KeyCommandBind.FIRE.cmd;
+        KeyCommandBind exclusive = List.of(KeyCommandBind.values()).stream()
+              .filter(bind -> (bind.isExclusive || bind.isMenuBar) && bind != KeyCommandBind.FIRE && bind.key != 0
+                    && !ClientSettingsForm.DROPPED_BINDS.contains(bind))
+              .findFirst().orElseThrow();
+
+        form.text(fire, SettingsForm.key(exclusive.key, exclusive.modifiers));
+
+        String problem = form.error(fire);
+        assertNotNull(problem);
+        assertTrue(problem.contains(megamek.client.ui.Messages.getString("KeyBinds.cmdNames." + exclusive.cmd)),
+              problem);
+        assertNotNull(form.error(ClientSettingsForm.BIND + exclusive.cmd), "both of them show it");
+    }
+
+    @Test
+    void copyAndPasteStayTheirs() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+        String fire = ClientSettingsForm.BIND + KeyCommandBind.FIRE.cmd;
+
+        form.text(fire, SettingsForm.key(KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK));
+        assertNotNull(form.error(fire));
+        form.text(fire, SettingsForm.key(KeyEvent.VK_V, InputEvent.ALT_DOWN_MASK));
+        assertNull(form.error(fire));
+    }
+
+    @Test
+    void theKeyboardPageSetsTheRepeatAndTheTooltips() {
+        ClientSettingsForm form = new ClientSettingsForm(store, client);
+
+        assertEquals("1000", form.text(GUIPreferences.TOOLTIP_DELAY));
+        form.text(GUIPreferences.TOOLTIP_DELAY, "240");
+        form.text(GUIPreferences.ADVANCED_KEY_REPEAT_RATE, "35");
+        form.apply().run();
+
+        assertEquals(200, store.getInt(GUIPreferences.TOOLTIP_DELAY), "the delay snaps to its slider's steps");
+        assertEquals(35, store.getInt(GUIPreferences.ADVANCED_KEY_REPEAT_RATE));
+        form.search("hotkeys");
+        assertTrue(form.visiblePages().stream().allMatch(page -> ClientSettingsForm.CONTROLS.equals(page.categoryId())));
     }
 }

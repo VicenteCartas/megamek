@@ -41,6 +41,7 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.UIUtil;
 import megamek.codeUtilities.StringUtility;
 import megamek.common.Hex;
+import megamek.common.KeyBindParser;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
 import megamek.common.board.BoardSceneryLayouts;
@@ -124,6 +125,10 @@ final class GpuMapSource implements BoardSource {
         // Label/color preferences affect presentation only; interned terrain pixels and feature geometry are reused.
         dirtyAll();
     });
+    /** New key bindings change only the menus' shortcuts. */
+    private final IPreferenceChangeListener keyBinds = event -> onSwing(() -> {
+        if (!isClosed()) { refresh(); }
+    });
     private Board board;
     private List<BoardScene.Tile> tiles = List.of();
     /** EDT-owned derived editor annotations; never supplied to map previews or gameplay. */
@@ -192,6 +197,7 @@ final class GpuMapSource implements BoardSource {
             game.addGameListener(gameListener);
             PreferenceManager.getClientPreferences().addPreferenceChangeListener(preferences);
             GUIPreferences.getInstance().addPreferenceChangeListener(preferences);
+            KeyBindParser.addPreferenceChangeListener(keyBinds);
             timer.start();
         } catch (RuntimeException | Error failure) {
             close();
@@ -876,6 +882,7 @@ final class GpuMapSource implements BoardSource {
         if (board != null) { board.removeBoardListener(boardListener); }
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(preferences);
         GUIPreferences.getInstance().removePreferenceChangeListener(preferences);
+        KeyBindParser.removePreferenceChangeListener(keyBinds);
         terrain.close();
         images.clear();
         tiles = List.of();
