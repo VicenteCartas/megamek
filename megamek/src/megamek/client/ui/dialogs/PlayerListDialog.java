@@ -53,9 +53,9 @@ import javax.swing.JList;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.common.game.IGame;
 import megamek.common.Player;
 import megamek.common.Team;
+import megamek.common.game.IGame;
 
 public class PlayerListDialog extends JDialog implements ActionListener {
 
@@ -113,7 +113,7 @@ public class PlayerListDialog extends JDialog implements ActionListener {
     }
 
     /** @return The game's players list sorted by id. */
-    private static List<Player> sortedPlayerList(IGame game) {
+    public static List<Player> sortedPlayerList(IGame game) {
         List<Player> playerList = game.getPlayersList();
         playerList.sort(Comparator.comparingInt(Player::getId));
         return playerList;
@@ -127,58 +127,65 @@ public class PlayerListDialog extends JDialog implements ActionListener {
         ((DefaultListModel<String>) playerList.getModel()).removeAllElements();
 
         for (Player player : sortedPlayerList(client.getGame())) {
-            StringBuilder playerDisplay = new StringBuilder(String.format("%-12s", player.getName()));
-
-            // Append team information
-            if (displayTeam) {
-                Team team = client.getGame().getTeamForPlayer(player);
-                if (team != null) {
-                    if (team.getId() == Player.TEAM_NONE) {
-                        playerDisplay.append(Messages.getString("PlayerListDialog.NoTeam"));
-                    } else {
-                        playerDisplay.append(MessageFormat.format(Messages.getString("PlayerListDialog.Team"),
-                              team.getId()));
-                    }
-                } else {
-                    playerDisplay.append(Messages.getString("PlayerListDialog.TeamLess"));
-                }
-            }
-
-            if (player.isGameMaster()) {
-                playerDisplay.append(Messages.getString("PlayerListDialog.player_gm"));
-            }
-
-            if (player.isGhost()) {
-                playerDisplay.append(Messages.getString("PlayerListDialog.player_ghost"));
-            } else {
-                if (player.isBot()) {
-                    playerDisplay.append(Messages.getString("PlayerListDialog.player_bot"));
-                } else {
-                    playerDisplay.append(Messages.getString("PlayerListDialog.player_human"));
-                }
-                if (player.isObserver()) {
-                    playerDisplay.append(Messages.getString("PlayerListDialog.player_observer"));
-                } else if (player.isDone()) {
-                    playerDisplay.append(Messages.getString("PlayerListDialog.player_done"));
-                }
-            }
-
-            // this may be too much detail long term, but is useful for understanding the modes
-            // during testing
-            if (player.getSeeAll()) {
-                playerDisplay.append(Messages.getString("PlayerListDialog.player_seeall"));
-            }
-
-            if (player.getSingleBlind()) {
-                playerDisplay.append(Messages.getString("PlayerListDialog.player_singleblind"));
-            }
-
-            if (player.canIgnoreDoubleBlind()) {
-                playerDisplay.append(Messages.getString("PlayerListDialog.player_ignoreDoubleBlind"));
-            }
-
-            ((DefaultListModel<String>) playerList.getModel()).addElement(playerDisplay.toString());
+            ((DefaultListModel<String>) playerList.getModel()).addElement(String.format("%-12s", player.getName())
+                  + details(client, player, displayTeam));
         }
+    }
+
+    /**
+     * The list's text after the player's name: the team, when {@code displayTeam}, then the player's roles and modes,
+     * each with its own leading space.
+     */
+    public static String details(Client client, Player player, boolean displayTeam) {
+        StringBuilder playerDisplay = new StringBuilder();
+        // Append team information
+        if (displayTeam) {
+            Team team = client.getGame().getTeamForPlayer(player);
+            if (team != null) {
+                if (team.getId() == Player.TEAM_NONE) {
+                    playerDisplay.append(Messages.getString("PlayerListDialog.NoTeam"));
+                } else {
+                    playerDisplay.append(MessageFormat.format(Messages.getString("PlayerListDialog.Team"),
+                          team.getId()));
+                }
+            } else {
+                playerDisplay.append(Messages.getString("PlayerListDialog.TeamLess"));
+            }
+        }
+
+        if (player.isGameMaster()) {
+            playerDisplay.append(Messages.getString("PlayerListDialog.player_gm"));
+        }
+
+        if (player.isGhost()) {
+            playerDisplay.append(Messages.getString("PlayerListDialog.player_ghost"));
+        } else {
+            if (player.isBot()) {
+                playerDisplay.append(Messages.getString("PlayerListDialog.player_bot"));
+            } else {
+                playerDisplay.append(Messages.getString("PlayerListDialog.player_human"));
+            }
+            if (player.isObserver()) {
+                playerDisplay.append(Messages.getString("PlayerListDialog.player_observer"));
+            } else if (player.isDone()) {
+                playerDisplay.append(Messages.getString("PlayerListDialog.player_done"));
+            }
+        }
+
+        // this may be too much detail long term, but is useful for understanding the modes
+        // during testing
+        if (player.getSeeAll()) {
+            playerDisplay.append(Messages.getString("PlayerListDialog.player_seeall"));
+        }
+
+        if (player.getSingleBlind()) {
+            playerDisplay.append(Messages.getString("PlayerListDialog.player_singleblind"));
+        }
+
+        if (player.canIgnoreDoubleBlind()) {
+            playerDisplay.append(Messages.getString("PlayerListDialog.player_ignoreDoubleBlind"));
+        }
+        return playerDisplay.toString();
     }
 
     public void refreshPlayerList() {

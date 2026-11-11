@@ -211,7 +211,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
             return;
         }
         if (GpuBoardWindow.isRunning()) {
-            javax.swing.JOptionPane.showMessageDialog(owner, Messages.getString("GpuBoard.alreadyOpen"));
+            GpuBoardWindow.alreadyOpen(owner);
             return;
         }
         GpuUiLibraryWindow window = new GpuUiLibraryWindow(GUIPreferences.getInstance().getGUIScale());

@@ -155,6 +155,7 @@ final class GpuMapSource implements BoardSource {
     private boolean choosingPrint;
     private Supplier<GpuNativeDialogOwner> fileDialogOwner = () -> null;
     private Consumer<Boolean> fileDialogBusy = busy -> { };
+    private Notice notice = (title, text, error) -> false;
     private final AtomicReference<GpuBoardPrint.Request> printRequest = new AtomicReference<>();
     /** EDT-owned: the board tagger runs ({@link #runBoardTagger}). */
     private boolean tagging;
@@ -381,8 +382,11 @@ final class GpuMapSource implements BoardSource {
                     tagging = false;
                     if (closed) { return; }
                     editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.BOARD, "autotags", ""), boardGeneration);
-                    JOptionPane.showMessageDialog(owner, Messages.getString("BoardEditor.boardRunBoardTagger.report"),
-                          Messages.getString("BoardEditor.boardRunBoardTagger.title"), JOptionPane.PLAIN_MESSAGE);
+                    String title = Messages.getString("BoardEditor.boardRunBoardTagger.title");
+                    String report = Messages.getString("BoardEditor.boardRunBoardTagger.report");
+                    if (!notice.show(title, report, false)) {
+                        JOptionPane.showMessageDialog(owner, report, title, JOptionPane.PLAIN_MESSAGE);
+                    }
                 });
             }
         }, "board-tagger");
@@ -461,6 +465,16 @@ final class GpuMapSource implements BoardSource {
         fileDialogBusy = busy;
     }
 
+    /** Shows a message, or an error, over the scene; false when the caller must show it in Swing instead. */
+    interface Notice {
+        boolean show(String title, String text, boolean error);
+    }
+
+    /** EDT: where the scene's messages show, in place of Swing's message boxes over the owner. */
+    void notices(Notice notice) {
+        this.notice = notice;
+    }
+
     /** Print writes the 3D snapshot as a printable JPEG, to a file chosen in the system's save dialog. */
     private void choosePrint() {
         if (closed || printing || choosingPrint) { return; }
@@ -510,14 +524,22 @@ final class GpuMapSource implements BoardSource {
         return SystemFileDialog.withExtension(chooser.getSelectedFile(), request.filter()).toPath();
     }
 
-    private void printFailed(Exception failure) { printFailed(owner, failure); }
+    private void printFailed(Exception failure) {
+        if (!notice.show(Messages.getString("ClientGUI.errorSavingFile"), printFailure(failure), true)) {
+            printFailed(owner, failure);
+        }
+    }
 
+    /** The Legacy 2D preview's print failure, in a Swing message box over its Swing window. */
     static void printFailed(Window owner, Exception failure) {
+        JOptionPane.showMessageDialog(owner, printFailure(failure), Messages.getString("ClientGUI.errorSavingFile"),
+              JOptionPane.ERROR_MESSAGE);
+    }
+
+    private static String printFailure(Exception failure) {
         LOGGER.error(failure, "Unable to save printable board");
         String message = failure.getMessage();
-        if (message == null || message.isBlank()) { message = failure.toString(); }
-        JOptionPane.showMessageDialog(owner, message, Messages.getString("ClientGUI.errorSavingFile"),
-              JOptionPane.ERROR_MESSAGE);
+        return message == null || message.isBlank() ? failure.toString() : message;
     }
 
     @Override

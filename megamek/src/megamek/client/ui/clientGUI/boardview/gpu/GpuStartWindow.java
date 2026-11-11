@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
@@ -36,9 +37,11 @@ import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.utils.Os;
 import com.badlogic.gdx.utils.SharedLibraryLoader;
 import jakarta.annotation.Nullable;
+import megamek.client.Client;
 import megamek.client.lobby.LobbyError;
 import megamek.client.lobby.LobbyFiles;
 import megamek.client.ui.Messages;
+import megamek.client.ui.PackageBugReportAction;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.game.IGame;
 import megamek.common.scenario.Scenario;
@@ -452,6 +455,31 @@ public final class GpuStartWindow {
     /** EDT: true while the start window is open or opening. */
     public static boolean isOpen() {
         return open != null;
+    }
+
+    /**
+     * EDT: shows Report a Bug natively on the start screen; its button packages {@code client}'s game, when one runs,
+     * and the logs. False, showing nothing, when the start screen is not open.
+     */
+    public static boolean showBugReport(Supplier<Client> client) {
+        GpuStartWindow window = open;
+        if (window == null) {
+            return false;
+        }
+        PackageBugReportAction packaging = GpuBugReport.packaging(client, window.files,
+              card -> window.post(() -> card.accept(window.screen.dialogs)));
+        window.post(() -> GpuBugReport.open(window.screen.dialogs, packaging));
+        return true;
+    }
+
+    /** EDT: shows About natively on the start screen; false, showing nothing, when it is not open. */
+    public static boolean showAbout() {
+        GpuStartWindow window = open;
+        if (window == null) {
+            return false;
+        }
+        window.post(() -> window.screen.dialogs.about());
+        return true;
     }
 
     /**

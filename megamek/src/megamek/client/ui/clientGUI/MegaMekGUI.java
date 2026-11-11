@@ -765,10 +765,18 @@ public class MegaMekGUI implements IPreferenceChangeListener {
             case SETTINGS -> showSettings();
             case HELP_CONTENTS -> new MMReadMeHelpDialog(frame).setVisible(true);
             case HELP_SKINNING -> showSkinningHowTo();
-            case REPORT_BUG -> BugReportDialog.showWithGameTools(frame, this::currentTotalWarfareClient);
+            case REPORT_BUG -> {
+                if (!GpuStartWindow.showBugReport(this::currentTotalWarfareClient)) {
+                    BugReportDialog.showWithGameTools(frame, this::currentTotalWarfareClient);
+                }
+            }
             case COPY_SYSTEM_DATA -> new CopySystemDataAction().actionPerformed(null);
             case RESET_PROMPTS -> MegaMek.getMMOptions().setNagDialogIgnore(MMConstants.NAG_BOT_README, false);
-            case ABOUT -> new MMAboutDialog(frame).show();
+            case ABOUT -> {
+                if (!GpuStartWindow.showAbout()) {
+                    new MMAboutDialog(frame).show();
+                }
+            }
             case QUIT -> quit();
         }
     }

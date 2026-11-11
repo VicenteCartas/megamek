@@ -74,6 +74,7 @@ import megamek.client.lobby.RequisitionSkills;
 import megamek.client.lobby.UnitConfigForm;
 import megamek.client.lobby.VictoryConditionsForm;
 import megamek.client.ui.Messages;
+import megamek.client.ui.PackageBugReportAction;
 import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -1663,6 +1664,13 @@ public final class GpuLobbyWindow {
     /** The lobby's file routes, which ask the system's file dialog; Swing thread. */
     LobbyFiles files() {
         return files;
+    }
+
+    /** Any thread: shows Report a Bug natively over the lobby; its button packages the game and the logs. */
+    void reportBug() {
+        PackageBugReportAction packaging = GpuBugReport.packaging(gui::getClient, files,
+              open -> onScreen(shown -> shown.nativeDialog(open)));
+        onScreen(shown -> shown.nativeDialog(dialogs -> GpuBugReport.open(dialogs, packaging)));
     }
 
     /** EDT: asks for the file of a lobby file route in the system's file dialog; {@code chosen} gets null if none. */

@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javax.swing.AbstractAction;
 import javax.swing.JFileChooser;
@@ -100,8 +101,33 @@ public class PackageBugReportAction extends AbstractAction {
     /** Width of the result message before the user's GUI scale is applied, matching {@code BugReportDialog}. */
     private static final int UNSCALED_MESSAGE_WIDTH = 420;
 
-    private final Component parent;
+    /**
+     * How the action talks to the player: where the archive goes, and what came of it. Swing dialogs by default; the
+     * libGDX window answers with its own cards. Every method is called on the Swing thread.
+     */
+    public interface Prompts {
+        /**
+         * Asks where the archive should go, then hands the file to {@code chosen} on the Swing thread, or null when
+         * the player cancels.
+         */
+        void chooseArchive(Consumer<File> chosen);
+
+        /** Tells the player the archive could not be written. */
+        void failed(String title, String text);
+
+        /**
+         * Tells the player what the archive holds, and offers the issue form and copying the archive.
+         *
+         * @param caution   a note about anything that did not go to plan, or {@code null}
+         * @param issueForm opens the MegaMek issue form with the archive on the clipboard; runs on the Swing thread
+         * @param copyFile  puts the archive on the clipboard; runs on the Swing thread
+         */
+        void result(BugReportBundle.BundleResult result, @Nullable String caution, Runnable issueForm,
+              Runnable copyFile);
+    }
+
     private final Supplier<Client> clientSupplier;
+    private final Prompts prompts;
 
     /**
      * Creates the action.
@@ -113,17 +139,71 @@ public class PackageBugReportAction extends AbstractAction {
      *                       be {@code null}, and may return {@code null}; both mean "no game running".
      */
     public PackageBugReportAction(@Nullable Component parent, @Nullable Supplier<Client> clientSupplier) {
+        this(parent, clientSupplier, null);
+    }
+
+    /**
+     * Creates the action with its own prompts.
+     *
+     * @param prompts how the action asks and tells the player; {@code null} for Swing dialogs over {@code parent}
+     *
+     * @see #PackageBugReportAction(Component, Supplier)
+     */
+    public PackageBugReportAction(@Nullable Component parent, @Nullable Supplier<Client> clientSupplier,
+          @Nullable Prompts prompts) {
         super(I18N.get("package.text"));
-        this.parent = parent;
         this.clientSupplier = clientSupplier;
+        this.prompts = (prompts == null) ? new SwingPrompts(parent) : prompts;
         putValue(AbstractAction.SHORT_DESCRIPTION, I18N.get("package.tooltip"));
+    }
+
+    /** The folder the archive chooser opens on. */
+    public static File archiveDirectory() {
+        return new File(MMConstants.SAVEGAME_DIR);
+    }
+
+    /** The archive name the chooser suggests: {@code MegaMek-BugReport.zip}, stamped with the date and time. */
+    public static String suggestedArchiveName() {
+        return StringUtil.addDateTimeStamp(DEFAULT_ARCHIVE_NAME);
+    }
+
+    /** The archive chooser's title. */
+    public static String chooserTitle() {
+        return I18N.get("package.chooser.title");
+    }
+
+    /** The name of the archive chooser's file type. */
+    public static String chooserFilter() {
+        return I18N.get("package.chooser.filter");
+    }
+
+    /**
+     * What the result says, as plain text: the caution first, then what the archive holds and what was left out, one
+     * entry a line, and what to do next.
+     */
+    public static String resultText(BugReportBundle.BundleResult result, @Nullable String caution) {
+        StringBuilder text = new StringBuilder();
+        if (caution != null) {
+            text.append(caution).append("\n\n");
+        }
+        text.append(I18N.get("package.result.included", result.archiveFile().getPath()));
+        for (String entryName : result.includedEntries()) {
+            text.append("\n  \u2022 ").append(entryName);
+        }
+        if (result.hasSkippedEntries()) {
+            text.append("\n\n").append(I18N.get("package.result.skipped"));
+            for (String entryName : result.skippedEntries()) {
+                text.append("\n  \u2022 ").append(entryName);
+            }
+        }
+        return text.append("\n\n").append(I18N.get("package.result.next")).toString();
     }
 
     /**
      * Copies this action, matching the behaviour of the other actions in the suite.
      *
-     * <p>Both fields are immutable references that the copy is meant to share - the same parent window and the same
-     * client supplier - so the shallow copy {@link Object#clone()} makes is exactly what is wanted here.</p>
+     * <p>Every field is an immutable reference that the copy is meant to share - the same client supplier and the same
+     * prompts - so the shallow copy {@link Object#clone()} makes is exactly what is wanted here.</p>
      *
      * @return the copy, or {@code null} if it could not be made
      */
@@ -140,12 +220,29 @@ public class PackageBugReportAction extends AbstractAction {
 
     @Override
     public void actionPerformed(ActionEvent event) {
-        File archiveFile = chooseArchiveFile();
-        if (archiveFile == null) {
-            LOGGER.debug("[BugReport] Player cancelled the archive location chooser");
-            return;
-        }
+        prompts.chooseArchive(chosenFile -> {
+            if (chosenFile == null) {
+                LOGGER.debug("[BugReport] Player cancelled the archive location chooser");
+            } else {
+                packageInto(withZipExtension(chosenFile));
+            }
+        });
+    }
 
+    /**
+     * @return {@code file} with a {@code .zip} extension guaranteed, made absolute so the containing directory is
+     *       always resolvable; a relative choice would leave getParentFile() null and the save request would have
+     *       nowhere to point.
+     */
+    private static File withZipExtension(File file) {
+        File zipFile = file;
+        if (!file.getName().toLowerCase(Locale.ROOT).endsWith(ARCHIVE_EXTENSION)) {
+            zipFile = new File(file.getParentFile(), file.getName() + ARCHIVE_EXTENSION);
+        }
+        return zipFile.getAbsoluteFile();
+    }
+
+    private void packageInto(File archiveFile) {
         Client client = (clientSupplier == null) ? null : clientSupplier.get();
         if ((client == null) || !client.isConnected()) {
             LOGGER.info("[BugReport] No connected game; packaging logs and system information only");
@@ -155,34 +252,6 @@ public class PackageBugReportAction extends AbstractAction {
         }
 
         requestSaveThenBuildArchive(client, archiveFile);
-    }
-
-    /**
-     * Asks the player where the archive should go.
-     *
-     * @return the chosen file, with a {@code .zip} extension guaranteed, or {@code null} if the player cancelled
-     */
-    private @Nullable File chooseArchiveFile() {
-        File saveGameDirectory = new File(MMConstants.SAVEGAME_DIR);
-        JFileChooser fileChooser = new JFileChooser(saveGameDirectory);
-        fileChooser.setDialogTitle(I18N.get("package.chooser.title"));
-        fileChooser.setFileFilter(new FileNameExtensionFilter(I18N.get("package.chooser.filter"), "zip"));
-        fileChooser.setSelectedFile(new File(saveGameDirectory, StringUtil.addDateTimeStamp(DEFAULT_ARCHIVE_NAME)));
-
-        if (fileChooser.showSaveDialog(parent) != JFileChooser.APPROVE_OPTION) {
-            return null;
-        }
-
-        File chosenFile = fileChooser.getSelectedFile();
-        if (chosenFile == null) {
-            return null;
-        }
-        if (!chosenFile.getName().toLowerCase(Locale.ROOT).endsWith(ARCHIVE_EXTENSION)) {
-            chosenFile = new File(chosenFile.getParentFile(), chosenFile.getName() + ARCHIVE_EXTENSION);
-        }
-        // Absolute, so the containing directory is always resolvable; a relative choice would leave
-        // getParentFile() null and the save request would have nowhere to point.
-        return chosenFile.getAbsoluteFile();
     }
 
     /**
@@ -272,11 +341,11 @@ public class PackageBugReportAction extends AbstractAction {
                 try {
                     BugReportBundle.BundleResult result = get();
                     deleteTemporarySave(saveGameFile);
-                    showResult(result, cautionNotice);
+                    prompts.result(result, cautionNotice, () -> openIssueForm(result.archiveFile()),
+                          () -> copyToClipboard(result.archiveFile()));
                 } catch (Exception exception) {
                     LOGGER.error(exception, "[BugReport] Could not write the archive to {}", archiveFile.getPath());
-                    JOptionPane.showMessageDialog(parent, I18N.get("package.failed"), I18N.get("package.result.title"),
-                          JOptionPane.ERROR_MESSAGE);
+                    prompts.failed(I18N.get("package.result.title"), I18N.get("package.failed"));
                 }
             }
         }.execute();
@@ -296,13 +365,39 @@ public class PackageBugReportAction extends AbstractAction {
         }
     }
 
+    /** The Swing dialogs the action has always shown, over {@code parent}. */
+    private record SwingPrompts(@Nullable Component parent) implements Prompts {
+        @Override
+        public void chooseArchive(Consumer<File> chosen) {
+            File saveGameDirectory = archiveDirectory();
+            JFileChooser fileChooser = new JFileChooser(saveGameDirectory);
+            fileChooser.setDialogTitle(chooserTitle());
+            fileChooser.setFileFilter(new FileNameExtensionFilter(chooserFilter(), "zip"));
+            fileChooser.setSelectedFile(new File(saveGameDirectory, suggestedArchiveName()));
+            boolean approved = fileChooser.showSaveDialog(parent) == JFileChooser.APPROVE_OPTION;
+            chosen.accept(approved ? fileChooser.getSelectedFile() : null);
+        }
+
+        @Override
+        public void failed(String title, String text) {
+            JOptionPane.showMessageDialog(parent, text, title, JOptionPane.ERROR_MESSAGE);
+        }
+
+        @Override
+        public void result(BugReportBundle.BundleResult result, @Nullable String caution, Runnable issueForm,
+              Runnable copyFile) {
+            showResult(parent, result, caution, issueForm, copyFile);
+        }
+    }
+
     /**
-     * Tells the player what was collected and offers to open the folder or put the archive on the clipboard.
+     * Tells the player what was collected and offers to open the issue form or put the archive on the clipboard.
      *
      * @param result        what the bundle wrote
      * @param cautionNotice a note about anything that did not go to plan, or {@code null}
      */
-    private void showResult(BugReportBundle.BundleResult result, @Nullable String cautionNotice) {
+    private static void showResult(@Nullable Component parent, BugReportBundle.BundleResult result,
+          @Nullable String cautionNotice, Runnable issueForm, Runnable copyFile) {
         int messageWidth = UIUtil.scaleForGUI(UNSCALED_MESSAGE_WIDTH);
         StringBuilder message = new StringBuilder("<html><body width=%d>".formatted(messageWidth));
         if (cautionNotice != null) {
@@ -330,9 +425,9 @@ public class PackageBugReportAction extends AbstractAction {
               JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null, options, options[0]);
 
         if (choice == 0) {
-            openIssueForm(result.archiveFile());
+            issueForm.run();
         } else if (choice == 1) {
-            copyToClipboard(result.archiveFile());
+            copyFile.run();
         }
     }
 
