@@ -13,10 +13,12 @@ import megamek.logging.MMLogger;
 
 /**
  * A picture seen through a comm feed: tinted toward the signal color, crossed by scanlines and flecks of static, now and
- * then torn by a glitch band shifted sideways under a bright line, and booting up from a line of light across its
- * middle that opens into the picture. Corner brackets frame it. How rough the feed is comes from its {@link Signal};
- * without motion it shows settled, tinted and scanned, with no static, glitches or flicker. The widget owns a shader:
- * {@link #dispose()} it with its view.
+ * then torn by a glitch band shifted sideways under a bright line, darkened toward its edges like a tube's face, with a
+ * faint interference bar drifting down it. It tunes in from snow: the picture rolls, shears and splits into its colors
+ * and settles as the snow clears. Rougher signals keep more of the bar and the color split. While its speaker talks
+ * ({@link #voice(float)}) the picture brightens with their voice. Corner brackets frame it. How rough the feed is comes
+ * from its {@link Signal}; without motion it shows settled, tinted and scanned, with no static, glitches or flicker.
+ * The widget owns a shader: {@link #dispose()} it with its view.
  */
 public class UiSignalFeed extends Widget implements Disposable {
     private static final MMLogger LOGGER = MMLogger.create(UiSignalFeed.class);
@@ -36,7 +38,11 @@ public class UiSignalFeed extends Widget implements Disposable {
     }
 
     private static final float STEP = .125f;
-    private static final float BOOT_SECONDS = .7f;
+    private static final float TUNE_SECONDS = .65f;
+    /** Seconds the interference bar takes to drift down the picture. */
+    private static final float BAR_SECONDS = 14;
+    /** The snow's frames a second while tuning in. */
+    private static final float SNOW_RATE = 30;
 
     private static final String VERTEX = """
           attribute vec4 a_position;
@@ -69,6 +75,8 @@ public class UiSignalFeed extends Widget implements Disposable {
           uniform vec3 u_line;
           uniform float u_boot;
           uniform float u_flicker;
+          uniform vec4 u_live;
+          uniform float u_snow;
           float hash(vec2 p) {
               return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
           }
@@ -76,14 +84,25 @@ public class UiSignalFeed extends Widget implements Disposable {
               vec2 span = u_region.zw - u_region.xy;
               vec2 local = (v_texCoords - u_region.xy) / span;
               float py = local.y * u_size.y;
-              float band = step(u_glitch.x, py) * step(py, u_glitch.y);
-              vec2 uv = v_texCoords + vec2(band * u_glitch.z / u_size.x * span.x, 0.0);
-              float inside = step(min(u_region.x, u_region.z), uv.x) * step(uv.x, max(u_region.x, u_region.z));
-              vec4 art = texture2D(u_texture, uv) * inside + vec4(0.0, 0.0, 0.0, 1.0 - inside) * band;
-              float luma = dot(art.rgb, vec3(0.299, 0.587, 0.114));
               float settle = 1.0 - u_boot;
+              float tuning = step(0.001, settle);
+              float ly = tuning > 0.0 ? fract(local.y + settle * settle * 0.8) : local.y;
+              float band = step(u_glitch.x, py) * step(py, u_glitch.y);
+              float shear = settle * settle * (hash(vec2(floor(py / 3.0), u_snow)) - 0.5) * 0.12;
+              vec2 lp = vec2(local.x + band * u_glitch.z / u_size.x + shear, ly);
+              float inside = step(0.0, lp.x) * step(lp.x, 1.0);
+              float split = (u_live.z * 1.5 + settle * 6.0) / u_size.x;
+              vec4 art = texture2D(u_texture, u_region.xy + lp * span);
+              art.r = texture2D(u_texture, u_region.xy + vec2(clamp(lp.x + split, 0.0, 1.0), lp.y) * span).r;
+              art.b = texture2D(u_texture, u_region.xy + vec2(clamp(lp.x - split, 0.0, 1.0), lp.y) * span).b;
+              art = art * inside + vec4(0.0, 0.0, 0.0, 1.0 - inside) * band;
+              float luma = dot(art.rgb, vec3(0.299, 0.587, 0.114));
               vec3 colour = mix(art.rgb, u_tint.rgb, u_tint.a);
-              colour = mix(colour, u_tint.rgb * (0.25 + luma * 1.5), settle * settle * 0.85);
+              colour = mix(colour, u_tint.rgb * (0.25 + luma * 1.5), settle * 0.7);
+              colour *= 1.0 + u_live.y * 0.18;
+              float drift = local.y - u_live.x;
+              drift -= floor(drift + 0.5);
+              colour += u_tint.rgb * exp(-drift * drift / 0.004) * (0.05 + 0.1 * u_live.z) * u_live.w;
               float line = step(u_scan.x - 1.0, mod(py, u_scan.x));
               colour *= 1.0 - line * u_scan.y;
               vec2 cell = floor(vec2(local.x * u_size.x / 6.0, py / 2.0));
@@ -91,14 +110,13 @@ public class UiSignalFeed extends Widget implements Disposable {
               colour = mix(colour, mix(u_tint.rgb, vec3(1.0), 0.5), fleck * u_noise.y);
               float edge = 1.0 - step(1.0, abs(py - u_glitch.x));
               colour = mix(colour, u_line, edge * u_glitch.w);
-              float open = smoothstep(0.0, 0.55, u_boot);
-              float gap = open - abs(local.y - 0.5) * 2.0;
-              if (gap < -0.02) {
-                  discard;
-              }
-              float rim = 1.0 - smoothstep(0.0, 0.03, abs(gap));
-              colour += u_tint.rgb * rim * settle * 1.6;
-              float alpha = art.a * smoothstep(-0.02, 0.0, gap) * u_flicker;
+              float snow = 1.0 - smoothstep(0.1, 0.8, u_boot);
+              float grain = hash(floor(vec2(local.x * u_size.x, py) / 2.0) + vec2(u_snow * 1.7, u_snow * 0.61));
+              colour = mix(colour, grain * mix(vec3(1.0), u_tint.rgb + 0.3, 0.4), snow);
+              colour *= 1.0 - (1.0 - smoothstep(0.0, 0.06, ly)) * tuning * 0.85;
+              vec2 face = (local - 0.5) * vec2(1.0, 0.85);
+              colour *= 1.0 - smoothstep(0.35, 0.75, length(face)) * (0.35 + 0.15 * u_live.z);
+              float alpha = max(art.a, snow) * u_flicker;
               gl_FragColor = vec4(colour, alpha) * v_color;
           }
           """;
@@ -122,10 +140,14 @@ public class UiSignalFeed extends Widget implements Disposable {
     private float glitchShift;
     private float boot;
     private float flicker = 1;
+    private float bar;
+    private float snowTime;
+    private int snowFrame;
+    private float voice;
 
     /**
      * A feed of {@code picture}, preferring {@code width} by {@code height} stage units, tinted {@code tint} with glitch
-     * lines in {@code line}; {@code white} is a solid white region for the brackets. It boots up once it is on stage,
+     * lines in {@code line}; {@code white} is a solid white region for the brackets. It tunes in once it is on stage,
      * unless {@code motion} is off.
      */
     public UiSignalFeed(TextureRegion picture, TextureRegion white, float width, float height, Color tint, Color line,
@@ -139,16 +161,36 @@ public class UiSignalFeed extends Widget implements Disposable {
         prefWidth = width;
         prefHeight = height;
         boot = motion ? 0 : 1;
+        bar = random.nextFloat();
     }
 
-    /** Starts the boot-up over, as when the channel opens again. */
+    /** Starts tuning in over, as when the channel opens again. */
     public void reboot() {
         boot = motion ? 0 : 1;
     }
 
-    /** Whether the feed has booted up. */
+    /** Ends tuning in at once, as when the player skips the channel opening. */
+    public void settle() {
+        boot = 1;
+        flicker = 1;
+    }
+
+    /** Whether the feed has tuned in. */
     public boolean booted() {
         return boot >= 1;
+    }
+
+    /** How loud the speaker is now, 0 (quiet) to 1; the picture brightens with it. Ignored without motion. */
+    public void voice(float level) {
+        voice = motion ? Math.max(0, Math.min(1, level)) : 0;
+    }
+
+    /**
+     * How rough the signal is overall, 0 (clean) to 1 (barely holding): the static and the glitches together. It sets
+     * how strongly the interference bar shows and how far the colors split.
+     */
+    public float roughness() {
+        return Math.max(0, Math.min(1, signal.noiseDensity() * 8 + signal.glitchChance() * 1.5f));
     }
 
     @Override
@@ -157,7 +199,13 @@ public class UiSignalFeed extends Widget implements Disposable {
         if (!motion) {
             return;
         }
-        boot = Math.min(1, boot + delta / BOOT_SECONDS);
+        boot = Math.min(1, boot + delta / TUNE_SECONDS);
+        bar = (bar + delta / BAR_SECONDS) % 1;
+        snowTime += delta;
+        if (snowTime >= 1 / SNOW_RATE) {
+            snowTime %= 1 / SNOW_RATE;
+            snowFrame = (snowFrame + 1) % 977;
+        }
         stepTime += delta;
         while (stepTime >= STEP) {
             stepTime -= STEP;
@@ -217,6 +265,8 @@ public class UiSignalFeed extends Widget implements Disposable {
             program.setUniformf("u_line", line.r, line.g, line.b);
             program.setUniformf("u_boot", boot);
             program.setUniformf("u_flicker", flicker);
+            program.setUniformf("u_live", bar, voice, roughness(), live ? 1 : 0);
+            program.setUniformf("u_snow", snowFrame);
             batch.draw(picture, x, y, width, height);
             batch.setShader(null);
         }
@@ -246,6 +296,11 @@ public class UiSignalFeed extends Widget implements Disposable {
             batch.draw(white, sx > 0 ? cx : cx - arm, sy > 0 ? cy : cy - thick, arm, thick);
             batch.draw(white, sx > 0 ? cx : cx - thick, sy > 0 ? cy : cy - arm, thick, arm);
         }
+    }
+
+    /** Whether the feed's shader failed to compile, so the picture shows plain. */
+    boolean plain() {
+        return failed;
     }
 
     private ShaderProgram shader() {
