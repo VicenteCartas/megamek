@@ -54,6 +54,7 @@ import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.UnitOwnerColors;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Player;
@@ -95,6 +96,8 @@ public final class UnitAnnotations {
     private static final Color LABEL_SPACE_BACK = new Color(0, 0, 200, 200);
     private static final Color LABEL_GROUND_BACK = new Color(50, 50, 50, 200);
     private static final int ON_DECK_ARC_ALPHA = 100;
+    /** Shortest hyphenated Mek model treated as a full designation (UM-R60) rather than a configuration (A-Z). */
+    static final int MIN_DESIGNATION_LENGTH = 4;
 
     enum Positioning {
         LEFT, RIGHT
@@ -195,7 +198,7 @@ public final class UnitAnnotations {
             case FULL:
                 return standardLabelName(entity);
             case ABBREV:
-                return (entity instanceof Mek) ? entity.getModel() : abbreviateUnitName(standardLabelName(entity));
+                return abbreviatedName(entity);
             case CHASSIS:
                 return reduceVehicleName(entity);
             case NICKNAME:
@@ -207,8 +210,7 @@ public final class UnitAnnotations {
                     return reduceVehicleName(entity);
                 }
             case NICKNAME_AND_ABBREVIATED: {
-                String abbreviated = (entity instanceof Mek) ? entity.getModel()
-                      : abbreviateUnitName(standardLabelName(entity));
+                String abbreviated = abbreviatedName(entity);
                 if (!pilotNick(entity).isBlank()) {
                     return "\"" + pilotNick(entity).toUpperCase() + "\" (" + abbreviated + ")";
                 } else if (!unitNick(entity).isBlank()) {
@@ -250,6 +252,36 @@ public final class UnitAnnotations {
             }
             return String.join(" ", Arrays.copyOfRange(tokens, 0, i + 1));
         }
+    }
+
+    /** Returns the label name used by the abbreviated label styles. */
+    private static String abbreviatedName(Entity entity) {
+        if (entity instanceof Mek) {
+            return abbreviatedMekName(entity.getChassis(), entity.getModel());
+        }
+        return abbreviateUnitName(standardLabelName(entity));
+    }
+
+    /**
+     * Returns the abbreviated label name of a Mek. A model designation with a hyphen names the Mek on its own (Marauder
+     * MAD-3R shows {@code MAD-3R}), so it is shown alone. Any other model is only a configuration (Mad Cat Prime,
+     * Thor A), so the chassis is kept in front of it. A blank model shows the chassis alone. Hyphenated models
+     * shorter than {@link #MIN_DESIGNATION_LENGTH} are configurations too (Pariah A-Z, Ha Otoko -HR).
+     *
+     * @param chassis the Mek's chassis, without any reporting name
+     * @param model   the Mek's model, possibly blank or {@code null}
+     *
+     * @return the label name, never blank unless the chassis is blank
+     */
+    static String abbreviatedMekName(String chassis, @Nullable String model) {
+        String trimmedModel = (model == null) ? "" : model.trim();
+        if (trimmedModel.isEmpty()) {
+            return chassis;
+        }
+        if (trimmedModel.contains("-") && (trimmedModel.length() >= MIN_DESIGNATION_LENGTH)) {
+            return trimmedModel;
+        }
+        return chassis + " " + trimmedModel;
     }
 
     /** Returns the string with some content shortened like Battle Armor -> BA */
@@ -809,14 +841,7 @@ public final class UnitAnnotations {
         if (!GUIP.getUnitLabelBorder()) {
             return null;
         }
-        if (!GUIP.getTeamColoring()) {
-            return entity.getOwner().getColour().getColour(false);
-        }
-        if (entity.getOwner().equals(bv.getLocalPlayer())) {
-            return GUIP.getMyUnitColor();
-        }
-        return bv.getLocalPlayer() != null && entity.getOwner().getTeam() == bv.getLocalPlayer().getTeam()
-              ? GUIP.getAllyUnitColor() : GUIP.getEnemyUnitColor();
+        return UnitOwnerColors.colorFor(entity.getOwner(), bv.getLocalPlayer(), bv.getGame());
     }
 
     private Color labelTextColor() {

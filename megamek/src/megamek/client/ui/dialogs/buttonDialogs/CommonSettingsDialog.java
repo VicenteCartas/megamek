@@ -248,6 +248,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private final JCheckBox soundMuteOthersTurn = new JCheckBox(Messages.getString(
           "CommonSettingsDialog.soundMuteOthersTurn"));
     private JTextField tfSoundMuteOthersFileName;
+    private final JCheckBox soundMutePing = new JCheckBox(Messages.getString("CommonSettingsDialog.soundMutePing"));
+    private JTextField tfSoundMutePingFileName;
 
     private JTextField userDir;
     private JTextField mmlPath;
@@ -937,17 +939,20 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         tfSoundMuteChatFileName = new JTextField(5);
         tfSoundMuteMyTurnFileName = new JTextField(5);
         tfSoundMuteOthersFileName = new JTextField(5);
+        tfSoundMutePingFileName = new JTextField(5);
 
         return createAudioSettingsPanel(masterVolumeLabel, masterVolumeSlider,
               soundMuteChat, tfSoundMuteChatFileName,
               soundMuteMyTurn, tfSoundMuteMyTurnFileName,
-              soundMuteOthersTurn, tfSoundMuteOthersFileName, soundPrompt);
+              soundMuteOthersTurn, tfSoundMuteOthersFileName,
+              soundMutePing, tfSoundMutePingFileName, soundPrompt);
     }
 
     static CommonSettingsPane.SectionedContent createAudioSettingsPanel(JLabel volumeLabel, JSlider volumeSlider,
         JCheckBox chatMute, JTextField chatSoundFile,
         JCheckBox myTurnMute, JTextField myTurnSoundFile,
-          JCheckBox otherTurnsMute, JTextField otherTurnsSoundFile, JCheckBox soundPrompt) {
+          JCheckBox otherTurnsMute, JTextField otherTurnsSoundFile,
+          JCheckBox pingMute, JTextField pingSoundFile, JCheckBox soundPrompt) {
         volumeLabel.setLabelFor(volumeSlider);
         JPanel volumeControl = createMasterVolumeControl(volumeSlider);
         SettingsFormPanel volumeGrid = createAudioControlGrid(
@@ -958,11 +963,14 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             Messages.getString("CommonSettingsDialog.soundMuteMyTurn.chooser.title"));
           JPanel otherTurnsSoundControl = createAudioFileControl(otherTurnsSoundFile, "btnOtherTurnsSoundChooser",
             Messages.getString("CommonSettingsDialog.soundMuteOthersTurn.chooser.title"));
+        JPanel pingSoundControl = createAudioFileControl(pingSoundFile, "btnPingSoundChooser",
+              Messages.getString("CommonSettingsDialog.soundMutePing.chooser.title"));
         SettingsFormPanel notificationGrid = createAudioControlGrid(
             "CommonSettingsAudioNotificationGrid",
               chatMute, chatSoundControl,
               myTurnMute, myTurnSoundControl,
-              otherTurnsMute, otherTurnsSoundControl, soundPrompt);
+              otherTurnsMute, otherTurnsSoundControl,
+              pingMute, pingSoundControl, soundPrompt);
         return new CommonSettingsPane.SectionedContent(List.of(volumeGrid, notificationGrid));
     }
 
@@ -2848,6 +2856,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             tfSoundMuteChatFileName.setText(GUIP.getSoundBingFilenameChat());
             tfSoundMuteMyTurnFileName.setText(GUIP.getSoundBingFilenameMyTurn());
             tfSoundMuteOthersFileName.setText(GUIP.getSoundBingFilenameOthersTurn());
+            soundMutePing.setSelected(GUIP.getSoundMutePing());
+            tfSoundMutePingFileName.setText(GUIP.getSoundBingFilenamePing());
 
             maxPathfinderTime.setValue(Math.max(1, CLIENT_PREFERENCES.getMaxPathfinderTime()));
 
@@ -3359,6 +3369,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         GUIP.setSoundBingFilenameChat(tfSoundMuteChatFileName.getText());
         GUIP.setSoundBingFilenameMyTurn(tfSoundMuteMyTurnFileName.getText());
         GUIP.setSoundBingFilenameOthersTurn(tfSoundMuteOthersFileName.getText());
+        GUIP.setSoundMutePing(soundMutePing.isSelected());
+        GUIP.setSoundBingFilenamePing(tfSoundMutePingFileName.getText());
 
         CLIENT_PREFERENCES.setMaxPathfinderTime((int) maxPathfinderTime.getValue());
 

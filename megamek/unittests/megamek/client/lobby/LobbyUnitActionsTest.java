@@ -18,6 +18,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 import megamek.client.Client;
+import megamek.client.bot.AIType;
 import megamek.common.Player;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.force.Force;
@@ -55,6 +56,7 @@ class LobbyUnitActionsTest {
         bot = new Player(2, "Princess");
         bot.setBot(true);
         game.addPlayer(2, bot);
+        game.recordBotType(bot.getName(), AIType.CASPAR);
         client = mock(Client.class);
         when(client.getGame()).thenReturn(game);
         when(client.getLocalPlayer()).thenReturn(local);

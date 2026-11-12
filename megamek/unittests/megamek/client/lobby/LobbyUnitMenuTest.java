@@ -16,6 +16,7 @@ import java.util.Set;
 
 import megamek.client.AbstractClient;
 import megamek.client.Client;
+import megamek.client.bot.AIType;
 import megamek.common.Player;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.force.Force;
@@ -48,6 +49,7 @@ class LobbyUnitMenuTest {
         enemy = player(2, "Enemy", 2);
         bot = player(3, "Princess", 1);
         bot.setBot(true);
+        game.recordBotType(bot.getName(), AIType.CASPAR);
         Map<String, AbstractClient> bots = new HashMap<>();
         bots.put(bot.getName(), mock(AbstractClient.class));
         client = mock(Client.class);
@@ -126,6 +128,35 @@ class LobbyUnitMenuTest {
         LobbyUnitMenu.BotLance botLance = LobbyUnitMenu.botLance(game, lance);
         assertTrue(botLance != null && botLance.owner() == bot);
         assertTrue(botLance.unitIds().containsAll(List.of(locust.getId(), stinger.getId())));
+    }
+
+    @Test
+    void aPrincessLanceTakesNoOrders() {
+        game.recordBotType(bot.getName(), AIType.PRINCESS);
+        Force lance = lance("Bot Lance", bot, mek(bot, "Locust"), mek(bot, "Stinger"));
+
+        List<String> commands = leafCommands(menu(List.of(), List.of(lance), true));
+
+        assertNull(LobbyUnitMenu.botLance(game, lance));
+        assertTrue(commands.stream().noneMatch(c -> c.startsWith(LobbyUnitMenu.LMP_BOT_FORMATION + "|")),
+              commands::toString);
+    }
+
+    @Test
+    void aCompanyOfBotLancesOffersAFormationForEveryLance() {
+        int companyId = game.getForces().addTopLevelForce(new Force("Company", -1, new Camouflage()), bot);
+        Force company = game.getForces().getForce(companyId);
+        for (String name : List.of("First", "Second")) {
+            int lanceId = game.getForces().addSubForce(new Force(name, -1, new Camouflage()), company);
+            game.getForces().addEntity(mek(bot, name + " Locust"), lanceId);
+            game.getForces().addEntity(mek(bot, name + " Stinger"), lanceId);
+        }
+
+        List<String> commands = leafCommands(menu(List.of(), List.of(company), true));
+
+        assertTrue(commands.contains(LobbyUnitMenu.LMP_BOT_FORMATION + "|WEDGE:" + companyId + "|-1"),
+              commands::toString);
+        assertEquals(2, LobbyUnitMenu.parentLances(game, company).size());
     }
 
     @Test
