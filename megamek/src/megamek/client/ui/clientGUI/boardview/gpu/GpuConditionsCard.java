@@ -100,9 +100,12 @@ final class GpuConditionsCard implements GpuHud.Component {
 
     @Override
     public void update(GpuHud.Inputs inputs) {
-        root.setVisible(inputs.preferences().conditionsVisible());
         GpuBoardActions.PhaseInfo phase = inputs.frame().panels().phase();
         List<String> notable = phase.notable();
+        // Deployment keeps the top clear: the strip only shows unusual conditions, which change where to deploy.
+        boolean quiet = notable.isEmpty() && !state.conditionsExpanded
+              && inputs.frame().status().phase().isDeployment();
+        root.setVisible(inputs.preferences().conditionsVisible() && !quiet);
         summary.setText(notable.isEmpty() ? Messages.getString("GpuBoard.hud.conditions.normal")
               : String.join(SEPARATOR, notable));
         List<String> next = phase.conditions();

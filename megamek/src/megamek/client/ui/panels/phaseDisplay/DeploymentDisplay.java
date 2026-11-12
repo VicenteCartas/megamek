@@ -40,6 +40,7 @@ import java.awt.event.InputEvent;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -73,6 +74,7 @@ import megamek.common.board.AllowedDeploymentHelper;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
+import megamek.common.board.DeploymentElevationType;
 import megamek.common.board.ElevationOption;
 import megamek.common.board.FacingOption;
 import megamek.common.equipment.Transporter;
@@ -681,6 +683,58 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         return game.getEntity(cen);
     }
 
+    /**
+     * The heights (altitudes for an aerospace unit) the unit placed this turn may deploy at in its hex, lowest first;
+     * empty while none is placed on a map with heights. Above a VTOL's highest listed elevation, any is allowed; the
+     * list then offers a few more.
+     */
+    public List<Integer> placedHeights() {
+        Entity entity = currentEntity();
+        Board board = entity == null || entity.getPosition() == null ? null : game.getBoard(entity.getBoardId());
+        if (board == null || board.isSpace() || !board.contains(entity.getPosition())
+              || !clientgui.getClient().isMyTurn()) {
+            return List.of();
+        }
+        List<Integer> heights = new ArrayList<>();
+        for (ElevationOption option : new AllowedDeploymentHelper(entity, entity.getPosition(), board,
+              board.getHex(entity.getPosition()), game).findAllowedElevations()) {
+            int top = option.type() == DeploymentElevationType.ELEVATIONS_ABOVE
+                  ? Math.max(option.elevation(), entity.getElevation()) + HEIGHTS_ABOVE : option.elevation();
+            for (int height = option.elevation(); height <= top; height++) {
+                if (!heights.contains(height)) {
+                    heights.add(height);
+                }
+            }
+        }
+        Collections.sort(heights);
+        return heights;
+    }
+
+    /** How many elevations above its highest listed one {@link #placedHeights} offers a VTOL. */
+    private static final int HEIGHTS_ABOVE = 5;
+
+    /**
+     * Deploys the unit placed this turn at {@code height} (its altitude, for an aerospace unit) instead, if its hex
+     * allows that height; the GL HUD's height control on the placed unit.
+     */
+    public void setPlacedHeight(int height) {
+        Entity entity = currentEntity();
+        if (isIgnoringEvents() || !placedHeights().contains(height)) {
+            return;
+        }
+        Board board = game.getBoard(entity.getBoardId());
+        List<ElevationOption> options = new AllowedDeploymentHelper(entity, entity.getPosition(), board,
+              board.getHex(entity.getPosition()), game).findAllowedElevations();
+        new DeploymentHelper(clientgui).applyDeploymentElevation(entity, board, height);
+        lastHexDeploymentOptions.clear();
+        lastHexDeploymentOptions.addAll(options);
+        lastDeploymentOption = DeploymentHelper.heightOption(options, height);
+        clientgui.boardStates().forEach(BoardClientState::redrawAllEntities);
+        clientgui.updateFiringArc(entity);
+        clientgui.showSensorRanges(entity);
+        clientgui.boardStates().forEach(BoardClientState::repaint);
+    }
+
     public void die() {
         if (clientgui.getClient().isMyTurn()) {
             endMyTurn();
@@ -843,6 +897,16 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
                                                          Coords coords) {
         return AllowedDeploymentHelper.hasFacingDependentFootprint(entity)
                && (entity.getPosition().distance(coords) == 1);
+    }
+
+    /**
+     * The facing a click on {@code coords} gives the selected, unplaced {@code entity}, as {@link #hexMoused} decides
+     * it: the first placement since its selection faces the enemy (DeploymentHelper#startingFacing), later ones keep
+     * its facing.
+     */
+    public int placementFacing(Entity entity, Coords coords) {
+        return originalFacing == -1 ? DeploymentHelper.startingFacing(entity, game.getPlayersList(), coords)
+              : entity.getFacing();
     }
 
     //

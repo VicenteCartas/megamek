@@ -168,6 +168,8 @@ interface BoardSource extends AutoCloseable {
     default void stopKeys() { }
     /** Full play needs its tactical artwork prepared before interactive frames; map-only views do not. */
     default boolean isGameplay() { return false; }
+    /** The sequence of the last centre request the player asked for (locate, select, Center Here); -1 for none. */
+    default long userCenterSequence() { return -1; }
     /**
      * The game's units the last frame does not show on this board (not deployed, elsewhere or hidden), captured on
      * Swing like its units: the view draws them behind its loading stage, so their models and programs are ready when

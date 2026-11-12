@@ -19,6 +19,7 @@ import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.g3d.utils.DefaultShaderProvider;
 import com.badlogic.gdx.graphics.g3d.utils.RenderContext;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.utils.TimeUtils;
 
 /** Unit paint, damage and imported surface lighting. The ModelBatch owns the provider and its shaders. */
 final class GpuUnitShader extends DefaultShader {
@@ -38,6 +39,7 @@ final class GpuUnitShader extends DefaultShader {
     private final int damageOpacity = register("u_damageOpacity");
     private final int damageTransform = register("u_damageTransform");
     private final int opacity = register("u_unitOpacity");
+    private final int materialize = register("u_materialize");
     /** The renderable being drawn shows translucent ({@link Shown#opacity}): it blends over the scene. */
     private boolean translucent;
     private final boolean displayOutput;
@@ -162,6 +164,7 @@ final class GpuUnitShader extends DefaultShader {
         source = replaceOnce(source, "// unit-overlays", "diffuse.rgb = unitOverlays(diffuse.rgb);", "fragment");
         // One uniform rather than a blended program variant: a unit fades without a program compiled after loading.
         return replaceOnce(source, "    // Tactical draws after the scene composite", "    fragColor.a *= u_unitOpacity;\n"
+              + "    fragColor.rgb = unitMaterialize(fragColor.rgb);\n"
               + "    // Tactical draws after the scene composite", "fragment");
     }
 
@@ -247,7 +250,27 @@ final class GpuUnitShader extends DefaultShader {
      * much of it shows. Below 1 it draws translucent, after the other units ({@code GpuBattleView.renderUnits}).
      */
     static final class Shown extends com.badlogic.gdx.graphics.Color {
+        /** How long (ms) a just-deployed unit takes to build up from its feet. */
+        static final long MATERIALIZE_MILLIS = 750;
+
         float opacity = 1;
+        /**
+         * The deployment's materialize: when (TimeUtils#millis) the unit began to build up from its feet between its
+         * lowest and highest board heights {@link #bottom} and {@link #top}, 0 when whole. The shader eases it by the
+         * clock, so an instance a frame no longer updates still ends whole.
+         */
+        long materializeStart;
+        float bottom;
+        float top;
+
+        /** How far a unit that began to build up at {@code start} has, easing out: 1 when whole or never started. */
+        static float materialized(long start) {
+            if (start == 0) {
+                return 1;
+            }
+            float t = Math.min(1, TimeUtils.timeSinceMillis(start) / (float) MATERIALIZE_MILLIS);
+            return 1 - (1 - t) * (1 - t);
+        }
     }
 
     /** Scene alpha is coverage for uncovered sky and transparent exports, not another color channel. */
@@ -294,6 +317,12 @@ final class GpuUnitShader extends DefaultShader {
         }
         float shown = part.userData instanceof Shown unit ? unit.opacity : 1;
         set(opacity, shown);
+        float built = part.userData instanceof Shown unit ? Shown.materialized(unit.materializeStart) : 1;
+        if (built < 1 && part.userData instanceof Shown unit) {
+            set(materialize, built, unit.bottom, unit.top, Math.max(1e-3f, (unit.top - unit.bottom) / 28));
+        } else {
+            set(materialize, 1f, 0f, 1f, 1f);
+        }
         translucent = shown < 1;
         super.render(part, attributes);
     }

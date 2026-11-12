@@ -52,6 +52,7 @@ import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Os;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.SharedLibraryLoader;
+import com.badlogic.gdx.utils.TimeUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.ui.Messages;
@@ -97,6 +98,8 @@ class GpuBattleView extends ApplicationAdapter {
     /** How near the board area's edge (unscaled window pixels) a route's drag scrolls the board ({@link #edgePan}). */
     private static final float EDGE_PAN_MARGIN = 48;
     private static final float FLIGHT_HEXES_PER_SECOND = 1.5f;
+    /** How long (ms) a drag-aimed deployment waits for its placement to show before it gives up turning the unit. */
+    private static final long PLACEMENT_WAIT = 1500;
     /** The zoom factor of one ZOOM_IN or ZOOM_OUT bind; the Menu's View zoom items use it as well. */
     static final float ZOOM_STEP = 1.2f;
     /** Degrees a middle drag orbits the camera per layout unit, on the board and on the minimap (C.4). */
@@ -159,6 +162,16 @@ class GpuBattleView extends ApplicationAdapter {
     private final Set<String> deadUnits = new HashSet<>();
     /** This frame's ghosts of exploded meeples ({@link #ghost}): the instances placed for them, by how much shows. */
     private final Map<ModelInstance, Float> unitGhosts = new java.util.IdentityHashMap<>();
+    /** This frame's units materializing where they were just deployed, with their progress (1 whole). */
+    private final Map<ModelInstance, Float> arriving = new java.util.IdentityHashMap<>();
+    /** This frame's unit being deployed under the pointer, among {@link #unitGhosts}, or null. */
+    private ModelInstance placingGhost;
+    /** The hex of {@link #placingGhost}, or null. */
+    private Coords placingHex;
+    /** The least opacity of the shading outside LOS while deployment's LOS overlay is on. */
+    private static final float LOS_EMPHASIS = .8f;
+    /** The status of the frame drawn, which tells a deployment preview from a unit on the board. */
+    private GpuBattleStatus.Snapshot shownStatus;
     /** Battle seconds over which a ghost fades in and out. */
     private static final float GHOST_FADE_SECONDS = .25f;
     private final GpuUnitModels unitModels = GpuUnitModels.ENABLED ? new GpuUnitModels() : null;
@@ -171,6 +184,8 @@ class GpuBattleView extends ApplicationAdapter {
     private GpuUnitBases unitBases;
     private final Map<BoardScene.Unit, Vector3> unitAnchors = new HashMap<>();
     private final Map<BoardScene.Unit, UnitFootprint.Pose> unitFootprints = new HashMap<>();
+    /** How far each unit sharing its hex stands off the hex's centre this frame ({@link #stackOffsets}). */
+    private final Map<BoardScene.Unit, Vector2> stackShifts = new HashMap<>();
     private final Map<String, ModelInstance> unitInstances = new HashMap<>();
     /** The instance the view shows for a scene unit: its 3D model or meeple. */
     private final Function<BoardScene.Unit, ModelInstance> shownUnit =
@@ -801,6 +816,7 @@ class GpuBattleView extends ApplicationAdapter {
               || scene.boardId() != frame.scene().boardId());
         List<BoardScene.Tile> previousTiles = scene == null ? null : scene.tiles();
         scene = frame.scene();
+        shownStatus = frame.status();
         if (unitModels != null) { unitModels.setDisplayMode(displayMode(), boardCamera.tactical()); }
         history.accept(frame.timeline(), scene, frame.reports(), this::hasInfantryTransports);
         // The trees an attack takes down split into their pieces ahead of its hit (GpuTerrain#breakTrees).
@@ -932,6 +948,8 @@ class GpuBattleView extends ApplicationAdapter {
         tactical.update(scene, detailChanged, hovered, !unitFrame.panels().move().route().isEmpty(), hoveredUnit);
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(tuning.fovStyle(), tuning.fovDarkness(), tuning.sensorStyle(), tuning.sensorDarkness());
+        fieldOfView.emphasize(ui instanceof GpuHud hud
+              && hud.deploymentOverlay() == GpuHudState.DeployOverlay.DAMAGE ? LOS_EMPHASIS : 0);
         attackEffects.setWind(atmosphereSettings.effects());
         // The board's pressure already reads as vacuum in space or at zero gravity.
         attackEffects.setFuelAirStrength(AreaEffectHelper.fuelAirStrength(atmosphereSettings.pressure(), false));
@@ -962,6 +980,7 @@ class GpuBattleView extends ApplicationAdapter {
             BoardCameraControls.move(boardCamera, cameraKeys.values(), Gdx.graphics.getDeltaTime() * cameraSpeed);
             boardInput.autoPan(Gdx.graphics.getDeltaTime());
         }
+        boardInput.settlePlacement();
         if (changedTiles || hoverCameraRevision != boardCamera.revision()) {
             source.setVisibleArea(boardCamera.visibleArea(scene));
         }
@@ -1059,6 +1078,7 @@ class GpuBattleView extends ApplicationAdapter {
               .collect(Collectors.toCollection(ArrayList::new));
         outlined.addAll(markers.outlinedInstances());
         outlined.removeIf(instance -> instance == null || unitGhosts.containsKey(instance)
+              || arriving.containsKey(instance)
               || instance.userData instanceof GpuUnitShader.Shown shown && shown.opacity < 1
               || !boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance)));
         float seeThrough = tuning.seeThrough();
@@ -1073,7 +1093,7 @@ class GpuBattleView extends ApplicationAdapter {
         updateHud(frame);
         if (boardCamera.tactical()) {
             // After the HUD update, which settles the board overlay's acting unit and focused enemy.
-            unitBases.update(scene, frame.status(), unitFootprints, overlay.actor(), overlay.focus(), hoveredUnit,
+            unitBases.update(scene, frame.status(), hexCentred(), overlay.actor(), overlay.focus(), hoveredUnit,
                   hovered, UnitScreenScale.hexPixels(boardCamera.camera.zoom, 1), Gdx.graphics.getDeltaTime(),
                   source.uiPreferences().overlays().statusBadges(), casualties.casualties());
         }
@@ -1175,7 +1195,8 @@ class GpuBattleView extends ApplicationAdapter {
         // Each artillery round in the air marks the hex it is coming down on, until it lands.
         overlay.setIncomingTargets(playback.attacks(), Gdx.graphics.getDeltaTime());
         // Movement annotations show through scenery; draw the destination ghost after the route and the units.
-        overlay.renderMarks(boardCamera.camera, unitFootprints::get);
+        overlay.renderMarks(boardCamera.camera, hexCentred()::get);
+        overlay.renderArrivals(boardCamera.camera, arrivalNotices, scene.boardId(), TimeUtils.millis());
         overlay.render(boardCamera.camera);
         renderHoverRings();
         var ghosts = ghosts();
@@ -1185,7 +1206,7 @@ class GpuBattleView extends ApplicationAdapter {
         fireControl.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), boardCamera.tactical());
         renderStage("terrain markers");
         tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), boardCamera.tactical(),
-              source.uiPreferences().overlays());
+              source.uiPreferences().overlays(), ui instanceof GpuHud hud && hud.showsAllEcmFields());
         renderStage("hex grid");
         // Outside the Tactical View the grid over the finished scene; inside it, the ground layer drew it.
         if (!boardCamera.tactical()) {
@@ -1195,7 +1216,8 @@ class GpuBattleView extends ApplicationAdapter {
         renderHexText(wireframeView);
         renderStage("overlay labels and ghosts");
         overlay.renderGhost(boardCamera.camera, shownUnit);
-        overlay.renderGhosts(boardCamera.camera, unitGhosts);
+        overlay.renderGhosts(boardCamera.camera, unitGhosts, arriving, placingGhost,
+              placingHex != null && GpuHexTip.hazard(scene.tile(placingHex)) != null);
         fireControl.renderLabels(boardCamera.camera, boardCamera.tactical());
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         tactical.renderLabels(boardCamera.camera);
@@ -1307,6 +1329,10 @@ class GpuBattleView extends ApplicationAdapter {
         // The HUD shows the tuning controls' own values, not the settings of the terrain on display.
         try (TerrainSettings.Scope ignored = TerrainSettings.use(null)) {
             ui.cameraGesture(boardInput.panning && boardInput.dragged || !cameraKeys.isEmpty());
+            if (ui instanceof GpuHud hud) {
+                hud.arrivals(arrivalCues(frame.scene() != null));
+                hud.damageNumbers(damageNumbers(frame.scene() != null));
+            }
             ui.update(frame, view, dialog(), source.uiPreferences());
         }
         if (ui.isModal()) {
@@ -1540,6 +1566,75 @@ class GpuBattleView extends ApplicationAdapter {
         lines.identity();
     }
 
+    /** The fewest stage units between hex centres for the Damage overlay's numbers to stay readable. */
+    private static final float DAMAGE_NUMBER_SPACING = 30;
+
+    /**
+     * The Damage overlay's expected damage on each hex the camera shows, where its centre lies in stage units (y up);
+     * none while the hexes are too small on the screen for a number each.
+     */
+    private List<GpuDamageNumbers.HexDamage> damageNumbers(boolean drawn) {
+        Map<Coords, Integer> numbers = overlay.damageNumbers();
+        if (!drawn || scene == null || numbers.isEmpty()) {
+            return List.of();
+        }
+        com.badlogic.gdx.graphics.Camera camera = boardCamera.camera;
+        float stage = ui.stage().getWidth() / camera.viewportWidth;
+        if (UnitScreenScale.hexPixels(boardCamera.camera.zoom, layoutScale) * stage < DAMAGE_NUMBER_SPACING) {
+            return List.of();
+        }
+        float width = ui.stage().getWidth();
+        float height = ui.stage().getHeight();
+        List<GpuDamageNumbers.HexDamage> shown = new ArrayList<>();
+        Vector3 hex = new Vector3();
+        for (Map.Entry<Coords, Integer> number : numbers.entrySet()) {
+            Coords coords = number.getKey();
+            if (scene.tile(coords) == null) {
+                continue;
+            }
+            hex.set(BoardGeometry.centerX(coords), BoardGeometry.centerY(coords),
+                  BoardTacticalGeometry.floatingZ(scene, coords));
+            Vector2 at = GpuNameplates.project(camera, hex);
+            if (at == null) {
+                continue;
+            }
+            at.scl(stage);
+            if (at.x >= 0 && at.y >= 0 && at.x <= width && at.y <= height) {
+                shown.add(new GpuDamageNumbers.HexDamage(at, number.getValue()));
+            }
+        }
+        return shown;
+    }
+
+    /**
+     * Other players' arrivals still marked, each with where its hex lies in stage units (y up), off the stage where
+     * the camera does not show it; a hex behind the camera lies far out in its direction.
+     */
+    private List<GpuArrivalCues.Cue> arrivalCues(boolean drawn) {
+        if (!drawn || scene == null || arrivalNotices.isEmpty()) {
+            return List.of();
+        }
+        com.badlogic.gdx.graphics.Camera camera = boardCamera.camera;
+        float stage = ui.stage().getWidth() / camera.viewportWidth;
+        List<GpuArrivalCues.Cue> cues = new ArrayList<>(arrivalNotices.size());
+        for (GpuArrivalCues.Arrival arrival : arrivalNotices) {
+            if (arrival.boardId() != scene.boardId() || scene.tile(arrival.hex()) == null) {
+                continue;
+            }
+            Vector3 hex = new Vector3(BoardGeometry.centerX(arrival.hex()), BoardGeometry.centerY(arrival.hex()),
+                  BoardTacticalGeometry.floatingZ(scene, arrival.hex()));
+            Vector2 at = GpuNameplates.project(camera, hex);
+            if (at == null) {
+                Vector3 toward = hex.sub(camera.position);
+                Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
+                at = new Vector2(toward.dot(right), toward.dot(camera.up)).nor().scl(1e5f)
+                      .add(camera.viewportWidth / 2, camera.viewportHeight / 2);
+            }
+            cues.add(new GpuArrivalCues.Cue(arrival, at.scl(stage)));
+        }
+        return cues;
+    }
+
     /**
      * The board view's facts for the HUD: the view mode, the hovered hex and unit, a hex's width on the screen and,
      * while a board is drawn, each drawn unit's head (its label anchor) and screen rectangle in stage units, y up, and
@@ -1613,8 +1708,16 @@ class GpuBattleView extends ApplicationAdapter {
      * Whether the HUD is presenting live or historical actions. Only history.running() reports live work to Swing.
      */
     private boolean playbackBusy() {
-        return history.running() || playback.reviewing() || history.replaying();
+        boolean busy = history.running() || playback.reviewing() || history.replaying();
+        if (busy != loggedPlaybackBusy) {
+            loggedPlaybackBusy = busy;
+            LOGGER.debug("[GpuDeploy] playback busy {} (running {}, reviewing {}, replaying {})", busy,
+                  history.running(), playback.reviewing(), history.replaying());
+        }
+        return busy;
     }
+
+    private boolean loggedPlaybackBusy;
 
     /** Benchmark boundary only. Normal gameplay does not allocate queries, read clocks or wait for the GPU. */
     void renderStage(String stage) { }
@@ -1707,11 +1810,17 @@ class GpuBattleView extends ApplicationAdapter {
         }
     }
 
+
     private void prepareUnits() {
         hover.clear();
+        trackArrivals();
+        arriving.clear();
         unitAnchors.clear();
         unitFootprints.clear();
+        stackShifts.clear();
         unitGhosts.clear();
+        placingGhost = null;
+        placingHex = null;
         // Zoomed out, the 3D view's units grow to stay visible; the Tactical View's icons keep their size in the hex.
         float growth = boardCamera.tactical() ? 1
               : UnitScreenScale.factor(UnitScreenScale.hexPixels(boardCamera.camera.zoom, layoutScale));
@@ -1724,14 +1833,21 @@ class GpuBattleView extends ApplicationAdapter {
         animators.keySet().retainAll(unitInstances.keySet());
         unitDamage.keySet().retainAll(unitInstances.keySet());
         equipmentAppearance.keySet().retainAll(unitInstances.keySet());
+        // A materialize lasts only while this frame's pass below renews it: no instance keeps a cut it set before.
+        for (ModelInstance instance : unitInstances.values()) {
+            if (instance.userData instanceof GpuUnitShader.Shown shown) { shown.materializeStart = 0; }
+        }
         hits.keySet().retainAll(scene.units().stream().map(BoardScene.Unit::id).collect(Collectors.toSet()));
         hits.values().removeIf(hit -> hoverClock - hit.clock() > HIT_MEMORY_SECONDS);
+        Map<Integer, Vector2> stackOffsets = stackOffsets();
         for (BoardScene.Unit unit : scene.units()) {
             var hit = hit(unit);
             if (hit != null) { hits.put(unit.id(), hit); }
             var recent = recentHit(unit);
             Vector3 position = BoardGeometry.center(unit.location().coords(), unit.location().elevation());
             playback.placeDisplacement(unit, position);
+            Vector2 stacked = stackOffsets.get(unit.id());
+            if (stacked != null) { position.add(stacked.x, stacked.y, 0); }
             float facing = unit.location().facing() * 60;
             UnitMotion motion = unit.sensorContact() ? null : motions.get(unit.id());
             UnitMotion.Sample sample = motion == null ? UnitMotion.Sample.STILL : motion.sample();
@@ -1796,6 +1912,9 @@ class GpuBattleView extends ApplicationAdapter {
                 casualties.prepare(death, standing, unit);
             }
             float ghost = destroyed ? ghost(unit, death) : 0;
+            // The unit being deployed under the pointer (GpuBoardSource#deploymentPreview): drawn as the plan's
+            // ghost, never picked, marked or shadowed.
+            boolean placing = !destroyed && placingPreview(unit);
             if (destroyed) {
                 // The casualty owns the last drawn pose until it fades. A later simultaneous attack can still draw
                 // a temporary ghost, but neither view keeps a permanent wreck.
@@ -1938,15 +2057,44 @@ class GpuBattleView extends ApplicationAdapter {
                 shown.opacity = shove.posePushedOff(instance);
                 anchor = visual.anchor(instance, boardCamera.camera);
             }
-            if (airborne && collapse == 0) {
-                float offset = hoverOffset(hoverClock, unit.id(), unit.part());
-                hover.add(new Hover(instance, offset));
-                anchor.add(0, 0, offset);
-                position.z += offset;
+            float hoverLift = 0;
+            long arrivalStart = placing ? 0 : arrivalStarts.getOrDefault(unit.id(), 0L);
+            float arrival = GpuUnitShader.Shown.materialized(arrivalStart);
+            // A flier holds still while it materializes, and bobs once it is whole.
+            if (airborne && collapse == 0 && arrival >= 1) {
+                hoverLift = hoverOffset(hoverClock, unit.id(), unit.part());
+                hover.add(new Hover(instance, hoverLift));
+                anchor.add(0, 0, hoverLift);
+                position.z += hoverLift;
             }
-            if (ghost == 0) { unitFootprints.put(unit, new UnitFootprint.Pose(placement, position, footprintFacing)); }
+            shown.materializeStart = arrival < 1 ? arrivalStart : 0;
+            if (arrival < 1) {
+                var box = UnitBounds.local(instance);
+                float bottom = Float.MAX_VALUE;
+                float top = -Float.MAX_VALUE;
+                Vector3 corner = new Vector3();
+                for (int index = 0; index < 8; index++) {
+                    corner.set((index & 1) == 0 ? box.min.x : box.max.x, (index & 2) == 0 ? box.min.y : box.max.y,
+                          (index & 4) == 0 ? box.min.z : box.max.z).mul(instance.transform);
+                    bottom = Math.min(bottom, corner.z);
+                    top = Math.max(top, corner.z);
+                }
+                // The bob lifts the drawn model later (applyHover): the cut rides with it.
+                shown.bottom = bottom + hoverLift;
+                shown.top = top + hoverLift;
+                arriving.put(instance, arrival);
+            }
+            if (ghost == 0 && !placing) {
+                unitFootprints.put(unit, new UnitFootprint.Pose(placement, position, footprintFacing));
+                if (stacked != null) { stackShifts.put(unit, stacked); }
+            }
             unitAnchors.put(unit, anchor);
             if (ghost > 0) { unitGhosts.put(instance, ghost); }
+            if (placing) {
+                unitGhosts.put(instance, 1f);
+                placingGhost = instance;
+                placingHex = unit.location().coords();
+            }
         }
         occupiedGround.clear();
         for (BoardScene.Unit unit : scene.units()) {
@@ -1981,6 +2129,129 @@ class GpuBattleView extends ApplicationAdapter {
      * plays on its ghost, which fades in as that attack or the death begins and out as the attack ends. None without
      * one: the hit that killed it plays on the unit.
      */
+    /**
+     * Deployment's materialize: since when each unit has been seen waiting off the board this phase, and when each
+     * placed unit began to build up (by anyone). A unit builds up as it appears on a hex after it waited off the board
+     * for a moment; units standing when the phase began never do, nor does one whose snapshot listed it without its
+     * hex only briefly, and an arrival in progress never starts over. One cleared and placed again builds up again.
+     */
+    private static final long ARRIVAL_SETTLE_MILLIS = 300;
+    /** How long another player's arrival stays marked on the board and at the window's edge. */
+    static final long ARRIVAL_NOTICE_MILLIS = 4500;
+    private final Map<Integer, Long> offBoardSince = new HashMap<>();
+    private final Map<Integer, Long> arrivalStarts = new HashMap<>();
+    private final List<GpuArrivalCues.Arrival> arrivalNotices = new ArrayList<>();
+    /** Every unit the status has listed this deployment phase. */
+    private final Set<Integer> knownUnits = new HashSet<>();
+
+    private void trackArrivals() {
+        GpuBattleStatus.Snapshot status = shownStatus;
+        if (status == null) {
+            return;
+        }
+        if (!status.phase().isDeployment()) {
+            offBoardSince.clear();
+            arrivalStarts.clear();
+            arrivalNotices.clear();
+            knownUnits.clear();
+            return;
+        }
+        long now = TimeUtils.millis();
+        arrivalStarts.values().removeIf(start -> now - start > GpuUnitShader.Shown.MATERIALIZE_MILLIS);
+        arrivalNotices.removeIf(notice -> now - notice.start() > ARRIVAL_NOTICE_MILLIS);
+        boolean primed = !knownUnits.isEmpty();
+        for (GpuBattleStatus.UnitStatus listed : status.units()) {
+            int id = listed.id();
+            // Other players' units are listed only once they stand on the board, so one first listed during the
+            // phase has just deployed.
+            boolean appeared = knownUnits.add(id) && primed && listed.side() != GpuBattleStatus.Side.OWN;
+            if (listed.position() == null) {
+                offBoardSince.putIfAbsent(id, now);
+                continue;
+            }
+            Long since = appeared ? Long.valueOf(0) : offBoardSince.remove(id);
+            if (since == null || now - since < ARRIVAL_SETTLE_MILLIS || arrivalStarts.containsKey(id)) {
+                continue;
+            }
+            arrivalStarts.put(id, now);
+            LOGGER.debug("[GpuDeploy] {} ({}) materializes at {}", listed.name(), id, listed.position());
+            if (listed.side() != GpuBattleStatus.Side.OWN && !listed.sensorContact()) {
+                arrivalNotices.removeIf(notice -> notice.id() == id);
+                arrivalNotices.add(new GpuArrivalCues.Arrival(id, listed.side(),
+                      listed.label().isEmpty() ? listed.name() : listed.label(), listed.position(), listed.boardId(),
+                      now));
+            }
+        }
+    }
+
+
+    /** The share of a hex's width between a hex's centre and each unit sharing it ({@link #stackOffsets}). */
+    private static final float STACK_SPREAD = 0.22f;
+
+    /**
+     * The units' poses with stacked units back on their hex's centre: a hex-sized base or ring belongs to the hex,
+     * where it would otherwise spill into the neighbours.
+     */
+    private Map<BoardScene.Unit, UnitFootprint.Pose> hexCentred() {
+        if (stackShifts.isEmpty()) {
+            return unitFootprints;
+        }
+        Map<BoardScene.Unit, UnitFootprint.Pose> centred = new HashMap<>(unitFootprints);
+        for (Map.Entry<BoardScene.Unit, Vector2> shift : stackShifts.entrySet()) {
+            UnitFootprint.Pose pose = centred.get(shift.getKey());
+            if (pose != null) {
+                centred.put(shift.getKey(), new UnitFootprint.Pose(pose.unit(),
+                      pose.position().cpy().sub(shift.getValue().x, shift.getValue().y, 0), pose.facing()));
+            }
+        }
+        return centred;
+    }
+
+    /**
+     * Where units that stand together in one hex move off its centre, so none hides inside another (protomeks of a
+     * point, a mek over a vehicle): ground units of one hex only, around its centre in the order of their ids, from
+     * the hex's north. Troops already make room around those (crowds), and airborne units, carried units, sensor
+     * contacts, multi-hex units and the deployment's preview keep the hex's centre.
+     */
+    private Map<Integer, Vector2> stackOffsets() {
+        Map<Coords, List<Integer>> stacks = new HashMap<>();
+        for (BoardScene.Unit unit : scene.units()) {
+            if (unit.part() >= 0 || unit.airborne() || unit.attachment() != null || unit.sensorContact()
+                  || unit.footprint().size() > 1 || UnitAnimator.troops(unit) || dead(unit) || placingPreview(unit)) {
+                continue;
+            }
+            stacks.computeIfAbsent(unit.location().coords(), ignored -> new ArrayList<>()).add(unit.id());
+        }
+        Map<Integer, Vector2> offsets = new HashMap<>();
+        float radius = STACK_SPREAD * BoardGeometry.width();
+        for (List<Integer> stack : stacks.values()) {
+            if (stack.size() < 2) { continue; }
+            java.util.Collections.sort(stack);
+            for (int index = 0; index < stack.size(); index++) {
+                float angle = MathUtils.PI2 * index / stack.size();
+                offsets.put(stack.get(index), new Vector2(MathUtils.sin(angle) * radius, MathUtils.cos(angle) * radius));
+            }
+        }
+        return offsets;
+    }
+
+    /**
+     * Whether a scene unit is the deployment's preview under the pointer: in the deployment phase, a unit the status
+     * lists without a hex. Every unit on the board has one.
+     */
+    private boolean placingPreview(BoardScene.Unit unit) {
+        GpuBattleStatus.Snapshot status = shownStatus;
+        if (status == null || !status.phase().isDeployment() || unit.sensorContact() || unit.attachment() != null) {
+            return false;
+        }
+        for (GpuBattleStatus.UnitStatus listed : status.units()) {
+            if (listed.id() == unit.id()) {
+                return listed.position() == null;
+            }
+        }
+        return false;
+    }
+
     private float ghost(BoardScene.Unit unit, UnitAttack death) {
         float shown = 0;
         for (var attack : playback.attacks()) {
@@ -2163,6 +2434,29 @@ class GpuBattleView extends ApplicationAdapter {
             cameraSelection = scene.selectedId();
             cameraFollowingPlayback = false;
             cameraReviewing = false;
+            return;
+        }
+        GpuBattleStatus.Snapshot status = shownStatus;
+        if (status != null && status.phase().isDeployment()) {
+            // Deployment leaves the camera where the player puts it: units appearing, turns passing and selections
+            // the phase display makes never move it, only the player's own locate, select and Center Here requests.
+            boolean asked = centerSequence != request.sequence() && request.sequence() == source.userCenterSequence();
+            centerSequence = request.sequence();
+            cameraSelection = scene.selectedId();
+            cameraFollowingPlayback = false;
+            cameraReviewing = false;
+            boardCamera.clearPlaybackFrame();
+            if (asked) {
+                var unit = request.entityId() == Entity.NONE ? null : scene.units().stream()
+                      .filter(listed -> listed.id() == request.entityId()).findFirst().orElse(null);
+                boardCamera.viewableArea(0, cameraWidth());
+                if (unit != null && onMap(scene, unit)) {
+                    boardCamera.frameSelection(unit, cameraWidth());
+                } else if (request.coords() != null && scene.tile(request.coords()) != null) {
+                    boardCamera.frameLocation(BoardGeometry.center(request.coords(),
+                          scene.tile(request.coords()).elevation()), cameraWidth());
+                }
+            }
             return;
         }
         boolean instant = instantAction != null || history.speed() == UnitMotion.Speed.INSTANT;
@@ -2883,6 +3177,26 @@ class GpuBattleView extends ApplicationAdapter {
         /** B+click samples a whole hex; releasing B before the mouse must not invoke the active tool. */
         private boolean brushPickerGesture;
         /**
+         * Deployment's turning drag: a left press on the hex of the unit just placed; its drag turns the unit toward
+         * each hex it crosses ({@code facingFrom} is that unit's hex, {@code facedHex} the last one it faced).
+         */
+        private Coords facingFrom;
+        private Coords facedHex;
+        /**
+         * A left press on the hex where the deployment ghost stands: a release there places the unit as a click does,
+         * while a drag holds the ghost there and turns its silhouette toward the pointer ({@code placingAim}, the hex
+         * last aimed at); the release places it and then turns it that way.
+         */
+        private Coords placingFrom;
+        private Coords placingAim;
+        /**
+         * A placement a drag aimed: once the unit stands on {@code pendingHex} it turns toward {@code pendingAim}.
+         * Dropped by the next press, or {@link #PLACEMENT_WAIT} after the release while no dialog asks anything.
+         */
+        private Coords pendingHex;
+        private Coords pendingAim;
+        private long pendingSince;
+        /**
          * A Select press that grabbed no selected item: its drag draws a selection box (Shift adds, Ctrl removes) and a
          * release without a drag is a click. Only a press on the selection, or inside a selected object's outline,
          * moves it.
@@ -3167,9 +3481,15 @@ class GpuBattleView extends ApplicationAdapter {
                 cancelRoute();
                 return true;
             }
+            if (button == Input.Buttons.RIGHT && boardGesture && placingFrom != null) {
+                // A right click while the ghost is aimed drops the placement.
+                reset();
+                return true;
+            }
             if (boardGesture || ui.hit(x, y)) {
                 return false;
             }
+            dropPendingPlacement();
             dragX = x;
             dragY = y;
             startX = x;
@@ -3186,6 +3506,13 @@ class GpuBattleView extends ApplicationAdapter {
             panning = BoardCameraControls.cameraButton(button);
             orbiting = BoardCameraControls.orbits(button, gestureModifiers);
             ui.boardPress();
+            if (button == Input.Buttons.LEFT && !source.isEditor() && !measurementGesture && ui instanceof GpuHud hud) {
+                Coords pressed = pickSelection(x, y).coords();
+                facingFrom = hud.facesFrom(pressed) ? pressed : null;
+                facedHex = null;
+                placingFrom = facingFrom == null && placingGhost != null && pressed != null
+                      && pressed.equals(placingHex) ? pressed : null;
+            }
             if (button == Input.Buttons.LEFT && source.isEditor() && !measurementGesture && !brushPickerGesture) {
                 // A press on the selection's rotation handle turns the selection.
                 var handle = rotationHandle();
@@ -3226,6 +3553,26 @@ class GpuBattleView extends ApplicationAdapter {
                 return true;
             }
             if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < BoardCameraControls.DRAG_THRESHOLD * layoutScale) {
+                return true;
+            }
+            if (placingFrom != null && ui instanceof GpuHud hud) {
+                // Press-and-drag on the ghost: it stays on its hex and its silhouette faces the hex under the pointer.
+                dragged = true;
+                Coords at = ui.hit(x, y) ? null : pick(x, y);
+                if (at != null && !at.equals(placingFrom) && !at.equals(placingAim)) {
+                    placingAim = at;
+                    hud.pinPlacement(placingFrom, placingFrom.direction(at));
+                }
+                return true;
+            }
+            if (facingFrom != null && ui instanceof GpuHud hud) {
+                // Deployment's turning drag: the placed unit faces the hex under the pointer; the release clicks nothing.
+                dragged = true;
+                Coords at = ui.hit(x, y) ? null : pick(x, y);
+                if (at != null && !at.equals(facingFrom) && !at.equals(facedHex) && hud.facesFrom(facingFrom)) {
+                    facedHex = at;
+                    hud.faceToward(at);
+                }
                 return true;
             }
             // Past the threshold a gesture is a drag: a left one does nothing more and cancels its click (C.4). An orbit
@@ -3287,6 +3634,17 @@ class GpuBattleView extends ApplicationAdapter {
                 reset();
                 return true;
             }
+            // The release of an aimed ghost places the unit; it turns as aimed once the placement shows.
+            if (placingFrom != null && dragged && ui instanceof GpuHud hud) {
+                hud.boardClick(placingFrom, Entity.NONE, Input.Buttons.LEFT, gestureModifiers, startX, startY, Float.NaN);
+                if (placingAim != null) {
+                    pendingHex = placingFrom;
+                    pendingAim = placingAim;
+                    pendingSince = TimeUtils.millis();
+                }
+                reset();
+                return true;
+            }
             // A short left or right click on the board of the press goes to the HUD: the tool click or the menu. A
             // map preview follows hover unless its menu is open; Alt or a pending ruler consumes a left click for LOS.
             if (!dragged && button != Input.Buttons.MIDDLE && !ui.hit(x, y)
@@ -3324,6 +3682,13 @@ class GpuBattleView extends ApplicationAdapter {
             boardGesture = false;
             measurementGesture = false;
             brushPickerGesture = false;
+            facingFrom = null;
+            facedHex = null;
+            if (placingAim != null && pendingHex == null && ui instanceof GpuHud hud) {
+                hud.unpinPlacement();
+            }
+            placingFrom = null;
+            placingAim = null;
             marquee = false;
             editorGrab = null; editorHexGrab = null; rotationGrab = null;
             clearElevationScroll();
@@ -3356,6 +3721,32 @@ class GpuBattleView extends ApplicationAdapter {
         void interrupt() {
             if (drawingRoute()) { cancelRoute(); }
             else { reset(); }
+        }
+
+        /**
+         * Each frame: an aimed placement turns its unit once the unit stands on its hex; it is dropped after
+         * {@link #PLACEMENT_WAIT} without that, the wait held while a dialog (an elevation choice) asks the player.
+         */
+        void settlePlacement() {
+            if (pendingHex == null || !(ui instanceof GpuHud hud)) {
+                return;
+            }
+            if (hud.facesFrom(pendingHex)) {
+                hud.faceToward(pendingAim);
+                dropPendingPlacement();
+            } else if (hud.isModal()) {
+                pendingSince = TimeUtils.millis();
+            } else if (TimeUtils.timeSinceMillis(pendingSince) > PLACEMENT_WAIT) {
+                dropPendingPlacement();
+            }
+        }
+
+        private void dropPendingPlacement() {
+            if (pendingHex != null && ui instanceof GpuHud hud) {
+                hud.unpinPlacement();
+            }
+            pendingHex = null;
+            pendingAim = null;
         }
 
         /**
@@ -3482,6 +3873,9 @@ class GpuBattleView extends ApplicationAdapter {
                     }
                     return true;
                 }
+                if (modifiers() == InputEvent.CTRL_DOWN_MASK && ui instanceof GpuHud hud && hud.wheelHeight(amountY)) {
+                    return true;
+                }
                 finishElevationScroll();
                 boardCamera.zoomAt(wheelZoom(amountY), Gdx.input.getX(), Gdx.graphics.getHeight() - Gdx.input.getY());
                 return true;
@@ -3500,6 +3894,11 @@ class GpuBattleView extends ApplicationAdapter {
             if (key == Input.Keys.ESCAPE && boardGesture && gestureButton == Input.Buttons.LEFT && source.isEditor()) {
                 if (drawingRoute()) { cancelRoute(); }
                 else if (marquee || measurementGesture || brushPickerGesture) { reset(); }
+                return true;
+            }
+            // Esc while the deployment ghost is aimed drops the placement before its release places it.
+            if (key == Input.Keys.ESCAPE && boardGesture && placingFrom != null) {
+                reset();
                 return true;
             }
             int awt = awtKey(key);
@@ -3985,6 +4384,7 @@ class GpuBattleView extends ApplicationAdapter {
         armFlips.clear();
         unitFootprints.clear();
         hover.clear();
+        arriving.clear();
         unitPicking.clear();
     }
     void cameraCommand(KeyCommandBind command) { boardInput.cameraCommand(-1, command); }

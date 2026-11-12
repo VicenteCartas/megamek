@@ -139,9 +139,12 @@ public class FovHighlightingAndDarkening {
         }
         Coords viewerPosition = null;
         Entity viewer = state.getDisplayedEntity();
-        // In the movement phase, calc LOS based on the selected hex, otherwise use the selected Entity.
+        // In the movement phase, calc LOS based on the selected hex, in deployment from the hex the unit is previewed
+        // on, otherwise use the selected Entity.
         if (state.getGame().getPhase().isMovement() && state.getSelected() != null) {
             viewerPosition = state.getSelected();
+        } else if (state.getGame().getPhase().isDeployment() && state.getDeploymentPreview() != null) {
+            viewerPosition = state.getDeploymentPreview();
         } else if (viewer != null) {
             if (viewer.isOnBoard(state.getBoardId())) {
                 viewerPosition = viewer.getSecondaryPositions().values().stream()

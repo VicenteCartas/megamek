@@ -21,6 +21,7 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.gdx.UiTheme.EdgeBox;
+import megamek.client.ui.panels.phaseDisplay.ReportDisplay.ReportCommand;
 import megamek.common.enums.GamePhase;
 
 /**
@@ -33,6 +34,8 @@ final class GpuInitiativeCard implements GpuHud.Component {
     private static final Color DIE = Color.valueOf("ECEAE4");
     private static final Color DARK = Color.valueOf("111111");
     private static final Color TAG_EDGE = Color.valueOf("5B6563");
+    private static final float ACTION = 40;
+    private static final String REROLL = ReportCommand.REPORT_REROLL_INITIATIVE.getCmd();
 
     /** What the card was built from; it is rebuilt when this changes. */
     private record Shown(int round, List<GpuBattleStatus.InitiativeSide> sides, List<GpuBattleStatus.Slot> turns,
@@ -54,6 +57,12 @@ final class GpuInitiativeCard implements GpuHud.Component {
     private final Label activations;
     private final Table slots = new Table();
     private final List<Table> boxes = new ArrayList<>();
+    private final Table actions = new Table();
+    private final Cell<Table> actionsCell;
+    private final UiButton reroll;
+    private final UiButton proceed;
+    private List<BoardScene.Command> commands = List.of();
+    private String doneId;
     private GpuBattleStatus.Snapshot status;
     private Shown shown;
     private int page;
@@ -70,7 +79,19 @@ final class GpuInitiativeCard implements GpuHud.Component {
         // inside the card instead of running over the dock, as the other HUD lists do.
         ScrollPane scroll = ui.scrollList(body);
         scroll.setName("initiative-body");
-        root.add(scroll).grow();
+        root.add(scroll).grow().row();
+        // Before the first deployment the card is the whole screen's question, so it carries its own answer: Continue
+        // (and the Tactical Genius reroll) at its foot instead of a second panel below it.
+        reroll = ui.button("hud", null, UiTheme.upper(Messages.getString("GpuBoard.hud.dock.rerollInitiative")), null);
+        reroll.setName("initiative-reroll");
+        reroll.pad(0, 14, 0, 14);
+        onChange(reroll, () -> run(REROLL));
+        proceed = ui.button("hud-main", null, UiTheme.upper(Messages.getString("GpuBoard.hud.dock.continue")), null);
+        proceed.setName("initiative-continue");
+        onChange(proceed, () -> run(doneId));
+        actions.add(reroll).height(ACTION).padRight(6);
+        actions.add(proceed).growX().height(ACTION);
+        actionsCell = root.add(actions).growX().padTop(14);
         body.top().left();
         body.defaults().left().growX();
         caption = ui.caption("");
@@ -130,6 +151,36 @@ final class GpuInitiativeCard implements GpuHud.Component {
             }
         }
         flow();
+        boolean staging = staging(next);
+        BoardScene scene = inputs.frame().scene();
+        commands = scene == null ? List.of() : scene.commands();
+        doneId = inputs.frame().panels().phase().doneId();
+        actionsCell.setActor(staging ? actions : null).padTop(staging ? 14 : 0);
+        if (staging) {
+            BoardScene.Command done = command(doneId);
+            BoardScene.Command again = command(REROLL);
+            proceed.setDisabled(done == null || !done.enabled());
+            reroll.setVisible(again != null && again.enabled());
+            actions.getCell(reroll).width(reroll.isVisible() ? reroll.getPrefWidth() : 0)
+                  .padRight(reroll.isVisible() ? 6 : 0);
+        }
+    }
+
+    /** Before the first deployment: the deployment order is all there is, and the card answers it itself. */
+    static boolean staging(GpuBattleStatus.Snapshot status) {
+        return status.round() == 0 && (status.phase().isInitiative() || status.phase().isInitiativeReport());
+    }
+
+    private BoardScene.Command command(String id) {
+        return id == null || id.isEmpty() ? null
+              : commands.stream().filter(command -> command.id().equals(id)).findFirst().orElse(null);
+    }
+
+    private void run(String id) {
+        BoardScene.Command command = command(id);
+        if (command != null && command.enabled()) {
+            command.action().run();
+        }
     }
 
     private void build() {

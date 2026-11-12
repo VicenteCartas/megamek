@@ -912,7 +912,7 @@ class GpuUnitPanelTest {
               record.heatTicks(), record.heatTickEffects(), record.heatScale(), record.heatBuildup(), record.weapons(),
               record.equipment(), record.systems(), record.crew(), record.abilities(), ammo, record.conditions(),
               record.carried(), record.unused(), record.lastTarget(), record.info(), record.readoutRows(),
-              record.readout());
+              record.readout(), record.damage());
     }
 
     /** The tooltip text of an actor (its TextTooltip's label). */
@@ -1081,7 +1081,7 @@ class GpuUnitPanelTest {
               record.heatTicks(), record.heatTickEffects(), record.heatScale(), record.heatBuildup(), record.weapons(),
               record.equipment(), record.systems(), record.crew(), record.abilities(), record.ammo(),
               record.conditions(), record.carried(), record.unused(), record.lastTarget(), record.info(),
-              record.readoutRows(), record.readout());
+              record.readoutRows(), record.readout(), record.damage());
     }
 
     /** The sheet's popover: the window-sized overlay's one child. */

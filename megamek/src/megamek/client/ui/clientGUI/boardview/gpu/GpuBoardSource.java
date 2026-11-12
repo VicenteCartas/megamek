@@ -44,6 +44,7 @@ import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.client.ui.clientGUI.tooltip.HexTooltip;
 import megamek.client.ui.dialogs.RoundsInAirDialog;
+import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.client.ui.tileset.UnitModelEquipment;
@@ -53,6 +54,7 @@ import megamek.common.TagInfo;
 import megamek.common.actions.ArtilleryAttackAction;
 import megamek.common.actions.AttackAction;
 import megamek.common.actions.WeaponAttackAction;
+import megamek.common.board.AllowedDeploymentHelper;
 import megamek.common.board.Board;
 import megamek.common.board.BridgeConstruction;
 import megamek.common.board.Coords;
@@ -124,6 +126,11 @@ final class GpuBoardSource implements BoardSource {
     private final GpuUnitRecord unitRecord = new GpuUnitRecord(this);
     /** Independent capture cache for the own card while another unit's record is inspected. */
     private final GpuUnitRecord ownUnitRecord = new GpuUnitRecord(this);
+    /** Independent capture cache for the unit the pointer peeks at in deployment, whose reach the board shows. */
+    private final GpuUnitRecord peekUnitRecord = new GpuUnitRecord(this);
+    /** EDT-written: the peeked unit's record, or the empty one. */
+    private volatile GpuUnitRecord.Snapshot peekRecord = GpuUnitRecord.Snapshot.EMPTY;
+    private volatile int peekUnit = Entity.NONE;
     private final GpuFirePreview preview;
     private final GpuChat chat;
     private final GpuToasts toasts = new GpuToasts(this);
@@ -181,6 +188,8 @@ final class GpuBoardSource implements BoardSource {
     private List<BoardScene.Tile> tiles = List.of();
     private BoardFieldOfView fieldOfView = BoardFieldOfView.EMPTY;
     private volatile boolean closed;
+    /** {@link #userCenterSequence()}. */
+    private volatile long userCenter = -1;
     /** EDT-confined stack of native modal dialogs; only the newest is shown, so they are answered LIFO. */
     private final Deque<PendingDialog> pendingDialogs = new ArrayDeque<>();
     /** Its newest unanswered dialog for the GL thread, read without any monitor and never part of a {@link Frame}. */
@@ -203,6 +212,9 @@ final class GpuBoardSource implements BoardSource {
     /** One pointer sample from the GL thread, captured together on the EDT. */
     private record HoverPoint(Coords coords, float pointedZ) { }
     private volatile HoverPoint hoverPoint = new HoverPoint(null, Float.NaN);
+    /** The deployment ghost's hex and facing while a press-drag aims it, or null while it follows the pointer. */
+    private record DeployPin(Coords hex, int facing) { }
+    private volatile DeployPin deployPin;
     private long boardGeneration;
     private volatile Rectangle visibleArea = new Rectangle(0, 0, 16, 16);
     /** The game's units the last capture did not show on this board (reserveUnits). */
@@ -222,6 +234,106 @@ final class GpuBoardSource implements BoardSource {
     @Override
     public void setHover(Coords coords, float pointedZ) {
         hoverPoint = new HoverPoint(coords, pointedZ);
+    }
+
+    /**
+     * GL thread: holds the deployment ghost on {@code hex} facing {@code facing} (a press-drag turning it before the
+     * placement), instead of under the pointer facing the board's centre.
+     */
+    void pinDeploymentPreview(Coords hex, int facing) {
+        deployPin = hex == null ? null : new DeployPin(hex, facing);
+    }
+
+    /** GL thread: hides deployment's ghost while the HUD's selection is cleared and no unit is being deployed. */
+    void holdDeploymentPreview(boolean held) {
+        previewHeld = held;
+    }
+
+    private volatile boolean previewHeld;
+
+    /** GL thread: the deployment ghost follows the pointer again. */
+    void unpinDeploymentPreview() {
+        DeployPin pin = deployPin;
+        if (pin != null) {
+            facingHold = new DeployHold(pin, System.currentTimeMillis());
+        }
+        deployPin = null;
+    }
+
+    /**
+     * An aimed placement's facing, held on the placed unit until MegaMek turns it (the turn follows the placing click a
+     * few frames later), so it never shows the click's default facing first; dropped once it does or after a while.
+     */
+    private record DeployHold(DeployPin pin, long since) { }
+    private static final long DEPLOY_HOLD_MILLIS = 1500;
+    private volatile DeployHold facingHold;
+
+    /** The units with the unit just placed by an aimed placement turned as it was aimed, until MegaMek turns it. */
+    private void holdPlacedFacing(JComponent panel, List<BoardScene.Unit> units) {
+        DeployPin pin = deployPin;
+        DeployHold hold = facingHold;
+        if (pin == null && hold != null) {
+            pin = hold.pin();
+        }
+        if (pin == null || !(panel instanceof DeploymentDisplay deployment)) {
+            return;
+        }
+        Entity entity = deployment.currentEntity();
+        boolean placedThere = entity != null && pin.hex().equals(entity.getPosition());
+        if (hold != null && (!placedThere || entity.getFacing() == pin.facing()
+              || System.currentTimeMillis() - hold.since() > DEPLOY_HOLD_MILLIS)) {
+            facingHold = null;
+        }
+        if (!placedThere || entity.getFacing() == pin.facing()) {
+            return;
+        }
+        for (int index = 0; index < units.size(); index++) {
+            BoardScene.Unit unit = units.get(index);
+            if (unit.id() == entity.getId() && pin.hex().equals(unit.location().coords())) {
+                BoardScene.Waypoint at = unit.location();
+                units.set(index, unit.at(new BoardScene.Waypoint(at.coords(), at.elevation(), pin.facing(),
+                      at.proneCause(), at.aeroState(), at.footprint(), at.form(), at.fallSide(), at.hullDown())));
+            }
+        }
+    }
+
+    /**
+     * The heights the placed unit may deploy at in its hex, offered on the unit while it has a choice: an aerospace
+     * unit's altitude, a VTOL's elevation, a mek's ice or sea floor. {@code altitude} tells altitudes from elevations.
+     */
+    record HeightChoice(int unitId, int height, List<Integer> heights, boolean altitude) {
+        static final HeightChoice NONE = new HeightChoice(Entity.NONE, 0, List.of(), false);
+    }
+
+    private volatile HeightChoice heightChoice = HeightChoice.NONE;
+
+    /** GL thread: the placed unit's height choice, {@link HeightChoice#NONE} while there is none. */
+    HeightChoice heightChoice() {
+        return heightChoice;
+    }
+
+    private HeightChoice captureHeightChoice(JComponent panel) {
+        if (!(panel instanceof DeploymentDisplay deployment)) {
+            return HeightChoice.NONE;
+        }
+        Entity entity = deployment.currentEntity();
+        List<Integer> heights = deployment.placedHeights();
+        if (entity == null || heights.size() < 2) {
+            return HeightChoice.NONE;
+        }
+        return new HeightChoice(entity.getId(), entity.isAero() ? entity.getAltitude() : entity.getElevation(),
+              heights, entity.isAero());
+    }
+
+    /** GL thread: deploys the placed unit {@code unitId} at {@code height} instead, if it is still the one placed. */
+    void setPlacedHeight(int unitId, int height) {
+        SwingUtilities.invokeLater(() -> {
+            if (acceptsInput() && phasePanel.get() instanceof DeploymentDisplay deployment
+                  && deployment.currentEntity() != null && deployment.currentEntity().getId() == unitId) {
+                deployment.setPlacedHeight(height);
+                refresh();
+            }
+        });
     }
 
     BoardClientState currentView() {
@@ -1412,6 +1524,19 @@ final class GpuBoardSource implements BoardSource {
                   .map(entity -> unit(entity, -1, new Coords(0, 0), false, usedImages)).toList();
         }
         JComponent panel = phasePanel.get();
+        holdPlacedFacing(panel, units);
+        heightChoice = captureHeightChoice(panel);
+        DeployPin pin = deployPin;
+        BoardScene.Unit placing = previewHeld ? null
+              : pin != null ? deploymentPreview(panel, pin.hex(), pin.facing(), usedImages)
+              : deploymentPreview(panel, hoverPoint.coords(), -1, usedImages);
+        if (placing != null) {
+            units.add(placing);
+        }
+        // Deployment's line-of-sight overlay looks from the previewed hex; only while the shading shows, as each new
+        // origin recaptures the field of view.
+        view.setDeploymentPreview(placing != null && (view.shouldFovDarken() || view.shouldFovHighlight())
+              ? placing.location().coords() : null);
         MovePath path = panel instanceof MovementDisplay movement ? movement.getPlannedMovement() : null;
         int actorId = actions.actorId();
         GameTurn activeTurn = activeTurn();
@@ -1464,6 +1589,9 @@ final class GpuBoardSource implements BoardSource {
         int card = checked(cardUnit, this::identified);
         int ownCard = checked(ownCardUnit, this::owned);
         GpuUnitRecord.Snapshot record = unitRecord.capture(card);
+        int peek = checked(peekUnit, this::identified);
+        peekRecord = peek == Entity.NONE ? GpuUnitRecord.Snapshot.EMPTY
+              : peek == card ? record : peekUnitRecord.capture(peek);
         GpuHudData nextPanels = new GpuHudData(actions.phaseInfo(commands), move,
               fire.capture(panel, hover, focus), physical.capture(panel),
               record,
@@ -1659,6 +1787,87 @@ final class GpuBoardSource implements BoardSource {
         return client != null && client.isMyTurn() ? client.getMyTurn() : null;
     }
 
+    /**
+     * The unit being deployed, not yet placed, standing on the hovered hex while that hex is a legal deployment hex
+     * for it: the view draws it as a ghost under the pointer, so the player sees what a click puts there. It faces as
+     * the click would place it (DeploymentDisplay#placementFacing), or {@code facing} when it is a direction (0-5).
+     * Null outside the local deployment turn.
+     */
+    private BoardScene.Unit deploymentPreview(JComponent panel, Coords hover, int facing,
+          Map<Image, Boolean> usedImages) {
+        if (hover == null || !(panel instanceof DeploymentDisplay deployment) || activeTurn() == null
+              || !view.game.getPhase().isDeployment() || board == null || !board.contains(hover)) {
+            noPreview(panel instanceof DeploymentDisplay && activeTurn() == null ? "not the local turn" : null, null);
+            return null;
+        }
+        Entity entity = deployment.currentEntity();
+        if (parked(entity, hover)) {
+            noPreview("waiting for the pointer to move", entity);
+            return null;
+        }
+        String refused = entity == null ? "no current unit" : entity.getPosition() != null ? null
+              : entity.isBoardProhibited(board) ? "board prohibited"
+              : !board.isLegalDeployment(hover, entity) ? "outside its deployment zone"
+              : !deployableAt(entity, hover) ? "no height to stand at" : null;
+        if (entity == null || entity.getPosition() != null || refused != null) {
+            noPreview(refused, entity);
+            return null;
+        }
+        noPreview(null, null);
+        int shownFacing = facing >= 0 && facing < 6 ? facing : deployment.placementFacing(entity, hover);
+        BoardScene.Unit unit = unit(entity, -1, hover, false, usedImages);
+        // As a placed unit is captured, so an aerospace unit or a LAM shows its own form and flight state.
+        return unit.at(unitWaypoint(entity, hover, shownFacing));
+    }
+
+    private int previewEntityId = Entity.NONE;
+    private Coords parkedHover;
+
+    /**
+     * Whether the ghost waits for the pointer to move: a newly current unit (the next one after a confirmed placement)
+     * shows no ghost on the hex the pointer rests on, as that is usually the hex the previous unit just landed on and
+     * the ghost would cover it.
+     */
+    private boolean parked(Entity entity, Coords hover) {
+        int id = entity == null ? Entity.NONE : entity.getId();
+        if (id != previewEntityId) {
+            previewEntityId = id;
+            parkedHover = hover;
+        } else if (parkedHover != null && !parkedHover.equals(hover)) {
+            parkedHover = null;
+        }
+        return parkedHover != null && parkedHover.equals(hover) && id != Entity.NONE && entity.getPosition() == null;
+    }
+
+    private String noPreviewReason;
+
+    /** Logs once per change why deployment shows no ghost under the pointer, to trace a turn that takes no unit. */
+    private void noPreview(String reason, Entity entity) {
+        String shown = reason == null ? null : (entity == null ? "" : entity.getShortName() + ": ") + reason;
+        if (!java.util.Objects.equals(shown, noPreviewReason)) {
+            noPreviewReason = shown;
+            if (shown != null) {
+                LOGGER.debug("[GpuDeploy] no placement ghost; {}", shown);
+            }
+        }
+    }
+
+    /**
+     * Whether a click on {@code coords} could place the unit: some height there it may stand at (water too deep for a
+     * tank, a building a hover cannot enter), as DeploymentHelper asks before it places it. Space maps keep any height.
+     */
+    private boolean deployableAt(Entity entity, Coords coords) {
+        if (board.isSpace()) {
+            return true;
+        }
+        var allowed = new AllowedDeploymentHelper(entity, coords, board, board.getHex(coords), view.game);
+        if (!allowed.findAllowedElevations().isEmpty()) {
+            return true;
+        }
+        var facings = allowed.findAllowedFacings(0);
+        return facings != null && facings.hasValidFacings();
+    }
+
     private Entity reportEntity(int id) {
         Entity entity = view.game.getEntityFromAllSources(id);
         return entity != null && EntityVisibilityUtils.detectedOrHasVisual(view.getLocalPlayer(), view.game, entity)
@@ -1680,6 +1889,7 @@ final class GpuBoardSource implements BoardSource {
             Entity entity = acceptsInput() ? view.game.getEntity(id) : null;
             if (entity != null && identified(entity)) {
                 view.processBoardViewEvent(new BoardViewEvent(view, BoardViewEvent.SELECT_UNIT, id));
+                requestedCenter();
                 refresh();
             }
         });
@@ -1695,6 +1905,7 @@ final class GpuBoardSource implements BoardSource {
                 } else {
                     centerOnBoard(entity);
                 }
+                requestedCenter();
                 refresh();
             }
         });
@@ -2088,9 +2299,40 @@ final class GpuBoardSource implements BoardSource {
         });
     }
 
+    /** GL thread: centres the board on {@code coords} at the player's request (the context menu's Center Here). */
+    void centerOnHex(Coords coords) {
+        command(() -> {
+            view.centerOnHex(coords);
+            requestedCenter();
+        });
+    }
+
+    /**
+     * EDT: the board's latest centre request came from the player (a locate or select click, Center Here), not from a
+     * phase display or another player's turn. Deployment's camera follows only these (GpuBattleView#updateCameraFocus).
+     */
+    private void requestedCenter() {
+        userCenter = view.getCenterRequest().sequence();
+    }
+
+    @Override
+    public long userCenterSequence() {
+        return userCenter;
+    }
+
     /** GL thread: the unit on the unit card and record sheet. */
     void setCardUnit(int id) {
         cardUnit = id;
+    }
+
+    /** GL thread: the unit deployment peeks at under the pointer, whose record the next capture takes. */
+    void setPeekUnit(int id) {
+        peekUnit = id;
+    }
+
+    /** GL thread: the peeked unit's record as last captured; the empty one while none is peeked. */
+    GpuUnitRecord.Snapshot peekRecord() {
+        return peekRecord;
     }
 
     /**

@@ -14,6 +14,7 @@ import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.TimeUtils;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
@@ -66,13 +67,20 @@ final class GpuHintLine implements GpuHud.Component {
     private final Label status;
     private final Cell<Label> statusCell;
     private final BoardCamera camera;
+    private final GpuHudState state;
+    private final Drawable plate;
 
     GpuHintLine(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera) {
         ui = kit.ui;
         this.camera = camera;
+        this.state = state;
         root.setName("hint-line");
         // Presses pass through the line to the board (#hint: pointer-events none).
         root.setTouchable(Touchable.disabled);
+        // A dark plate under the gestures, as the board's other floating texts have, so they read over bright ground.
+        root.setBackground(ui.skin.getDrawable("panel-pop"));
+        root.pad(5, 12, 5, 12);
+        plate = root.getBackground();
         chip = ui.panel();
         chip.setName("pick-chip");
         chip.pad(7, 14, 7, 9);
@@ -109,12 +117,34 @@ final class GpuHintLine implements GpuHud.Component {
     @Override
     public void update(GpuHud.Inputs inputs) {
         // While the camera flies, Free Flight's keys replace the board's gestures (the old GL UI's help line).
-        List<String> items = camera.firstPerson() ? flight() : items(inputs);
+        List<String> items = camera.firstPerson() ? flight() : items(inputs, state.deployOverlay);
+        GpuBattleStatus.Snapshot deploying = inputs.frame().status();
+        GpuBattleStatus.UnitStatus waiting = deploying.myTurn() && deploying.phase().isDeployment()
+              && state.inspected != deploying.actorId() ? state.presented(state.inspected) : null;
+        boolean notDeploying = !camera.firstPerson() && waiting != null
+              && waiting.side() == GpuBattleStatus.Side.OWN && waiting.position() == null;
+        if (notDeploying) {
+            // A card of an own unit the turn does not deploy: say why nothing follows the pointer.
+            items = new ArrayList<>(items);
+            items.addAll(0, List.of(waiting.name(), text(waiting.pending() ? "GpuBoard.hud.deploy.laterTurn"
+                  : "GpuBoard.hud.deploy.notThisTurn")));
+        }
+        boolean overlaid = !camera.firstPerson() && state.deployOverlay != null
+              && state.deployOverlay != GpuHudState.DeployOverlay.OFF && deploying.myTurn()
+              && deploying.phase().isDeployment();
+        if (overlaid && state.deployOverlay == GpuHudState.DeployOverlay.DAMAGE) {
+            String legend = damageLegend(state.presentedRecord(deploying.actorId()));
+            if (!legend.isEmpty()) {
+                items = new ArrayList<>(items);
+                items.addAll(0, List.of(text("GpuBoard.hud.deploy.overlay.DAMAGE"), legend));
+            }
+        }
         long now = TimeUtils.millis();
         if (!items.equals(shown)) {
             shown = items;
             changedAt = now;
             root.clearChildren();
+            root.setBackground(items.isEmpty() ? null : plate);
             for (int index = 0; index < items.size(); index += 2) {
                 root.add(ui.label(items.get(index), "hud-medium", SIZE, Color.WHITE))
                       .padLeft(index == 0 ? 0 : ITEM_GAP);
@@ -122,8 +152,9 @@ final class GpuHintLine implements GpuHud.Component {
             }
         }
         GpuPlayers.Pick pick = inputs.frame().panels().players().pick();
-        // The gestures fade once read and return when they change; a pick's steps and Free Flight's keys stay.
-        boolean lasting = pick != null || camera.firstPerson();
+        // The gestures fade once read and return when they change; a pick's steps, Free Flight's keys and a deployment
+        // overlay's legend stay.
+        boolean lasting = pick != null || camera.firstPerson() || overlaid || notDeploying;
         float faded = Math.min(1, Math.max(0, (now - changedAt - HOLD_MILLIS) / (float) FADE_MILLIS));
         root.getColor().a = lasting ? 1 : 1 - faded;
         if (pick != null) {
@@ -134,11 +165,38 @@ final class GpuHintLine implements GpuHud.Component {
     }
 
     /**
+     * The Damage overlay's legend: the unit's peak expected damage, where it peaks and how far it reaches; empty
+     * without a damage curve.
+     */
+    static String damageLegend(GpuUnitRecord.Snapshot record) {
+        List<Float> damage = record == null ? List.of() : record.damage();
+        int peakRange = -1, reach = 0;
+        float peak = 0;
+        for (int range = 1; range < damage.size(); range++) {
+            float value = damage.get(range);
+            if (value > peak) {
+                peak = value;
+                peakRange = range;
+            }
+            if (value > 0) {
+                reach = range;
+            }
+        }
+        return peakRange < 0 ? ""
+              : text("GpuBoard.hud.deploy.damageLegend", Math.round(peak), peakRange, reach);
+    }
+
+    /**
      * The line's gestures and what each does now, alternating (the prototype's hintText, plan A.12 L11). While a bot
      * order picks hexes, the pick's: its instructions and picked hexes, Done and Cancel, as the Legacy 2D board's
      * picker dialog shows them.
      */
     static List<String> items(GpuHud.Inputs inputs) {
+        return items(inputs, null);
+    }
+
+    /** The items, with deployment's overlay mode ({@code null} while Ctrl+wheel has not chosen one). */
+    static List<String> items(GpuHud.Inputs inputs, GpuHudState.DeployOverlay overlay) {
         boolean planning = GpuHud.planning(inputs);
         GpuBoardSource.UiPreferences preferences = inputs.preferences();
         GpuPlayers.Pick pick = inputs.frame().panels().players().pick();
@@ -153,6 +211,16 @@ final class GpuHintLine implements GpuHud.Component {
         // elsewhere, and in the charge, DFA and ram gears MegaMek's click chooses the target.
         int pending = inputs.frame().panels().los().pending();
         GpuBattleStatus.Snapshot status = inputs.frame().status();
+        if (pending == 0 && status.myTurn() && status.phase().isDeployment()) {
+            // Deployment: place, face by dragging from the unit; the queue's chips show the overlays.
+            List<String> deploying = new ArrayList<>(List.of(text("GpuBoard.hud.mouse.leftClick"),
+                  text("GpuBoard.hud.hint.place"), text("GpuBoard.hud.mouse.leftDrag"),
+                  text("GpuBoard.hud.hint.face"), key(preferences, KeyCommandBind.DONE),
+                  text("GpuBoard.hud.deploy.confirm")));
+            deploying.addAll(List.of(text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.pan"),
+                  text("GpuBoard.hud.mouse.wheel"), text("GpuBoard.hud.hint.zoom")));
+            return deploying;
+        }
         boolean targeting = status.myTurn() && status.phase().isMovement()
               && inputs.frame().panels().move().mode() == GpuMovePlan.Mode.TARGET;
         List<String> items = new ArrayList<>(List.of(text("GpuBoard.hud.mouse.leftClick"),

@@ -35,6 +35,9 @@ final class GpuChatPanel implements GpuHud.Component {
     private final GpuHudState state;
     private final Table root;
     private final UiButton button;
+    private final UiButton queueButton;
+    private final UiButton cornerButton;
+    private final Table corner;
     private final Table lines = new Table();
     private final ScrollPane scroll;
     private final TextField field;
@@ -109,15 +112,27 @@ final class GpuChatPanel implements GpuHud.Component {
         sendRow.add(send).height(SEND_HEIGHT).padLeft(6);
         root.add(sendRow).growX();
         // The last mini button in every command-dock footer, pressed while the panel is open.
-        button = ui.button("hud-mini", "chat", null, null);
-        button.setName("chat-button");
-        ui.tip(button).getActor().setText(text("GpuBoard.hud.chat.title"));
-        UiKit.onChange(button, () -> {
+        button = toggle("chat-button");
+        // Deployment hides the dock; the force's queue carries its own.
+        queueButton = toggle("deploy-chat-button");
+        cornerButton = toggle("corner-chat-button");
+        corner = ui.panel();
+        corner.setName("corner-chat");
+        corner.pad(6);
+        corner.add(cornerButton);
+    }
+
+    private UiButton toggle(String name) {
+        UiButton toggle = ui.button("hud-mini", "chat", null, null);
+        toggle.setName(name);
+        ui.tip(toggle).getActor().setText(text("GpuBoard.hud.chat.title"));
+        UiKit.onChange(toggle, () -> {
             state.chatOpen = !state.chatOpen;
             if (state.chatOpen) {
                 focus();
             }
         });
+        return toggle;
     }
 
     @Override
@@ -128,6 +143,16 @@ final class GpuChatPanel implements GpuHud.Component {
     /** The Chat button at the right end of the dock's footer. */
     UiButton button() {
         return button;
+    }
+
+    /** The Chat button in the deployment queue's header. */
+    UiButton queueButton() {
+        return queueButton;
+    }
+
+    /** The Chat button standing alone at the window's bottom right while neither the dock nor the queue shows. */
+    Actor corner() {
+        return corner;
     }
 
     /** The chosen height within the space above the dock in this frame. */
@@ -162,6 +187,8 @@ final class GpuChatPanel implements GpuHud.Component {
             blur();
         }
         button.pressed(open).dot(newest > seen);
+        queueButton.pressed(open).dot(newest > seen);
+        cornerButton.pressed(open).dot(newest > seen);
         if (scrollDown && open && root.getHeight() > 0) {
             // The prototype keeps the newest line in view (#chatlog scrollTop = scrollHeight).
             scrollDown = false;

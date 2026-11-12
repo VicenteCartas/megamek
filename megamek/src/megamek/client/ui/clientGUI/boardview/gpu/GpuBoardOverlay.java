@@ -5,9 +5,11 @@ import static megamek.client.ui.gdx.UiTheme.alpha;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -40,6 +42,7 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
+import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -77,6 +80,8 @@ final class GpuBoardOverlay implements Disposable {
      */
     private static final Color GHOST = new Color(.25f, .72f, .95f, 1);
     private static final Color GHOST_GLOW = new Color(.15f, .43f, .57f, 1);
+    private static final Color HAZARD = Color.valueOf("FF554C");
+    private static final Color HAZARD_GLOW = new Color(HAZARD.r * .5f, HAZARD.g * .3f, HAZARD.b * .3f, 1);
     private static final float GHOST_OPACITY = .75f;
     /** A destroyed unit's ghost ({@link #renderGhosts}): pale and fainter, not the plan's cyan. */
     private static final Color DEAD = new Color(.78f, .8f, .84f, 1);
@@ -102,6 +107,29 @@ final class GpuBoardOverlay implements Disposable {
     private static final float DRIFT_HEAD_HEXES = .24f;
     /** The sides of a multi-hex unit's oval mark. */
     private static final int OVAL_STEPS = 96;
+    /** Deployment's reach bands: short mint, medium amber, long coral; a tint over each band and its border. */
+    private static final Color REACH_AMBER = new Color(1, .78f, .3f, 1);
+    private static final float REACH_TINT = .3f;
+    /** Weapons that reach further, artillery's map sheets, are left out of the bands. */
+    private static final int REACH_LIMIT = 30;
+    /** The index of each band in a record weapon's ranges (RangeType). */
+    private static final int SHORT = 1;
+    private static final int LONG = 3;
+
+    /**
+     * The deploying unit's weapon reach (deployment's Ranges and Damage overlays): the hex it stands on or would be
+     * placed on, and the longest short, medium and long range of its usable weapons, in hexes. With its expected damage
+     * by range ({@code damage}, empty for the bands alone) each hex in reach shades by what the unit would deal there,
+     * on the hexes it would see only while {@code sight} computed its line of sight (an own unit's preview).
+     */
+    private record Reach(Coords from, int shortRange, int mediumRange, int longRange, List<Float> damage,
+          BoardFieldOfView sight) { }
+
+    /** The Damage overlay's heat: a hex's tint from its share of the unit's peak damage, low to high. */
+    private static final Color DAMAGE_LOW = new Color(1, .86f, .35f, 1);
+    private static final Color DAMAGE_HIGH = new Color(1, .2f, .16f, 1);
+    private static final float DAMAGE_TINT_MIN = .14f;
+    private static final float DAMAGE_TINT_MAX = .58f;
 
     private final ModelBatch batch = new ModelBatch(GpuShaderManager.provider("Route markers", GpuUnitShader::unlitProvider),
           (camera, renderables) -> { });
@@ -115,6 +143,16 @@ final class GpuBoardOverlay implements Disposable {
     private final GpuLinearOverlay ghostBlend = new GpuLinearOverlay();
     private ModelInstance overlay;
     private ModelInstance movementMarkers;
+    /** Deployment's reach bands, a mesh of their own: the preview moving them rebuilds only them. */
+    private ModelInstance reachOverlay;
+    /** The reach and view the reach mesh shows. */
+    private Reach reachShown;
+    private boolean reachTactical;
+    /** Each hex's fill draped over its surface, the centre then the six corners; kept while the terrain is. */
+    private final Map<Coords, Vector3[]> fills = new HashMap<>();
+    /** The terrain (by identity) and board geometry the fills lie on. */
+    private Object fillsTiles;
+    private int fillsRevision;
     private long builds;
     /** The marks' bands by unit and by hex, in drawing order. */
     private Map<Integer, List<Band>> unitMarks = Map.of();
@@ -136,6 +174,8 @@ final class GpuBoardOverlay implements Disposable {
     private GpuMovePlan.Snapshot move;
     private GpuFireOrders.Snapshot fire;
     private GpuPhysicalOptions.Snapshot physical;
+    /** Deployment's weapon reach on the board (#reach), or null while none shows. */
+    private Reach reach;
     /** The client's movement palette, captured on the EDT for both views and the route pulse. */
     private Map<GpuMovePlan.Band, Integer> movementColors = Map.of();
     private int hoveredUnit = Entity.NONE;
@@ -204,9 +244,11 @@ final class GpuBoardOverlay implements Disposable {
         boolean sameMarks = same && frame.status() == status && state.presentedUnits() == units
               && view.hoveredUnit() == hoveredUnit && state.inspected == inspected;
         // A hovered unit hides the hover route (G3), so for the meshes only whether one is hovered counts.
+        Reach nextReach = reach(frame.scene(), frame.status(), state, view.hoveredUnit());
         boolean sameMeshes = same && panels.move() == move && preferences.movementColors().equals(movementColors)
               && (view.hoveredUnit() == Entity.NONE) == (hoveredUnit == Entity.NONE)
               && revision == BoardGeometry.revision();
+        reach = nextReach;
         scene = frame.scene();
         status = frame.status();
         units = state.presentedUnits();
@@ -221,6 +263,7 @@ final class GpuBoardOverlay implements Disposable {
         if (!sameMarks) {
             marks();
         }
+        updateReach();
         if (sameMeshes) {
             return;
         }
@@ -306,6 +349,84 @@ final class GpuBoardOverlay implements Disposable {
             Gdx.gl.glDepthMask(true);
             Gdx.gl.glDisable(GL20.GL_BLEND);
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
+        }
+    }
+
+    /** Another player's arrival: its side's colour, enemies coral and allies blue. */
+    private static final Color ARRIVAL_ENEMY = new Color(1f, .42f, .36f, 1);
+    private static final Color ARRIVAL_ALLY = new Color(.45f, .72f, 1f, 1);
+    private static final float ARRIVAL_WAVE_GAP = .4f;
+    private static final float ARRIVAL_WAVE_SECONDS = 1.3f;
+    private static final float ARRIVAL_WAVE_CYCLE = 1.8f;
+    private static final int ARRIVAL_WAVE_REPEATS = 1;
+
+    /**
+     * Where another player just deployed a unit (GpuBattleView#trackArrivals): rings ripple out from its hex as it
+     * materializes, and the hex's outline beats in its side's colour until the notice ends, over everything so a
+     * player looking elsewhere on the screen catches it.
+     */
+    void renderArrivals(Camera camera, List<GpuArrivalCues.Arrival> arrivals, int boardId, long now) {
+        if (scene == null || arrivals.isEmpty()) {
+            return;
+        }
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+        Gdx.gl.glDepthMask(false);
+        Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
+        shapes.setProjectionMatrix(camera.combined);
+        shapes.begin(ShapeRenderer.ShapeType.Filled);
+        try {
+            for (GpuArrivalCues.Arrival arrival : arrivals) {
+                if (arrival.boardId() != boardId || scene.tile(arrival.hex()) == null) {
+                    continue;
+                }
+                float seconds = (now - arrival.start()) / 1000f;
+                float life = 1 - (now - arrival.start()) / (float) GpuBattleView.ARRIVAL_NOTICE_MILLIS;
+                if (life <= 0) {
+                    continue;
+                }
+                Color color = arrival.side() == GpuBattleStatus.Side.ENEMY ? ARRIVAL_ENEMY : ARRIVAL_ALLY;
+                Coords hex = arrival.hex();
+                Vector3 center = BoardGeometry.center(hex, 0);
+                float z = BoardTacticalGeometry.floatingZ(scene, hex);
+                float beat = .6f + .4f * MathUtils.sin(seconds * 7);
+                float fade = Math.min(1, life * 4);
+                hexRing(hex, center, z, .8f, 1.06f, color, fade * beat);
+                // Two cycles of three waves each, then only the outline beats on until the notice fades.
+                for (int wave = 0; wave < 3; wave++) {
+                    float since = seconds - wave * ARRIVAL_WAVE_GAP;
+                    if (since < 0 || since >= ARRIVAL_WAVE_REPEATS * ARRIVAL_WAVE_CYCLE) {
+                        continue;
+                    }
+                    float t = (since % ARRIVAL_WAVE_CYCLE) / ARRIVAL_WAVE_SECONDS;
+                    if (t > 1) {
+                        continue;
+                    }
+                    float scale = 1 + 3f * t;
+                    hexRing(hex, center, z, scale - .22f, scale, color, fade * (1 - t) * (1 - t));
+                }
+            }
+        } finally {
+            shapes.end();
+            Gdx.gl.glDepthMask(true);
+            Gdx.gl.glDisable(GL20.GL_BLEND);
+        }
+    }
+
+    /** A hexagonal band around {@code hex} between {@code inner} and {@code outer} times its corners' distance. */
+    private void hexRing(Coords hex, Vector3 center, float z, float inner, float outer, Color color, float alpha) {
+        float bits = Color.toFloatBits(color.r, color.g, color.b, MathUtils.clamp(alpha, 0, 1));
+        Vector3[] in = new Vector3[6];
+        Vector3[] out = new Vector3[6];
+        for (int corner = 0; corner < 6; corner++) {
+            Vector3 offset = BoardGeometry.corner(hex, 0, corner).sub(center);
+            in[corner] = new Vector3(offset).scl(inner).add(center.x, center.y, z);
+            out[corner] = new Vector3(offset).scl(outer).add(center.x, center.y, z);
+        }
+        for (int corner = 0; corner < 6; corner++) {
+            int next = (corner + 1) % 6;
+            triangle(out[corner], out[next], in[next], bits);
+            triangle(out[corner], in[next], in[corner], bits);
         }
     }
 
@@ -492,6 +613,9 @@ final class GpuBoardOverlay implements Disposable {
             return;
         }
         batch.begin(camera);
+        if (reachOverlay != null) {
+            batch.render(reachOverlay);
+        }
         if (overlay != null) {
             batch.render(overlay);
         }
@@ -546,17 +670,36 @@ final class GpuBoardOverlay implements Disposable {
     /**
      * Destroyed units in the playback of what they still fired or took (GpuBattleView#ghost): pale copies of the
      * instances the view placed for them, each at its share of {@link #DEAD_OPACITY}, drawn as the route's ghost is.
+     * The unit being deployed under the pointer ({@code placing}, or null) is among them, drawn in the plan's cyan, and
+     * each unit {@code arriving} where it was just deployed keeps that hologram, fading as the unit materializes.
      */
-    void renderGhosts(Camera camera, Map<ModelInstance, Float> shown) {
-        if (shown.isEmpty()) { return; }
+    void renderGhosts(Camera camera, Map<ModelInstance, Float> shown, Map<ModelInstance, Float> arriving,
+          ModelInstance placing, boolean hazard) {
+        if (shown.isEmpty() && arriving.isEmpty()) { return; }
         ghostBlend.begin();
         try {
             ghostBatch.begin(camera);
+            arriving.forEach((source, progress) -> {
+                var ghost = new ModelInstance(source);
+                for (Material material : ghost.materials) {
+                    ghostly(material);
+                    ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity = GHOST_OPACITY
+                          * (1 - progress);
+                }
+                ghostBatch.render(ghost, ghostLight);
+            });
             shown.forEach((source, opacity) -> {
                 var ghost = new ModelInstance(source);
                 for (Material material : ghost.materials) {
-                    ghostly(material, DEAD, DEAD_GLOW);
-                    ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity = DEAD_OPACITY * opacity;
+                    if (source == placing && hazard) {
+                        // Placing the unit there harms it (fire, magma, ice that may break): the ghost warns in red.
+                        ghostly(material, HAZARD, HAZARD_GLOW);
+                    } else if (source == placing) {
+                        ghostly(material);
+                    } else {
+                        ghostly(material, DEAD, DEAD_GLOW);
+                        ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity = DEAD_OPACITY * opacity;
+                    }
                 }
                 ghostBatch.render(ghost, ghostLight);
             });
@@ -639,6 +782,235 @@ final class GpuBoardOverlay implements Disposable {
         }
         movementMarkers = markers.end();
         return sink.end();
+    }
+
+    /**
+     * Deployment's weapon reach on the board, only with the Damage overlay on: the enemy under the pointer's damage;
+     * else, in the local turn, the acting unit's damage where it sees, from where it stands, the pointer's preview or
+     * the hex it was placed on; else the clicked enemy's damage. A unit without a damage curve shows its range bands.
+     * Null when none of them is on the board with a usable weapon.
+     */
+    private static Reach reach(BoardScene scene, GpuBattleStatus.Snapshot status, GpuHudState state, int hovered) {
+        if (scene == null || !status.phase().isDeployment()
+              || state.deployOverlay != GpuHudState.DeployOverlay.DAMAGE) {
+            return null;
+        }
+        Reach peeked = enemyReach(scene, state, hovered);
+        if (peeked != null) {
+            return peeked;
+        }
+        if (status.myTurn()) {
+            Reach own = reach(scene, status.actorId(), state.presentedRecord(status.actorId()), true,
+                  scene.fieldOfView());
+            if (own != null) {
+                return own;
+            }
+        }
+        return enemyReach(scene, state, state.inspected);
+    }
+
+    /** The damage reach of {@code id} when it is a listed, uncloaked unit not the player's; null otherwise. */
+    private static Reach enemyReach(BoardScene scene, GpuHudState state, int id) {
+        GpuBattleStatus.UnitStatus unit = state.presented(id);
+        if (unit == null || unit.side() == GpuBattleStatus.Side.OWN || unit.sensorContact()) {
+            return null;
+        }
+        return reach(scene, id, state.peekRecord.unitId() == id ? state.peekRecord : state.presentedRecord(id), true,
+              null);
+    }
+
+    /**
+     * {@code id}'s reach from its hex on the board by its {@code record}, with its damage curve when {@code damage}
+     * asks for it and the record has one; null off the board or without a weapon.
+     */
+    private static Reach reach(BoardScene scene, int id, GpuUnitRecord.Snapshot record, boolean damage,
+          BoardFieldOfView sight) {
+        if (record.unitId() != id) {
+            return null;
+        }
+        Coords from = null;
+        for (BoardScene.Unit unit : scene.units()) {
+            if (unit.id() == id && unit.attachment() == null && !unit.sensorContact()) {
+                from = unit.location().coords();
+                break;
+            }
+        }
+        if (from == null) {
+            return null;
+        }
+        int[] bands = bands(record);
+        if (damage && !record.damage().isEmpty()) {
+            return new Reach(from, bands[SHORT], bands[SHORT + 1], bands[LONG], record.damage(),
+                  sight == null || !sight.active() ? null : sight);
+        }
+        return bands[LONG] > 0 ? new Reach(from, bands[SHORT], bands[SHORT + 1], bands[LONG], List.of(), null) : null;
+    }
+
+    /**
+     * A record's short, medium and long reach in hexes (indexed SHORT to LONG): the farthest of its working direct-fire
+     * weapons in each band; long is 0 without one.
+     */
+    static int[] bands(GpuUnitRecord.Snapshot record) {
+        int[] bands = new int[LONG + 1];
+        for (GpuUnitRecord.RecordWeapon weapon : record.weapons()) {
+            List<Integer> ranges = weapon.ranges();
+            if (weapon.destroyed() || weapon.crippled() || ranges.size() <= LONG || ranges.get(LONG) > REACH_LIMIT) {
+                continue;
+            }
+            for (int band = SHORT; band <= LONG; band++) {
+                bands[band] = Math.max(bands[band], ranges.get(band));
+            }
+        }
+        return bands;
+    }
+
+    /** Rebuilds the reach mesh when the reach, the terrain, the view or the board geometry changed. */
+    private void updateReach() {
+        Object tiles = scene == null ? null : scene.tiles();
+        int geometry = BoardGeometry.revision();
+        if (tiles != fillsTiles || geometry != fillsRevision) {
+            fills.clear();
+            fillsTiles = tiles;
+            fillsRevision = geometry;
+            reachShown = null;
+        }
+        Reach next = scene == null ? null : reach;
+        if (Objects.equals(next, reachShown) && tactical == reachTactical) {
+            return;
+        }
+        reachShown = next;
+        reachTactical = tactical;
+        damageNumbers = Map.of();
+        if (reachOverlay != null) {
+            reachOverlay.model.dispose();
+            reachOverlay = null;
+        }
+        if (next != null) {
+            radius = BoardGeometry.WIDTH / 2;
+            Sink sink = new Sink(material(tactical));
+            if (next.damage().isEmpty()) {
+                reachBands(sink);
+            } else {
+                reachDamage(sink);
+            }
+            reachOverlay = sink.end();
+        }
+    }
+
+    /**
+     * The Damage overlay: each hex in reach, but the unit's own, tinted from pale amber to red and more opaque by the
+     * unit's expected damage at its distance against the most it deals anywhere; a hex it would not see stays clear.
+     * The farthest reach has its border.
+     */
+    private void reachDamage(Sink sink) {
+        List<Float> curve = reach.damage();
+        float peak = 0;
+        for (float value : curve) {
+            peak = Math.max(peak, value);
+        }
+        if (peak <= 0) {
+            return;
+        }
+        Set<Coords> reached = new HashSet<>();
+        Map<Coords, Integer> numbers = new HashMap<>();
+        Color tint = new Color();
+        for (Coords coords : within(reach.from(), curve.size() - 1)) {
+            int distance = reach.from().distance(coords);
+            float value = distance == 0 ? 0 : curve.get(distance);
+            if (value <= 0) {
+                continue;
+            }
+            reached.add(coords);
+            if (!sees(reach.sight(), coords)) {
+                continue;
+            }
+            numbers.put(coords, Math.round(value));
+            Vector3[] fill = fill(coords);
+            if (fill != null) {
+                // Squared, so the falloff from the peak reads: most loadouts stay near it over the short ranges.
+                float share = (value / peak) * (value / peak);
+                tint.set(DAMAGE_LOW).lerp(DAMAGE_HIGH, share);
+                tint.a = MathUtils.lerp(DAMAGE_TINT_MIN, DAMAGE_TINT_MAX, share);
+                sink.fan(fill, tint.cpy());
+            }
+        }
+        if (!reached.isEmpty()) {
+            outline(sink, reached, .09f, true, alpha(DAMAGE_HIGH, 1));
+        }
+        damageNumbers = Map.copyOf(numbers);
+    }
+
+    /** The Damage overlay's expected damage on each hex it tints; empty while it shows none. */
+    private Map<Coords, Integer> damageNumbers = Map.of();
+
+    Map<Coords, Integer> damageNumbers() {
+        return damageNumbers;
+    }
+
+    /** Whether a line of sight reaches {@code coords}: always without a computed one ({@code sight} null). */
+    private static boolean sees(BoardFieldOfView sight, Coords coords) {
+        if (sight == null) {
+            return true;
+        }
+        int x = coords.getX();
+        int y = coords.getY();
+        if (x < 0 || y < 0 || x >= sight.width() || y >= sight.height()) {
+            return false;
+        }
+        return sight.hexes().get(x * sight.height() + y).hasLineOfSight();
+    }
+
+    /** The reach bands as tinted hexes, nearest first, each band with its border. */
+    private void reachBands(Sink sink) {
+        Set<Coords> near = within(reach.from(), reach.shortRange());
+        Set<Coords> middle = within(reach.from(), reach.mediumRange());
+        Set<Coords> far = within(reach.from(), reach.longRange());
+        Color[] colors = { MINT, REACH_AMBER, CORAL };
+        List<Set<Coords>> sets = List.of(near, middle, far);
+        for (int band = 0; band < sets.size(); band++) {
+            Color tint = alpha(colors[band], REACH_TINT);
+            for (Coords coords : sets.get(band)) {
+                if (band == 0 || !sets.get(band - 1).contains(coords)) {
+                    Vector3[] fill = fill(coords);
+                    if (fill != null) {
+                        sink.fan(fill, tint);
+                    }
+                }
+            }
+            if (!sets.get(band).isEmpty()) {
+                outline(sink, sets.get(band), .09f, band == sets.size() - 1, alpha(colors[band], 1));
+            }
+        }
+    }
+
+    /** A hex's fill over its surface, the centre then the six corners, or null off the board. */
+    private Vector3[] fill(Coords coords) {
+        Vector3[] fill = fills.get(coords);
+        if (fill == null) {
+            BoardScene.Tile tile = scene.tile(coords);
+            if (tile == null) {
+                return null;
+            }
+            fill = new Vector3[7];
+            fill[0] = on(tile, BoardGeometry.center(coords, 0), .015f);
+            System.arraycopy(corners(tile, 1, .015f), 0, fill, 1, 6);
+            fills.put(coords, fill);
+        }
+        return fill;
+    }
+
+    /** The hexes at most {@code range} from {@code from}, on the board or off it. */
+    private static Set<Coords> within(Coords from, int range) {
+        Set<Coords> set = new HashSet<>();
+        for (int x = from.getX() - range; x <= from.getX() + range; x++) {
+            for (int y = from.getY() - range; y <= from.getY() + range; y++) {
+                Coords coords = new Coords(x, y);
+                if (from.distance(coords) <= range) {
+                    set.add(coords);
+                }
+            }
+        }
+        return set;
     }
 
     /** A glow needs a listed, shown, living unit that is no contact: the actor is friendly, the focus an enemy. */
@@ -1135,6 +1507,11 @@ final class GpuBoardOverlay implements Disposable {
             overlay.model.dispose();
             overlay = null;
         }
+        if (reachOverlay != null) {
+            reachOverlay.model.dispose();
+            reachOverlay = null;
+        }
+        fills.clear();
         // The ghost owns no GL object: its meshes and textures are the shown model's.
         ghost = null;
         ghostSource = null;
@@ -1171,6 +1548,20 @@ final class GpuBoardOverlay implements Disposable {
             MeshPartBuilder mesh = reserve(3);
             mesh.triangle(mesh.vertex(a, null, color, null), mesh.vertex(b, null, color, null),
                   mesh.vertex(c, null, color, null));
+        }
+
+        /** A hex filled from its centre ({@code fill[0]}) to its six corners. */
+        void fan(Vector3[] fill, Color color) {
+            MeshPartBuilder mesh = reserve(7);
+            short center = mesh.vertex(fill[0], null, color, null);
+            short first = mesh.vertex(fill[1], null, color, null);
+            short previous = first;
+            for (int corner = 2; corner <= 6; corner++) {
+                short next = mesh.vertex(fill[corner], null, color, null);
+                mesh.triangle(center, previous, next);
+                previous = next;
+            }
+            mesh.triangle(center, previous, first);
         }
 
         void quad(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Color color) {

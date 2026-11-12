@@ -152,6 +152,11 @@ class GpuTuningPanelSmokeTest {
 
         /** A left click at the actor's centre through the HUD's stage, once its page shows it; then a frame. */
         void click(Actor actor) {
+            // The Tuning utility hangs in the View popover: open it first, as a player would.
+            Actor popover = hud.stage.getRoot().findActor("utility-view-menu");
+            if (popover != null && actor.isDescendantOf(popover) && !popover.isVisible()) {
+                click("utility-view");
+            }
             reveal(actor);
             Vector2 point = hud.stage.stageToScreenCoordinates(
                   actor.localToStageCoordinates(new Vector2(actor.getWidth() / 2, actor.getHeight() / 2)));
@@ -474,7 +479,7 @@ class GpuTuningPanelSmokeTest {
     }
 
     @Test
-    void theUtilityPrecedesHelpAndMenuAndOpensThePanelAtItsPlaceOneDialogAtATime() {
+    void theUtilityHangsInTheViewPopoverAndOpensThePanelAtItsPlaceOneDialogAtATime() {
         GpuHudTestStage.run(harness -> {
             try (Hud hud = new Hud(harness)) {
                 for (int[] size : SIZES) {
@@ -484,31 +489,29 @@ class GpuTuningPanelSmokeTest {
                     GpuHud.Metrics metrics = GpuHud.Metrics.of(size[0], size[1]);
                     String at = size[0] + " x " + size[1];
                     UiButton utility = hud.find("tuning-button");
-                    Rectangle button = GpuHudTestStage.bounds(utility);
                     Rectangle menu = GpuHudTestStage.bounds(hud.find("utility-menu"));
-                    Rectangle help = GpuHudTestStage.bounds(hud.find("utility-help"));
+                    Rectangle view = GpuHudTestStage.bounds(hud.find("utility-view"));
                     assertEquals(size[0] - metrics.gap(), menu.x + menu.width, .5f, "Menu is last at the right gap " + at);
-                    assertEquals(button.x + button.width + GpuUtilityBar.GAP, help.x, .5f, "Help follows Tuning " + at);
-                    assertEquals(help.x + help.width + GpuUtilityBar.GAP, menu.x, .5f, "Menu follows Help " + at);
-                    assertEquals("?", hud.<UiButton>find("utility-help").getText().toString());
+                    assertNull(hud.hud.stage.getRoot().findActor("utility-help"), "Help is a page of the Menu " + at);
                     assertEquals("", hud.<UiButton>find("utility-menu").getText().toString());
                     Rectangle phase = GpuHudTestStage.bounds(hud.find("phase-header"));
                     assertFalse(phase.overlaps(GpuHudTestStage.bounds(hud.find("utility-bar"))),
                           "The camera controls must stay clear of the phase header " + at);
-                    assertEquals(menu.y, button.y, .5f, "on the row's line " + at);
-                    assertEquals(34, button.height, .5f, "the compact utility's height " + at);
+                    assertEquals(menu.y, view.y, .5f, "on the row's line " + at);
+                    assertFalse(hud.find("utility-view-menu").isVisible(), "the popover is closed at first");
                     assertFalse(hud.find("tuning-panel").isVisible(), "closed at first");
 
                     hud.click(utility);
                     assertSame(GpuHudState.Dialog.TUNING, hud.hud.state.dialog);
                     assertTrue(utility.isChecked(), "the utility is pressed while the panel is open");
+                    assertFalse(hud.find("utility-view-menu").isVisible(), "the panel replaces the popover");
                     // The panel keeps its last page when it closes, so it opens on Display only the first time.
                     if (size == SIZES[0]) { assertTrue(hud.find("tuning-display").isVisible(), "the Display page is the first"); }
                     hud.click("tuning-board-tab");
                     Rectangle panel = GpuHudTestStage.bounds(hud.find("tuning-frame"));
                     assertEquals(size[0] - metrics.gap(), panel.x + panel.width, .5f, "at the right gap " + at);
                     assertEquals(360, panel.width, .5f, at);
-                    assertEquals(metrics.gap(), button.y - panel.y - panel.height, .5f,
+                    assertEquals(metrics.gap(), view.y - panel.y - panel.height, .5f,
                           "one gap below the utilities " + at);
                     assertEquals(70, panel.y, .5f, "the long Board page fills down to the bottom margin " + at);
                     assertTrue(hud.<ScrollPane>find("tuning-board").isScrollY(), "and scrolls " + at);
@@ -527,9 +530,10 @@ class GpuTuningPanelSmokeTest {
                     assertSame(GpuHudState.Dialog.HELP, hud.hud.state.dialog, "Help replaces the panel " + at);
                     assertFalse(hud.find("tuning-panel").isVisible());
                     assertFalse(utility.isChecked());
-                    // Help is modal: a press outside it, on the utility too, only dismisses it (UiModal).
-                    hud.click(utility);
+                    // Help is modal: a press outside it, on the View utility too, only dismisses it (UiModal).
+                    hud.click("utility-view");
                     assertSame(GpuHudState.Dialog.NONE, hud.hud.state.dialog, "a press beside Help closes it " + at);
+                    assertFalse(hud.find("utility-view-menu").isVisible(), "and opens nothing " + at);
                     hud.click(utility);
                     assertSame(GpuHudState.Dialog.TUNING, hud.hud.state.dialog, "then the utility opens it " + at);
                     hud.key(KeyCommandBind.CANCEL);
@@ -673,6 +677,10 @@ class GpuTuningPanelSmokeTest {
                                 assertEquals(guiScale, preferences.getGUIScale(), "Swing's GUI scale is untouched");
                                 assertEquals(1, preferences.getBoardUiScale(), "so is the 3D UI scale");
                                 assertEquals(full, stage.getWidth(), .5f, "and the HUD's layout");
+                                Actor popover = stage.getRoot().findActor("utility-view-menu");
+                                if (popover != null && !popover.isVisible()) {
+                                    stage.getRoot().findActor("utility-view").fire(new ChangeListener.ChangeEvent());
+                                }
                                 Actor tune = stage.getRoot().findActor("tuning-button");
                                 Vector2 at = windowPoint(stage, tune, tune.getWidth() / 2, tune.getHeight() / 2);
                                 mouse(User32.WM_MOUSEMOVE, 0, at);

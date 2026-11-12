@@ -104,7 +104,7 @@ final class GpuTuningPanel implements GpuHud.Component {
         });
         root.setName("tuning-panel");
         root.top().right();
-        button = GpuUtilityBar.utility(ui, "tune", "GpuBoard.hud.tuning.title", "tuning-button");
+        button = GpuUtilityBar.popoverItem(ui, "tune", "GpuBoard.hud.tuning.title", "tuning-button");
         onChange(button, () -> state.toggle(GpuHudState.Dialog.TUNING));
     }
 

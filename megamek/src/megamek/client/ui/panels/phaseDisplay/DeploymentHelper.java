@@ -42,6 +42,7 @@ import javax.swing.UIManager;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.phaseDisplay.DeployElevationChoiceDialog;
 import megamek.client.ui.dialogs.phaseDisplay.DeployFacingChoiceDialog;
@@ -343,6 +344,16 @@ public class DeploymentHelper {
         } else if (elevationOptions.isEmpty() && validFacings) {
             finalElevation = FACING_ELEVATION; // Only option in current implementation
             finalFacing = promptForFacingIfNeeded(facingOptions, finalFacing);
+        } else if ((clientgui != null) && GpuBoardWindow.drawsDialogsFor(clientgui)) {
+            // The GL HUD offers the height on the placed unit itself, so the placement asks nothing and keeps the
+            // unit's height, or the nearest one this hex allows
+            int currentHeight = entity.isAero() ? entity.getAltitude() : entity.getElevation();
+            ElevationOption elevationOption = nearestHeightOption(elevationOptions, currentHeight);
+            lastHexDeploymentOptions.clear();
+            lastHexDeploymentOptions.addAll(elevationOptions);
+            lastDeploymentOption = elevationOption;
+            finalElevation = elevationOption.elevation();
+            finalFacing = promptForFacingIfNeeded(facingOptions, finalFacing);
         } else {
             ElevationOption elevationOption = showElevationChoiceDialog(elevationOptions);
             if (elevationOption != null) {
@@ -401,6 +412,48 @@ public class DeploymentHelper {
         } else {
             aero.liftOff(elevation);
         }
+    }
+
+    /**
+     * The option of {@code options} that allows {@code height}: the one at it, or the open-ended one above it ({@link
+     * DeploymentElevationType#ELEVATIONS_ABOVE}) as that height; else the option nearest to it, the higher on a tie.
+     *
+     * @param options The allowed options, not empty
+     * @param height  The wanted elevation or altitude
+     * @return The option to deploy at
+     */
+    static ElevationOption nearestHeightOption(List<ElevationOption> options, int height) {
+        ElevationOption exact = heightOption(options, height);
+        if (exact != null) {
+            return exact;
+        }
+        ElevationOption nearest = options.getFirst();
+        for (ElevationOption option : options) {
+            int distance = Math.abs(option.elevation() - height);
+            int nearestDistance = Math.abs(nearest.elevation() - height);
+            if (distance < nearestDistance || (distance == nearestDistance && option.elevation() > nearest.elevation())) {
+                nearest = option;
+            }
+        }
+        return nearest;
+    }
+
+    /**
+     * @return The option of {@code options} at {@code height}, the open-ended one above as that height when it is
+     *       above its start, or null when none allows it
+     */
+    static @Nullable ElevationOption heightOption(List<ElevationOption> options, int height) {
+        for (ElevationOption option : options) {
+            if (option.elevation() == height) {
+                return option;
+            }
+        }
+        for (ElevationOption option : options) {
+            if ((option.type() == DeploymentElevationType.ELEVATIONS_ABOVE) && (height > option.elevation())) {
+                return new ElevationOption(height, DeploymentElevationType.ELEVATIONS_ABOVE);
+            }
+        }
+        return null;
     }
 
     private @Nullable ElevationOption showElevationChoiceDialog(List<ElevationOption> elevationOptions) {
@@ -516,11 +569,19 @@ public class DeploymentHelper {
 
     public void setStartingFacing(Entity entity,
           List<Player> players, @Nullable Coords sourceCoords) {
-        int playerStartingPos = entity.getStartingPos();
-        int enemyStartingPos = -1;
+        int facing = startingFacing(entity, players, sourceCoords);
+        entity.setFacing(facing);
+        entity.setSecondaryFacing(facing);
+    }
+
+    /**
+     * The facing a unit deployed at {@code sourceCoords} (its deployment area's centre when null) starts with: toward
+     * the enemy deployment centre when all enemies are one team, otherwise the default for its starting position.
+     */
+    public static int startingFacing(Entity entity, List<Player> players, @Nullable Coords sourceCoords) {
         int enemyTeamNumber = -1;
         int teamCount = 0;
-        List<Player> enemiesList = new ArrayList<Player>();
+        List<Player> enemiesList = new ArrayList<>();
         for (Player player : players) {
             if (player.getId() == entity.getOwnerId()) {
                 continue;
@@ -533,50 +594,25 @@ public class DeploymentHelper {
                 }
             }
         }
-        int facing = -1;
         if (teamCount == 1) {
             // All the enemies share the same starting team, and assuming starting position
-            enemyStartingPos = enemiesList.get(0).getStartingPos();
+            int enemyStartingPos = enemiesList.get(0).getStartingPos();
             Coords entityStartingPos =
                   (sourceCoords != null) ? sourceCoords :
                         entity.getGame().getBoard().getDeploymentCenter(entity.getStartingPos());
             Coords enemyDeploymentCenter = entity.getGame().getBoard().getDeploymentCenter(enemyStartingPos);
-            facing = entityStartingPos.direction(enemyDeploymentCenter);
-            entity.setFacing(facing);
-            entity.setSecondaryFacing(facing);
-        } else {
-            // With multiple opposing teams, it is likely a free for all, so go with default facing.
-            // set facing according to starting position
-            switch (playerStartingPos) {
-                case Board.START_W:
-                case Board.START_SW:
-                    facing = 1;
-                    break;
-                case Board.START_SE:
-                case Board.START_E:
-                    facing = 5;
-                    break;
-                case Board.START_NE:
-                    facing = 4;
-                    break;
-                case Board.START_N:
-                    facing = 3;
-                    break;
-                case Board.START_NW:
-                    facing = 2;
-                    break;
-                default:
-                    facing = 0;
-                    break;
-            }
+            int facing = entityStartingPos.direction(enemyDeploymentCenter);
+            return facing == -1 ? 0 : facing;
         }
-        if (facing != -1) {
-            entity.setFacing(facing);
-            entity.setSecondaryFacing(facing);
-        } else {
-            entity.setFacing(0);
-            entity.setSecondaryFacing(0);
-        }
-
+        // With multiple opposing teams, it is likely a free for all, so go with default facing.
+        // set facing according to starting position
+        return switch (entity.getStartingPos()) {
+            case Board.START_W, Board.START_SW -> 1;
+            case Board.START_SE, Board.START_E -> 5;
+            case Board.START_NE -> 4;
+            case Board.START_N -> 3;
+            case Board.START_NW -> 2;
+            default -> 0;
+        };
     }
 }

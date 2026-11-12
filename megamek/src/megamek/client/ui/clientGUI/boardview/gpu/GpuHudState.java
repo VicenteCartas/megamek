@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import megamek.client.ui.Messages;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
@@ -17,6 +18,15 @@ import megamek.common.units.Entity;
 final class GpuHudState {
     /** The centred panels; opening one closes the others (Help closes Menu, Players and Tuning). */
     enum Dialog { NONE, HELP, MENU, PLAYERS, TUNING }
+
+    /** The overlays the deployment queue's chips show while deploying, one at a time; OFF shows none. */
+    enum DeployOverlay {
+        DAMAGE, ECM, OFF;
+
+        String label() {
+            return Messages.getString("GpuBoard.hud.deploy.overlay." + name());
+        }
+    }
 
     /**
      * The unit sheet's tabs with the Unit Display's keys that open them, F1 to F6 (unit panel design 5.1). SYSTEMS is
@@ -46,6 +56,10 @@ final class GpuHudState {
     GpuFireOrders.AimTarget aiming;
     Dialog dialog = Dialog.NONE;
     boolean overview;
+    /** The deployment strip leaves out the units already placed (GpuDeploymentQueue). */
+    boolean hideDeployed;
+    /** Deployment's overlay, which Ctrl+wheel chose last; null until it does. */
+    DeployOverlay deployOverlay;
     boolean chatOpen;
     /** The unit sheet is open (unit panel design 2.3): one flag, one step of the Esc chain. */
     boolean recordOpen;
@@ -100,6 +114,8 @@ final class GpuHudState {
     private List<GpuBattleStatus.UnitStatus> presentedUnits = List.of();
     private GpuUnitRecord.Snapshot presentedRecord = GpuUnitRecord.Snapshot.EMPTY;
     private GpuUnitRecord.Snapshot presentedOwnRecord = GpuUnitRecord.Snapshot.EMPTY;
+    /** The record of the unit deployment peeks at under the pointer, for its reach on the board; GL thread. */
+    GpuUnitRecord.Snapshot peekRecord = GpuUnitRecord.Snapshot.EMPTY;
 
     GpuHudState(GpuPlaybackHistory history) {
         this.history = history;

@@ -28,6 +28,7 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiConfirmation;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay.DeployCommand;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay.FiringCommand;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay.PhysicalCommand;
 import megamek.client.ui.panels.phaseDisplay.ReportDisplay.ReportCommand;
@@ -90,6 +91,10 @@ final class GpuCommandDock implements GpuHud.Component {
     /** The physical options the option row shows (the prototype's four limbs), and the generic phase commands. */
     private static final int OPTIONS = 4;
     private static final int COMMANDS = 5;
+    /** Deployment's compact dock: its row's commands, and those only More offers. */
+    private static final int DEPLOY_COMMANDS = 2;
+    private static final Set<String> DEPLOY_MORE_ONLY = Set.of(DeployCommand.DEPLOY_NEXT.getCmd(),
+          DeployCommand.DEPLOY_TURN.getCmd(), DeployCommand.DEPLOY_REMOVE.getCmd());
     private static final String SEPARATOR = " \u00B7 ";
     private static final Color WAITING = Color.valueOf("8A9593");
     private static final List<GpuMovePlan.Mode> MODES = List.of(GpuMovePlan.Mode.WALK, GpuMovePlan.Mode.RUN,
@@ -224,6 +229,7 @@ final class GpuCommandDock implements GpuHud.Component {
         title.setEllipsis(true);
         title.setName("dock-title");
         span = ui.label("", "hud-small", 11.5f, Color.WHITE);
+        span.setEllipsis(true);
         span.setName("dock-span");
         stop = button("hud-mini", null, text("GpuBoard.hud.dock.stop"), null, "dock-stop");
         onChange(stop, this::stop);
@@ -550,7 +556,7 @@ final class GpuCommandDock implements GpuHud.Component {
         head.clearChildren();
         head.add(title).left().minWidth(0);
         head.add().expandX();
-        head.add(span).right().padLeft(10);
+        head.add(span).right().padLeft(10).minWidth(0);
         if (shape.backwards()) {
             head.add(backwards).padLeft(10);
         }
@@ -920,9 +926,15 @@ final class GpuCommandDock implements GpuHud.Component {
         String[] lines = inputs.frame().panels().phase().status().split("\n", -1);
         GpuBattleStatus.UnitStatus actor = status.myTurn() ? state.presented(status.actorId()) : null;
         // The phase header names the phase; the dock names the unit it commands and the phase display's status line.
-        String headline = actor == null ? "" : phase.isMovement() ? text("GpuBoard.hud.dock.movement", name(actor))
-              : name(actor);
+        // Deployment's unit card stands beside the dock: its status line is enough.
+        String headline = actor == null || phase.isDeployment() ? ""
+              : phase.isMovement() ? text("GpuBoard.hud.dock.movement", name(actor)) : name(actor);
         String line = lines[0].strip();
+        boolean deploying = phase.isDeployment() && status.myTurn();
+        if (deploying) {
+            // The phase strip names the turn; the compact dock only says what lets Deploy go.
+            line = "";
+        }
         head(headline, false);
         span(line, UiTheme.MINT);
         boolean headed = !headline.isEmpty() || !line.isEmpty();
@@ -941,7 +953,15 @@ final class GpuCommandDock implements GpuHud.Component {
         if (skip != null) {
             secondary(skip.label(), skip.enabled());
         }
-        foot("", lines.length > 1 ? lines[1].strip() : "");
+        if (deploying) {
+            // Placing is local until Deploy (Done) sends the unit, so the foot names the confirmation once it can.
+            foot("", done != null && done.enabled()
+                  ? text("GpuBoard.hud.deploy.footReady", UiTheme.upper(done.label()),
+                        GpuHintLine.key(inputs.preferences(), KeyCommandBind.DONE))
+                  : text("GpuBoard.hud.deploy.footPlace"));
+        } else {
+            foot("", lines.length > 1 ? lines[1].strip() : "");
+        }
     }
 
     // ------------------------------------------------------------------ actions
@@ -1244,9 +1264,16 @@ final class GpuCommandDock implements GpuHud.Component {
         return options.stream().filter(row::contains).toList();
     }
 
-    /** The generic option row: the first five phase commands in MegaMek's order that are available now. */
+    /**
+     * The generic option row: the first five phase commands in MegaMek's order that are available now. Deployment's
+     * compact dock keeps two: its next unit is a card of the force, turning a drag, and Remove (which takes the unit
+     * out of the game) stays in More.
+     */
     private List<BoardScene.Command> rowCommands() {
-        return others(Set.of()).filter(BoardScene.Command::enabled).limit(COMMANDS).toList();
+        boolean deployment = inputs.frame().status().phase().isDeployment();
+        return others(Set.of()).filter(BoardScene.Command::enabled)
+              .filter(command -> !deployment || !DEPLOY_MORE_ONLY.contains(command.id()))
+              .limit(deployment ? DEPLOY_COMMANDS : COMMANDS).toList();
     }
 
     private List<BoardScene.Command> commands() {

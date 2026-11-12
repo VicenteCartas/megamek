@@ -11,6 +11,7 @@ import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -37,6 +38,10 @@ final class GpuPhaseHeader implements GpuHud.Component {
     private static final float RIBBON_HEIGHT = 5;
     private static final float RIBBON_ALPHA = .75f;
     private static final float DONE_ALPHA = .3f;
+    /** The deployment strip's phase name, the room between its parts and the runs of the order it shows. */
+    private static final float STRIP_NAME_SIZE = 17;
+    private static final float STRIP_GAP = 12;
+    private static final int STRIP_RUNS = 4;
 
     private final Table root;
     private final UiKit ui;
@@ -67,6 +72,16 @@ final class GpuPhaseHeader implements GpuHud.Component {
     private final Cell<Actor> ribbonCell;
     private final float nameScale;
     private boolean narrow;
+    /** The ring, texts and ribbon of every phase but deployment. */
+    private final Table full = new Table();
+    /** Deployment's one line: the phase, whose turn it is and the coming turn order. */
+    private final Table strip = new Table();
+    private final Cell<Table> content;
+    private final Label stripName;
+    private final Label stripWho;
+    private final Table order = new Table();
+    private GpuTurnOrder.Upcoming shownOrder;
+    private boolean slim;
 
     GpuPhaseHeader(GpuHudKit kit, GpuBoardSource source, GpuHudState state) {
         ui = kit.ui;
@@ -112,11 +127,43 @@ final class GpuPhaseHeader implements GpuHud.Component {
         text.row();
         text.add(who).height(14).padTop(4);
         // A 46-unit ring in the grid's 48-unit column, 12 units before the text.
-        root.add(ring).size(46).padRight(14);
-        root.add(text).growX().minWidth(0);
-        root.row();
-        ribbonCell = root.add((Actor) null).colspan(2).growX().padRight(14);
+        full.add(ring).size(46).padRight(14);
+        full.add(text).growX().minWidth(0);
+        full.row();
+        ribbonCell = full.add((Actor) null).colspan(2).growX().padRight(14);
+        content = root.add(full).grow();
         root.addActor(speeds);
+
+        stripName = ui.label("", "hud-phase", STRIP_NAME_SIZE, UiTheme.TEXT);
+        stripWho = ui.label("", "hud-button", 12, UiTheme.MINT);
+        stripWho.setName("phase-strip-who");
+        order.setName("phase-strip-order");
+        strip.add(stripName).height(20);
+        strip.add(divider()).width(1).height(18).padLeft(STRIP_GAP).padRight(STRIP_GAP);
+        strip.add(stripWho).height(16);
+        strip.add(order).padLeft(STRIP_GAP);
+    }
+
+    /** The strip's thin rule between its parts. */
+    private Actor divider() {
+        Actor divider = new Actor() {
+            @Override
+            public void draw(Batch batch, float parentAlpha) {
+                ui.fill(batch, UiTheme.LINE, getColor().a * parentAlpha, getX(), getY(), getWidth(), getHeight());
+            }
+        };
+        divider.setTouchable(Touchable.disabled);
+        return divider;
+    }
+
+    /** Whether the header shows as the deployment's one-line strip, which the HUD sizes to its content. */
+    boolean slim() {
+        return slim;
+    }
+
+    /** The strip's preferred width, the header's whole width while it is {@link #slim()}. */
+    float stripWidth() {
+        return root.getPadLeft() + root.getPadRight() + strip.getPrefWidth();
     }
 
     @Override
@@ -134,6 +181,18 @@ final class GpuPhaseHeader implements GpuHud.Component {
     public void update(GpuHud.Inputs inputs) {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         GamePhase phase = status.phase();
+        boolean deployment = phase.isDeployment();
+        if (deployment != slim) {
+            slim = deployment;
+            content.setActor(slim ? strip : full);
+            // The strip's last label ends the panel, which needs its right padding back.
+            root.padRight(slim ? 16 : 2);
+            speeds.setVisible(false);
+        }
+        if (slim) {
+            updateStrip(status, inputs);
+            return;
+        }
         ring.progress = progress(phase) / 6f;
         // The speeds pace the other players' moves and the playback; on the local player's own turn they only crowd
         // the header.
@@ -174,6 +233,62 @@ final class GpuPhaseHeader implements GpuHud.Component {
             ribbonCell.setActor(ribbonShown ? ribbon : null).height(ribbonShown ? RIBBON_HEIGHT : 0)
                   .padTop(ribbonShown ? 11 : 0);
         }
+    }
+
+    /**
+     * Deployment's one line: the phase, whose turn it is and the turns after it, in order ("Then Princess › You ›
+     * Princess +11"), as {@link GpuTurnOrder} names them.
+     */
+    private void updateStrip(GpuBattleStatus.Snapshot status, GpuHud.Inputs inputs) {
+        stripName.setText(UiTheme.upper(status.phase().localizedName()));
+        GpuBattleStatus.Slot current = status.turnIndex() >= 0 && status.turnIndex() < status.turns().size()
+              ? status.turns().get(status.turnIndex()) : null;
+        String who;
+        Color color = UiTheme.MINT;
+        if (status.myTurn()) {
+            who = Messages.getString("GpuBoard.hud.deploy.yourTurn");
+        } else if (current != null && !current.playerName().isEmpty()) {
+            who = Messages.getString("GpuBoard.hud.deploy.theirTurn", current.playerName());
+            color = sideColor(current.side());
+        } else {
+            who = inputs.frame().panels().phase().status().lines().findFirst().orElse("");
+        }
+        stripWho.setText(UiTheme.upper(who));
+        stripWho.setColor(color);
+        GpuTurnOrder.Upcoming upcoming = status.turnOrderHidden() ? GpuTurnOrder.Upcoming.EMPTY
+              : GpuTurnOrder.upcoming(status.turns(), status.turnIndex(), STRIP_RUNS);
+        if (upcoming.equals(shownOrder)) {
+            return;
+        }
+        shownOrder = upcoming;
+        order.clearChildren();
+        if (upcoming.next().isEmpty()) {
+            return;
+        }
+        order.add(ui.label(UiTheme.upper(Messages.getString("GpuBoard.hud.deploy.order")), "hud-caption", 11,
+              UiTheme.MUTED)).padRight(8);
+        for (int i = 0; i < upcoming.next().size(); i++) {
+            GpuTurnOrder.Run run = upcoming.next().get(i);
+            if (i > 0) {
+                order.add(ui.label("›", "hud-button", 12, UiTheme.MUTED)).padLeft(6).padRight(6);
+            }
+            Label label = ui.label(playerName(run.slot(), status) + (run.count() > 1 ? " ×" + run.count() : ""),
+                  "hud-button", 12, turnColor(run.slot()));
+            label.setName("phase-strip-run");
+            order.add(label);
+        }
+        if (upcoming.more() > 0) {
+            Label more = ui.label(Messages.getString("GpuBoard.hud.deploy.more", upcoming.more()), "hud-caption", 11,
+                  UiTheme.MUTED);
+            more.setName("phase-strip-more");
+            order.add(more).padLeft(STRIP_GAP);
+        }
+    }
+
+    /** The order's name for a turn's player: "You" for the local player. */
+    private static String playerName(GpuBattleStatus.Slot slot, GpuBattleStatus.Snapshot status) {
+        return slot.playerId() == status.localPlayerId() ? Messages.getString("GpuBoard.hud.initiative.you")
+              : slot.playerName();
     }
 
     /**

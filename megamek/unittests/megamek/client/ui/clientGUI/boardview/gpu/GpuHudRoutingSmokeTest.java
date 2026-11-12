@@ -1084,6 +1084,8 @@ class GpuHudRoutingSmokeTest {
             assertEquals(GpuHudState.Dialog.NONE, state.dialog, "one Esc closes the Players panel");
             // The next frame lays out the closed dialog's backdrop, which takes presses until then.
             routing.view.render();
+            routing.press(routing.find("utility-view"));
+            routing.view.render();
             routing.press(routing.find("tuning-button"));
             routing.press(routing.find("tuning-atmosphere-tab"));
             routing.press(routing.find("tuning-atmosphere-pressure"));

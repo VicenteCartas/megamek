@@ -52,6 +52,9 @@ final class GpuHud implements GpuBoardHud {
     /** The solution card moves beside the right column when the list would keep less than this height. */
     private static final float SOLUTION_ROOM = 430;
     private static final float CONDITIONS_WIDTH = 260;
+    /** The deployment queue of the force's cards: its height, and its least width. */
+    private static final float QUEUE_HEIGHT = 180;
+    private static final float QUEUE_MIN_WIDTH = 140;
     /**
      * The forces list's width, at most the left column's (the user's request of 2026-10-02: the prototype's column of
      * 300 left the rows much room to spare). The phase header and the unit card keep the column; the forces grid
@@ -173,6 +176,7 @@ final class GpuHud implements GpuBoardHud {
     final Stage stage;
     final GpuHudState state;
     private final GpuBoardSource source;
+    private final GpuDeployConfirm deployConfirm;
     private final GpuHudKit kit;
     private final GpuContextMenu contextMenu;
     private final GpuLosPanel losPanel;
@@ -191,6 +195,10 @@ final class GpuHud implements GpuBoardHud {
     private final GpuConditionsCard conditionsCard;
     /** The forces, a rail at the window's edge until expanded. */
     private final GpuForcesPanel forces;
+    private final GpuPhaseHeader phaseHeader;
+    private final GpuDeploymentQueue deployQueue;
+    private final GpuArrivalCues arrivalCues;
+    private final GpuDamageNumbers damageNumbers;
     /** The layer of Help, Menu, Players and the tuning panel: a focus in it is that dialog's Esc step. */
     private final Group dialogs;
     private final UiModal centeredDialogs;
@@ -202,10 +210,13 @@ final class GpuHud implements GpuBoardHud {
     private final Container<Actor> initiativeSlot;
     private final Container<Actor> conditionsSlot;
     private final Container<Actor> forcesSlot;
+    /** The deployment phase's force along the bottom, beside the unit card. */
+    private final Container<Actor> queueSlot;
     private final Container<Actor> unitSlot;
     private final Container<Actor> otherUnitSlot;
     private final Container<Actor> sheetSlot;
     private final Container<Actor> utilitySlot;
+    private final GpuUtilityBar utilities;
     private final Container<Actor> chipSlot;
     private final Container<Actor> hintSlot;
     private final Container<Actor> pickSlot;
@@ -218,6 +229,7 @@ final class GpuHud implements GpuBoardHud {
     private final Container<Actor> dockSlot;
     private final Container<Actor> drawerSlot;
     private final Container<Actor> chatSlot;
+    private final Container<Actor> cornerChatSlot;
     private final Container<Actor> overviewSlot;
     private final Container<Actor> helpSlot;
     private final Container<Actor> menuSlot;
@@ -240,6 +252,7 @@ final class GpuHud implements GpuBoardHud {
     private Inputs inputs;
     private int publishedFocus = Entity.NONE;
     private int publishedCard = Entity.NONE;
+    private int publishedPeek = Entity.NONE;
     private int publishedOwnCard = Entity.NONE;
     /** The unit the HUD selects once the local turn began (C.5), held while a dialog would drop the command. */
     private int pendingSelect = Entity.NONE;
@@ -289,12 +302,17 @@ final class GpuHud implements GpuBoardHud {
         // First: the components with unit menus and select lists open this one.
         contextMenu = new GpuContextMenu(kit, source, state, this::select);
         GpuNameplates nameplates = new GpuNameplates(kit, source, state);
+        GpuDeployConfirm deployConfirm = new GpuDeployConfirm(kit, state, nameplates, source);
+        this.deployConfirm = deployConfirm;
         targetCards = new GpuTargetCards(kit, source, state, contextMenu);
         losPanel = new GpuLosPanel(kit.ui, stage, source, camera);
-        GpuPhaseHeader phaseHeader = new GpuPhaseHeader(kit, source, state);
+        phaseHeader = new GpuPhaseHeader(kit, source, state);
         GpuInitiativeCard initiativeCard = new GpuInitiativeCard(kit, source, state);
         conditionsCard = new GpuConditionsCard(kit, source, state);
         forces = new GpuForcesPanel(kit, source, state, contextMenu, this::select);
+        chat = new GpuChatPanel(kit, source, state);
+        deployQueue = new GpuDeploymentQueue(kit, state, contextMenu, this::select, this::toggleDeploymentOverlay,
+              chat.queueButton());
         // The unit panel's paperdoll geometry, read once per window (unit panel design 6.2).
         GpuPaperdolls paperdolls = new GpuPaperdolls();
         GpuUnitCard unitCard = new GpuUnitCard(kit, source, state, contextMenu, paperdolls, false);
@@ -315,7 +333,6 @@ final class GpuHud implements GpuBoardHud {
         weapons = new GpuWeaponsPanel(kit, source, state, contextMenu);
         GpuSolutionCard solution = new GpuSolutionCard(kit, source, state);
         log = new GpuLogPanel(kit, source, state, contextMenu);
-        chat = new GpuChatPanel(kit, source, state);
         dock = new GpuCommandDock(kit, source, state, camera, contextMenu, chat.button());
         GpuForceOverview overview = new GpuForceOverview(kit, source, state, contextMenu, this::select);
         GpuHelpDialog help = new GpuHelpDialog(kit, source, state);
@@ -324,25 +341,33 @@ final class GpuHud implements GpuBoardHud {
         GpuToastStack toasts = new GpuToastStack(kit, source, state);
         modal = new GpuModalDialog(kit, source, state);
         GpuHexTip hexTip = new GpuHexTip(kit, state, contextMenu);
+        arrivalCues = new GpuArrivalCues(kit, source, state);
+        damageNumbers = new GpuDamageNumbers(kit);
         GpuAimDialog aim = new GpuAimDialog(kit, source, state, paperdolls);
-        List<Component> parts = new ArrayList<>(List.of(nameplates, boardLabels, targetCards, losPanel, phaseHeader,
-              initiativeCard, conditionsCard, forces, unitCard, otherUnitCard, recordSheet, utilities, hint, minimap, overlays,
+        List<Component> parts = new ArrayList<>(List.of(nameplates, deployConfirm, boardLabels, targetCards, losPanel,
+              phaseHeader,
+              initiativeCard, conditionsCard, forces, deployQueue, unitCard, otherUnitCard, recordSheet, utilities, hint,
+              minimap, overlays,
               contacts, weapons, solution, log, dock, chat, overview, help, menu, players, contextMenu, hexTip, aim,
-              toasts, modal));
+              toasts, modal, arrivalCues, damageNumbers));
 
         // The Tactical View's north mark first: the prototype draws it on the board, under the labels (G4). Then the
         // prototype's #fx strokes (guides, traces, leaders) under every board label, the nameplates included (G8b).
         northSlot = slot(labels, utilities.north());
         // The hex's hover card, the unit panel's hover card and slot popover share the popover layer with the context
         // menu, which opens over them.
-        List<Container<Actor>> spanning = new ArrayList<>(List.of(slot(labels, boardLabels.fx()),
+        List<Container<Actor>> spanning = new ArrayList<>(List.of(slot(labels, damageNumbers.actor()),
+              slot(labels, boardLabels.fx()),
               slot(labels, nameplates.actor()), slot(labels, boardLabels.actor()), slot(labels, targetCards.actor()), slot(labels, losPanel.actor()),
-              slot(popover, hexTip.actor()), slot(popover, unitCard.overlay()), slot(popover, otherUnitCard.overlay()),
+              slot(labels, deployConfirm.actor()),
+              slot(popover, hexTip.actor()), slot(popover, arrivalCues.actor()), slot(popover, unitCard.overlay()),
+              slot(popover, otherUnitCard.overlay()),
               slot(popover, recordSheet.overlay()),
               slot(popover, contextMenu.actor()), slot(popover, dock.confirmation().actor())));
         phaseSlot = panel(panels, phaseHeader.actor()).top().left().fillX();
         conditionsSlot = panel(panels, conditionsCard.actor()).top().left().fillX();
         forcesSlot = panel(panels, forces.actor()).top().left().fillX();
+        queueSlot = panel(panels, deployQueue.actor()).fill();
         unitSlot = panel(panels, unitCard.actor()).bottom().left().fillX();
         otherUnitSlot = panel(panels, otherUnitCard.actor()).bottom().right().fillX();
         sheetSlot = panel(panels, recordSheet.actor()).fill();
@@ -363,6 +388,7 @@ final class GpuHud implements GpuBoardHud {
         dockSlot = panel(panels, dock.actor()).bottom().fillX();
         // The dock's More panel slides out of the dock's right side, over the board beside it.
         chatSlot = panel(chatLayer, chat.actor()).fill();
+        cornerChatSlot = panel(panels, chat.corner());
         drawerSlot = panel(chatLayer, dock.drawer().actor()).fill();
         overviewSlot = panel(overviewLayer, overview.actor()).fill();
         helpSlot = panel(centeredDialogs, help.actor()).fillX();
@@ -376,10 +402,13 @@ final class GpuHud implements GpuBoardHud {
         // The aimed shot dialog's window-sized scrim over the panels and menus, under the toasts and the native modal.
         spanning.add(slot(dialogs, aim.actor()));
 
-        // The developer tuning utility sits before Help and Menu; its panel places itself.
+        // The developer tuning utility sits in the utility bar's View popover; its panel places itself.
         // Before release, delete this block, the tuningModel parameter, GpuHudState.Dialog.TUNING and GpuTuningPanel.
         parts.add(tuning);
         spanning.add(slot(dialogs, tuning.actor()));
+        // The View popover hangs over the Tuning panel it opens, so its Tuning item can close the panel again.
+        spanning.add(slot(dialogs, utilities.popover()));
+        this.utilities = utilities;
 
         components = List.copyOf(parts);
         windowSlots = List.copyOf(spanning);
@@ -444,6 +473,21 @@ final class GpuHud implements GpuBoardHud {
         // local turn without an acting unit (GpuHudState.presented).
         updateState(frame, view.playbackBusy(), dialog);
         inputs = new Inputs(state.presented(frame), view, dialog, preferences, metrics, panelBounds());
+        // With the selection cleared no unit is being deployed: no ghost follows the pointer. Nor while the card shows
+        // another own unit than the one MegaMek deploys (one that cannot deploy in this turn).
+        source.holdDeploymentPreview(state.turnLocked(frame.status()) || inspectingOtherOwn(frame.status()));
+        int peek = Entity.NONE;
+        if (frame.status().phase().isDeployment()) {
+            GpuBattleStatus.UnitStatus hovered = state.presented(view.hoveredUnit());
+            if (hovered != null && hovered.side() != GpuBattleStatus.Side.OWN && !hovered.sensorContact()) {
+                peek = hovered.id();
+            }
+        }
+        if (peek != publishedPeek) {
+            publishedPeek = peek;
+            source.setPeekUnit(peek);
+        }
+        state.peekRecord = source.peekRecord();
         for (Component component : components) {
             component.update(inputs);
         }
@@ -452,6 +496,15 @@ final class GpuHud implements GpuBoardHud {
         layout();
         fadeForCamera();
         keepModalFocus();
+    }
+
+    /** In the local deployment turn, whether the card shows an own unit that is not the one being deployed. */
+    private boolean inspectingOtherOwn(GpuBattleStatus.Snapshot status) {
+        if (!status.myTurn() || !status.phase().isDeployment() || state.inspected == status.actorId()) {
+            return false;
+        }
+        GpuBattleStatus.UnitStatus unit = state.presented(state.inspected);
+        return unit != null && unit.side() == GpuBattleStatus.Side.OWN;
     }
 
     /** Whether the player pans, orbits or turns the camera this frame; GpuBattleView reports it before the update. */
@@ -512,6 +565,132 @@ final class GpuHud implements GpuBoardHud {
             publishedOwnCard = ownCard;
             source.setOwnCardUnit(ownCard);
         }
+        if (frame.status().phase().isDeployment()) {
+            if (deployOverlayRestore == null
+                  && GpuBoardActions.menuItem(frame.globalCommands(), ClientGUI.VIEW_TOGGLE_FOV_DARKEN) != null) {
+                // The chips own these toggles during deployment, starting with none: the line-of-sight shading the
+                // player keeps on for play would otherwise show while the LOS chip reads off.
+                captureDeployOverlay(frame.globalCommands());
+                setViewToggle(frame.globalCommands(), ClientGUI.VIEW_TOGGLE_FOV_DARKEN,
+                      state.deployOverlay == GpuHudState.DeployOverlay.DAMAGE);
+            }
+        } else if (deployOverlayRestore != null) {
+            // Deployment over: the View toggles return to the player's own choice.
+            restoreDeployOverlay(frame);
+        }
+    }
+
+    /** The View items deployment's overlay chips switch, by {@link GpuHudState.DeployOverlay}. */
+    private static final List<String> DEPLOY_OVERLAY_ITEMS = List.of(ClientGUI.VIEW_TOGGLE_FOV_DARKEN);
+
+    /**
+     * The View toggles' states before deployment's overlay chips took them over, in the order of
+     * {@link #DEPLOY_OVERLAY_ITEMS}; null while it has not.
+     */
+    private boolean[] deployOverlayRestore;
+
+    /**
+     * An overlay chip of the deployment queue (design: the overlays that help to choose a hex): shows the deploying
+     * unit's weapon reach, every E(C)CM field or line-of-sight shading, one at a time; choosing the shown one again
+     * clears it.
+     */
+    void toggleDeploymentOverlay(GpuHudState.DeployOverlay mode) {
+        if (inputs == null || !inputs.frame().status().phase().isDeployment()) {
+            return;
+        }
+        GpuHudState.DeployOverlay next = state.deployOverlay == mode ? GpuHudState.DeployOverlay.OFF : mode;
+        List<BoardScene.Command> commands = inputs.frame().globalCommands();
+        if (deployOverlayRestore == null) {
+            captureDeployOverlay(commands);
+        }
+        // The Damage overlay shows the unit's damage only where it sees, so it takes MegaMek's line-of-sight shading.
+        setViewToggle(commands, ClientGUI.VIEW_TOGGLE_FOV_DARKEN, next == GpuHudState.DeployOverlay.DAMAGE);
+        state.deployOverlay = next;
+    }
+
+    private void captureDeployOverlay(List<BoardScene.Command> commands) {
+        deployOverlayRestore = new boolean[DEPLOY_OVERLAY_ITEMS.size()];
+        for (int index = 0; index < DEPLOY_OVERLAY_ITEMS.size(); index++) {
+            BoardScene.Command item = GpuBoardActions.menuItem(commands, DEPLOY_OVERLAY_ITEMS.get(index));
+            deployOverlayRestore[index] = item != null && Boolean.TRUE.equals(item.selected());
+        }
+    }
+
+    /** Deployment's overlay on the board, or null outside deployment and while none was chosen. */
+    GpuHudState.DeployOverlay deploymentOverlay() {
+        return inputs != null && inputs.frame().status().phase().isDeployment() ? state.deployOverlay : null;
+    }
+
+    /** Other players' arrivals the board view still marks, before this frame's update. */
+    void arrivals(List<GpuArrivalCues.Cue> cues) {
+        arrivalCues.cues(cues);
+    }
+
+    /** The Damage overlay's numbers on the hexes the camera shows, before this frame's update. */
+    void damageNumbers(List<GpuDamageNumbers.HexDamage> numbers) {
+        damageNumbers.numbers(numbers);
+    }
+
+    /** Whether deployment's ECM overlay outlines every E(C)CM field on the board, in the 3D view too. */
+    boolean showsAllEcmFields() {
+        return deploymentOverlay() == GpuHudState.DeployOverlay.ECM;
+    }
+
+    private void restoreDeployOverlay(GpuBoardSource.Frame frame) {
+        for (int index = 0; index < DEPLOY_OVERLAY_ITEMS.size(); index++) {
+            setViewToggle(frame.globalCommands(), DEPLOY_OVERLAY_ITEMS.get(index), deployOverlayRestore[index]);
+        }
+        deployOverlayRestore = null;
+        state.deployOverlay = null;
+    }
+
+    /** Ticks or clears a View check item through its own action, when it is available and differs. */
+    private static void setViewToggle(List<BoardScene.Command> commands, String actionCommand, boolean on) {
+        BoardScene.Command item = GpuBoardActions.menuItem(commands, actionCommand);
+        if (item != null && item.enabled() && Boolean.TRUE.equals(item.selected()) != on) {
+            item.action().run();
+        }
+    }
+
+    /**
+     * Whether a left press on {@code coords} starts deployment's turning drag: in the local deployment turn, on the
+     * hex where the acting unit was just placed.
+     */
+    boolean facesFrom(Coords coords) {
+        if (inputs == null || coords == null || inputs.dialog() != null || inputs.frame().scene() == null) {
+            return false;
+        }
+        GpuBattleStatus.Snapshot status = inputs.frame().status();
+        if (!status.myTurn() || !status.phase().isDeployment() || state.turnLocked(status)) {
+            return false;
+        }
+        GpuBattleStatus.UnitStatus actor = GpuHudState.unit(status, status.actorId());
+        return actor != null && coords.equals(actor.position())
+              && actor.boardId() == inputs.frame().scene().boardId();
+    }
+
+    /** Turns the placed unit toward {@code coords}, as MegaMek's Shift+click in deployment does. */
+    void faceToward(Coords coords) {
+        if (coords == null) {
+            return;
+        }
+        source.hover(coords, InputEvent.SHIFT_DOWN_MASK);
+        source.click(coords, false, InputEvent.SHIFT_DOWN_MASK);
+    }
+
+    /** Holds deployment's ghost on {@code hex}, turned to {@code facing}, while a press-drag aims it. */
+    void pinPlacement(Coords hex, int facing) {
+        source.pinDeploymentPreview(hex, facing);
+    }
+
+    /** The deployment ghost follows the pointer again. */
+    void unpinPlacement() {
+        source.unpinDeploymentPreview();
+    }
+
+    /** Ctrl+wheel: steps the placed unit's height by {@code amountY} notches; false while it has no height choice. */
+    boolean wheelHeight(float amountY) {
+        return deployConfirm.wheel(amountY);
     }
 
     /** Only the highest modal owns focus, including file pickers above a pending game prompt. */
@@ -731,6 +910,9 @@ final class GpuHud implements GpuBoardHud {
     private boolean escape() {
         // A row dragged in a list (attacks or weapons) goes home first.
         if (targetCards.cancelDrag() || recordSheet.cancelDrag() || weapons.cancelDrag()) {
+            return true;
+        }
+        if (utilities.closeView()) {
             return true;
         }
         GamePhase phase = inputs.frame().status().phase();
@@ -1071,6 +1253,12 @@ final class GpuHud implements GpuBoardHud {
                     source.physical().target(unit.id());
                 }
             }
+        } else if (phase.isDeployment() && inspectingOtherOwn(status)) {
+            // The card shows an own unit that cannot deploy in this turn: a click places nothing, so MegaMek's current
+            // unit is not placed unseen; a unit there is selected or inspected.
+            if (unit != null) {
+                select(unit.id());
+            }
         } else {
             // Deployment, the targeting display's phases (D1), non-planner movement and every other tool of the turn.
             if (unit != null && !own) { state.inspected = unit.id(); }
@@ -1121,14 +1309,14 @@ final class GpuHud implements GpuBoardHud {
     }
 
     /**
-     * Whether {@link #select} makes the unit the actor: an own unit that can act now in the local MOVEMENT, FIRING,
-     * TARGETING, OFFBOARD or PHYSICAL turn. The unit menus offer "Select" for it and "Inspect" for any other.
+     * Whether {@link #select} makes the unit the actor: an own unit that can act now in the local DEPLOYMENT, MOVEMENT,
+     * FIRING, TARGETING, OFFBOARD or PHYSICAL turn. The unit menus offer "Select" for it and "Inspect" for any other.
      */
     static boolean acts(GpuBattleStatus.Snapshot status, GpuBattleStatus.UnitStatus unit) {
         GamePhase phase = status.phase();
         return status.myTurn() && unit.side() == GpuBattleStatus.Side.OWN && unit.canActNow()
               && (phase.isFiring() || phase.isMovement() || phase.isPhysical() || phase.isTargeting()
-              || phase.isOffboard());
+              || phase.isOffboard() || phase.isDeployment());
     }
 
     @Override
@@ -1168,14 +1356,27 @@ final class GpuHud implements GpuBoardHud {
         // The forces overview covers both columns and the middle; what lies under it is hidden, where the prototype
         // blurs it (shot 12).
         boolean covered = state.overview;
-        unitSlot.setVisible(!covered);
-        otherUnitSlot.setVisible(!covered);
-        // The dock keeps its chat footer even when unit commands are unavailable.
-        dockSlot.setVisible(true);
+        GpuBattleStatus.Snapshot shownStatus = inputs.frame().status();
+        // The deployment order before the first deployment: no unit can act yet, so it shows no force or unit panel,
+        // only the order card, which carries its own Continue, and the chat alone in the corner.
+        boolean staging = GpuInitiativeCard.staging(shownStatus);
+        unitSlot.setVisible(!covered && !staging);
+        otherUnitSlot.setVisible(!covered && !staging);
+        // The order card names the phase itself; the phase plate (and its playback speed) and the conditions wait for
+        // the board.
+        phaseSlot.setVisible(!staging);
+        conditionsSlot.setVisible(!staging);
+        // The dock keeps its chat footer even when unit commands are unavailable. Deployment has none: the force's
+        // queue fills the bottom, its placed unit carries Deploy and Clear, and the queue header the chat.
+        boolean deploying = inputs.frame().status().phase().isDeployment();
+        dockSlot.setVisible(!deploying && !staging);
+        cornerChatSlot.setVisible(staging && !covered);
         hintSlot.setVisible(!covered && !state.chatOpen && !m.narrow());
         pickSlot.setVisible(!covered && (m.narrow() || state.chatOpen) && picking(inputs));
         initiativeSlot.setVisible(!covered);
-        forcesSlot.setVisible(!covered);
+        // Deployment trades the forces list for the queue of cards along the bottom (deployment HUD design).
+        forcesSlot.setVisible(!covered && !deploying && !staging);
+        queueSlot.setVisible(!covered && deploying);
         boolean sheet = GpuRecordSheet.open(state) && !covered;
         sheetSlot.setVisible(sheet);
         minimapSlot.setVisible(!covered && inputs.preferences().minimapEnabled());
@@ -1207,7 +1408,10 @@ final class GpuHud implements GpuBoardHud {
         // between them at the grid's width; it does not move the dock.
         float phaseHeight = height(phaseSlot);
         float phaseTop = utilityLeft < m.left() + 2 * gap ? utilityHeight + 2 * gap : gap;
-        place(phaseSlot, gap, phaseTop, m.left(), phaseHeight);
+        // The deployment strip is one line, as wide as its text up to the utilities.
+        float phaseWidth = phaseHeader.slim()
+              ? Math.max(m.left(), Math.min(phaseHeader.stripWidth(), utilityLeft - STACK - gap)) : m.left();
+        place(phaseSlot, gap, phaseTop, phaseWidth, phaseHeight);
         float cardHeight = height(unitSlot);
         place(unitSlot, gap, height - gap - cardHeight, m.left(), cardHeight);
         float forcesWidth = state.forcesGrid && !sheet ? m.grid() : m.forces();
@@ -1257,21 +1461,51 @@ final class GpuHud implements GpuBoardHud {
         // Middle band between the columns: the dock beside the unit card, one bar along the bottom edge, with the hint
         // line and a pick's chip above it. It starts after the left column, which the unit card fills, or the wider
         // grid and the open unit sheet.
-        float bandLeft = gap + Math.max(sheet ? m.grid() : forcesWidth, m.left()) + gap;
+        // In deployment the record stacks above the unit card, so the force's cards never move when it opens.
+        float bandLeft = gap + Math.max(sheet && !deploying ? m.grid() : forcesWidth, m.left()) + gap;
         float bandRight = width - gap - rightWidth - gap;
         float dockWidth = Math.min(m.dock(), bandRight - bandLeft);
         float dockHeight = height(dockSlot);
         float dockTop = height - gap - dockHeight;
-        place(dockSlot, bandLeft, dockTop, dockWidth, dockHeight);
+        float dockX = staging ? centred(dockWidth, 0, width) : bandLeft;
+        float chatRight = dockX + dockWidth;
+        float chatBottom = dockTop;
+        if (deploying) {
+            // The force's cards fill the band up to the window's edge while no card fills the right column's bottom.
+            float queueRight = shown(otherUnitSlot) ? bandRight : width - gap;
+            dockWidth = 0;
+            dockX = queueRight;
+            // One height whatever is selected: the bottom of the screen does not resize as the player picks units.
+            float queueHeight = QUEUE_HEIGHT;
+            float queueWidth = queueRight - bandLeft;
+            queueSlot.setVisible(queueSlot.isVisible() && queueWidth >= QUEUE_MIN_WIDTH);
+            place(queueSlot, bandLeft, height - gap - queueHeight, Math.max(0, queueWidth), queueHeight);
+            chatRight = queueRight;
+            chatBottom = height - gap - queueHeight;
+        }
+        if (shown(cornerChatSlot)) {
+            float cornerWidth = cornerChatSlot.getPrefWidth();
+            float cornerHeight = cornerChatSlot.getPrefHeight();
+            place(cornerChatSlot, width - gap - cornerWidth, height - gap - cornerHeight, cornerWidth, cornerHeight);
+            chatRight = width - gap;
+            chatBottom = height - gap - cornerHeight;
+        }
+        place(dockSlot, dockX, dockTop, dockWidth, dockHeight);
         float pickHeight = height(pickSlot);
-        float chatHeight = chat.height(dockTop - STACK - rightStart - (pickHeight > 0 ? pickHeight + STACK : 0));
-        place(chatSlot, dockSlot.getX(), dockTop - STACK - chatHeight, dockWidth, chatHeight);
+        float chatWidth = deploying ? Math.min(m.dock(), chatRight - bandLeft)
+              : Math.max(dockWidth, Math.min(m.dock(), dockX + dockWidth - bandLeft));
+        float chatHeight = chat.height(chatBottom - STACK - rightStart - (pickHeight > 0 ? pickHeight + STACK : 0));
+        place(chatSlot, chatRight - chatWidth, chatBottom - STACK - chatHeight, chatWidth, chatHeight);
         float hintWidth = hintSlot.getPrefWidth();
         float hintHeight = hintSlot.getPrefHeight();
         float hintBottom = gap + (dockHeight > 0 ? dockHeight + STACK : 0);
-        place(hintSlot, dockSlot.getX() + (dockSlot.getWidth() - hintWidth) / 2,
-              height - hintBottom - hintHeight, hintWidth,
-              hintHeight);
+        float hintX = dockSlot.getX() + (dockSlot.getWidth() - hintWidth) / 2;
+        if (shown(queueSlot)) {
+            // Above the force's cards, centred on the band.
+            hintBottom = Math.max(hintBottom, gap + queueSlot.getHeight() + STACK);
+            hintX = centred(hintWidth, bandLeft, chatRight);
+        }
+        place(hintSlot, hintX, height - hintBottom - hintHeight, hintWidth, hintHeight);
         float pickWidth = Math.min(pickSlot.getPrefWidth(), dockWidth);
         place(pickSlot, dockSlot.getX() + (dockWidth - pickWidth) / 2,
               dockTop - (state.chatOpen ? chatHeight + STACK : 0) - STACK - pickHeight,
@@ -1313,7 +1547,7 @@ final class GpuHud implements GpuBoardHud {
 
         // Top row: the conditions card beside the left column (the sheet's width while it is open), the tactical chip
         // centred in the room that is left.
-        float conditionsX = gap + leftWidth() + STACK;
+        float conditionsX = gap + Math.max(leftWidth(), phaseHeader.slim() ? phaseSlot.getWidth() : 0) + STACK;
         // A narrow window has no space beside the toolbar; keep the card usable in the middle band below it.
         boolean conditionsBelow = conditionsX + CONDITIONS_WIDTH + STACK > utilityLeft;
         float conditionsRight = conditionsBelow ? bandRight : utilityLeft - STACK;

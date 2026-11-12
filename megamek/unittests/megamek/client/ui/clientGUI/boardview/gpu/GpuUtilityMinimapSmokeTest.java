@@ -84,7 +84,7 @@ class GpuUtilityMinimapSmokeTest {
             hint = new GpuHintLine(hud.kit, source, state, camera);
             minimap = new GpuMinimap(hud.kit, source, state, camera);
             for (Actor actor : List.of(utilities.north(), utilities.actor(), utilities.chip(), hint.actor(),
-                  minimap.actor())) {
+                  minimap.actor(), utilities.popover())) {
                 hud.window.addActor(actor);
             }
         }
@@ -270,28 +270,45 @@ class GpuUtilityMinimapSmokeTest {
         assertEquals(2, parts.minimapRuns.get(), "The minimap's close button runs the same item");
         click(hud, "utility-log");
         assertTrue(parts.state.logOpen());
-        click(hud, "utility-help");
-        assertEquals(GpuHudState.Dialog.HELP, parts.state.dialog);
         click(hud, "utility-menu");
-        assertEquals(GpuHudState.Dialog.MENU, parts.state.dialog, "Menu replaces Help");
+        assertEquals(GpuHudState.Dialog.MENU, parts.state.dialog);
         click(hud, "utility-menu");
         assertEquals(GpuHudState.Dialog.NONE, parts.state.dialog);
         click(hud, "utility-log");
         assertFalse(parts.state.logOpen());
         List<String> row = new ArrayList<>();
-        ((Table) parts.utilities.actor()).getChildren().forEach(child -> row.add(child.getName()));
-        assertEquals(List.of("map-view-top", "map-view-isometric", "map-view-fit", "utility-tactical",
-              "utility-wireframe", "utility-map", "utility-contacts", "utility-log", "tuning-button",
-              "utility-help", "utility-menu"), row);
+        ((Table) parts.utilities.actor()).getCells().forEach(cell -> row.add(cell.getActor().getName()));
+        assertEquals(List.of("utility-view", "utility-tactical", "utility-map", "utility-contacts", "utility-log",
+              "utility-menu"), row);
+        Actor popover = hud.stage.getRoot().findActor("utility-view-menu");
+        assertFalse(popover.isVisible(), "View starts closed");
+        click(hud, "utility-view");
+        assertTrue(popover.isVisible(), "View opens its popover");
+        List<String> items = new ArrayList<>();
+        ((Table) popover).getCells().forEach(cell -> items.add(cell.getActor().getName()));
+        assertEquals(List.of("map-view-top", "map-view-isometric", "map-view-fit", "utility-wireframe",
+              "tuning-button"), items);
+        Rectangle view = GpuHudTestStage.bounds(hud.stage.getRoot().findActor("utility-view"));
+        Rectangle hanging = GpuHudTestStage.bounds(popover);
+        assertTrue(hanging.y + hanging.height <= view.y, "The popover hangs below the row");
         click(hud, "map-view-top");
         assertTrue(board.camera.isTopDown());
+        assertFalse(popover.isVisible(), "A camera preset closes the popover");
+        click(hud, "utility-view");
         click(hud, "map-view-isometric");
         assertFalse(board.camera.isTopDown());
+        click(hud, "utility-view");
         click(hud, "map-view-fit");
         Vector3 fitted = board.camera.focus.cpy();
         board.camera.center(BoardGeometry.center(new Coords(1, 1), 0));
+        click(hud, "utility-view");
         click(hud, "map-view-fit");
         assertTrue(fitted.epsilonEquals(board.camera.focus, .01f), "Fit restores the board framing after a pan");
+        click(hud, "utility-view");
+        click(hud, "utility-log");
+        assertFalse(popover.isVisible(), "A press outside the popover closes it");
+        assertTrue(parts.state.logOpen(), "and still reaches what it pressed");
+        click(hud, "utility-log");
 
         click(hud, "utility-tactical");
         assertTrue(board.camera.tactical(), "Tactical view enters the Tactical View");
@@ -299,9 +316,11 @@ class GpuUtilityMinimapSmokeTest {
         assertTrue(parts.utilities.chip().isVisible());
         Button isometric = hud.stage.getRoot().findActor("map-view-isometric");
         assertTrue(isometric.isDisabled(), "The Tactical View keeps its top-down angle");
+        click(hud, "utility-view");
         click(hud, "map-view-isometric");
         assertTrue(board.camera.isTopDown(), "The disabled preset cannot incline the Tactical View");
         assertTrue(board.camera.tactical(), "Camera presets keep the Tactical View active");
+        click(hud, "utility-view");
         // The chip names the mode only: the pressed utility switches back.
         List<String> chip = new ArrayList<>();
         boolean button = false;

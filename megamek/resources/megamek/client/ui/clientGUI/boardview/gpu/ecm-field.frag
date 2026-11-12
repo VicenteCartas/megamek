@@ -10,8 +10,9 @@ layout(location = 0) out vec4 fragColor;
 uniform sampler2D u_cells;
 uniform vec4 u_board;          // board width and height in hexes, tile width and height in board pixels
 uniform int u_tactical;        // 1: the Tactical View (option B), 0: the 3D view (option C)
-uniform int u_fieldsAll;       // the Tactical View outlines every field; 0 leaves it the 3D view's ticks
+uniform int u_fieldsAll;       // every field's outline: the Tactical View's Fields, or deployment's ECM overlay
 uniform int u_hatchAll;        // the Tactical View hatches every jammed hex, not only the open field's
+uniform int u_fill;            // deployment's ECM overlay: tint every covered hex and hatch every jammed one
 uniform int u_openKinds;       // the open source's side and kind bits; 0 when no field is open
 uniform float u_strength;      // the ECM Transparency setting / 128
 uniform vec2 u_pulseCentre;    // the open source's hex centre, in board pixels
@@ -121,6 +122,15 @@ void main() {
     vec2 world = v_local + centre(v_cell);
     vec4 colour = vec4(0.0);
 
+    if (u_fill == 1) {
+        // The field's body: enemy ECM over own ECM, ECCM fainter, so where a field reaches reads without its edge.
+        int kind = strongest(self.bits & KINDS);
+        if ((self.bits & KINDS) != 0) {
+            bool counter = kind == OWN_ECCM || kind == ENEMY_ECCM;
+            vec3 body = kind == OWN_ECM || kind == OWN_ECCM ? u_own : u_enemy;
+            colour = over(colour, vec4(body, (counter ? 0.10 : 0.20) * min(strength, 1.3)));
+        }
+    }
     if (u_pulseTime >= 0.0 && self.open && self.count == 1) {
         // Continuous cube distance on the board's hex lattice: the front keeps the field's hexagon.
         vec2 offset = world - u_pulseCentre;
@@ -130,7 +140,7 @@ void main() {
         colour = over(colour, vec4(u_pulseColour.rgb, pulse(d, u_pulseTime) * u_pulseColour.a * min(strength, 1.3)));
     }
 
-    if ((self.bits & JAMMED) != 0 && (self.open || u_tactical == 1 && u_hatchAll == 1)) {
+    if ((self.bits & JAMMED) != 0 && (self.open || u_fill == 1 || u_tactical == 1 && u_hatchAll == 1)) {
         float spacing = u_board.z / 6.5;
         float across = (fract(dot(world, ACROSS_HATCH) / spacing + 0.5) - 0.5) * spacing;
         float apart = screenLength(ACROSS_HATCH * across);
@@ -156,7 +166,7 @@ void main() {
         bool open = (kind & u_openKinds) != 0 && (self.open || next.open);
         int pattern = 2;
         float width = counter ? 2.4 : 3.0, alpha = counter ? 0.7 : 0.85;
-        if (u_tactical == 1 && u_fieldsAll == 1 || open) {
+        if (u_fieldsAll == 1 || open) {
             pattern = counter ? 1 : 0;
             width = u_tactical == 1 ? 3.6 : 4.2;
             alpha = 1.0;

@@ -535,7 +535,7 @@ final class GpuContextMenu implements GpuHud.Component {
                 }
             }
             case CENTER_UNIT -> source.locateUnit(unit.id());
-            case CENTER_HEX -> source.command(() -> source.currentView().centerOnHex(action.location().coords()));
+            case CENTER_HEX -> source.centerOnHex(action.location().coords());
             case LINE_OF_SIGHT -> source.los().lineOfSight(unit.id(), action.location().coords(), pointedZ);
             case PLAN_MOVE -> source.moves().planTo(action.location().coords(), action.location().boardId(), false);
             case PIN_MOVE -> source.moves().planTo(action.location().coords(), action.location().boardId(), true);

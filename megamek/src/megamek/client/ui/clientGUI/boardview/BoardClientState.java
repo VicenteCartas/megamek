@@ -234,6 +234,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     Rectangle displayablesRect = new Rectangle();
 
     private Coords selected;
+    private Coords deploymentPreview;
     private MovePath plannedMovement;
     private BoardFocus focus = new BoardFocus(0, null);
     private Runnable changed = () -> { };
@@ -308,6 +309,19 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
             visibilityChanged();
         }
     }
+
+    /**
+     * The hex the deploying unit is previewed on (under the pointer or pinned while it is aimed), or null: in the
+     * deployment phase the field of view looks from there rather than from the unit, which has no position yet.
+     */
+    public void setDeploymentPreview(Coords coords) {
+        if (!Objects.equals(deploymentPreview, coords)) {
+            deploymentPreview = coords;
+            visibilityChanged();
+        }
+    }
+
+    public Coords getDeploymentPreview() { return deploymentPreview; }
 
     /** Retains the phase controller's actual path, not a path reconstructed from rendering artifacts. */
     public void setPlannedMovement(MovePath path) {

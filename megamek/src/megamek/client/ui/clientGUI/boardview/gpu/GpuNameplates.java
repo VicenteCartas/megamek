@@ -246,6 +246,12 @@ final class GpuNameplates implements GpuHud.Component {
         return plate == null ? head : plate.marker().getY() + plate.marker().getHeight();
     }
 
+    /** The width of the unit's shown marker (its tag, else its pip), or 0 without one. */
+    float width(int unitId) {
+        Plate plate = plates.get(unitId);
+        return plate == null ? 0 : plate.marker().getWidth();
+    }
+
     /**
      * A tag's lighter part: "destroyed", or the board label's status words in their order and, for an enemy hovered
      * while the focus unit {@code from} acts, the actor's best roll of the weapons phase (or why there is none), else
