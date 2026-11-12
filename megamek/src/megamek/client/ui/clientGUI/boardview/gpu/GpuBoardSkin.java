@@ -77,8 +77,7 @@ final class GpuBoardSkin implements Disposable {
         theme = new UiTheme(Configuration.fontsDir());
         skin = theme.skin;
         // Noto Sans stays the default font: the 3D hex labels and the window's loading message use it.
-        BitmapFont font = theme.worldFont("default-font", "Noto Sans/NotoSans-Regular.ttf", 15, 0);
-        theme.worldFont(OUTLINE_FONT, "Noto Sans/NotoSans-Regular.ttf", 15, 15f * OUTLINE / FONT_RESOLUTION);
+        BitmapFont font = worldFonts(theme);
         theme.add("default", new Label.LabelStyle(font, TEXT), Label.LabelStyle.class);
         Pixmap enemy = new Pixmap(new FileHandle(new File(Configuration.miscImagesDir(), ENEMY_ICON)));
         try {
@@ -89,6 +88,13 @@ final class GpuBoardSkin implements Disposable {
         battleDrawables();
         tokenHud();
         tuningStyles();
+    }
+
+    /** Adds the hex labels' fonts, default-font and its outline, to {@code theme}; returns default-font. */
+    static BitmapFont worldFonts(UiTheme theme) {
+        BitmapFont font = theme.worldFont("default-font", "Noto Sans/NotoSans-Regular.ttf", 15, 0);
+        theme.worldFont(OUTLINE_FONT, "Noto Sans/NotoSans-Regular.ttf", 15, 15f * OUTLINE / FONT_RESOLUTION);
+        return font;
     }
 
     /** Builds the token styles again after the user's palette changed ({@link DesignTokens#setPalette}). */

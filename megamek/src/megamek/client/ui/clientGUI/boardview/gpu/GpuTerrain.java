@@ -11,9 +11,8 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
-import java.util.LinkedHashSet;
-import java.util.function.Predicate;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -26,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
@@ -72,8 +72,8 @@ import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
-import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.OrientedBoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
@@ -10736,9 +10736,11 @@ final class GpuTerrain implements Disposable {
         });
         treeSplits.clear();
         meshGeneration++;
-        detailWorker.shutdownNow();
-        // Workers borrow chunk/asset data. ForkJoinPool.close may return once termination has started after
-        // shutdownNow; wait for actual termination before freeing those resources, even if closing is interrupted.
+        // Not shutdownNow: a chunk's parallel streams fork into this pool, and a worker joining a subtask that
+        // shutdownNow dropped from the queue waits forever. The bumped generation lets every queued task cancel itself.
+        detailWorker.shutdown();
+        // Workers borrow chunk/asset data. Wait for actual termination before freeing those resources, even if
+        // closing is interrupted.
         boolean interrupted = false;
         while (!detailWorker.isTerminated()) {
             try { detailWorker.awaitTermination(1, TimeUnit.DAYS); }
