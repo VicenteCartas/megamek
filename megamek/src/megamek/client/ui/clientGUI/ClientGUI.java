@@ -176,12 +176,14 @@ import megamek.common.event.entity.GameEntityRemoveEvent;
 import megamek.common.event.player.GamePlayerChangeEvent;
 import megamek.common.event.player.GamePlayerChatEvent;
 import megamek.common.event.player.GamePlayerDisconnectedEvent;
+import megamek.common.event.player.GamePlayerPingEvent;
 import megamek.common.game.Game;
 import megamek.common.hexArea.HexArea;
 import megamek.common.icons.Camouflage;
 import megamek.common.loaders.MULParser;
 import megamek.common.loaders.MekSummaryCache;
 import megamek.common.moves.MovePath;
+import megamek.common.net.enums.PacketCommand;
 import megamek.common.options.GameOptions;
 import megamek.common.options.OptionsConstants;
 import megamek.common.preference.IPreferenceChangeListener;
@@ -383,6 +385,12 @@ public class ClientGUI extends AbstractClientGUI
     /** Open the default board once per game; later phase changes preserve a manual choice or rendering fallback. */
     private boolean boardViewChosen;
     private LobbyCommands lobbyCommands;
+
+    /**
+     * Set while a ping notice is written to the chat box, so that line does not also play the chat sound. Chat events
+     * are dispatched on the thread that raises them, so the flag is only ever read during that one call.
+     */
+    private boolean isQuietSystemMessage = false;
 
     private final ConcurrentLinkedQueue<Runnable> toastDripQueue = new ConcurrentLinkedQueue<>();
     private javax.swing.Timer toastDripTimer;
@@ -3845,6 +3853,44 @@ public class ClientGUI extends AbstractClientGUI
         return dead;
     }
 
+    /**
+     * Plays the "my turn" sound before a pop-up that holds the game until this player answers it.
+     *
+     * @param decision the request type, written to the log so a test can see which pop-up rang
+     */
+    private void bingForDecision(PacketCommand decision) {
+        logger.info("Decision prompt {}: playing my-turn sound", decision);
+        bingMyTurn();
+    }
+
+    /**
+     * Plays the ping sound and shows who pinged this player: a toast on the board in game, or a line in the chat box in
+     * the lobby or when toasts are switched off. The chat line does not also play the chat sound.
+     *
+     * @param event the ping, naming its sender
+     */
+    private void showPing(GamePlayerPingEvent event) {
+        Player sender = client.getGame().getPlayer(event.senderId());
+        String senderName = (sender == null) ? Messages.getString("ClientGUI.ping.unknownSender") : sender.getName();
+        String notice = Messages.getString(event.isToEveryone() ? "ClientGUI.ping.everyone" : "ClientGUI.ping.you",
+              senderName);
+        audioService.playSound(SoundType.BING_PING);
+        // addToast reaches the native battle window's own toast stack, so the Swing overlay need not exist
+        boolean canToast = !client.getGame().getPhase().isLounge() && GUIP.getToastEnabled();
+        logger.info("[PlayerPing] pinged by {} (everyone: {}), notice as {}, ping sound muted: {}",
+              senderName, event.isToEveryone(), canToast ? "toast" : "chat line", GUIP.getSoundMutePing());
+        if (canToast) {
+            addToast(ToastLevel.INFO, notice);
+        } else {
+            isQuietSystemMessage = true;
+            try {
+                systemMessage(notice);
+            } finally {
+                isQuietSystemMessage = false;
+            }
+        }
+    }
+
     private void setWeaponOrderPrefs(boolean prefChange) {
         for (Entity entity : client.getGame().getEntitiesVector()) {
             if ((entity.getOwner().equals(client.getLocalPlayer()))
@@ -3979,7 +4025,14 @@ public class ClientGUI extends AbstractClientGUI
 
         @Override
         public void gamePlayerChat(GamePlayerChatEvent e) {
-            bingChat();
+            if (!isQuietSystemMessage) {
+                bingChat();
+            }
+        }
+
+        @Override
+        public void gamePlayerPing(GamePlayerPingEvent event) {
+            showPing(event);
         }
 
         @Override
@@ -4241,6 +4294,7 @@ public class ClientGUI extends AbstractClientGUI
                         paths[1] = null;
                         optionType = JOptionPane.YES_NO_OPTION;
                     }
+                    bingForDecision(gameCFREvent.getCFRType());
                     int choice = option(Messages.getFormattedString("CFRDomino.Message", entity.getDisplayName()),
                           Messages.getString("CFRDomino.Title"),
                           optionType,
@@ -4285,6 +4339,7 @@ public class ClientGUI extends AbstractClientGUI
                     }
                     amsList.setSelectionModel(new AmsAssignGUI(amsList, amsMaxCount));
 
+                    bingForDecision(gameCFREvent.getCFRType());
                     String amsTitle = Messages.getString("CFRAMSAssign.Message", entity.getDisplayName());
                     DialogAnswer amsAnswer = askRows("", amsTitle,
                           amsOptions.stream().map(option -> new DialogRow(option, "", null, true)).toList(), true,
@@ -4345,6 +4400,7 @@ public class ClientGUI extends AbstractClientGUI
                         apdsOptions.add(waaMsg);
                     }
 
+                    bingForDecision(gameCFREvent.getCFRType());
                     result = input(Messages.getString("CFRAPDSAssign.Message", entity.getDisplayName()),
                           Messages.getString("CFRAPDSAssign.Title", entity.getDisplayName()),
                           JOptionPane.QUESTION_MESSAGE,
@@ -4386,6 +4442,7 @@ public class ClientGUI extends AbstractClientGUI
                     getBoardState().cursor(target.getPosition());
 
                     // Ask whether the player wants to take a PBS or not
+                    bingForDecision(gameCFREvent.getCFRType());
                     int pbsChoice = confirm(Messages.getString("ClientGUI.PointBlankShot.Message",
                                 target.getShortName(),
                                 attacker.getShortName()),
@@ -4429,6 +4486,7 @@ public class ClientGUI extends AbstractClientGUI
                     }
                     logger.debug("CFR_TELEGUIDED_TARGET: showing dialog with {} targets", targetDescriptions.size());
                     // Set up the selection pane
+                    bingForDecision(gameCFREvent.getCFRType());
                     input = (String) input(Messages.getString("TeleMissileTargetDialog.message"),
                           Messages.getString("TeleMissileTargetDialog.title"),
                           JOptionPane.QUESTION_MESSAGE,
@@ -4465,6 +4523,7 @@ public class ClientGUI extends AbstractClientGUI
                     }
                     logger.debug("CFR_TAG_TARGET: showing dialog with {} targets", TAGTargetDescriptions.size());
                     // Set up the selection pane
+                    bingForDecision(gameCFREvent.getCFRType());
                     input = (String) input(Messages.getString("TAGTargetDialog.message"),
                           Messages.getString("TAGTargetDialog.title"),
                           JOptionPane.QUESTION_MESSAGE,
@@ -4933,7 +4992,8 @@ public class ClientGUI extends AbstractClientGUI
             }
             case GUIPreferences.SOUND_BING_FILENAME_CHAT,
                  GUIPreferences.SOUND_BING_FILENAME_MY_TURN,
-                 GUIPreferences.SOUND_BING_FILENAME_OTHERS_TURN -> audioService.loadSoundFiles();
+                 GUIPreferences.SOUND_BING_FILENAME_OTHERS_TURN,
+                 GUIPreferences.SOUND_BING_FILENAME_PING -> audioService.loadSoundFiles();
             case GUIPreferences.MASTER_VOLUME -> audioService.setVolume();
             case GUIPreferences.BOT_COMMANDS_ENABLED, GUIPreferences.BOT_COMMANDS_LOCATION ->
                 // Route through maybeShowBotCommands() so the phase rules (non-board phases never show the panel)

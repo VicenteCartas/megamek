@@ -34,6 +34,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MapMenu;
+import megamek.client.ui.clientGUI.UnitOwnerColors;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
@@ -1927,9 +1928,10 @@ final class GpuBoardSource implements BoardSource {
             }
         }
         Color outline = sensor ? new Color(GpuMarkers.SENSOR_RGB)
-              : GUIPreferences.getInstance().getTeamColoring() && view.getLocalPlayer() != null
+              : GUIPreferences.getInstance().getTeamColoring()
+                    && UnitOwnerColors.isViewerOnASide(view.getLocalPlayer(), view.getGame())
                     ? UIUtil.teamColor(entity.getOwner(), view.getLocalPlayer())
-                    : entity.getOwner().getColour().getColour(false);
+                    : entity.getOwner().getDisplayColour().getColour(false);
         // No unit annotations: the HUD's nameplates are the units' labels (X3).
         return new BoardScene.Unit(entity.getId(), part, sensor ? Messages.getString("BoardView1.sensorReturn")
               : entity.getShortName(),

@@ -904,6 +904,11 @@ public final class GpuLobbyWindow {
         players(controller -> controller.replaceWithBot(id));
     }
 
+    /** Any thread: pings player {@code id}, or everyone when it is the local player's own id. */
+    void ping(int id) {
+        players(controller -> controller.ping(id));
+    }
+
     /** Any thread: adds a bot, through its setup dialog, on {@code team}. */
     void addBot(int team) {
         players(controller -> controller.addBot(team));

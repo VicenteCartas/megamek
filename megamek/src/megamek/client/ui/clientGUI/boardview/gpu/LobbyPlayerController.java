@@ -151,6 +151,11 @@ final class LobbyPlayerController {
         }
     }
 
+    /** Pings player {@code id}, or everyone when it is the local player's own id; a disconnected player is not. */
+    void ping(int id) {
+        commands.ping(id);
+    }
+
     /** Has a new bot take the place of the disconnected player {@code id}, with their saved bot settings if any. */
     void replaceWithBot(int id) {
         Player player = session.game().getPlayer(id);

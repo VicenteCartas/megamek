@@ -95,6 +95,9 @@ final class LobbyPlayersPanel {
 
         void addBot(int team);
 
+        /** Pings player {@code id}; the local player's own id pings everyone. */
+        default void ping(int id) { }
+
         /** Keeps whether the chat dock is open or folded (a client preference). */
         default void chatOpen(boolean open) { }
 
@@ -579,7 +582,8 @@ final class LobbyPlayersPanel {
 
     /**
      * The icons at the end of the totals line: the player settings for the local player and their bots, a
-     * bot's own settings and its removal, and for a disconnected player, a bot to take their place.
+     * bot's own settings and its removal, for a disconnected player, a bot to take their place, and for any other
+     * player a ping (on the local player's own card, a ping to everyone).
      */
     private void cardActions(Table strip, PlayerRow player) {
         int id = player.id();
@@ -596,6 +600,9 @@ final class LobbyPlayersPanel {
         if (player.ghost()) {
             cardAction(strip, "bot", "Lobby.replaceBot", "lobby-player-replace-" + id,
                   () -> actions.replaceWithBot(id));
+        } else if (!player.localBot()) {
+            cardAction(strip, "volume", player.self() ? "PlayerPing.menu.pingEveryone" : "PlayerPing.menu.ping",
+                  "lobby-player-ping-" + id, () -> actions.ping(id));
         }
     }
 

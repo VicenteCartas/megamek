@@ -16,6 +16,7 @@ import java.util.stream.Collectors;
 import jakarta.annotation.Nullable;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
+import megamek.client.ui.dialogs.BotCommands.MoveOrderCommands;
 import megamek.common.Player;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.battleArmor.ProtoMekClampMount;
@@ -33,6 +34,7 @@ import megamek.common.options.OptionsConstants;
 import megamek.common.orders.FormationShape;
 import megamek.common.orders.LanceRole;
 import megamek.common.orders.LanceRoles;
+import megamek.common.orders.OrderEligibility;
 import megamek.common.rules.SettableHeat;
 import megamek.common.units.Dropship;
 import megamek.common.units.Entity;
@@ -468,7 +470,7 @@ public final class LobbyUnitMenu {
         if (forceView && (forces.size() == 1)) {
             addBotFormationMenu(popup, game, forces.getFirst());
         }
-        addBotFacingItem(popup, joinedEntities);
+        addBotFacingItem(popup, game, joinedEntities);
 
         popup.add(Item.spacer());
         popup.add(menuItem("View AlphaStrike Stats", LMP_ALPHA_STRIKE + NO_INFO + seIds, true));
@@ -493,16 +495,18 @@ public final class LobbyUnitMenu {
     public record BotLance(Player owner, List<Integer> unitIds) { }
 
     /**
-     * The units of the first bot owning units in {@code force}, in lance order, or null when no bot owns any. Decided by
-     * who owns the units, not the force: a lance a player builds and then hands to a bot still belongs to the player,
-     * and a lance may mix the player's units with the bot's (HammerGS, 2026-10-02).
+     * The units placed directly in {@code force} that take unit orders, all of the first such unit's owner, in lance
+     * order, or null when none does. Only CASPAR bots take unit orders; Princess takes none (see
+     * {@link OrderEligibility#takesUnitOrders}). Decided by who owns the units, not the force: a lance a player builds
+     * and then hands to a bot still belongs to the player, and a lance may mix the player's units with the bot's
+     * (HammerGS, 2026-10-02).
      */
     public static @Nullable BotLance botLance(Game game, Force force) {
         Player owner = null;
         List<Integer> unitIds = new ArrayList<>();
         for (int unitId : force.getEntities()) {
             Entity unit = game.getEntity(unitId);
-            if ((unit == null) || (unit.getOwner() == null) || !unit.getOwner().isBot()) {
+            if ((unit == null) || !OrderEligibility.takesUnitOrders(game, unit.getOwner())) {
                 continue;
             }
             if (owner == null) {
@@ -516,32 +520,40 @@ public final class LobbyUnitMenu {
     }
 
     /**
-     * Adds the Formation and Role menus for a lance with a bot's units in it, so they start the game in formation and
-     * knowing their job. Only the bot's units are ordered; a player's own units in the lance are left alone.
+     * The order-taking units of each lance under a parent force, a company with no order-taking units of its own,
+     * each lance as {@link #botLance} gives it; empty when no lance under it takes orders.
+     */
+    public static List<List<Integer>> parentLances(Game game, Force parent) {
+        List<List<Integer>> lances = new ArrayList<>();
+        for (Force subForce : game.getForces().getFullSubForces(parent)) {
+            BotLance lance = botLance(game, subForce);
+            if (lance != null) {
+                lances.add(lance.unitIds());
+            }
+        }
+        return lances;
+    }
+
+    /**
+     * Adds the Formation and Role menus for a lance with a CASPAR bot's units in it, so they start the game in
+     * formation and knowing their job. Only the bot's units are ordered; a player's own units in the lance are left
+     * alone. Princess bots take no unit orders, so their lances get no menus.
+     *
+     * <p>A parent force, a company with no units of its own but lances under it that take orders, gets a Formation
+     * menu that sets every such lance, each on its own leader, and a Role item saying to set the role on each lance:
+     * the tester right-clicked the company and concluded the menus did not exist (QA playtest, #9526).</p>
      */
     private static void addBotFormationMenu(Item popup, Game game, Force force) {
         BotLance lance = botLance(game, force);
         if (lance == null) {
-            logger.info("[BotOrders] lobby menus for {}: no Formation or Role, none of its own units is a bot's",
-                  force.getName());
+            addParentFormationMenu(popup, game, force);
             return;
         }
         List<Integer> unitIds = lance.unitIds();
         logger.info("[BotOrders] lobby menus for {}: Formation and Role for {} unit(s) of {} ({} in the lance)",
               force.getName(), unitIds.size(), lance.owner().getName(), force.getEntities().size());
         String forceId = String.valueOf(force.getId());
-
-        // one item per shape, the lance's first unit leading, plus Formation off
-        Item formation = Item.menu(Messages.getString("BotCommandPanel.Formations.lobby"));
-        formation.setEnabled(unitIds.size() >= 2);
-        for (FormationShape shape : FormationShape.values()) {
-            formation.add(new Item(Messages.getString("BotCommandPanel.Formations.shape." + shape),
-                  LMP_BOT_FORMATION + "|" + shape.name() + ":" + forceId + NO_INFO));
-        }
-        formation.addSeparator();
-        formation.add(new Item(Messages.getString("BotCommandPanel.Formations.off"),
-              LMP_BOT_FORMATION_OFF + "|" + forceId + NO_INFO));
-        popup.add(formation);
+        popup.add(formationMenu(forceId, unitIds.size() >= 2));
 
         // None, Convoy... or Escort..., the last two opening the Role dialog on that choice
         List<Entity> units = new ArrayList<>();
@@ -570,19 +582,48 @@ public final class LobbyUnitMenu {
         popup.add(role);
     }
 
+    private static void addParentFormationMenu(Item popup, Game game, Force parent) {
+        List<List<Integer>> lances = parentLances(game, parent);
+        if (lances.isEmpty()) {
+            logger.info("[BotOrders] lobby menus for {}: no Formation or Role, none of its units is a CASPAR bot's",
+                  parent.getName());
+            return;
+        }
+        logger.info("[BotOrders] lobby menus for {}: Formation for {} lance(s) under it", parent.getName(),
+              lances.size());
+        popup.add(formationMenu(String.valueOf(parent.getId()),
+              !MoveOrderCommands.formableLances(lances).isEmpty()));
+        // a role is a lance's job and a company holds lances with different ones, so it is set on each lance
+        popup.add(menuItem(Messages.getString("BotCommandPanel.Role.lobbyParent"), LMP_BOT_ROLE + NO_INFO + NO_INFO, false));
+    }
+
+    /** The Formation menu: one item per shape, the first unit of each lance leading, plus Formation off. */
+    private static Item formationMenu(String forceId, boolean enabled) {
+        Item formation = Item.menu(Messages.getString("BotCommandPanel.Formations.lobby"));
+        formation.setEnabled(enabled);
+        for (FormationShape shape : FormationShape.values()) {
+            formation.add(new Item(Messages.getString("BotCommandPanel.Formations.shape." + shape),
+                  LMP_BOT_FORMATION + "|" + shape.name() + ":" + forceId + NO_INFO));
+        }
+        formation.addSeparator();
+        formation.add(new Item(Messages.getString("BotCommandPanel.Formations.off"),
+              LMP_BOT_FORMATION_OFF + "|" + forceId + NO_INFO));
+        return formation;
+    }
+
     /**
-     * Adds a Bot facing item for units owned by a bot. It opens the turret-style facing dialog: the "when stopped"
+     * Adds a Bot facing item for units owned by a CASPAR bot. It opens the turret-style facing dialog: the "when stopped"
      * facing is the one each unit deploys in and holds whenever it stops, the "while moving" one it keeps on the move.
      * Auto leaves the choice to the bot, which deploys facing the enemy's deployment zone.
      */
-    private static void addBotFacingItem(Item popup, Collection<Entity> selectedUnits) {
+    private static void addBotFacingItem(Item popup, Game game, Collection<Entity> selectedUnits) {
         if (selectedUnits.isEmpty()) {
             return;
         }
         List<Entity> units = new ArrayList<>(selectedUnits);
         units.sort(Comparator.comparingInt(Entity::getId));
         for (Entity unit : units) {
-            if ((unit.getOwner() == null) || !unit.getOwner().isBot()) {
+            if (!OrderEligibility.takesUnitOrders(game, unit.getOwner())) {
                 return;
             }
         }
