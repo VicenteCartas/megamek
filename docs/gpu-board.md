@@ -124,9 +124,17 @@ before the movement or fall it happened in: `GpuBoardSource` queues it once the 
 the unit destroyed, after that movement, and the playback plays it as the movement ends,
 when the fall lands. An action in which a unit died holds
 `UnitPlayback.DEATH_HOLD_SECONDS` (0.8 s) instead of the usual second while its pieces
-settle: the next action begins about two seconds after the explosion. Attacks resolve together: one a destroyed
-meeple still fires or takes after its death plays on its ghost (`GpuBattleView.ghost`), a faint pale copy that fades in
-and out with that attack.
+settle: the next action begins about two seconds after the explosion. The deaths a strike, a bombardment or an
+explosion causes play with it (`UnitPlayback.collectCasualties`): each unit dies as the blast's front reaches it,
+while what the blast brings down gives way, and the action ends with them. Attacks resolve together: one a destroyed
+unit still fires or takes after its death plays on the unit itself (`GpuBattleView.ghost`), in its colours and
+camouflage, fading in and out with that attack. A review (a log entry's Replay) shows a unit the game has dead or gone
+since the same way: it fades in, plays the attack and fades out, and does not die again. A destroyed unit draws no
+firing line (`GpuBoardSource.firingLines`).
+
+A move that ends with other events waiting and no checkpoint behind it leaves its unit where it ended until a
+checkpoint shows it there (`UnitPlayback.arrived`): a walk onto a structure its weight brings down is followed by the
+collapse and the fall, and only then by its checkpoint, and the structure gives way as the unit gets onto it.
 
 A confirmed attack (`ResolvedAttack`) arrives before its damage and displacement packets, so the checkpoint captured
 with it shows the board before it, and what follows plays from its contact. Charges, deaths from above and rams send
@@ -238,9 +246,18 @@ population, dust coverage and galaxy extent. These are shader constants.
 
 `EnhancedTerrainCorpusTest` is an opt-in regression for all installed maps
 (`MEGAMEK_LEGACY_CORPUS=1`). It strictly loads both board formats, converts
-legacy scenery, checks structure selections and requires native ground for
-every non-liquid hex. Liquids have their own native renderer. This verifies
-coverage; it does not render every map or judge the quality of every asset.
+legacy scenery, checks structure selections and rejects converted scenery
+tokens selected for rendering again. The 2026-11-11 check passed for 2,432 maps
+and 3,786,877 hexes. This verifies coverage; it does not render every map or
+judge the quality of every asset.
+
+Enhanced terrain always uses its native ground, shaping and vegetation. The
+pre-conversion ground eligibility flag, transparent-image classifier and green
+scatter-mesh fallback are removed. Classic retains its selected graphics mode.
+Building and fuel-tank models come from native designs or their gameplay kits;
+missing kits cannot revive retired models selected by old tileset artwork.
+Classic capture also excludes old structure sprites when a model is missing.
+Industrial terrain retains its generated equipment layouts.
 
 The 2026-10-21 corpus regression passed for 2,427 installed maps and 3,771,653
 hexes, with native ground and complete structure selections. The earlier
@@ -284,7 +301,7 @@ with exactly the casualty's opacity; both disappear when the body finishes fadin
 immediately, without the weapon anticipation delay. As a
 unit's death begins (or the first frame it shows destroyed), its meeple explodes instead of falling over
 (`MeepleCasualties`): `MeepleShatter` cuts it along four
-planes in different directions into closed pieces, and `MeepleDebris` throws them as rigid bodies. Each takes two
+planes in different directions into closed pieces, on the cutter threads the structures' cuts use (`KitFragments#later`), as the death is queued, never in a frame (a meeple whose cut is not in yet keeps its last pose until it is), and `MeepleDebris`, the stepper structures' pieces land in too, throws them as rigid bodies. Each takes two
 pushes over its mass (its volume): a blast low in the body, outward, and the momentum of the hits of the last ten
 seconds, away from each attacker by the damage it dealt; shards fly farther than chunks. Under a fast tabletop
 gravity scaled by the board's, they bounce off the ground, roofs and rocks, sampled lazily from the board's picking
@@ -394,8 +411,9 @@ feature. Classic, for low-end computers, is a build mode of the same chunk pipel
   (`BoardScene.Tile.tileset`, which `BoardArtwork` composes from the Classic tileset, `data/models/board/classic`, never
   the 2D board's) with `BoardRim.column`'s incline mask along each edge above a lower neighbour, or its high-incline mask
   where the drop exceeds two levels or the map marks a cliff side there. It goes into the hex's base slot of the ground
-  atlas, which a water neighbour's bank borrows. The tileset decals and object sprites go into the decal atlas;
-  Enhanced packs neither, only its legacy paint. Bridges have no Classic art: both graphics draw the same 3D bridge.
+  atlas, which a water neighbour's bank borrows. Terrain sprites such as rubble and geysers use a separate Classic
+  scenery atlas. Both graphics draw placed decals through the same native `BoardDecoration` pipeline, including
+  converted old-map decals; there is no raster decal overlay. Bridges have no Classic art: both graphics draw the same 3D bridge.
   The tileset holds level-0 ground art; `TilesetLevels` turns each image for the hex's level by its recipe in
   `classic/tileset/levels.json`: its table's entry (levels -3 to 10, fitted to the old per-level copies), or past the
   table the nearest entry plus the recipe's formula, eased as `levelGrade` eases heights. The column shader adds

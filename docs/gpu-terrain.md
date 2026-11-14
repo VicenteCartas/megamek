@@ -151,7 +151,7 @@ a color-only fade will not hide mismatched relief. See
 `BoardBiome` shares world-space rows, wet patches and growth patterns between
 ground shading and plant placement. `GpuBiomeSurface` uploads per-hex attributes;
 `GpuBiomeVegetation` prepares crops/reeds; `GpuGroundCover` prepares grass roots;
-`GpuTreeInstances` draws repeated trees. Stable seeds and support identities keep
+`GpuTreeInstances` lists repeated trees and `GpuIndirectInstances` draws them. Stable seeds and support identities keep
 plants from moving when snapshots or detail levels change.
 [Fields and wetlands](gpu-fields-marsh.md) and [grass](gpu-grass-rendering.md)
 explain these paths. Small props use `BoardScatter`/`GpuScatter`; rough terrain

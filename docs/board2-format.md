@@ -185,6 +185,24 @@ stores a side on both hexes, and either one parts it. A legacy file's hand-set e
 | `space` | `level`, `screen` |
 | `scorch` | `appearance` only |
 
+A destroyed ground road uses `road.destroyed: true`. Its `connections` retain only the original reciprocal road
+connections, so surviving roads end at the destroyed hex with a cut edge. This is presentation metadata: the destroyed
+hex has no road for movement rules. Building collapse and rubble clearing preserve it; an explicit editor repair or
+removal can replace it.
+
+Road components use explicit `connections` unless `autoConnections: true` requests the game's neighbouring-road
+connections. This distinction survives saving, so editing an explicit road can remove a damaged branch while an
+automatic road still draws its original approach to a destroyed neighbour.
+
+Destroyed ground track uses `rail.destroyed: true`, retaining its original `type` (`rail` or `maglev`) and `connections`.
+`bed: true` additionally preserves the rules' level-zero rail bed after ordinary terrain damage; without it, as after
+crater clearing, no live rail terrain remains. The surviving track derives its cut edges from these records, including
+`bridgeRail.destroyed` records from collapsed or vaporized spans. Destroyed rail and bridgeRail components may store
+`elevation`, the route's absolute original level before cratering. Without it, older files use the hex's current level
+and the ruined bridge height. A vaporized span retains route history without a bridge component, so it leaves no piers
+and cannot restore an unsupported track. Broken edges do not introduce buffer stops. Native boards, clipboard
+copies and game saves retain the damage; an editor repair supplies intact track again.
+
 A fortified hex's `scenario` appearance may store `"fortification": "sandbags"`: its strongpoint is a sandbag emplacement
 instead of dug into the ground. `dug`, the default, is omitted. Pavement and roads always take sandbags, whatever is stored.
 The value is written only while the hex is fortified; rules and the 2D views ignore it.

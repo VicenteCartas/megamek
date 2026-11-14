@@ -6,14 +6,14 @@
 
 | Owner | Responsibility |
 | --- | --- |
-| `TilesetScenery.customBuildingFile` | Map selected tileset artwork to the custom building catalog. |
-| `GpuAssets.building` | Choose custom kit or legacy fallback and own shared loaded assets. |
+| `TilesetScenery.customBuildingFile` | Resolve native building assets in the building catalog. |
+| `GpuAssets.building` | Assemble native kits and own shared loaded assets. |
 | `ConnectedKit` | Read and check a kit's pieces; place base, floors, roof and connection pieces for a hex's exits. |
 | `GpuBuilding` | Upload a kit, choose stable base/floor/roof recipes, instance their placed pieces and expose picking geometry. |
 | `GpuBuildingInterior` | Generate shared floor sheets and supports from the roof's occupied footprint. |
 | `BoardIndustrial` | Generate deterministic machinery with independent equipment heights and neighbor pipe joints. |
 | `BoardWall` | Choose a wall family from its weight and assemble its layered components for drawing, picking and clearance. |
-| `GpuTreeInstances / GpuTerrain` | Instance module ranges; install chunks and retire unused recipes/interior buffers. |
+| `GpuIndirectInstances / GpuTerrain` | Draw module ranges instanced from shared pools; install chunks and retire unused recipes/interior buffers. |
 
 A building hex draws its explicit look or, without one, the standard kit of its gameplay class and weight
 (`TilesetScenery.genericBuilding`): `data/models/buildings/standard/<class>-<weight>.json`, for example
@@ -25,15 +25,24 @@ described in `data/models/buildings/README.md`. A structure asset names its file
 `buildings/fuel_tanks/fuel_tank_light` is `data/models/buildings/fuel_tanks/fuel_tank_light.glb`. A fuel tank's kit follows
 its weight (`TilesetScenery.genericFuelTank`), as a generic building's does; the Classic model tileset has no entry for it.
 
+A kit's level of detail follows a hex's larger side on screen (`TreeLod.prop`: the near level above 80 pixels, the
+next below). The six standard building kits draw a closed outer hull there (`tools/buildings/far_levels.py`, the
+kit README's "Far level"): each wall piece one face on its storey's outer plane, a roof edge three faces, a fitting one
+box (a sparse one, such as a washing line, keeps its near mesh), all on the kit's 512-pixel far atlas, which carries the tint mask (`GpuColorTexture.paintLevels` keeps its painted
+share in the mip levels), the lit windows' night glow and the faces' normals. Their JSON's `hull` leaves out the roof
+body past the near level (`BayKit`); every level seats its roof at the same height (`GeneratedKit.seated`). On the 48x48
+city fitted to a 1080p screen this is 260 to 490 triangles a hex instead of 900 to 10,600. The switch at 80 pixels is
+not invisible: relief, sun shadows and aliased edges of the near level become a softer flat face (see
+`docs/gpu-board-performance.md`, "Building far levels").
+
 Every kit may carry connection pieces (`data/models/buildings/README.md`). The hex's own exits pick them
 (`ConnectedKit.reach`): a connected side runs the structure's whole height, lowered to the top of a neighbour of the
 same structure terrain (building or fuel tank) that connects back where their vertical spans overlap. An exit edit
 rebuilds the hexes within two of it. The fuel tanks connect by ground pipes, which stand in their base module only.
 
-`GpuAssets.building` tries that file first for building, fuel-tank and industrial terrain. Missing kits keep the existing
-`data/models/board/buildings/...` GLB/G3DJ loader, height fitting and wall textures.
-Discovery accepts a custom kit even if there is no legacy model.
-Malformed custom kits fail with an authoring error rather than silently concealing invalid assets.
+`GpuAssets.building` loads native building and fuel-tank kits. Retired tileset model selections and files under
+`data/models/board/buildings/...` are not a fallback for missing kits. Classic ground also excludes their old structure
+sprites. Industrial terrain uses its generated equipment layouts. Malformed kits are reported under their own asset name.
 
 Generated `buildings/wall-<exits>` uses `data/models/buildings/walls/<family>/` in both
 the game and editor. The wall's weight (`BLDG_WEIGHT`, `TilesetScenery.buildingWeight`, in `Cover.wallWeight`)
@@ -191,12 +200,11 @@ generator supersedes them for these four terrain identifiers. Ordinary buildings
   node/material instances while borrowing the same GPU buffers. A single-LOD kit never switches models.
 - Floors and struts are shared by roof footprint and level count. Scene commits discard recipes and interior
   buffers no installed or cached chunk uses. Native resources have explicit GL-thread disposal.
-- New buildings bypass the whole-building chunk mesh merger. The existing `GpuTreeInstances` backend also draws
-  building module ranges, sharing one compact range buffer per LOD/material/pass across all placements. The GPU
-  stores ordinary instance transforms in addition to the small recipe; total rendering memory is not a few bytes.
-- A weak map caches persistent renderable-to-batch lookups without retaining its keys. Weak references never own
-  GPU resource disposal. Unchanged frames reuse meshes and upload no new instance data; visibility/LOD changes
-  can update instance buffers. There is no per-frame building assembly or interior generation.
+- New buildings bypass the whole-building chunk mesh merger. `GpuIndirectInstances` draws building module
+  ranges instanced: each range's geometry once in a pool of its vertex layout, shared by every placement and pass;
+  a chunk's modules are one list of placements, written when its snapshot changes. The GPU stores ordinary
+  instance transforms in addition to the small recipe; total rendering memory is not a few bytes.
+- Unchanged frames upload no instance data; a visibility or LOD change writes the changed chunks' lists again. There is no per-frame building assembly or interior generation.
 
 Adding or replacing a GLB in an already-open viewport requires the existing asset reload or reopening the view;
 missing kits and loaded kits are cached for that renderer's lifetime. Editing a building's height uses the cache.

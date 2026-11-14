@@ -8,7 +8,7 @@
 | --- | --- |
 | `BoardFeatures` | Recognize orchard appearance, choose a species and place deterministic rows with road clearance. |
 | `GpuAssets` | Resolve the authored orchard tree and snow variants. |
-| `GpuTreeInstances / TreeLod` | Draw repeated trees at the selected detail in color, depth and shadow passes. |
+| `GpuTreeInstances / TreeLod` | Choose each tree's detail and list the stands that `GpuIndirectInstances` draws in colour, depth and shadow passes. |
 | `mm-data tree assets` | Own the silhouettes, proportions, textures and authored mesh levels. |
 
 `WOODS` with `FLUFF:12` selects the orchard models in the shared 3D board scene.

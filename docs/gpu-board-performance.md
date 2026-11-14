@@ -615,7 +615,9 @@ requests. A worker must not read changing Swing state or allocate GL resources.
 
 Natural plants settle on full-detail support at every chunk level, so zooming moves
 none of them. Workers prepare that support with the chunk (`GpuTerrain.plantSupports`),
-and a full-detail chunk shares its own surfaces. Classic columns, a biodome's garden
+and a full-detail chunk shares its own surfaces. A game's tree that already has its
+saved pose (`BoardPlanting.posed`) asks for none: a rebuild of posed trees on a 48x48
+region of Ocoee at distant detail takes 4.0-4.1 s against 4.7-4.8 s. Classic columns, a biodome's garden
 and a root past the prepared hexes build theirs on first use, on the GL thread. At
 most `BUILD_JOBS` chunks hold it at once: about 100 MB in the worst measured case
 (399 KB per hex). Against building it all on the GL thread, GL time in `refine` with
@@ -981,10 +983,10 @@ and 56af45d8 full on the reference block) and, for the atlas, the same rendered 
   no measurable difference (32.5 s against 34.5 s live, one run each), so the slice is
   unchanged. The limit there is the work per chunk, not the slice.
 - **Editor: artwork per dirtied chunk.** `prepareUpdate` recomposes the rim, ground and
-  decal artwork only for the hexes of chunks the edit dirtied and keeps the previous
-  build's pixel objects for every other hex (`terrainPixels`, `normalPixels`,
-  `decalPixels` fields). The change scan therefore also compares each hex's decal,
-  tileset decal and tileset scenery artwork, which the atlas comparison used to notice
+  terrain sprite artwork only for the hexes of chunks the edit dirtied and keeps the previous
+  build's pixel objects for every other hex. The surviving caches are `terrainPixels` and `sceneryPixels`:
+  the obsolete raster decal cache was removed after old-map conversion moved all decals into the native pipeline.
+  The change scan compares Classic ground and terrain sprite artwork, which the atlas comparison used to notice
   for every hex. A changed limb model still recomposes everything.
 - **Editor: concrete fit.** `BoardConcrete.adopt` lets a scene whose fit inputs did not
   change (ground, water, level, roads, cliff tops, structures and props) keep the previous
@@ -1109,6 +1111,72 @@ costs held still: 28-37 ms of GPU time in the opaque pass with the board filling
 a 1080p window. A chunk replacement adds 3-6 ms there, the shadow map
 `replaceDetail` marks for redrawing.
 
+## Building far levels
+
+The six standard building kits draw a closed outer hull below 80 pixels a hex (`TreeLod.PROPS`; the kit README's
+"Far level", `tools/buildings/far_levels.py`). Triangles of a hex of four storeys and a roof, lone and in a straight
+run (`work/city-lod/h/src/.../ZzKitHexStats.java`):
+
+| Kit | Near | Far before | Far now |
+| --- | --- | --- | --- |
+| hard (Square) | 8,116 / 5,415 (7,456 / 5,430) | 6,656 / 4,475 (6,156 / 4,490) | 457 / 317 (301 / 327) |
+| medium (Square) | 11,246 / 7,652 (10,388 / 7,622) | 10,578 / 7,119 (9,686 / 7,089) | 457 / 319 (301 / 329) |
+| heavy (Square) | 5,963 / 4,162 (5,309 / 4,070) | 5,837 / 3,953 (5,163 / 3,897) | 457 / 318 (301 / 328) |
+| civilian timber, masonry | 11,085 / 11,212, 13,013 / 13,068 | 9,019 / 8,777, 5,389 / 5,396 | 440 / 431, 432 / 401 |
+| Castle Brian terraces, exoskeleton | 7,482 / 8,682, 8,193 / 8,813 | 5,488 / 6,461, 6,494 / 6,725 | 488 / 427, 444 / 427 |
+| light (Square) | 24,732 / 20,651 (20,196 / 19,972) | 924 / 988 (740 / 1,012) | 423 / 264 (266 / 268) |
+
+Castle Brian had a third level below 24 pixels (terraces 4,130 / 4,606); it now has two, as the others.
+
+On the 48x48 city (`unofficial/VictorMorson/48x48.board`, 915 building hexes), fitted to a 1080p screen (29 pixels a
+hex), the building kits draw 233,747 triangles instead of 4,827,103, all props 976,350 instead of 5,569,706
+(`work/city-lod/shots/census-fin-{a,b}`); at 166 pixels a hex and closer every building draws its near level, as
+before. GPU frame time, median ms, of the standing profile (`ZzStandingProfileTest`: 1920x1080, Medium, terrain cache
+off, hour pinned, 600 warm-up frames; runs alternating before, after, after, before):
+
+| View (pixels a hex column) | NVIDIA before | NVIDIA after | Iris Xe before | Iris Xe after |
+| --- | --- | --- | --- | --- |
+| overview (12.8) | 4.75, 4.02 | 3.15, 2.67 | 27.85, 27.68 | 14.45, 14.62 |
+| middle (32) | 5.11, 5.11 | 3.19, 3.18 | 37.55, 39.31 | 22.32, 22.60 |
+| close (71) | 4.38, 4.41 | 4.31, 4.31 | 38.87, 40.58 | 41.73, 38.12 |
+
+The close view draws the near level and does not change. The frame interval (median of a phase) is noisy on both cards:
+on the Iris overview 12.8 to 19.9 ms before and 12.2 to 16.1 ms after, on NVIDIA 5.0 to 15.0 ms in every view either way.
+
+The switch at 80 pixels is not invisible, measured at its largest (a hex 88 pixels wide, both levels forced, four iso
+directions and straight above, day and night, hour pinned; `work/city-lod/pop_table.py`): the biggest connected blob of
+pixels changing by more than 24 of 255 is 98 to 8,920 pixels in the iso views and 28 to 1,695 straight above, against at
+most 4 between two frames of one level (one case 71). The near level's relief, its sun shadows in recesses and its
+aliased edges become a softer, lighter flat face; the mean colour of the changed pixels moves -6.6 to +8.0 of 255 by day
+and -4.5 to +7.8 at night, Castle Brian's +12.7 to +15.4 at night. Matching alone cannot remove this, so the switch
+dissolves.
+
+In the live view a kit structure that changes level dissolves into it over `TreeLod.DISSOLVE` (0.25 s of the terrain
+clock) from the frame its chunk's lists first draw the new level: it draws at both, which keep complementary pixels of
+one screen pattern (`level-dissolve.glsl`, the trees' too), its cutouts' fading texels with it. Meanwhile its chunk's kit
+parts draw in groups whose programs discard (`GpuIndirectInstances`), which parts at rest never pay. Shadows, a faded
+building (a unit inside), captures, previews and the wireframe view switch at once. A pass draws its groups in an order
+of their contents (`GpuIndirectInstances#drawOrder`), so coplanar faces keep their tie winners through a dissolve and
+when a group is made again. Read frame by frame at 30 frames a second through the switch, both ways, with the views and
+rule above (`work/gpu-driven/profile/hsrc/.../ZzDissolvePopTest.java`): the biggest blob between two frames is 2 to 7
+pixels for every weight on the 4.3 and the 4.1 way and on the Iris Xe, against 918 to 8,744
+pixels switching at once. Dithering keeps its blobs at 1 to 4 pixels down to 15 frames a second
+(`work/gpu-driven/dissolve/ign.py`); at 10 or fewer a frame shows half of each level.
+
+What a switch costs, the 48x48 city's whole board between every kit near and every kit far and back
+(`ZzSwitchCostTest`: 4 cycles each way, a frame timed from its render to a `glFinish` after it, the machine awake):
+switching at once (the build before the dissolve) it was one frame of 307-758 ms zooming out and 238-435 ms zooming in
+on the NVIDIA machine, 390-653 and 338-808 ms with the Iris Xe; sampled, half of it builds each kit's new level
+(`GpuBuilding.Assembly#instance`, `ConnectedKit#placements`). With the dissolve and that frame unchanged it grew to
+400-701 and 273-319 ms (Iris 620-1,446 and 490-941: its snapshots and leaving lists on top), and the 8 frames that
+draw both levels took 24-46 ms (median) on NVIDIA and 65-113 ms on the Iris. A live view's props therefore take their
+new levels within 4 ms a frame, at least one, those of the chunks it sees first (`GpuTerrain#takeLevels`), which the
+dissolve hides: the worst frame is 44-83 ms zooming out and 20-24 ms zooming in on NVIDIA (317-449 and 238-285 ms
+at once), 135-158 and 52-67 ms on the Iris Xe (330-502 and 284-338 ms at once), the switch spread over 36-87 frames
+of 6-15 ms (median) on NVIDIA and 20-64 frames of 24-42 ms on the Iris. The first zoom-out after a load is still one
+frame of about 480 ms on the Iris, spread or not (GPU time, not traced). Captures, previews, the wireframe and the
+frames under the loading stage still switch at once.
+
 ## Opaque drawing and pages
 
 | Owner | What it combines or reuses |
@@ -1117,7 +1185,8 @@ a 1080p window. A chunk replacement adds 3-6 ms there, the shadow map
 | `GpuOpaqueSorter` | Ordering of opaque renderables to keep compatible work together. |
 | `GpuPropBatch` | Static opaque prop ranges with compatible state. |
 | `GpuTerrainPages`, `GpuMeshPage` | Small ranges from nearby chunks in persistent page buffers. |
-| `GpuTreeInstances`, `GpuInstancedMesh` | Repeated models/transforms through instanced draws. Each tree takes the level its own projected diameter asks (`Stand.detail`); every chunk's trees stay uploaded per species and detail level in board order, and a pass draws the visible chunks' ranges, so panning uploads nothing and a zoom uploads only the species-level buffers in which a chunk's run changed (a dissolve changes them twice: when it begins and when its old level drops the tree). In the live view a tree that changes level dissolves into it over `TreeLod.DISSOLVE` (0.25 s of the terrain clock): meanwhile it draws at both levels, which keep complementary pixels of one screen pattern (`terrain-foliage.frag`, and the depth twin alike), and holds the level it takes, so a reversed or continued zoom starts the next dissolve only after this one (larger trees wait for it too, as none takes a coarser level than a smaller one). The run it left drops it once the last dissolve has ended. Captures and previews, whose clock stands still between frames, and the wireframe view switch at once; the shadow map keeps its own levels without a dissolve. At rest it costs nothing measurable: on an Iris Xe at Medium the forest, grassland and city views' frames and the trees' programs (their depth twins included) stayed within run-to-run noise of the build without it. Building parts still gather per pass. |
+| `GpuIndirectInstances` | Every instanced draw of the board (building parts, placed objects, trees, fades, outlines, falling pieces): each part's geometry once in a pool of its vertex layout, every placement in one board-wide instance buffer, written only when a snapshot changes; a pass regroups its visible instances part by part (a compute pass) only when its visible snapshots change, and draws one multi-draw indirect per material, layout and mirror. The view's passes cull each instance on the GPU where the camera sees a drawn chunk only in part; the shadow map's always. A part no list holds stays placed until the scene commit, so zooming across levels and back places nothing. On OpenGL 4.1 the same pools and lists draw a command at a time. 48x48 city, 1080p Medium: see ROADMAP A1 for the measured numbers per stage (render() on the RTX 4070 62-78 ms before stage 1, 5-6 ms now in every view; Iris Xe close view 87-93 ms CPU before, about 10 ms now). |
+| `GpuTreeInstances`, `GpuInstancedMesh` | Trees: each chunk's stand keeps its trees per species by size; each tree takes the level its own projected diameter asks (`Stand.detail`), and its lists (`GpuTreeInstances.list`, drawn by `GpuIndirectInstances`) hold each species and level's run, written again only when a run changes (a dissolve changes it twice: when it begins and when its old level drops the tree). In the live view a tree that changes level dissolves into it over `TreeLod.DISSOLVE` (0.25 s of the terrain clock): meanwhile it draws at both levels, which keep complementary pixels of one screen pattern (`level-dissolve.glsl`, and the depth twin alike), and holds the level it takes, so a reversed or continued zoom starts the next dissolve only after this one (larger trees wait for it too, as none takes a coarser level than a smaller one). Captures and previews, whose clock stands still between frames, and the wireframe view switch at once; the shadow map keeps its own levels without a dissolve. `GpuInstancedMesh` draws ground cover's runs, the hex grid and labels and biome vegetation. |
 | `TerrainLod` | Ground sampling per level, chosen by projected hex size (64/24/6 px) with hysteresis. `BoardRelief` already emits six-triangle fans for ordinary planar hex tops at every LOD. Shaped cliff/coast boundaries retain their shared samples; concave outlines use polygon triangulation. Rounded cliff tops refine interior shading samples at the same playing height, so the six-triangle budget applies to ordinary tops without those rims. Dressing, slopes and walls have separate geometry costs. The earlier 573-face flat-ground measurement predates this implementation and is not a current cost or a pending optimization. Measure the installed scene before changing sample counts or thresholds. |
 | `TreeLod` | Four plant levels by projected diameter (80/48/24 px, 10% hysteresis): the near mesh, two decimated meshes and, below 24 px, an impostor: one quad (2 triangles) turned toward each pass's own camera (colour, depth, shadow), each pixel showing the nearest of 32 renders of the far mesh it replaces (8 directions at 10, 35.26, 60 and 90 degrees above the horizon, `impostor-frames.glsl`): its unlit colour, and its surface's normal and depth, with which each texel is lit and takes its shadow at that surface (`mm-data/tools/prepare_tree_lods.py -- impostors`). The quad is alpha-tested, so it shadows and picks like the meshes; each texel writes its surface's depth, and the quad itself takes the depth of its plant's front (`impostorFrontZ`) with conservative depth (`depth_greater` from GLSL 4.20), so the early depth test stays on. Against the earlier crossed cards (12 triangles), measured on the Iris Xe at Medium before texels wrote their own depth (2026-11-08, cards/frames/frames/cards): every tree and city view within its run-to-run spread, e.g. far forest 16.9 vs 16.8 ms. Far and middle views were primitive-bound (halving the window changed frame time little), so fewer triangles, not cheaper shading, is what pays there. A tree-only vertex shader without the scene shader's per-vertex light loops, shadow projection and fog was tried and measured identical (the driver already discards that unused work), so trees keep the shared vertex shader. |
 | `GpuTerrainDepth` | Depth-only ranges borrowing finished chunk meshes and materials. |
@@ -1346,14 +1415,13 @@ imported Valencia objects gave about 9,000 opaque draws, and the frame was limit
 by draw submission. Now `GpuTerrain.Chunk.cacheDecorations` splits the parts of the
 placed objects: a part whose world transform is a place, a turn about z, one
 horizontal and one vertical scale (`GpuTreeInstances.placeable`) and whose material
-has an instanced shader goes to `GpuTreeInstances.add(Array<Renderable>)`, the path
-the game uses for shared building modules, in the colour, depth and shadow passes;
+has an instanced shader goes to the chunk's instanced list (`GpuIndirectInstances`), as
+shared building modules do, in the colour, depth and shadow passes;
 tilted, mirrored and unevenly stretched parts still draw one by one. Plain placed
 trees stand in the chunk's tree stand with its detail levels (`Chunk.restand`), as
 in the game; a drag preview refills the stand with new arrays, and a part preview
-only changes the gathered instance data. Nothing is packed, so an edit still
-rebuilds only its chunk; the commit keeps the object meshes' instanced batches
-(`retainParts`).
+only changes the listed instance data. Nothing is packed, so an edit still
+rebuilds only its chunk; the commit keeps the parts' geometry in the pools.
 
 Same benchmark (now also printing a profiled frame's GL draws per render stage),
 Valencia City imported (5,136 objects in 616 groups), editor; two runs per stage,
@@ -1655,19 +1723,18 @@ marked box of a missing file.
 the packed path's 2,043; +36 % frame time on the Iris Xe overview). Now a mirrored
 placement is instanced too: the instance's last float marks the mirror, which reverses
 the model's y axis before the turn (`tree-instances.glsl`), and mirror images go to a
-batch of their own (`GpuTreeInstances.Part` keyed on the mirror) whose mesh draws with
-`glFrontFace(GL_CW)` (`GpuInstancedMesh.mirrored`), so every pass culls the faces it
-culls for the model unmirrored. Instanced parts therefore keep their model's own culling;
+group of their own (`GpuIndirectInstances`, keyed on the mirror) drawn with
+`glFrontFace(GL_CW)`, so every pass culls the faces it culls for the model unmirrored. Instanced parts therefore keep their model's own culling;
 a mirror image drawn one by one or faded keeps both faces or the reversed face as before
-(`GpuTerrain.culling`). The tree stand still takes no mirror image (its species batches
+(`GpuTerrain.culling`). The tree stand still takes no mirror image (its species lists
 keep the counter-clockwise front face); a mirrored plant draws as an object part. The scratch harness on the
 all-mirrored 48x48 after the change (Iris Xe, 3840x2359): 1,821 draws in a profiled overview frame, against 1,911
 with no object mirrored in the same build (city 1,448 and 1,442, dense 1,287 and 1,277). Frame medians of 31-34 ms
 mirrored and 31-33 ms unmirrored at the overview are indicative only: another session's test JVM ran at the time.
 
 **Level changes.** A placed object's mesh level change now gathers only the chunk's
-object parts again; buildings still repack the chunk's prop caches
-(`GpuTerrain.updateDetail`). The shadow map keeps the previous level until its next
+object parts again; buildings still repack the chunk's prop caches once all its props have taken their levels
+(`GpuTerrain.detailProps`; a live view spreads them over frames, `takeLevels`). The shadow map keeps the previous level until its next
 refit, as before. After the level change of a faded (hovered-roof) mirrored tree, consecutive frames took a few frames
 to become identical again (2 pixels by 2/255 on its trunk; cause not isolated), so the orchard round trip of
 `GpuSceneryColourSmokeTest` compares settled frames.
@@ -2392,3 +2459,613 @@ documented above. The skip-copy and peeled-base loop experiments remain work-onl
 Integration verification compares the production shader with the tested candidate and checks the patch for
 whitespace errors. The tested source is unchanged, so the completed native compilation, rendering, image and
 independent-review checks above apply to this implementation. Changes remain unstaged.
+
+### Urbanruins loading, rendering and rooftop deployment (2026-11-11)
+
+The reproduction starts a **fresh local server and lobby**, loads
+`buildingsnobasement/urbanruins.board` (50 x 50), and adds one Albatross ALB-4Ur and one Alpha Wolf A from their MTF
+files. It does not load a saved game. The real client GUI enters deployment; native board input clicks hex 2624,
+chooses the building top (elevation 2), and invokes the real DEPLOY button. The server subsequently resolves the
+overloaded CF-15 building, collapse, fall and normal autosaves. The initial comparison uses a second real network
+client with scripted deployment; the Princess follow-up is noted separately below.
+
+Measurements use the NVIDIA RTX 4070 Laptop GPU at 1920 x 1080, MEDIUM / ENHANCED, Java 21, a 4 GB heap and
+generational ZGC. Each fresh match gets a new JVM; application and driver shader caches are warm. The profile owns
+one hidden native board window and disables background shader warming. These are local measurements, not a
+cold-driver or cross-platform performance claim. Unit-catalogue startup is excluded from renderer loading.
+
+The retained changes address these measured costs:
+
+- Loading frames repeatedly placed reserve models by calling the uncached board picker. A baseline wall profile
+  attributed about 18 seconds to `withReserve` / `BoardGeometry.pick` / `BoardSurface`. Reserve warm-up now waits
+  for installed terrain and uses that terrain's picker.
+- Building kits copied the same shared mesh buffers again for each root node. Reading the buffers once across
+  the kit preserves each node's transformed picking triangles. The initial kit profile attributed about
+  5.6 seconds to the repeated buffer reads.
+- Sloping-water height queries repeatedly scanned entire triangle lists during terrain construction. Completed
+  surfaces now use the existing triangle support index; construction-time queries and shore fallback retain their
+  previous behavior.
+- Ordinary instanced building modules were excluded from material-state reuse. Consecutive compatible draws now
+  share state without changing their order, geometry, shader or material. Animated wind and per-piece debris
+  remain excluded.
+- The server traverses the full city game graph for two normal autosaves during the deployment transition.
+  It now captures a fast, complete snapshot, then performs XML serialization, compression, file replacement and
+  requested client delivery on one background writer. The writer retains XStream metadata and omits indentation.
+
+Before the asynchronous-save change, two unprofiled fresh-match comparisons produced the following results.
+Each entry contains both runs; differences in fall outcomes and scheduling prevent attributing every
+phase-transition difference to the patch.
+
+| Measurement | Original | Changed |
+| --- | --- | --- |
+| Renderer creation to board shown | 53.33 / 59.72 s | 39.79 / 41.60 s |
+| DEPLOY request to next initiative report | 3.07 / 2.54 s | 2.63 / 2.91 s |
+| Map click to published roof-choice dialog | .30 / .27 s | .34 / .30 s |
+| Map click to Mek rendered at elevation 2, second pair | .93 s | .89 s |
+| DEPLOY to collapse playback no longer busy, second pair | 3.49 s | 3.90 s |
+
+Loading improved by 25-30% in these pairs. Those initial changes did not establish an improvement in the
+complete DEPLOY wait or first placement latency. The original approximately four-second placement frame did
+not recur in these runs. Slow-frame logs now include the longest rendering stage, and captures taking more than
+250 ms log the EDT capture duration, phase, tile count and unit count. These distinguish scene work from drawing
+and client-state work if that stall occurs again.
+
+An isolated rendering comparison toggled only the new module state reuse, keeping existing terrain batching
+enabled. Four alternating 200-frame blocks (first 30 frames excluded in each) gave original/changed/original/changed
+medians of 31.35 / 24.20 / 27.19 / 23.89 ms. The settled second pair is 12.1% less frame time, approximately
+36.8 to 41.9 FPS. The earlier comparison that disabled *all* terrain batching is not evidence for this patch.
+All 12 tested camera/projection/opacity color comparisons were pixel-identical.
+
+Sampled fresh-match runs identified autosave traversal/compression as the dominant packet-pump work after DEPLOY;
+no JFR allocation stall overlapped that interval. Sampling inflates timings and is not used in the table above.
+An independent fresh-city XML comparison found identical elements, attributes, reference IDs and leaf values:
+131,617 elements, with raw XML reduced from 7,174,360 to 3,823,624 bytes. Compressed size was approximately
+281 KB versus 215 KB. A buffered-writer experiment did not establish a further gain and was not retained.
+
+The real-Princess pair before asynchronous saving (`baseline-fresh-princess` / `fixed-fresh-princess`) also starts from the lobby with
+fresh MTF units and keeps the bot's normal precognition and deployment logic. Both runs give the human the first
+deployment turn; Princess then chooses hex 3032 itself. Renderer loading was 57.59 / 34.67 seconds, first visible
+roof placement .98 / .69 seconds, and DEPLOY-to-report 5.07 / 3.58 seconds. The human unit was confirmed deployed
+after .34 / .20 seconds; Princess was confirmed deployed after 2.76 / 1.92 seconds. Those waits include bot work,
+and this single pair is not an isolated autosave benchmark. Collapse playback stopped being busy after
+3.42 / 3.25 seconds. The remaining deployment wait is not eliminated.
+
+Moving only compression and disk I/O into the background was insufficient: the fresh rooftop run
+`async-fresh-final` still spent 1,119 and 203 ms producing the two XML snapshots at the deployment transition.
+The retained implementation uses Java serialization for the in-memory Total Warfare snapshot and builds the
+usual compressed XML save from that snapshot on the worker. `AbstractGame` is serializable as well as `Game`;
+otherwise Java serialization silently omits inherited boards, players, units, rounds and other base state.
+Snapshots are internal bytes created by the server, never a new external save format or a live-game reference.
+XML-only scenario/extension state and other game types retain the compatible XML snapshot fallback.
+
+The final fresh match against Princess (`async-native-fresh`) includes a rendered roof-choice dialog and reloads
+its newly generated autosave after shutdown. Both post-DEPLOY snapshots used the fast path:
+
+| Work at the deployment transition | XML snapshot experiment | Retained snapshot |
+| --- | --- | --- |
+| Rolling save: game-thread snapshot | 1,119 ms | 18 ms |
+| Normal save: game-thread snapshot | 203 ms | 13 ms |
+| Background XML/compression/write in the retained run | — | 1,583 / 266 ms |
+
+The game thread spends about 31 ms capturing both states instead of doing the expensive XML work. This is not
+literally zero cost; a first snapshot in that JVM took 48 ms, and the compatibility fallback is slower. At most
+four snapshots are retained; storage that cannot keep up applies backpressure before another snapshot is made.
+The worker publishes a completed temporary file, keeps same-name requests ordered, resolves rolling-save timestamp
+collisions and only prunes old recovery points after a successful save. Server shutdown drains accepted work.
+Client save failures receive an explicit failure response, releasing save-completion callbacks without overwriting
+an existing local file. The final DEPLOY-to-report interval was approximately 2.16 seconds, including Princess's
+deployment; collapse/fall playback finished after approximately 3.37 seconds. Animation duration is unchanged.
+
+Save verification also exposed an existing record-reader defect: it ignored concrete XML types for interface
+components and collection serialization proxies. Resolving those types through XStream's permission-checking
+mapper fixes native city-decoration lists and scripted triggers. The final city save reloaded successfully, with
+both players and units, the saved phase, the collapsed rooftop unit, and all 2,500 hex appearance/decoration values
+checked. A separate snapshot comparison retained all 131,617 XML elements and the same leaf values; map iteration
+and reference-ID assignment can change after reconstructing the snapshot.
+
+Verification includes 46 water/surface tests, the modular building geometry test, both off-board-reserve loading
+cases, the submission pixel comparison and 25 save/serialization/client tests: 75 passing cases across those runs.
+The save tests cover state isolation, UTF-8, references, inherited state, ordered overwrites and delivery, rolling
+retention, errors, shutdown, XML-only scenarios, SBF and record type permissions. Production and test compilation
+and changed-file Spotless checks pass. The generic animated-liquid factor assertion remains a known failure that
+was reproduced identically on unchanged code; the previously failing board-visual save round trip now passes.
+
+Local evidence is under `work/urbanruins-profile`: `runs/baseline-fresh-roof2` and `fixed-fresh-roof` hold wall/JFR
+profiles; `runs/*-fresh-timing.log` and `runs/*-fresh-visible.log` hold the unprofiled pairs;
+`runs/final-client-compare.log` holds the isolated rendering comparison. The local `fresh.py` generator creates
+`ZzFreshUrban.java`; `handoff/board-load/harness2/run.py` runs it with `main=ZzFreshUrban`, `-Dzz.play=30` and class
+overlays. `classes=fresh-classes` uses the preserved original `a-main` build; prefixing `fixed-classes` selects the
+changed code. `stacks jfr` enables profiling, and `-Dzz.princess=true` replaces the scripted opponent with Princess.
+`-Dzz.renderDialog=true` waits until the HUD has drawn the dialog before answering, and `-Dzz.reloadSave=true`
+verifies the new match's resulting save. `runs/async-native-fresh-unified.log` contains the historical snapshot/writer
+timings. Temporary runtime timing logs were removed at the November 11 review checkpoint; use a profiling harness
+to collect new timings.
+
+### Urbanruins follow-up: persistent planting and object updates (2026-11-11)
+
+The follow-up uses another **fresh 1v1 match against Princess**, the same map, units, roof click and real DEPLOY
+command. The benchmark now removes `GLProfiler` entirely: disabling it restored GL30 but left its GL20 interceptor
+installed. It also disables VSync after the loading view's pacing has finished. CPU stage timers and nonblocking
+GPU timestamp queries are collected separately. The earlier instrumented frame times are not directly comparable
+with these uncapped measurements.
+
+The main remaining rendering cost was submission of thousands of individually transformed building modules.
+Fixed opaque modules now share packed pages, retaining the original instanced draws while pages are prepared.
+Pages include offscreen chunks so camera movement does not discard and repack them. Transparent, animated,
+skeletal, mirrored and per-instance colour-slot geometry keeps its original path. Packing consumes additional
+GPU geometry memory; the measured whole-process peaks were about 7.4 GiB in both compared runs, which is not a
+measurement of that extra GPU allocation alone. Outline depth also now submits only faded occluders that can
+actually hide a unit, instead of submitting the entire opaque city again. Retiring instance buffers is budgeted
+across frames rather than deleting every retired buffer during a collapse.
+
+Loading profiles also found repeated linear mesh-part/material searches inside LibGDX model construction and
+repeated building-triangle scans during initial plant placement. Model construction now indexes those IDs once.
+Placed obstacle footprints use a conservative triangle grid, with the existing exact intersection tests, and
+share immutable results within one terrain preparation. Original vegetation support is prepared in batches so
+adjacent patches share bank/wall work. Plant support for rendered scatter is prepared on workers too. These are
+initial-placement optimizations, not a reason to repeat placement during gameplay.
+
+`BoardPlanting` captures the original map for cosmetic placement. A hex allocates its original root buffer once
+when its detail first needs it; detail changes only change drawing density. Trees and foliage retain their
+accepted transforms, including rejected placements, so removing a neighbour never retries or plants anything.
+Destruction permanently removes affected members. A crater removes unsupported roots; scorched grass does not
+remove standing game trees. Explicit map editing uses the editor's existing placement path and may add plants.
+
+The existing mesh generation and dirty-hex mechanism now distinguishes object updates from ground changes in
+Enhanced gameplay. Building collapse, tree removal, all rubble models, rubble clearing and burned vegetation
+retain the installed ground models, GPU meshes, material atlas and tactical support. Ground resources transfer
+ownership only when the replacement commits; a cancelled build owns no borrowed ground resources. Object picking
+and the applicable paint/scatter layers update independently. Bulldozing's new gravel/path decal still appears.
+The rubble classification covers the whole `scenery/rubble/` family, not a list of grades. Real game grades 1–7
+are exercised: light, medium, heavy, hardened, wall, ultra and the unknown-grade heavy-art fallback, as well as
+all ten current pile/path assets. A crater still rebuilds affected ground and preserves distant chunks.
+
+This does not yet separate every kind of geometry the existing renderer puts into its ground layers: bridge
+geometry, rough/boulder formations, fungus relief, legacy bitmap paint and Classic column artwork retain their
+existing local rebuild path. Ground-scale setting changes while a match is open are also not covered by the
+plant-anchor regressions. No new server terrain version or competing authoritative map state was introduced.
+
+The native roof-choice prompt now routes before constructing a Swing dialog and its layout. Cancellation still
+uses the existing deployment helper, and the elevation-above choice retains its follow-up prompt.
+
+| Fresh-match measurement | Previous fixes (`final-baseline`) | Final code (`final-verified-fresh`) |
+| --- | --- | --- |
+| Settled median frame | 23.161 ms / 43.2 FPS | 13.247 ms / 75.5 FPS |
+| Settled p95 frame | 29.591 ms | 17.941 ms |
+| Renderer creation to board shown | 34.43 s | 35.56 s |
+| Map click to roof-choice prompt | .26 s | .21 s |
+| Map click to Mek visible on roof | .65 s | .62 s |
+| DEPLOY to next initiative report, including Princess | 2.71 s | .97 s |
+| DEPLOY to collapse/fall playback complete | 3.38 s | 3.36 s |
+
+The previous follow-up runs settled around 69–74 FPS. The first run of the same batched build was slower:
+17.334 ms / 57.7 FPS, 43.64-second renderer loading, .89-second placement and 1.35-second DEPLOY-to-report;
+unrelated lobby/catalogue startup also varied. Its repeat reached 81.1 FPS with 34.90-second loading, .61-second
+placement and .77-second DEPLOY-to-report. These are measured runs, not a guaranteed frame-rate floor. Initial
+renderer loading remains substantial, and this pass does **not** establish an additional loading-time improvement
+over the previous fixes. The collapse/fall playback is an intentional animation and was not shortened.
+
+Native verification checks ground GPU-object identity, live picking after collapse, all rubble variants and the
+actual bulldozer rule, paint retention, scorch removal, craters, editor planting, original-root persistence,
+occluded-unit visibility and native deployment selection/cancellation. Material-state reuse matches all pixels
+in twelve camera/projection/opacity views. Packed versus instanced building transforms differ at one edge pixel
+in two opaque orthographic views (maximum channel deltas 5 and 11 out of 255), and match in the other ten views.
+The pixel bound is eight of 1,152,000 pixels; the inspected edge differences are CPU/GPU transform rounding.
+The generic animated-liquid factor assertion and the older incremental-edit interior-surface identity assertion
+both fail identically on the original build; they are recorded separately from the passing regressions.
+
+The final focused suite passes all 32 cases (`final-ownership`), including a triangle-count check that burning
+procedural shrubs retains exactly the original field-stone triangles. Decorative vegetation has its own mesh
+ownership within the existing scatter render pass; field dressing also uses the original planting support, so
+clearing a former building/wooded hex cannot introduce procedural shrubs on a later detail rebuild. Production
+and test compilation and changed-file Spotless checks pass. The final fresh-match audit confirmed that all four
+affected chunks took the object-update path; its rooftop screenshot was inspected for missing city geometry.
+
+Evidence: `runs/final-baseline`, `runs/final-load-profile`, `runs/final-batched`, `runs/final-batched-repeat`,
+`runs/final-verified-fresh`, `runs/final-ownership`, `runs/final-scatter`, `runs/root-batch-equivalence`,
+`runs/ground-final`, `runs/all-rubble` and `runs/baseline-incremental` under
+`work/urbanruins-profile`. The corrected harness is `ZzFreshProfile.java`, selected with `main=ZzFreshProfile`,
+`-Dzz.princess=true -Dzz.renderDialog=true -Dzz.uncapped=true`; `-Dzz.gpu=true` adds timestamp queries.
+
+### Radius-10 nuclear strikes on urbanruins (2026-11-11)
+
+Reproduced from a fresh lobby with two real network clients and one Mek each, deployed outside the blast. A scheduled
+strike resolves through the normal firing phase in the dense city at zero-based (25, 24). The custom strike uses Santa
+Ana's 10,000 base damage, degradation 1,000, secondary radius 10, and crater depths 3 and 0. The preset Santa Ana's much
+larger secondary radius and shallower damage falloff would cover most of this map. These custom parameters change 331
+hexes while leaving surrounding roads available for inspection. No saved game was used.
+
+The rules themselves took 13–22 ms. A sampled baseline showed 9.8 terrain-worker thread-seconds constructing surfaces,
+including repeated building-footprint extraction while placing rough-ground rocks and preparing water fields. The main
+avoidable work was hundreds of single-hex notifications (including unchanged hexes for scorch markers), plus chunk-wide
+reconstruction when one wall's material-cache chart changed.
+
+Changes:
+
+- Nuclear resolution batches its complete terrain changes, including collateral damage, into one `CHANGE_HEXES` packet.
+  Server and clients derive exits/cliffs after the whole batch is installed. Nested explosions join the same batch, and
+  the scope is cleared even if resolution throws. Scorch/incoming special-display markers no longer invalidate terrain;
+  the existing phase-boundary display synchronization remains responsible for them.
+- Material-cache wall layout is compared per hex. Unchanged ground/roads without moved wall slots can reuse their
+  installed support and copied mesh ranges even when another hex in the same chunk craters. The existing incremental
+  render-equivalence test now passes its formerly failing interior-reuse assertion.
+- Ground preparation's obstacle cache belongs to the current scene and also covers water-field preparation. Original
+  vegetation placement retains its separate original-scene support/cache; this does not replant or move vegetation.
+- A destroyed road keeps its original reciprocal connections in the existing presentation-only ruin data. Surviving
+  roads use them to reach the destroyed border and end across their full width, with a cut/worn edge. The destroyed hex
+  has no road for movement rules. Ordinary dead ends and explicitly unconnected roads retain their existing shapes.
+  Native board files, clipboard copies and save snapshots retain this metadata. Rubble clearing and subsequent building
+  collapse preserve it; explicit editor removal clears it. Both Classic and Enhanced use the same cut geometry.
+
+Matched camera runs used the RTX 4070 Laptop, 1920x1080, MEDIUM/ENHANCED, Java 21/ZGC, warm shader cache, no sampling
+profiler, and the camera fixed over the blast from before firing through completion. No compilation or other profiling
+run overlapped these measurements. Each entry is one fresh match; machine/load variance remains material.
+
+| Crater depth | Rules, before → after | Rules end → playback starts | Strike start → terrain settled |
+| --- | --- | --- | --- |
+| 3 | 12.9 → 21.9 ms | 1.71 → 0.51 s | 19.34 → 16.95 s |
+| 0 | 16.9 → 19.3 ms | 3.42 → 0.52 s | 27.73 → 16.58 s |
+
+“Settled” includes animation, terrain/material work and 60 consecutive non-busy frames. It is not an input-blocking timer.
+The slightly higher rules time includes deriving the server's final neighboring exits/cliffs. Depth zero still clears
+roads and changes heavily blasted ground to rough under the existing nuclear rules; water boiling can also lower water
+hexes. It therefore cannot use an object-only update. Depth three additionally lowers 91 hexes in the crater.
+
+This is not zero-cost terraforming: full settling still takes about 17 seconds here, and the longest strike frame was
+about 0.5–0.6 seconds, dominated by the first destruction-shadow draw. Initial renderer loading varied from 35 to 42
+seconds in these runs; they do not establish a loading-time improvement. No steady-FPS claim is made from the mixed
+movement, blast and rebuild interval.
+
+Evidence: `work/urbanruins-profile/ZzNukeProfile.java`, `run-nuke-comparisons.py`, and `runs/nuke-city-{before,after}-depth{0,3}`
+(logs and screenshots). The sampled baseline is `runs/nuke-baseline-depth3.stacks.gz`; `runs/nuke-before-depth3` was the
+first diagnostic run. Screenshots of both final crater settings were inspected. `nuke-final-compile.log` records successful
+production/test compilation and changed-file Spotless checks (`-PspotlessRatchetFrom=HEAD`).
+
+The final official-build regression run (`runs/nuke-final.log`) passes 78 tests: nuclear rules/packet boundaries, board
+and save persistence, all four road surfaces in all six directions, natural and explicitly disconnected dead ends,
+Classic/Enhanced cut-shape agreement, same-chunk road/support reuse, incremental render equivalence, permanent planting,
+obstacle-cache equivalence and water slopes/flow. The isolated flat-ground/crater road close-up
+(`runs/road-cut-closeup.png`, `ZzRoadCutShot.java`) was inspected through the production HDR display pass; the renderer
+reported no GL errors. The city timings precede only an editor-only `removeRuins` correction and expanded assertions;
+the timed gameplay/render paths are identical to the final build.
+
+
+### Damaged route ends and visual review (2026-11-11)
+
+Rail and maglev cuts now derive from the destroyed neighbour's original kind/connections, including collapsed deck
+rails. Ordinary rail damage retains its level-zero bed and the original track as a ruin; nuclear clearing retains the
+ruin when it removes the bed. Native `rail.destroyed` / `bed` fields preserve that distinction across board saves.
+The render snapshot captures the cut sides once per changed hex and its neighbours. The route layout cache includes
+those sides; no per-frame damage scan or new animation was added. Intact route layouts retain their existing geometry.
+
+The surviving track follows its original course to the cut, with exposed steel curled up/out/back into its surviving
+hex. Ordinary internal termini still have their buffer stops; damage creates none. Rail ballast, steel and maglev
+scorch use interpolated vertex colours, including matching colours at adjacent segments, rather than flat bands.
+The same generated maglev mesh continues to provide its picking/support shape.
+
+Destroyed road ends use a shorter chipped fade than a bridge landing, with soot on the remaining asphalt and a
+feathered ground-scorch coat. Landing masks carry tint; directional wear, track and slab masks retain their encoded
+data channels. The existing road cut geometry still ends at the destroyed border in both terrain modes.
+
+Native renderer previews are in `work/rail-damage-profile/` (`road-detail.png`, `rail-detail.png`,
+`maglev-detail.png`, `flat.png`, `crater.png`), generated by `ZzRouteDamageShot.java`. They are actual rendered fixtures,
+not concept images. The wider overview includes designed terminal buffer stops at the far ends for comparison.
+No FPS or loading-time improvement is claimed for these visual changes.
+
+Validation: the final official build passed `compileJava`, `compileTestJava` and focused `spotlessCheck`
+(`work/rail-damage-profile/final-gradient-compile.log`). All 75 focused tests passed in
+`work/urbanruins-profile/runs/rail-damage-verified.log`: native/clipboard/XStream damage persistence, original-kind
+matching and reachable bridge layers, all six cut directions, natural buffer stops, interpolated scorch colour,
+existing rail/corridor geometry, all road surfaces, real server radius-10 nukes with crater depths 0 and 3, ordinary
+rail damage, and a native GPU update that retains an unrelated road's support and planting within the changed chunk.
+Final flat/crater and close-up captures reported GL error 0 on the NVIDIA renderer. The small visual fixture's nearby
+support lies within the changed routes' terrain dependencies; its identity is not an unrelated-ground retention check.
+
+### Review fixes and simpler ownership (2026-11-11)
+
+The four independent-review findings are fixed:
+
+- Planting now belongs to the board client's presentation session, so replacing the GPU window or switching views
+  does not plant vegetation again. Each captured frame carries its owner; a delayed frame cannot accidentally bind to
+  a replacement board's history. This is presentation history, not authoritative rules state or newly serialized
+  save-game data. Reconnecting or loading a new board starts a new history.
+- Nuclear destruction retains original ground/deck rail connectivity and absolute height before clearing the hex.
+  Rail and maglev cuts therefore survive cratering and board/clipboard/save round trips without creating terminal
+  buffers or ghost bridge piers. Older damage records cannot recover elevations that were already discarded.
+- Reauthoring an explicit surviving road can remove an obsolete damaged branch. Native board data preserves the
+  distinction between automatic connections and explicit exits.
+- Persistent ground inputs own their fitted concrete outline. Evicting an unrelated query cache no longer refits
+  ground around already-destroyed buildings or disagrees with installed terrain.
+
+The implementation removes the global two-entry concrete cache and its adoption path. A single ground-input
+comparison controls persistence and invalidation; changed coordinates drive per-chunk ground work. Ordinary object
+destruction retains installed ground, including every rubble grade. Craters, actual ground conversions, and editor
+changes rebuild the affected ground and its dependencies. A conversion to rough drops former building obstacles;
+weather-only changes retain the original ground constraints. Boundary walls, shoreline/concrete neighbours, bridge
+approaches, and changed material-atlas slots remain explicit dependencies.
+
+Ground GPU resources now have one owner that moves between replacement chunks, instead of a long list of copied
+resource fields. Landing support and effect-height queries use the installed tactical surface when available.
+Object-only preparation no longer builds unused surfaces. Sparse dirty coordinates replace the rectangle enclosing
+unrelated edits: the distant-edit regression captures 13 hexes instead of 144. Rail cuts read retained route data
+directly, and damaged endpoints are resolved once per path. These changes introduce no additional persistent lookup
+cache.
+
+The final production/test compilation and focused Spotless checks pass
+(`work/review-urbanruins/conversion-final-compile.log`). The official-build regression suite passes **109 tests, zero
+failures** (`work/urbanruins-profile/runs/review-conversion-final.log`), including three native GPU integration tests.
+It covers the four findings, delayed-frame ownership, genuine ground conversions, all rubble grades, mixed
+collapse/crater updates, incremental render equivalence, road reauthoring, and radius-10 ground/bridge rail and maglev
+destruction at crater depths 0 and 3.
+
+Fresh-match measurements used the RTX 4070 Laptop, 1920x1080, MEDIUM/ENHANCED, Java 21/ZGC, a warm shader cache, and
+uncapped rendering. No saved game supplied the starting state, and no build or other GPU test ran concurrently.
+The rooftop run used Princess and one Mek per player. The nuclear runs used a fresh server, two network clients,
+and one Mek per player, with the same strike parameters and city camera described above. Each timing is one run,
+not a statistical performance comparison.
+
+| Fresh rooftop deployment | Measured result |
+| --- | --- |
+| Renderer context ready to board shown | 39.21 s |
+| Request deployment phase to server phase change | 0.305 s |
+| Map-hex placement request to elevation dialog | 0.198 s |
+| Placement request to Mek shown on roof, elevation 2 | 0.675 s |
+| DEPLOY request to next server phase | 0.853 s |
+| Steady full-board view, final 240 frames | 99.60 FPS; median 9.906 ms, p95 11.530 ms |
+
+The DEPLOY command dispatch itself took 8.3 ms. The roof subsequently collapsed under the Mek; playback completed
+3.27 seconds after DEPLOY. Reloading the resulting asynchronous autosave verified 2,500 hex appearances/decorations,
+players, units, phase, and the rooftop collapse. This run is `runs/review-fresh-timing` under
+`work/urbanruins-profile`; its screenshot was inspected. It predates only the nuclear rough-conversion correction,
+which does not change these measured placement, deployment, or steady-render paths. The FPS figure applies to the
+full-board camera, not a close view of dense buildings.
+
+| Final radius-10 strike | Rules | Rules end to playback | Rules end to fully settled | Longest strike frame |
+| --- | --- | --- | --- | --- |
+| Crater 0 | 25.130 ms | 0.498 s | 21.636 s | 504 ms |
+| Crater 3 | 15.558 ms | 0.430 s | 19.486 s | 521 ms |
+
+These final-build runs are `runs/review-final-nuke-depth0` and `runs/review-final-nuke-depth3` under
+`work/urbanruins-profile`. Both exited successfully and their screenshots were inspected. Each observed one changed
+terrain generation after the initial generation, updated 26 ground chunks, and retained zero roads within the strike's
+radius. The regression suite separately checks that unrelated road support stays installed and that destroyed rail
+and maglev branches remain cuts. Depth zero still converts ground to rough and clears routes under the game rules;
+it is not an object-only change. Renderer loading in these two runs took 39.18 and 38.97 seconds, respectively.
+"Fully settled" includes playback, background terrain/material preparation, and 60 consecutive non-busy frames;
+it is not a continuous input stall. The half-second worst frames remain visible hitches.
+
+A separate sampled run (`runs/review-nuke-profile`) identifies remaining costs; its instrumented FPS is not a timing
+baseline. In the pre-blast close-city view, GPU timestamp medians were 10.728 ms for opaque terrain, 2.973 ms for the
+depth prepass, and 2.549 ms for transparent effects. During the blast, workers spent substantial time preparing
+sculpted ground and clipping water coverage; the render thread was dominated by drawing and driver submission.
+During initial loading, surface construction, building-footprint extraction, initial planting, model loading, and
+material packing remain substantial. Sampled worker totals are overlapping thread-seconds, not elapsed time and not
+additive. Initial planting is expected; the strike profile does not show vegetation being replanted.
+
+Initial loading and full nuclear visual settling remain expensive. This review establishes correctness and simpler
+ownership; it does not establish a loading-time or nuclear-settling improvement over the earlier runs.
+
+### Nuclear rebuild scheduling, scatter clearing, and preparation before impact (2026-11-11)
+
+Scorch now removes all decorative scatter, including loose stones, slabs, plants, grass, and fungi. It also clears
+procedural field stones and shrubs. The previous plant-versus-stone scorch branch is removed, and captured scatter
+shares the existing removable layer and original placement support. Ground-input classification ignores every
+scatter kind, so scorching does not rebuild otherwise unchanged ground. Initial planting marks already-barren/bare
+hexes cleared, preventing field stones returning when an already-scorched board opens. Game-created rough terrain,
+rubble, and surviving game trees retain their rule-defined roles.
+
+A stage trace of a fresh radius-10 strike showed workers finishing preparation while chunks waited for render-thread
+collection and uploads. Gameplay gave this work only 2 ms per frame, although editor changes already received 12 ms.
+Actual board changes now use the same bounded 12 ms slice; camera-only LOD refinement retains 2 ms. The redundant
+editor-specific refinement argument and overload are removed. This trades a bounded amount of frame time during the
+update for earlier completion, rather than accumulating more caches. In matched crater-3 diagnostic runs, rules-end
+to fully settled fell from 15.233 s (`nuke-focus-before3`) to 11.295 s (`nuke-focus-budget3`). These measurements precede
+the height-sampling optimization below and are single runs, not a statistical comparison.
+
+The worker profile also found repeated support sampling. `BoardSurface.sampleHeight` previously retried each rejected
+triangle with tolerance even when another triangle contained the point exactly. It now searches for exact support
+first and runs the tolerant pass only after a miss. The highest exact surface still wins; nearby higher surfaces
+cannot move a point up a slope, and rounding gaps still recover. No lookup or spatial cache was added. The isolated
+800-triangle, 4,096-query benchmark (`ZzHeightBench.java`, alternating old/new order after warm-up) measured 31.299 ms
+versus 17.378 ms, a 44% reduction for this exact-support workload. This is not a 44% end-to-end loading claim.
+The original planting scene also shares its existing ground owner instead of constructing a second concrete fit.
+
+Incoming attacks can now prepare the next resolved playback checkpoint before impact. `UnitPlayback.preparingTerrain`
+exposes that checkpoint; the existing terrain job performs preparation and uploads while commit is held. At the
+playback's terrain-release point, the same job can publish. It neither predicts rules from the landing coordinate nor
+creates a separate speculative cache. Pause retains the old visible ground; skip releases the resolved result; board
+replacement disposes the pending job. A scheduled detonation has only a 50 ms contact lead-in, so it provides almost
+no opportunity to hide seconds of work. Fired rounds with travel time provide a useful preparation window. If geometry
+is not ready at impact, the existing installed terrain remains until the job completes; an instant handoff is not
+guaranteed for every blast.
+
+Validation records under `work/urbanruins-profile/runs`:
+
+- `nuke-height-tests`: 103 passing checks covering exact/tolerant support, water clipping, sculpted terrain, landing
+  supports, all scatter kinds, persistent ground, incremental render equivalence, and editor vegetation.
+- `nuke-preparation-tests`: 37 passing playback/ownership/GPU checks, including preparing and uploading a crater while
+  its old support stays installed, publishing without another mesh generation, pausing/skipping incoming attacks,
+  and replacing a board with preparation pending.
+- `nuke-final-tests`: seven passing checks after the initial-scorch correction. These suites overlap; their counts
+  must not be summed as distinct tests. Final compilation and scoped formatting checks passed in
+  `work/review-urbanruins/nuke-final-compile.log`.
+
+The close-city camera is fixed at zero-based (25, 24), zoom .75, with the same 1080p MEDIUM/ENHANCED RTX 4070 Laptop
+configuration as above. The final harness waits for terrain and visible page merging, allows 720 frames, then reports
+the last 240 intervals. Earlier 240-frame-only windows included settling work and measured about 51-53 FPS. They are
+not comparable to the final fully warmed windows, and the difference must not be attributed to a code optimization.
+
+A separate same-scene depth-prepass comparison (`nuke-focus-prepass`) measured 77.67 FPS normally, 78.28 without the
+object category, 83.21 with the prepass disabled, and 78.31 after restoring the default. Warm GPU medians were roughly
+3.2 ms for the default prepass, 6.4 ms for opaque terrain, and 2.5 ms for transparent effects. Disabling the prepass
+raised opaque shading to 7.8 ms. The default is unchanged: this modest city-only result does not justify a global
+rendering change without checking the other supported scenes and depth consumers.
+
+Final fresh-match runs (`nuke-focus-final0` and `nuke-focus-final3`, no sampling profiler or overlapping build/GPU test):
+
+| Metric | Crater 0 | Crater 3 |
+| --- | --- | --- |
+| Renderer context to board shown | 36.026 s | 36.983 s |
+| Warmed close-city FPS before strike | 78.67 | 77.90 |
+| Nuclear rules | 17.835 ms | 17.919 ms |
+| Rules end to playback starting | 0.353 s | 0.376 s |
+| Rules end to new terrain installed | Not timestamped separately | 8.493 s |
+| Rules end to terrain/playback settled | 10.214 s | 11.111 s |
+| Longest strike frame | 370 ms | 373 ms |
+| Warmed close-city FPS after strike | 101.13 | 104.01 |
+| Before-strike median / p95 frame time | 12.603 / 13.121 ms | 12.730 / 13.790 ms |
+| After-strike median / p95 frame time | 9.726 / 11.286 ms | 9.433 / 10.725 ms |
+
+Both runs rebuilt 23 ground chunks and left no roads within the strike radius. Actual before/after city captures and
+both crater outcomes were inspected. The zero-depth timing predates only initialization of already-cleared planting;
+the final run verifies this fresh board starts with zero barren and zero bare hexes, so that correction does not alter
+its timed path. The depth-three run uses the final production build. The benchmark enters from fresh network lobbies
+with one Mek per player, not a saved game.
+
+As in the earlier table, "settled" includes playback and 60 consecutive terrain-not-busy frames. It does not mean
+that all subsequent material-page warming has finished, nor is it a continuous input stall. The warmed FPS samples
+are taken later and must not be used to describe the rebuild interval. The depth-three terrain was installed 2.323 s
+after blast playback ended; another 2.618 s satisfied the settling criterion. The new scheduling materially reduces
+the geometry wait, but 8.5 s of terrain work and roughly 0.37 s worst frames remain limitations. Loading remains slow;
+these single runs do not establish a reliable loading-time improvement over its previous 35-42 s range.
+
+The remaining water-clipping work was inspected for removable triangulation. Flat pools already triangulate their
+finished outline; graded streams and cliff contacts encode actual slopes and undercuts. No blanket triangle reduction
+was applied, since removing those edges can change water coverage and ground shading. The next substantial reduction
+needs to preserve those physical boundaries rather than memoize another copy of the same computation.
+
+### 2026-11-11: 4K urbanruins and the 48x48 orbital report
+
+The user's second screenshot is `unofficial/VictorMorson/48x48.board`, not urbanruins. Both screenshots use
+Medium at 3840 × 2259 and 100% render scale. The disabled High shadow selection does not enable High shadows:
+`BoardQuality.MEDIUM.costlyOptions` remains false. These runs retain Medium and native resolution; benchmark
+vsync is disabled, and the laptop GPU is shared with the user's other activity.
+
+The initial fresh-match harness accidentally selected urbanruins regardless of its board argument. Runs named
+`orbital-city48-4k` therefore describe urbanruins, not 48x48. The harness now reads the requested board dimensions,
+selects that board in the actual network lobby, and prints `ZZBOARD` before deployment. Each match uses two fresh
+clients and one Mek per player. Saved games are not used as the starting point.
+
+The 48x48 idle CPU profile spent most opaque preparation time reclassifying unchanged building modules and adding
+their identities to visibility hash sets. A chunk now owns one preclassified `GpuPropBatch.Source` in place of its
+old raw snapshot. Page collection copies its reference ranges in bulk. The existing visibility set is filled only
+for partial or outdated pages; a complete prepared page draws directly. No additional persistent cache was added.
+Building modules are no longer merged into pages: `GpuIndirectInstances` draws them instanced, one multi-draw per
+program and layout (section on `GpuIndirectInstances` above). An earlier experiment with plain instancing (one draw per
+part) had raised hardware draws from about 1,200 to 6,400 and was slower; multi-draw keeps the draws few.
+
+Page preparation now has its own bounded advancement phase. Ordinary draw submission previously consumed the
+shared two-millisecond deadline before later terrain pages could advance. Scars and paint receive only the unused
+preparation allowance after the ordinary draws, so draw cost cannot starve their preparation.
+
+Other changes:
+
+- Orbital damage now uses the same batched hex update boundary as nuclear damage. Incoming/completed strike markers
+  send special-display packets, not unchanged terrain packets. The radius-10, strength-1,000,000 integration test
+  checks a single 331-hex update, no individual changed-hex packets, and terrain-before-detonation ordering.
+- Water clipping joins exactly level, adjacent triangles into convex patches using a temporary edge index. It
+  preserves holes, concave banks and all sloping triangles. The clipping result used to decide dry wall charts is
+  prepared on the terrain worker instead of recalculated while collecting render-thread geometry.
+- Instanced debris uploads already compact mesh ranges directly. Other ranges are remapped once, avoiding an
+  additional MeshBuilder traversal. First-use mesh allocation/upload is still present.
+- When terrain invalidates a shadow in a stable view with moving debris, the existing static shadow buffer keeps
+  that newly drawn terrain pass before adding moving casters. The next frame no longer repeats the full terrain pass.
+- A neighbouring animated-liquid shader replacement still matched an old UV expression. It now preserves the
+  current parallax-adjusted coordinates while replacing the texture sampler; the native animation pixel check passes.
+
+Measurement caution: the one-frame libGDX GLProfiler draw audit left its GL20 interceptor installed after
+`disable()` on this GL30 backend. Timing runs now omit that audit entirely. Earlier draw-count runs are useful for
+structural diagnosis, but their frame times include continued OpenGL error checks. The first
+`orbital-48x48-snapshot-4k` blast also contains an oversized diagnostic print; its impact timings are invalid.
+Use the subsequent `*-clean-4k` runs for final timing, without either diagnostic.
+
+The first clean 48x48 run revealed a second problem concealed by reporting only fully warmed FPS. It reached
+81.90 FPS before the strike, but took roughly 84 seconds between the initial initiative report and the warmed
+measurement. Before batching finished it repeatedly gathered thousands of unmerged modules. Its orbital rebuild
+still took about 31 seconds after rules resolution and its worst impact interval was 1,184 ms. These results
+predate the following handover correction and are not a claim that deployment or bombardment was fixed.
+
+Replacing a chunk snapshot now preserves the exact renderables of unchanged packable ranges. A temporary value
+index matches geometry, transform, material and user data, consuming duplicate coincident ranges individually.
+It is discarded after replacement. Surviving modules therefore remain in existing merged pages while destroyed
+ones disappear; changed transforms/materials still become new sources. Replacement chunks apply the same rule
+against the chunk they replace. A native regression verifies duplicate survival and that only changed geometry
+falls back while a page repacks. Initial visible page preparation also completes under a bounded loading phase
+before the gameplay handover, instead of leaving the first minutes of play to perform that work at two milliseconds
+per already slow frame. This changes the loading boundary; comparisons must include time to a usable board, not
+just the first revealed frame.
+
+#### Checkpoint: debris submission, shared ground support and decal projection
+
+The material submission group now accepts moving instanced pieces. It uploads each piece's motion uniforms through
+the same setter as an ordinary draw while retaining compatible material state. Shadow and colour submission share
+the existing sorter sequentially; no second material lookup was introduced. Native pixel comparisons cover falling
+pieces as well as static/packed terrain across camera projections, tilts and cutaways. The shadow reuse test also
+passes. The real-packet orbital collapse test starts every affected building within one simulated frame of its
+shock front and links no shaders during the strike. That checks animation ordering, not real-time smoothness:
+the test still recorded a 328 ms worst wave frame.
+
+The board-space HUD now borrows the view's installed-ground support owner. Previously rebuilding an outline could
+construct fresh terrain surfaces and hold a frame for 326-372 ms. Terrain installation/LOD changes invalidate the
+overlay geometry explicitly. The native overlay test verifies that it samples installed support without populating
+a second sculpted-surface cache, rebuilds when terrain changes, and frees its GPU buffers on disposal.
+
+Scorch removal of ordinary PROP features was incorrectly classified as a ground input change. Gameplay ground
+history now treats those props like buildings: removing them retains their original ground constraints. Bridge and
+rail route features remain ground inputs, and the editor still uses live geometry. The focused ground/planting
+suite passes nine tests, including clearing decorative plants, stones and props together while retaining a bridge.
+This fixes unnecessary invalidation; it is not a change to blast damage rules. Scorch alone clears decoration,
+signals, decals and grass. Roads and rails can be removed by cratering or conversion to rough, separately from
+scorch; ordinary rail damage continues to follow the existing rules.
+
+The next orbital trace exposed an unrelated render-thread stall in roof decal projection. Axis-aligned triangle
+bounds overlapped even for triangles that only shared an edge. Those pairs performed expensive Area subtraction.
+A separating-edge test now rejects disjoint/touching XY triangles before the existing plane intersection and Area
+operations. It uses no retained index or cache. All eleven decal geometry tests pass, including crossing slopes,
+duplicate coplanar faces, clipped terraces and a densely tessellated roof with overlapping copies.
+
+The fresh rooftop input run (`final-fresh-roof-4k`) uses an actual map click, answers the rooftop placement choice,
+and invokes DEPLOY. The click reached a rendered roof placement in about 0.77 s; DEPLOY reached the following
+phase in about 1.08 s. The chosen roof cannot carry the 95-ton Albatross and therefore collapses after deployment.
+The view took 39.37 s from renderer context creation to board shown. Before placement, its broad city view measured
+28.57 FPS (median 34.89 ms, p95 36.98 ms). Diagnostic GPU samples identified tree canopy and bark as the largest
+shading family there. A pre-pass experiment did not improve overall frame time, so the default remains unchanged.
+
+Camera scale matters: `.75` in these 4K runs is a broad city view. The later urbanruins run explicitly uses `.3` to
+match a closer buildings view. `final-urban3-close-4k`, before the prop/decal fixes above, measured 51.84 FPS before
+the radius-10/depth-3 strike and 74.51 afterward. Renderer loading was 41.50 s. Rules resolution took about 30 ms,
+but the replacement terrain was not installed until 12.45 s later; impact p95 was 186.46 ms and the maximum was
+569.97 ms. The HUD sculpting hitch was absent. The remaining trace was dominated by debris submission and
+render-thread collection; water clipping was a much smaller part of worker time. Screenshots before and after
+the crater were inspected. These are single-run 4K Medium measurements on the shared laptop GPU, not a controlled
+comparison against the user's screenshots or the earlier 1080p measurements.
+
+The last crater-zero broad-view run (`debris-prepass-urban0-4k`) predates the overlay/prop/decal corrections. It took
+7.91 s from rules completion to terrain installation and had a 535.62 ms maximum impact interval. A fresh crater-zero
+run with all checkpoint changes remains necessary; the tighter depth-three and 48x48 measurements must not be
+substituted for it. Large-strike smoothness and loading are still unresolved at this checkpoint.
+
+The completed `decal-orbital48-4k` run includes the prop invalidation and decal intersection changes. On the actual
+48x48 board, strength 1,000,000/radius 10, renderer loading was 47.11 s and the warmed pre-strike overview measured
+92.85 FPS (median 10.50 ms, p95 12.91 ms). Rules completion to terrain installation was 20.46 s; impact median was
+102.58 ms, p95 237.50 ms and maximum 1,202.58 ms. Eight replacement chunks retained their ground through object-only
+updates, and ten changed ground. The ground audit found actual new rough boulders and changed bridges, so those
+remaining ground changes cannot all be attributed to scorch. The final trace still spends substantial time in
+debris colour/shadow/outline submission, partial page range selection and render-thread model/decal collection.
+The separating-edge improvement does not eliminate all roof projection work or establish an end-to-end speedup.
+
+Screenshot inspection found that automatic phase/playback camera movement changed the 48x48 framing after the
+strike. Its logged post-strike 88.44 FPS is therefore not a controlled comparison with its pre-strike overview.
+The harness must lock the camera through playback before a further before/after comparison; the pre-strike sample
+also occurs in initiative, not the user's deployment phase. The urbanruins close-view run explicitly reapplies
+its camera and does not have this particular framing issue. These limitations are part of the review handoff.
+
+Cleanup removed temporary stage timers from normal gameplay, EDT capture timing and save snapshot/write timing
+logs. The pre-existing no-op render-stage hook remains for native tests/profiling; normal gameplay performs no
+per-stage clock reads through it. Scratch launchers, samplers and raw evidence remain under `work/urbanruins-profile`
+and are not production sources. See `docs/urbanruins-performance-review.md` for the self-contained review scope.
+
+Post-cleanup validation: production/test compilation and scoped Spotless checks pass. The final targeted run passes
+33 save, nuclear/orbital, ground/planting and decal tests with zero failures (`checkpoint-tests.log`). The initial
+scratch save-test invocation omitted the runtime's java.util.concurrent module opening; the corrected invocation
+uses both existing application module options and passes without any serialization implementation change.

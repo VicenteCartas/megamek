@@ -1,32 +1,26 @@
 # Building and bridge proportions
 
-These are the runtime dimensions of legacy structures and manufactured bridges.
-[Modular buildings](gpu-modular-buildings.md) describes the separate floor-kit
-contract. Board units are defined by `BoardGeometry`.
+These are the shared dimensions of native structures and manufactured bridges.
+[Modular buildings](gpu-modular-buildings.md) describes the floor-kit contract.
+Board units are defined by `BoardGeometry`.
 
 ## Owners and coordinate contract
 
 | Owner | Responsibility |
 | --- | --- |
-| `BoardArtwork` | Resolve tileset artwork and its associated model reference. |
-| `GpuAssets` | Load/cache authored board models and fit legacy structures to their runtime dimensions. |
+| `TilesetScenery` | Resolve native structure designs and default kits. |
+| `GpuAssets` | Load/cache board models, generated structures and modular assemblies. |
 | `BoardGeometry` | Convert game levels and model units to displayed board dimensions. |
 | `BoardBridgeMesh`, `BoardBridgeTruss` | Generate manufactured spans from the live road and on-deck rail footprint. |
 | `BoardBridgeSlope`, `BoardBridgeFooting` | Grade the span and fit its bank landings and optional piers. |
 
 The 3D board's hex is regular: 72 across its flats and 83.125 across its corners (the
 regular 83.138 to a 32nd, so lattice coordinates stay exact floats), every edge midpoint
-36 from the centre within 0.005. Legacy building GLBs fill that hex too, so
-neighbours meet at the edges; every structure model draws as authored, without an X
-stretch. Their ground is at local Z=0 and roof at Z=18 in the renderer's Z-up
-convention. Files use glTF Y-up. This is one default terrain level and also applies
-to fuel tanks and industrial structures.
-
-Placement fits actual model bounds to the game's level count, including changes
-to board scale or level height. Interior floors and columns use the shell's local
-height and placement transform. Facade UVs retain per-level repetition.
-Custom modular kits instead stack actual one-level modules without compressing
-their floor height to accommodate the roof cap.
+36 from the centre within 0.005. Files use glTF Y-up; the renderer uses Z-up.
+Native modular kits stack one-level modules, with their roof cap kept separate
+from the storey height. Board scale and level height apply to the assembled
+structure. Their connected footprint and interior contracts are documented in
+[modular buildings](gpu-modular-buildings.md).
 
 ## Manufactured bridges
 
@@ -65,12 +59,8 @@ bank connections, truss colours and pier ownership.
 
 ## Editing building assets
 
-A legacy building is packaged with its original artwork:
-
-```text
-building_hard_00.glb   # one-level mesh; processed roof texture embedded
-building_hard_00.png   # original building image, including alpha and shadow
-```
-
-Each GLB embeds its processed roof; shared facade textures remain external. The adjacent PNG is the original image,
-not a separate processed roof texture.
+Buildings use native kits under `data/models/buildings/`: a generated JSON kit
+or an authored GLB. Gameplay weight and class select the default kit; an explicit
+native appearance can select another. See [modular buildings](gpu-modular-buildings.md)
+and `data/models/buildings/README.md` for their geometry and material contracts.
+Retired tileset building GLBs under `models/board/buildings` are not loaded.

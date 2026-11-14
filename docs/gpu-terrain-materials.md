@@ -366,6 +366,16 @@ changes the field. Equal neighbouring severities stay constant. Shading uses the
 stronger of authored and nuclear severity. Disabling combat scars does not hide authored scorch. Erasing
 the appearance clears A without erasing combat history.
 
+Scorched hexes lose decorative props, traffic controls, all placed decals and ground scatter.
+This uses the shared scorch presentation for authored and nuclear scorch, plus the actual painted footprint of
+ordinary combat scars. Removing a decal also removes its projections into neighbouring hexes. Unaffected hexes
+keep their decorations; surviving game terrain and structures remain authoritative. Erasing authored scorch in
+the editor restores the original decorations when no combat scar remains.
+
+All decals use native `BoardDecoration` objects, including those converted from old maps. The obsolete raster
+decal overlay, its scene fields, atlas entries and opacity fallback have been removed. Classic terrain sprites
+such as rubble and geysers remain terrain artwork; they are separate from placed decals.
+
 The editable source is `mm-data/tools/materials/terrain/surfaces/ground-scorch/ground-scorch.ptex`.
 Its procedural deposits, cinders, ash and fused fissures export as a Godot 4 Standard
 material ([board materials](gpu-board-materials.md)) with stock Material Maker, or through

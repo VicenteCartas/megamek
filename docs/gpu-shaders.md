@@ -315,7 +315,8 @@ outside the family programs' capacity, and link behind the loading stage with th
 level included. Every terrain vertex stage declares `gl_Position` invariant, and a cutout's vertex stage also the alpha
 test's inputs (`foliage-coverage.glsl`); below GLSL 4.20, `terrain-foliage.frag` declares those inputs invariant too
 (`coverageIn`). An instanced tree's twins, its solid parts' included, run `terrain-foliage.frag` to its alpha test and
-its dissolve between detail levels, so they keep the pixels its colour draw keeps. The frame's single gather, draw order and flushes do not change. A draw without a twin, a variant that
+its dissolve between detail levels (`level-dissolve.glsl`), so they keep the pixels its colour draw keeps. A kit
+structure's parts dissolving between levels draw without a twin (kit modules are no occluders anyway). The frame's single gather, draw order and flushes do not change. A draw without a twin, a variant that
 appears later and a shader edit's replacements draw as before until the warm-up pairs them. The Tactical View, the
 Classic columns and the wireframe draw without it. `-Dmegamek.gpu.depthPrepass=false` turns it off; `=all` adds the
 other chunks' relief, for measurements only, since on an Iris Xe their twins cost about what they save. On NVIDIA the
@@ -507,6 +508,13 @@ and size, read at the same texel density:
 
 The order of both pairs' layers is `GpuAssets.FULL_SIZE_PLAN` and `ROAD_PLAN`, which build the
 arrays and write the layer numbers the shaders read (`GpuAssets.carpetLayers`, `iceLayers`).
+
+The instanced vertex stages also declare `u_poses`, the pose rows of pieces moved on the CPU
+(`GpuPoses`; tree-instances.glsl, `poseRow`): a texture of its own on unit 32, past the units
+the draws' binder hands out, read by the vertex stage alone, and bound from the board's first
+frame. Only a falling structure's pieces that have rows fetch it (`GpuDestruction`: an instance
+whose `a_instance1.w` is `FALL_ROW_OWNER` or more); a row either poses its piece or names the
+slot whose closed form still moves it.
 
 Exact-texel tables can share a texture: `u_lavaLights` also holds the board's hex table
 (`GpuLavaLighting.setHexes`, `boardHex` in terrain-hexes.glsl). Procedural water compiles
