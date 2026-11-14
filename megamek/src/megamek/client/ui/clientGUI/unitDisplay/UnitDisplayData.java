@@ -223,7 +223,8 @@ public final class UnitDisplayData {
 
     /** The text of the hidden activation list for a phase. */
     public static String hiddenActivationLabel(GamePhase phase) {
-        return phase.isUnknown() ? Messages.getString("MekDisplay.ActivateHidden.StopActivating") : phase.toString();
+        return phase.isUnknown() ? Messages.getString("MekDisplay.ActivateHidden.StopActivating")
+              : phase.localizedName();
     }
 
     /** The unit's sensors as the sensor list names them, in the unit's sensor order. */

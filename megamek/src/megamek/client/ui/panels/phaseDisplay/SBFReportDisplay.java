@@ -203,7 +203,7 @@ public class SBFReportDisplay extends StatusBarPhaseDisplay {
                 setStatusBarWithNotDonePlayers();
                 break;
             default:
-                setStatusBarText(phase.toString());
+                setStatusBarText(phase.localizedName());
                 break;
         }
 

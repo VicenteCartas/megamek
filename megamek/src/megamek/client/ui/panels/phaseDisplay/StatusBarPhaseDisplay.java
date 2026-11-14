@@ -421,9 +421,9 @@ public abstract class StatusBarPhaseDisplay extends AbstractPhaseDisplay
                     playersText += ", ...";
                 }
                 String msgNotDone = Messages.getString("StatusBarPhaseDisplay.notDone");
-                setStatusBarText(game.getPhase() + "  " + msgNotDone + " [" + playersText + "]");
+                setStatusBarText(game.getPhase().localizedName() + "  " + msgNotDone + " [" + playersText + "]");
             } else {
-                setStatusBarText(game.getPhase().toString());
+                setStatusBarText(game.getPhase().localizedName());
             }
         }
     }

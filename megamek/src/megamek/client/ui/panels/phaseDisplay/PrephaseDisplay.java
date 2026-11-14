@@ -169,7 +169,7 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay {
         this.clientgui = clientGUI;
         this.phase = phase;
 
-        setupStatusBar(Messages.getFormattedString("PrephaseDisplay.waitingForPrephasePhase", phase.toString()));
+        setupStatusBar(Messages.getFormattedString("PrephaseDisplay.waitingForPrephasePhase", phase.localizedName()));
         setButtons();
         setButtonsTooltips();
         butDone.setText(Messages.getString("PrephaseDisplay.Done"));
@@ -297,7 +297,7 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay {
         } else {
             setStatusBarText(Objects.requireNonNullElseGet(ghostTargetConfirmation,
                   () -> Messages.getFormattedString("PrephaseDisplay.its_your_turn",
-                        phase.toString(),
+                        phase.localizedName(),
                         ce.getDisplayName())));
         }
 
@@ -338,7 +338,7 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay {
      * Does turn start stuff
      */
     private void beginMyTurn() {
-        setStatusBarText(Messages.getFormattedString("PrephaseDisplay.its_your_turn", phase.toString(), ""));
+        setStatusBarText(Messages.getFormattedString("PrephaseDisplay.its_your_turn", phase.localizedName(), ""));
         butDone.setText("<html><b>" + Messages.getString("PrephaseDisplay.Done") + "</b></html>");
 
         clientgui.clearFieldOfFire();
@@ -505,7 +505,7 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay {
                 if (e.getPlayer() != null) {
                     setStatusBarText(Messages.getFormattedString(
                           "PrephaseDisplay.its_others_turn",
-                          phase.toString(), e.getPlayer().getName()));
+                          phase.localizedName(), e.getPlayer().getName()));
                 }
                 clientgui.bingOthersTurn();
             }
@@ -527,7 +527,7 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay {
 
         if (game().getPhase() == phase) {
             setStatusBarText(Messages
-                  .getFormattedString("PrephaseDisplay.waitingForPrephasePhase", phase.toString()));
+                  .getFormattedString("PrephaseDisplay.waitingForPrephasePhase", phase.localizedName()));
         }
     }
 

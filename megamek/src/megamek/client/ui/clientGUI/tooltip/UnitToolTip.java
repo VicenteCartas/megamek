@@ -1680,7 +1680,7 @@ public final class UnitToolTip {
         }
 
         if (!entity.getHiddenActivationPhase().isUnknown()) {
-            result += addToTT("HiddenActivating", NOBR, entity.getHiddenActivationPhase().toString()) + " ";
+            result += addToTT("HiddenActivating", NOBR, entity.getHiddenActivationPhase().localizedName()) + " ";
         } else if (entity.isHidden()) {
             result += addToTT("Hidden", BR) + " ";
         }
