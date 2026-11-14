@@ -37,6 +37,7 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiKit.Tone;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay.DeployCommand;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
@@ -113,10 +114,22 @@ final class GpuUnitCard implements GpuHud.Component {
         }
     }
 
+    /** The long range's index in a weapon's ranges (minimum, short, medium, long). */
+    private static final int LONG_RANGE = 3;
+
     /** What the card shows; it is rebuilt when this changes. Snapshots keep their identity while unchanged. */
     private record Shown(GpuBattleStatus.UnitStatus unit, GpuUnitRecord.Snapshot record, GpuFireOrders.Heat heat,
           boolean low, GamePhase phase, boolean mini, boolean sheetSelected, Deltas deltas,
-          List<GpuBoardSource.Bind> binds) { }
+          List<GpuBoardSource.Bind> binds, List<Setup> setup) { }
+
+    /** A deployment command of the placed unit as the card shows it; the card runs it by id at the click. */
+    private record Setup(String id, String label, boolean enabled) { }
+
+    /** The setup choices MegaMek offers a unit before it deploys, in its order; the card shows the enabled ones. */
+    private static final List<String> SETUP = List.of(DeployCommand.DEPLOY_LOAD.getCmd(),
+          DeployCommand.DEPLOY_UNLOAD.getCmd(), DeployCommand.DEPLOY_HULL_DOWN.getCmd(),
+          DeployCommand.DEPLOY_ASSAULT_DROP.getCmd(), DeployCommand.DEPLOY_DOCK.getCmd());
+    private static final String WITHDRAW = DeployCommand.DEPLOY_REMOVE.getCmd();
 
     private final GpuHudKit kit;
     private final UiKit ui;
@@ -138,6 +151,8 @@ final class GpuUnitCard implements GpuHud.Component {
     private InputListener opener;
     private GpuUnitRecord.Snapshot previousRecord = GpuUnitRecord.Snapshot.EMPTY;
     private Deltas deltas = Deltas.NONE;
+    /** The phase commands of the last frame; the deployment card's setup buttons run theirs. */
+    private List<BoardScene.Command> commands = List.of();
 
     GpuUnitCard(GpuHudKit kit, GpuBoardSource source, GpuHudState state, GpuContextMenu menu,
           GpuPaperdolls paperdolls, boolean other) {
@@ -229,10 +244,12 @@ final class GpuUnitCard implements GpuHud.Component {
         previousRecord = unitRecord;
         GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
         GpuFireOrders.Heat forecast = fire.active() && fire.actorId() == unit.id() ? fire.heat() : null;
+        BoardScene scene = inputs.frame().scene();
+        commands = scene == null ? List.of() : scene.commands();
         Shown next = new Shown(unit, unitRecord, forecast, inputs.metrics().lowHeight(),
               inputs.frame().status().phase(), !other && GpuRecordSheet.open(state),
               state.recordOpen && state.cardUnit() == unit.id(), deltas.shown(now),
-              inputs.preferences().binds());
+              inputs.preferences().binds(), setup(inputs.frame().status(), unit));
         if (!next.equals(shown)) {
             shown = next;
             show(next, inputs.preferences());
@@ -246,6 +263,9 @@ final class GpuUnitCard implements GpuHud.Component {
         root.clearChildren();
         if (unit.sensorContact()) {
             contact(unit, next, preferences);
+        } else if (next.phase().isDeployment()) {
+            // The deployment card keeps its form while the record is open, so neither it nor the queue jumps.
+            deployment(unit, next);
         } else if (next.mini()) {
             mini(unit, next, preferences);
         } else {
@@ -254,6 +274,122 @@ final class GpuUnitCard implements GpuHud.Component {
     }
 
     // ------------------------------------------------------------------------------------------------ the card forms
+
+    /**
+     * The deployment card: what decides where a unit goes, beside the force's cards. The header and the doll as the
+     * full card has them (a unit may start damaged), and four rows: the walk, run and jump MP, the usable weapons, the
+     * longest reach of those and the armor left; the Unit record below them. No heat, movement or chips yet.
+     */
+    private void deployment(GpuBattleStatus.UnitStatus unit, Shown next) {
+        root.pad(12, 14, 12, 14);
+        root.add(header(unit, next, true)).growX().height(40).row();
+        Table body = new Table();
+        body.top().left();
+        body.add(dollSlot(unit, next, true)).width(dollWidth(next.record())).growY().top();
+        Table rows = new Table();
+        rows.top().left();
+        rows.defaults().growX().left().padTop(5);
+        String jump = unit.jump() > 0 ? " / " + unit.jump() : "";
+        rows.add(row(text("GpuBoard.hud.deploy.move"), bold(unit.walk() + " / " + unit.run() + jump, ""),
+              SheetTab.STATUS)).padTop(2).row();
+        GpuUnitRecord.Snapshot record = next.record();
+        // The rows stand from the first frame, with dashes until the record arrives, so the card never reflows.
+        boolean recorded = !record.weapons().isEmpty();
+        rows.add(row(text("GpuBoard.hud.common.weapons"), recorded ? bold(Integer.toString(usableWeapons(record)),
+              " " + text("GpuBoard.hud.unit.ofListed", record.weapons().size())) : value("—", UiTheme.MUTED),
+              SheetTab.WEAPONS)).row();
+        int reach = recorded ? reach(record) : 0;
+        rows.add(row(text("GpuBoard.hud.deploy.range"), reach > 0 ? bold(Integer.toString(reach),
+              " " + text("GpuBoard.hud.deploy.hexes")) : value("—", UiTheme.MUTED), SheetTab.WEAPONS)).row();
+        int armor = unit.armor() >= 0 ? Math.round((float) unit.armor() * 100) : -1;
+        rows.add(row(text("GpuBoard.hud.deploy.armor"), armor >= 0 ? value(text("GpuBoard.hud.common.percent", armor),
+              armor < 100 ? UiTheme.AMBER : UiTheme.ACCENT) : value("—", UiTheme.MUTED), SheetTab.ARMOR)).row();
+        body.add(rows).grow().minWidth(0).top().padLeft(12);
+        root.add(body).growX().height(100).padTop(6).row();
+        // One row whatever the unit offers, so the card keeps its height: the record, MegaMek's setup choices for
+        // this unit, and Withdraw at the end.
+        Table actions = new Table();
+        actions.left();
+        UiButton sheet = ui.button("hud-mini", null, text("GpuBoard.hud.common.unitRecord"), null);
+        sheet.setName(name("-record"));
+        sheet.pressed(next.sheetSelected());
+        onChange(sheet, () -> {
+            if (state.recordOpen && state.cardUnit() == shownId) { state.recordOpen = false; }
+            else { showSheet(state.sheetTab); }
+        });
+        actions.add(sheet);
+        Setup withdraw = null;
+        for (Setup setup : next.setup()) {
+            if (setup.id().equals(WITHDRAW)) {
+                withdraw = setup;
+                continue;
+            }
+            UiButton button = ui.button("hud-mini", null, setup.label(), null);
+            button.setName(name("-setup-" + setup.id()));
+            onChange(button, () -> runCommand(setup.id()));
+            actions.add(button).padLeft(6);
+        }
+        actions.add().expandX();
+        if (withdraw != null) {
+            UiButton remove = ui.button("hud-delete-icon", "delete", null, null);
+            remove.setName(name("-withdraw"));
+            remove.setDisabled(!withdraw.enabled());
+            ui.tip(remove).getActor().setText(text("GpuBoard.hud.deploy.withdrawTip"));
+            onChange(remove, () -> runCommand(WITHDRAW));
+            actions.add(remove).size(26);
+        }
+        root.add(actions).growX().height(26).padTop(8);
+    }
+
+    /**
+     * The placed unit's setup commands, in its own deployment turn only: the enabled setup choices, then Withdraw
+     * (enabled or not, so the row does not jump). Empty for any other unit, phase or turn.
+     */
+    private List<Setup> setup(GpuBattleStatus.Snapshot status, GpuBattleStatus.UnitStatus unit) {
+        if (other || !status.phase().isDeployment() || !status.myTurn() || status.actorId() != unit.id()) {
+            return List.of();
+        }
+        List<Setup> setup = new ArrayList<>();
+        for (String id : SETUP) {
+            BoardScene.Command command = command(id);
+            if (command != null && command.enabled()) {
+                setup.add(new Setup(id, command.label(), true));
+            }
+        }
+        BoardScene.Command withdraw = command(WITHDRAW);
+        if (withdraw != null) {
+            setup.add(new Setup(WITHDRAW, withdraw.label(), withdraw.enabled()));
+        }
+        return setup;
+    }
+
+    private BoardScene.Command command(String id) {
+        for (BoardScene.Command command : commands) {
+            if (command.id().equals(id)) {
+                return command;
+            }
+        }
+        return null;
+    }
+
+    /** Runs the phase command with this id as the last frame showed it, while it is enabled. */
+    private void runCommand(String id) {
+        BoardScene.Command command = command(id);
+        if (command != null && command.enabled()) {
+            command.action().run();
+        }
+    }
+
+    /** The longest long range of the usable weapons, in hexes; 0 without one. */
+    private static int reach(GpuUnitRecord.Snapshot record) {
+        int reach = 0;
+        for (GpuUnitRecord.RecordWeapon weapon : record.weapons()) {
+            if (!weapon.destroyed() && !weapon.crippled() && weapon.ranges().size() > LONG_RANGE) {
+                reach = Math.max(reach, weapon.ranges().get(LONG_RANGE));
+            }
+        }
+        return reach;
+    }
 
     /**
      * The full card (3.2): header, body (doll slot and vitals), the chip line and the buttons in fixed rows, 290 units

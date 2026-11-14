@@ -28,6 +28,7 @@ import megamek.common.Hex;
 import megamek.common.HitData;
 import megamek.common.MPCalculationSetting;
 import megamek.common.RecordSheetSlotNames;
+import megamek.common.analysis.DamageProfile;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.enums.WeaponSortOrder;
 import megamek.common.equipment.AmmoMounted;
@@ -251,14 +252,16 @@ final class GpuUnitRecord {
      * the Extras tab's "Affected by" list, {@code carried} its "Carrying" lines with the searchlight, {@code abilities}
      * the crew's special abilities by group, {@code readoutRows} and {@code readout} the unit readout's rows and text.
      * While the unit sheet is closed ({@link #setSheetOpen}) the weapons have no statistics, bay weapons, quirks or
-     * ammunition choices, and {@code info} holds only the carrier and the carried units.
+     * ammunition choices, and {@code info} holds only the carrier and the carried units. {@code damage} is the unit's
+     * expected damage by range in hexes from 0 ({@link #damageCurve}), empty without a usable weapon.
      */
     record Snapshot(int unitId, boolean own, boolean removed, String paperdoll, String damageLevel,
           List<Location> locations, List<Vital> vitals, List<HitTrack> hitTracks, List<Shield> shields,
           List<Integer> heatTicks, List<String> heatTickEffects, int heatScale, WeaponDisplayData.HeatBuildup heatBuildup,
           List<RecordWeapon> weapons, List<Equipment> equipment, List<SystemControl> systems, List<CrewSeat> crew,
           List<TipUtil.OptionGroup> abilities, List<AmmoBin> ammo, List<String> conditions, List<String> carried,
-          String unused, String lastTarget, List<InfoRow> info, List<EntityReadout.Row> readoutRows, String readout) {
+          String unused, String lastTarget, List<InfoRow> info, List<EntityReadout.Row> readoutRows, String readout,
+          List<Float> damage) {
         static final Snapshot EMPTY = new Snapshot(Entity.NONE, false, List.of(), List.of(), 0, List.of(), List.of(),
               List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), "", "", "");
 
@@ -279,6 +282,7 @@ final class GpuUnitRecord {
             carried = List.copyOf(carried);
             info = List.copyOf(info);
             readoutRows = List.copyOf(readoutRows);
+            damage = List.copyOf(damage);
         }
 
         /**
@@ -291,7 +295,7 @@ final class GpuUnitRecord {
               String unused, String lastTarget, String readout) {
             this(unitId, own, false, "", "", locations, List.of(), List.of(), List.of(), heatTicks, List.of(),
                   heatScale, new WeaponDisplayData.HeatBuildup(0, 0, ""), weapons, equipment, systems, crew, abilities, ammo,
-                  conditions, carried, unused, lastTarget, List.of(), List.of(), readout);
+                  conditions, carried, unused, lastTarget, List.of(), List.of(), readout, List.of());
         }
 
         /** The record with the parts that are costly to build: the readout (text and rows) and the battle value. */
@@ -300,7 +304,7 @@ final class GpuUnitRecord {
             allInfo.addAll(battleValue);
             return new Snapshot(unitId, own, removed, paperdoll, damageLevel, locations, vitals, hitTracks, shields,
                   heatTicks, heatTickEffects, heatScale, heatBuildup, weapons, equipment, systems, crew, abilities,
-                  ammo, conditions, carried, unused, lastTarget, allInfo, rows, text);
+                  ammo, conditions, carried, unused, lastTarget, allInfo, rows, text, damage);
         }
     }
 
@@ -379,7 +383,33 @@ final class GpuUnitRecord {
               crew(game, entity, actions, portraits),
               PilotToolTip.crewAbilities(entity), ammo(actions ? gui.getClient() : null, entity),
               UnitDisplayData.affectedBy(game, entity), carried(game, entity), entity.getUnusedString().strip(),
-              lastTarget(entity), info(game, entity, gui, sheet), List.of(), "");
+              lastTarget(entity), info(game, entity, gui, sheet), List.of(), "", damageCurve(game, entity));
+    }
+
+    /** The longest range the damage curve follows: artillery's map sheets reach far past any board's overlay. */
+    private static final int DAMAGE_REACH_LIMIT = 30;
+    /** The curves by unit instance, which the client replaces on every server update (EDT only). */
+    private static final Map<Entity, List<Float>> DAMAGE_CURVES = new java.util.WeakHashMap<>();
+
+    /**
+     * A unit's expected damage at each range from 0 to its longest reach (DamageProfile: its working weapons weighted by
+     * the crew's chance to hit, the best ammunition at each range), at most {@link #DAMAGE_REACH_LIMIT} hexes; empty
+     * without a usable weapon.
+     */
+    static List<Float> damageCurve(Game game, Entity entity) {
+        return DAMAGE_CURVES.computeIfAbsent(entity, unit -> {
+            DamageProfile profile = DamageProfile.of(unit,
+                  game.getOptions().booleanOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_RANGE));
+            if (!profile.hasWeapons()) {
+                return List.of();
+            }
+            int reach = Math.min(profile.maxRange(), DAMAGE_REACH_LIMIT);
+            List<Float> curve = new ArrayList<>(reach + 1);
+            for (int range = 0; range <= reach; range++) {
+                curve.add((float) profile.expectedDamage(range));
+            }
+            return List.copyOf(curve);
+        });
     }
 
     /**
@@ -390,7 +420,7 @@ final class GpuUnitRecord {
         return new Snapshot(entity.getId(), false, false, GpuPaperdolls.family(entity), "", locations(entity),
               List.of(), List.of(), shields(entity), List.of(), List.of(), 0,
               new WeaponDisplayData.HeatBuildup(0, 0, ""), List.of(), List.of(), List.of(), List.of(), List.of(),
-              List.of(), List.of(), List.of(), "", "", List.of(), List.of(), "");
+              List.of(), List.of(), List.of(), "", "", List.of(), List.of(), "", List.of());
     }
 
     /**

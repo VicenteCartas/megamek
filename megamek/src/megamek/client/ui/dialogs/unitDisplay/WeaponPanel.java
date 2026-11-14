@@ -206,6 +206,7 @@ public class WeaponPanel extends PicMap implements ListSelectionListener, Action
     private JLabel wInfantryRange5R;
     private JTextPane toHitText;
     private JTextPane wTargetInfo;
+    private String shownTargetInfo;
 
     // I need to keep a pointer to the weapon list of the
     // currently selected mek.
@@ -746,7 +747,10 @@ public class WeaponPanel extends PicMap implements ListSelectionListener, Action
     private void createTargetDisplay(JPanel parent) {
         wTargetInfo = new JTextPane();
         setupTextPane(wTargetInfo);
-        addSubDisplay(parent, wTargetInfo, LINE_HEIGHT * 2, GridBagConstraints.BOTH);
+
+        // The target's details can run longer than the space below the split, so they scroll rather than get cut off
+        JScrollPane targetInfoScroll = new JScrollPane(wTargetInfo);
+        addSubDisplay(parent, targetInfoScroll, LINE_HEIGHT * 2, GridBagConstraints.BOTH);
     }
 
     public void clearToHit() {
@@ -866,7 +870,13 @@ public class WeaponPanel extends PicMap implements ListSelectionListener, Action
                   : state.weapons().indexOf(state.getSelectedWeapon()));
             weaponList.ensureIndexIsVisible(weaponList.getSelectedIndex());
             displaySelected();
-            wTargetInfo.setText(UnitToolTip.wrapWithHTML(state.getTargetText()));
+            String targetInfo = UnitToolTip.wrapWithHTML(state.getTargetText());
+            if (!targetInfo.equals(shownTargetInfo)) {
+                shownTargetInfo = targetInfo;
+                wTargetInfo.setText(targetInfo);
+                // Start at the top of the new target's details, not wherever the caret was left by setText
+                wTargetInfo.setCaretPosition(0);
+            }
             wTargetExtraInfo.setText(UnitToolTip.wrapWithHTML(state.getTargetExtra()));
             wTargetExtraInfo.setOpaque(!state.getTargetExtra().isEmpty());
             wRangeR.setText(state.getRange());

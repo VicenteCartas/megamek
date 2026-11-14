@@ -16,6 +16,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
@@ -27,6 +28,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
+import com.badlogic.gdx.utils.TimeUtils;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
@@ -48,8 +50,9 @@ import megamek.common.units.Entity;
 /**
  * Forces navigator in the left column (C.1 G2): the own and allied units, or the contacts, as grouped rows or as a grid
  * of tiles, with search, the grid's grouping and filter, and the phase's next-unit command; while the unit sheet is
- * open it shrinks to its strip. It shows the presented units and calls the HUD's selection rule, the unit menu and the
- * phase command; every rule stays with the client.
+ * open it shrinks to its strip. Unless pinned open (or in its grid, or searching) it folds to a rail at the window's
+ * edge, which unfolds while the pointer rests on it. It shows the presented units and calls the HUD's selection rule,
+ * the unit menu and the phase command; every rule stays with the client.
  */
 final class GpuForcesPanel implements GpuHud.Component {
     /** The phase displays' next-unit commands, by the ids their buttons give the scene's phase commands (C10). */
@@ -65,6 +68,10 @@ final class GpuForcesPanel implements GpuHud.Component {
     /** Grid tiles are at least 64 units wide, 5 apart (.tiles). */
     private static final float TILE_MIN = 64;
     private static final float TILE_GAP = 5;
+    /** The rail's width, which the HUD gives the forces slot while the panel is folded to it. */
+    static final float RAIL_WIDTH = 58;
+    /** How long the panel stays expanded after the pointer left it. */
+    static final long COLLAPSE_MILLIS = 350;
 
     /** The grid's groupings (.gsel), in the order its select face steps through them. */
     private enum Grouping {
@@ -133,6 +140,22 @@ final class GpuForcesPanel implements GpuHud.Component {
     private final UiButton next;
     private final UiButton stripNext;
     private final Label rightClick;
+    /**
+     * The rail at the window's edge, the panel's form until the pointer rests on it or it is pinned open: the own and
+     * allied units as sprites, the pending count and Next pending.
+     */
+    private final Table rail = new Table();
+    private final Table railList = new Table();
+    private final Label railCount;
+    private final UiButton railNext;
+    private final UiButton pin;
+    private final TextTooltip pinTip;
+    private final Map<Integer, RailItem> railItems = new HashMap<>();
+    private List<Integer> railShown = List.of();
+    /** The pointer is over the panel, and when it last left, in TimeUtils milliseconds. */
+    private boolean hovered;
+    private long leftAt;
+    private boolean folded;
     /** The units' rows and tiles, kept across rebuilds so that their pointer state stays with them. */
     private final Map<Integer, UnitRow> rows = new HashMap<>();
     private final Map<Integer, Tile> tiles = new HashMap<>();
@@ -176,7 +199,11 @@ final class GpuForcesPanel implements GpuHud.Component {
         gridToggle.setName("forces-grid");
         gridTip = ui.tip(gridToggle);
         onChange(gridToggle, () -> state.forcesGrid = !state.forcesGrid);
-        full.add(ui.header(text("GpuBoard.hud.forces.title"), null, overview, searchToggle, gridToggle)).growX()
+        pin = ui.button("hud-icon", "unlock", null, null);
+        pin.setName("forces-pin");
+        pinTip = ui.tip(pin);
+        onChange(pin, () -> state.forcesPinned = !state.forcesPinned);
+        full.add(ui.header(text("GpuBoard.hud.forces.title"), null, overview, searchToggle, gridToggle, pin)).growX()
               .row();
 
         // Grid only: the grouping and filter selects. G12 opens their lists; until then a click steps to the next.
@@ -242,20 +269,67 @@ final class GpuForcesPanel implements GpuHud.Component {
         strip.add(stripCount).minWidth(0).growX().left();
         strip.add(stripNext).padLeft(8);
         strip.add(restore).size(30).padLeft(4);
+
+        rail.setName("forces-rail");
+        rail.top().pad(6, 0, 6, 0);
+        UiButton expand = ui.button("hud-icon", "chevron-right", null, null);
+        expand.setName("forces-expand");
+        ui.tip(expand).getActor().setText(text("GpuBoard.hud.forces.pinTip"));
+        onChange(expand, () -> state.forcesPinned = true);
+        railCount = ui.label("", "hud-medium", 11, Tone.WARN.color);
+        railCount.setAlignment(Align.center);
+        railCount.setName("forces-rail-count");
+        railList.top();
+        ScrollPane railScroll = ui.scrollList(railList);
+        railScroll.setName("forces-rail-list");
+        railNext = ui.button("hud-icon", "skip", null, null);
+        railNext.setName("forces-rail-next");
+        ui.tip(railNext).getActor().setText(text("GpuBoard.hud.forces.nextPending"));
+        onChange(railNext, this::runNext);
+        rail.add(expand).size(30).row();
+        rail.add(railCount).growX().height(14).row();
+        rail.add(railScroll).growX().minHeight(0).padTop(4).row();
+        rail.add(railNext).size(30).padTop(4);
+
+        // The pointer resting on the panel unfolds the rail; it folds again a moment after the pointer left.
+        root.addListener(new InputListener() {
+            @Override
+            public void enter(InputEvent event, float x, float y, int pointer, Actor fromActor) {
+                if (pointer == -1 && (fromActor == null || !fromActor.isDescendantOf(root))) {
+                    hovered = true;
+                }
+            }
+
+            @Override
+            public void exit(InputEvent event, float x, float y, int pointer, Actor toActor) {
+                if (pointer == -1 && (toActor == null || !toActor.isDescendantOf(root))) {
+                    hovered = false;
+                    leftAt = TimeUtils.millis();
+                }
+            }
+        });
+    }
+
+    /** Whether the panel shows as its rail this frame, which the HUD gives {@link #RAIL_WIDTH}. */
+    boolean folded() {
+        return folded;
+    }
+
+    /** The phase's next-unit command, as the Next pending buttons run it. */
+    private void runNext() {
+        BoardScene.Command command = nextCommand();
+        if (command != null && command.enabled()) {
+            // The next unit is the selected one, also when MegaMek's current unit comes again.
+            state.restoreSelection();
+            command.action().run();
+        }
     }
 
     /** The phase's next-unit command as a mini button (Next pending ›), in the footer and in the strip. */
     private UiButton nextButton(String name) {
         UiButton button = ui.button("hud-mini", null, text("GpuBoard.hud.forces.nextPending"), null);
         button.setName(name);
-        onChange(button, () -> {
-            BoardScene.Command command = nextCommand();
-            if (command != null && command.enabled()) {
-                // The next unit is the selected one, also when MegaMek's current unit comes again.
-                state.restoreSelection();
-                command.action().run();
-            }
-        });
+        onChange(button, this::runNext);
         return button;
     }
 
@@ -279,11 +353,23 @@ final class GpuForcesPanel implements GpuHud.Component {
             shown = view;
             rebuild();
         }
-        content.setActor(GpuRecordSheet.open(state) ? strip : full);
         // The phase's own command decides, as in MegaMek; the scene changes more often than the list.
         BoardScene.Command command = nextCommand();
         next.setDisabled(pending == 0 || command == null || !command.enabled());
         stripNext.setDisabled(next.isDisabled());
+        railNext.setDisabled(next.isDisabled());
+        pin.pressed(state.forcesPinned);
+        pin.icons.forEach(icon -> ((Image) icon).setDrawable(ui.skin.getDrawable(state.forcesPinned ? "icon-lock"
+              : "icon-unlock")));
+        pinTip.getActor().setText(text(state.forcesPinned ? "GpuBoard.hud.forces.unpinTip"
+              : "GpuBoard.hud.forces.pinTip"));
+        boolean open = state.forcesPinned || state.forcesGrid || searching || hovered
+              || TimeUtils.timeSinceMillis(leftAt) < COLLAPSE_MILLIS;
+        folded = !open && !GpuRecordSheet.open(state);
+        Table wanted = GpuRecordSheet.open(state) ? strip : folded ? rail : full;
+        if (content.getActor() != wanted) {
+            content.setActor(wanted);
+        }
     }
 
     /** The phase display's next-unit command among the scene's phase commands, or null. */
@@ -334,6 +420,20 @@ final class GpuForcesPanel implements GpuHud.Component {
             footText.setText(pending > 0 ? text("GpuBoard.hud.forces.pendingCount", pending, own.size())
                   : text("GpuBoard.hud.forces.operationalCount", operational, own.size()));
             footRight.setActor(next);
+        }
+
+        // The rail lists the own and allied units; its count is the pending ones.
+        railCount.setText(pending > 0 ? String.valueOf(pending) : "");
+        List<UnitStatus> railed = units.stream().filter(unit -> unit.side() != Side.ENEMY).toList();
+        List<Integer> railIds = railed.stream().map(UnitStatus::id).toList();
+        if (railIds.equals(railShown)) {
+            railed.forEach(this::railItem);
+        } else {
+            railShown = railIds;
+            railList.clearChildren();
+            railItems.keySet().retainAll(railIds);
+            railed.forEach(unit -> railList.add(railItem(unit)).size(RailItem.WIDTH, RailItem.HEIGHT).padBottom(4)
+                  .row());
         }
 
         List<UnitStatus> listed = units.stream().filter(unit -> (unit.side() == Side.ENEMY) == shown.contacts())
@@ -525,6 +625,12 @@ final class GpuForcesPanel implements GpuHud.Component {
         Tile tile = tiles.computeIfAbsent(unit.id(), Tile::new);
         tile.show(unit, line(unit));
         return tile;
+    }
+
+    private RailItem railItem(UnitStatus unit) {
+        RailItem item = railItems.computeIfAbsent(unit.id(), RailItem::new);
+        item.show(unit, line(unit));
+        return item;
     }
 
     /** The prototype's acting() (C.5), whose row reads "Acting now" or "Up next". */
@@ -728,6 +834,75 @@ final class GpuForcesPanel implements GpuHud.Component {
                 bar.draw(batch, getX() + 7, getY() + 4, width, 2);
                 batch.setPackedColor(previous);
             }
+        }
+    }
+
+    /**
+     * A unit on the rail: its sprite on a tile with the card's highlight, a bar at its left edge in the status line's
+     * tone while the unit acts or awaits orders, and its armor along the bottom. The tooltip names it and its status;
+     * it selects and opens the menu as a row does.
+     */
+    private final class RailItem extends Table {
+        static final float WIDTH = 46;
+        static final float HEIGHT = 40;
+        private final GpuHudKit.UnitSprite sprite = kit.sprite(36, 30);
+        private final Drawable up = ui.skin.getDrawable("row");
+        private final Drawable over = ui.skin.getDrawable("row-over");
+        private final Drawable picked = ui.skin.getDrawable("field-focused");
+        private final Drawable friend = ui.skin.getDrawable("row-friend");
+        private final Drawable bar = ui.skin.getDrawable("white");
+        private final ClickListener pointer;
+        private final Label tip;
+        private Drawable highlight;
+        private float armor;
+        private Color accent;
+
+        private RailItem(int id) {
+            setName("forces-rail-" + id);
+            setBackground(up);
+            setTouchable(Touchable.enabled);
+            add(sprite);
+            tip = ui.tip(this).getActor();
+            pointer = new ClickListener() {
+                @Override
+                public void clicked(InputEvent event, float x, float y) {
+                    select.accept(id);
+                }
+            };
+            addListener(pointer);
+            addListener(UnitRow.menuOpener(menu, id, GpuForcesPanel.this::unit));
+        }
+
+        void show(UnitStatus unit, Line line) {
+            sprite.set(unit.icon(), UnitRow.spriteColor(unit));
+            tip.setText(unit.chassis() + "\n" + line.text());
+            highlight = unit.id() != shown.card() ? null : unit.id() == shown.focus() ? picked : friend;
+            armor = (float) Math.max(0, unit.armor());
+            accent = line.tone() == Tone.WARN || line.tone() == Tone.OK ? line.tone().color : null;
+            getColor().a = unit.destroyed() ? .4f : 1;
+        }
+
+        @Override
+        public void act(float delta) {
+            setBackground(highlight != null ? highlight : pointer.isOver() ? over : up);
+            super.act(delta);
+        }
+
+        @Override
+        public void draw(Batch batch, float parentAlpha) {
+            super.draw(batch, parentAlpha);
+            float previous = batch.getPackedColor();
+            float alpha = getColor().a * parentAlpha;
+            if (accent != null) {
+                batch.setColor(accent.r, accent.g, accent.b, accent.a * alpha);
+                bar.draw(batch, getX() + 1, getY() + 3, 2, getHeight() - 6);
+            }
+            float width = Math.min((getWidth() - 2) * armor, getWidth() - 10);
+            if (width > 0) {
+                batch.setColor(UiTheme.MINT.r, UiTheme.MINT.g, UiTheme.MINT.b, UiTheme.MINT.a * alpha);
+                bar.draw(batch, getX() + 5, getY() + 3, width, 2);
+            }
+            batch.setPackedColor(previous);
         }
     }
 }

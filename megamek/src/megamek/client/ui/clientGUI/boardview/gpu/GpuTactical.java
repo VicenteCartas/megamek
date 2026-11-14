@@ -543,6 +543,15 @@ final class GpuTactical implements Disposable {
 
     /** As {@link #render(Camera, float, boolean)}, the Tactical View's E(C)CM as the Overlays settings choose. */
     void render(Camera camera, float deltaSeconds, boolean tacticalView, BoardSource.UiPreferences.Overlays overlays) {
+        render(camera, deltaSeconds, tacticalView, overlays, false);
+    }
+
+    /**
+     * As {@link #render(Camera, float, boolean, BoardSource.UiPreferences.Overlays)}; {@code allFields} outlines every
+     * E(C)CM field in the 3D view too (deployment's ECM overlay), which otherwise shows only their ticks.
+     */
+    void render(Camera camera, float deltaSeconds, boolean tacticalView, BoardSource.UiPreferences.Overlays overlays,
+          boolean allFields) {
         scrollDistance += deltaSeconds * outlineSpeed;
         for (Material ink : outlines.values()) {
             TextureAttribute texture = ink.get(TextureAttribute.class, TextureAttribute.Diffuse);
@@ -554,8 +563,8 @@ final class GpuTactical implements Disposable {
         }
         batch.begin(camera);
         deploymentTint.submit(batch, camera);
-        electronicWarfare.submit(batch, camera, deltaSeconds, tacticalView, overlays.ecmFields(),
-              overlays.ecmHatch());
+        electronicWarfare.submit(batch, camera, deltaSeconds, tacticalView,
+              tacticalView ? overlays.ecmFields() || allFields : allFields, overlays.ecmHatch(), allFields);
         hexMasks.submit(batch, camera);
         renderPages(camera, presentation -> presentation == 0 || presentation == (tacticalView ? 2 : 1));
         batch.end();

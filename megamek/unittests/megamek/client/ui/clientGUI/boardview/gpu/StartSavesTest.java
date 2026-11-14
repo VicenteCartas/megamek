@@ -128,6 +128,14 @@ class StartSavesTest {
         assertFalse(StartSaves.loads(new Version(0, 49, 7), running));
     }
 
+    @Test
+    void aSaveLoadsIntoTheSameOrALaterRevisionOfItsRelease() {
+        Version running = new Version("0.51.01.2");
+        assertTrue(StartSaves.loads(new Version("0.51.01.1"), running));
+        assertTrue(StartSaves.loads(new Version("0.51.01.2"), running));
+        assertFalse(StartSaves.loads(new Version("0.51.01.3"), running));
+    }
+
     private File touch(String name, long modified) throws IOException {
         File file = folder.resolve(name).toFile();
         Files.writeString(file.toPath(), "");

@@ -1332,7 +1332,7 @@ class GpuHudInputTest {
     private static GpuUnitRecord.Snapshot record(int unitId) {
         return new GpuUnitRecord.Snapshot(unitId, true, false, "", "", List.of(), List.of(), List.of(), List.of(),
               List.of(), List.of(), 0, new WeaponDisplayData.HeatBuildup(0, 0, ""), List.of(), List.of(), List.of(),
-              List.of(), List.of(), List.of(), List.of(), List.of(), "", "", List.of(), List.of(), "");
+              List.of(), List.of(), List.of(), List.of(), List.of(), "", "", List.of(), List.of(), "", List.of());
     }
 
     private static GpuBoardWindow.DialogRequest message() {

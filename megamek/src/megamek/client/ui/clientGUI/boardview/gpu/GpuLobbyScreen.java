@@ -611,6 +611,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
 
             @Override
+            public void ping(int id) {
+                window.ping(id);
+            }
+
+            @Override
             public void addBot(int team) {
                 window.addBot(team);
             }

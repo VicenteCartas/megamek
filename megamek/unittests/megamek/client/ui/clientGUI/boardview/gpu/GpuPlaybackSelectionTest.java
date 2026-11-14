@@ -228,7 +228,7 @@ class GpuPlaybackSelectionTest {
     private static GpuUnitRecord.Snapshot record(int id) {
         return new GpuUnitRecord.Snapshot(id, true, false, "", "", List.of(), List.of(), List.of(), List.of(),
               List.of(), List.of(), 0, new WeaponDisplayData.HeatBuildup(0, 0, ""), List.of(), List.of(), List.of(),
-              List.of(), List.of(), List.of(), List.of(), List.of(), "", "", List.of(), List.of(), "");
+              List.of(), List.of(), List.of(), List.of(), List.of(), "", "", List.of(), List.of(), "", List.of());
     }
 
     private static GpuFirePreview.Snapshot preview(int id) {

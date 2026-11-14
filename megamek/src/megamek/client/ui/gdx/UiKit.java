@@ -56,7 +56,8 @@ public final class UiKit {
     /** The name of a header's count, for a view that keeps it current. */
     public static final String HEADER_COUNT = "header-count";
     /** Styles whose captions the prototype upper-cases (.b, .b.main, .b.mini, .b.brk.sm, .ltabs). */
-    private static final Set<String> UPPER_CASE = Set.of("hud", "hud-main", "hud-mini", "hud-utility-small",
+    private static final Set<String> UPPER_CASE = Set.of("hud", "hud-main", "hud-mini", "hud-confirm",
+          "hud-confirm-step", "hud-utility-small",
           "hud-tab-caps");
     /** CSS's normal line height of Roboto and Roboto Condensed, their ascent plus descent, in ems. */
     private static final float NORMAL_LINE = 1.172f;
@@ -777,7 +778,7 @@ public final class UiKit {
             return style.equals("hud-utility") ? 4 : 1;
         }
         return switch (style) {
-            case "hud-mini" -> 5;
+            case "hud-mini", "hud-confirm" -> 5;
             case "hud-plain" -> 7;
             default -> 6;
         };
@@ -789,7 +790,7 @@ public final class UiKit {
         }
         return switch (style) {
             case "hud-icon" -> 16;
-            case "hud-mini" -> 13;
+            case "hud-mini", "hud-confirm", "hud-confirm-clear", "hud-confirm-step" -> 13;
             case "hud-utility", "hud-utility-row" -> 19;
             default -> 17;
         };

@@ -9,8 +9,11 @@ uniform vec4 u_damageTransform;
 out vec3 v_paintPosition;
 out vec2 v_damageUV;
 out float v_damageMask;
+// The vertex's board position, for the deployment's materialize (GpuUnitShader.Shown#materialize).
+out vec3 v_unitWorld;
 
 void unitMaterialCoordinates() {
+    v_unitWorld = (u_worldTrans * vec4(a_position, 1.0)).xyz;
     v_damageMask = 1.0;
     #ifdef colorFlag
         // The exporter's PALETTE['glass'] identifies cockpit glazing inside shared detail meshes.

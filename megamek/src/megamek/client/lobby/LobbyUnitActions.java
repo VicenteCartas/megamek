@@ -372,45 +372,52 @@ public final class LobbyUnitActions {
         });
     }
 
-    /** The Formation and Role items of a bot lance; the info is {@code [choice:]forceId}. */
+    /**
+     * The Formation and Role items of a bot lance, or the Formation items of a parent force with bot lances under it;
+     * the info is {@code [choice:]forceId}.
+     */
     private void botLanceAction(String command, String info) {
         String[] parts = info.split(":");
         Force force = game().getForces().getForce(StringUtil.toInt(parts[parts.length - 1], Force.NO_FORCE));
-        LobbyUnitMenu.BotLance lance = (force == null) ? null : botLance(game(), force);
-        if (lance == null) {
+        if (force == null) {
+            return;
+        }
+        LobbyUnitMenu.BotLance lance = botLance(game(), force);
+        List<List<Integer>> lances = (lance != null) ? List.of(lance.unitIds())
+              : MoveOrderCommands.formableLances(parentLances(game(), force));
+        if (lances.isEmpty()) {
             return;
         }
         switch (command) {
-            case LMP_BOT_FORMATION -> sendFormation(force, lance.unitIds(), FormationShape.valueOf(parts[0]));
-            case LMP_BOT_FORMATION_OFF -> {
-                for (int unitId : lance.unitIds()) {
-                    client.sendChat(UnitOrderCommand.commandText(unitId, UnitOrderAction.FORMATION_OFF));
+            case LMP_BOT_FORMATION -> sendFormation(force, lances, FormationShape.valueOf(parts[0]));
+            case LMP_BOT_FORMATION_OFF -> sendFormation(force, lances, null);
+            case LMP_BOT_ROLE -> {
+                // a role is a lance's job: a parent force's Role item only says to set it on each lance
+                if (lance != null) {
+                    chooseRole(lance, force, switch (parts[0]) {
+                        case ROLE_CONVOY -> Boolean.TRUE;
+                        case ROLE_ESCORT -> Boolean.FALSE;
+                        default -> null;
+                    });
                 }
             }
-            case LMP_BOT_ROLE -> chooseRole(lance, force, switch (parts[0]) {
-                case ROLE_CONVOY -> Boolean.TRUE;
-                case ROLE_ESCORT -> Boolean.FALSE;
-                default -> null;
-            });
             default -> {
             }
         }
     }
 
     /**
-     * Puts a bot lance in formation: spacing {@link FormationOrder#DEFAULT_SPACING}, the lance's first unit leading
-     * and keeping together.
+     * Puts each bot lance in formation, or takes it out of formation for a {@code null} shape: spacing
+     * {@link FormationOrder#DEFAULT_SPACING}, each lance's first unit leading and keeping together, a convoy keeping
+     * its Run pace and Push through (see {@link MoveOrderCommands#lobbyFormationCommands(Game, List, FormationShape)}).
      */
-    private void sendFormation(Force lance, List<Integer> unitIds, FormationShape shape) {
-        for (int slot = 0; slot < unitIds.size(); slot++) {
-            client.sendChat(UnitOrderCommand.commandText(unitIds.get(slot), UnitOrderAction.FORMATION,
-                  UnitOrderCommand.SHAPE + '=' + shape.name(),
-                  UnitOrderCommand.LEADER + '=' + unitIds.get(0),
-                  UnitOrderCommand.SPACING + '=' + FormationOrder.DEFAULT_SPACING,
-                  UnitOrderCommand.SLOT + '=' + slot,
-                  UnitOrderCommand.TOGETHER + "=true"));
+    private void sendFormation(Force force, List<List<Integer>> lances, @Nullable FormationShape shape) {
+        // the role is read when the shape is picked, so a role set after the menu opened still counts
+        for (String command : MoveOrderCommands.lobbyFormationCommands(game(), lances, shape)) {
+            client.sendChat(command);
         }
-        LOGGER.info("[BotOrders] lobby formation {} for {} ({} units)", shape, lance.getName(), unitIds.size());
+        LOGGER.info("[BotOrders] lobby formation {} for {} ({} lance(s))", (shape == null) ? "off" : shape,
+              force.getName(), lances.size());
     }
 
     /**
@@ -467,12 +474,21 @@ public final class LobbyUnitActions {
         for (String command : MoveOrderCommands.roleCommands(units, role)) {
             client.sendChat(command);
         }
+        boolean isAnyInFormation = false;
+        for (Entity unit : units) {
+            isAnyInFormation |= unit.getUnitOrders().getFormation().isPresent();
+        }
         List<String> columnCommands = MoveOrderCommands.convoyColumnCommands(units, role);
         for (String command : columnCommands) {
             client.sendChat(command);
         }
+        String formationNote = "";
+        if (!columnCommands.isEmpty()) {
+            formationNote = isAnyInFormation ? ", keeping its shape at a convoy's Run pace and Push through"
+                  : ", put in a Column to travel";
+        }
         LOGGER.info("[BotOrders] lobby role {} for {} ({} units){}", (role == null) ? LanceRole.NONE_TEXT : role,
-              lance.getName(), units.size(), columnCommands.isEmpty() ? "" : ", put in a Column to travel");
+              lance.getName(), units.size(), formationNote);
     }
 
     // ---- Sprites

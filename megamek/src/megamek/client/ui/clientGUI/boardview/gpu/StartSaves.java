@@ -187,18 +187,11 @@ final class StartSaves {
     }
 
     /**
-     * Whether {@code running} loads a save {@code saved} wrote: only its own version, or a nightly build of the
-     * version in development, since MegaMek doesn't migrate saves.
+     * Whether {@code running} loads a save {@code saved} wrote: one from the same release and the same or an older
+     * revision of it, as {@link Version#canLoadSaveFrom} has it, since MegaMek doesn't migrate saves across releases.
      */
     static boolean loads(Version saved, Version running) {
-        if (running.is(saved)) {
-            return true;
-        }
-        return saved.toString().toLowerCase(Locale.ROOT).contains("nightly")
-              && saved.getMajor() == running.getMajor()
-              && saved.getMinor() == running.getMinor()
-              && saved.getPatch() == running.getPatch()
-              && saved.toString().contains(running.toString());
+        return running.canLoadSaveFrom(saved);
     }
 
     /** The {@link Version} a save was written by, from the components stored in its version node. */

@@ -879,7 +879,9 @@ class GpuLiveBoardSpaceSmokeTest {
             };
             view.create();
             hud = (GpuHud) GpuTestSupport.field(view, "ui");
-            overlay = (GpuBoardOverlay) GpuTestSupport.field(view, "overlay");
+            // The forces list stays open, as the checks use its rows; the folded rail has its own test.
+            hud.state.forcesPinned = true;
+            overlay =  (GpuBoardOverlay) GpuTestSupport.field(view, "overlay");
             input = Gdx.input;
             when(pointer.getInputProcessor()).thenReturn(input.getInputProcessor());
             when(pointer.getX()).thenReturn(120);

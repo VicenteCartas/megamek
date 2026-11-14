@@ -32,6 +32,8 @@ final class GpuFieldOfView implements Disposable {
 
     private Style fovStyle = FOV_STYLE;
     private float fovDarkness = FOV_DARKNESS;
+    /** The least opacity of the shading outside LOS, while an overlay asks for it to stand out; 0 otherwise. */
+    private float fovFloor;
     private Style sensorStyle = SENSOR_STYLE;
     private float sensorDarkness = SENSOR_DARKNESS;
     private BoardFieldOfView previous = BoardFieldOfView.EMPTY;
@@ -45,6 +47,11 @@ final class GpuFieldOfView implements Disposable {
         this.fovDarkness = fovDarkness;
         this.sensorStyle = sensorStyle;
         this.sensorDarkness = sensorDarkness;
+    }
+
+    /** Raises the shading outside LOS to at least {@code floor} opacity (deployment's LOS overlay); 0 leaves it. */
+    void emphasize(float floor) {
+        fovFloor = floor;
     }
 
     void update(BoardFieldOfView next) {
@@ -118,14 +125,15 @@ final class GpuFieldOfView implements Disposable {
         shader.setUniformf("u_fovSize", previous.width(), previous.height());
         shader.setUniformf("u_fovHexSize", BoardGeometry.width(), BoardGeometry.height());
         shader.setUniformMatrix("u_fovInverseView", camera.invProjectionView);
-        bindEffect(shader, "u_fovEffect", fovStyle, fovDarkness);
-        bindEffect(shader, "u_sensorEffect", sensorStyle, sensorDarkness);
+        bindEffect(shader, "u_fovEffect", fovStyle, fovDarkness, fovFloor);
+        bindEffect(shader, "u_sensorEffect", sensorStyle, sensorDarkness, 0);
     }
 
-    private void bindEffect(ShaderProgram shader, String uniform, Style style, float darkness) {
-        float opacity = previous.darken() ? previous.darkenAlpha() / 255f * darkness : 0;
-        // GPU styles are explicit: the Legacy 2D view's grayscale preference must not override Dimmed.
-        boolean grayscale = style == Style.GRAYSCALE && previous.darken();
+    private void bindEffect(ShaderProgram shader, String uniform, Style style, float darkness, float floor) {
+        float opacity = previous.darken() ? Math.max(floor, previous.darkenAlpha() / 255f * darkness) : 0;
+        // GPU styles are explicit: the Legacy 2D view's grayscale preference must not override Dimmed. An emphasized
+        // shading (deployment's LOS overlay) also drains the colour, so the hexes in sight stand apart.
+        boolean grayscale = (style == Style.GRAYSCALE || floor > 0) && previous.darken();
         shader.setUniformf(uniform, opacity, grayscale ? 1 : 0, style == Style.FOG_OF_WAR ? 1 : 0);
     }
 

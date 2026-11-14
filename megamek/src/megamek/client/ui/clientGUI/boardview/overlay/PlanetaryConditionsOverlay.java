@@ -202,6 +202,58 @@ public class PlanetaryConditionsOverlay extends AbstractBoardViewOverlay {
         return result;
     }
 
+    /**
+     * The conditions that differ from the standard ones (daylight, clear, calm, 1g, a breathable standard atmosphere,
+     * no fog, EMI or blowing sand, a temperature without effects), each as one short phrase, regardless of the
+     * display preferences. There are none in space.
+     *
+     * @param conditions the game's planetary conditions
+     * @param inSpace    true for a space board
+     *
+     * @return a new, modifiable list of the phrases
+     */
+    public static List<String> notableConditions(PlanetaryConditions conditions, boolean inSpace) {
+        List<String> result = new ArrayList<>();
+        if (inSpace) {
+            return result;
+        }
+        if (!conditions.getLight().isDay()) {
+            result.add(conditions.getLight().toString());
+        }
+        if (!conditions.getWeather().isClear()) {
+            result.add(conditions.getWeather().toString());
+        }
+        if (!conditions.getWind().isCalm()) {
+            result.add(conditions.getWind().toString());
+        }
+        if (conditions.isFog()) {
+            result.add(conditions.getFog().toString());
+        }
+        if (conditions.isExtremeTemperature()) {
+            result.add(conditions.getTemperature() + "\u00B0C");
+        }
+        if (conditions.getGravity() != 1.0) {
+            result.add(conditions.getGravity() + "g");
+        }
+        if (!conditions.getAtmosphere().isStandard()) {
+            result.add(labelled(MSG_ATMOSPHERIC_PRESSURE, conditions.getAtmosphere().toString()));
+        }
+        if (!conditions.getAtmosphericTaint().isBreathable()) {
+            result.add(labelled(MSG_ATMOSPHERIC_TAINT, conditions.getAtmosphericTaint().toString()));
+        }
+        if (conditions.isEMI()) {
+            result.add(labelled(MSG_EMI, conditions.getEMI().toString()));
+        }
+        if (conditions.isBlowingSand()) {
+            result.add(labelled(MSG_BLOWING_SAND, conditions.getBlowingSand().toString()));
+        }
+        return result;
+    }
+
+    private static String labelled(String label, String value) {
+        return label.strip() + " " + value;
+    }
+
     @Override
     protected boolean getVisibilityGUIPreference() {
         return GUIP.getShowPlanetaryConditionsOverlay();

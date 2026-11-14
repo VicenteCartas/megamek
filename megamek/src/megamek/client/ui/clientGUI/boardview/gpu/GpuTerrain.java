@@ -10963,10 +10963,12 @@ final class GpuTerrain implements Disposable {
         destruction.clear();
         falls.cuts.dispose();
         meshGeneration++;
-        detailWorker.shutdownNow();
+        // Not shutdownNow: a chunk's parallel streams fork into this pool, and a worker joining a subtask that
+        // shutdownNow dropped from the queue waits forever. The bumped generation lets every queued task cancel itself.
+        detailWorker.shutdown();
         planting = null;
-        // Workers borrow chunk/asset data. ForkJoinPool.close may return once termination has started after
-        // shutdownNow; wait for actual termination before freeing those resources, even if closing is interrupted.
+        // Workers borrow chunk/asset data. Wait for actual termination before freeing those resources, even if
+        // closing is interrupted.
         boolean interrupted = false;
         while (!detailWorker.isTerminated()) {
             try { detailWorker.awaitTermination(1, TimeUnit.DAYS); }

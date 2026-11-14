@@ -129,6 +129,25 @@ class LobbyCommandsTest {
     }
 
     @Test
+    void pingingAnotherPlayerPingsThemAlone() {
+        commands.ping(enemy.getId());
+        verify(client).sendChat("/ping Enemy");
+    }
+
+    @Test
+    void pingingOneselfPingsEveryone() {
+        commands.ping(local.getId());
+        verify(client).sendChat("/ping");
+    }
+
+    @Test
+    void aDisconnectedPlayerIsNotPinged() {
+        enemy.setGhost(true);
+        commands.ping(enemy.getId());
+        verify(client, never()).sendChat(anyString());
+    }
+
+    @Test
     void localBotUnitIsSentByTheBotClient() {
         assertSame(botClient, commands.correctSender(unitOf(bot)));
     }

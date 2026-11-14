@@ -362,6 +362,31 @@ public final class UiTheme implements Disposable {
         hudMain.overFontColor = Color.valueOf("0D1412");
         hudMain.disabledFontColor = Color.valueOf("6F7A78");
         skin.add("hud-main", hudMain);
+        // The on-map Deploy / Clear pair (GpuDeployConfirm): as wide as the unit's nameplate, so small and solid.
+        TextButton.TextButtonStyle confirm = new TextButton.TextButtonStyle(hudMain);
+        confirm.font = skin.getFont("hud-mini");
+        confirm.up = box("button-confirm", MAIN, Color.valueOf("E5EEE7"), 1, 3, null, 2, 6, 22);
+        confirm.over = box("button-confirm-over", Color.WHITE, Color.WHITE, 1, 3, null, 2, 6, 22);
+        confirm.down = confirm.over;
+        confirm.disabled = null;
+        skin.add("hud-confirm", confirm);
+        TextButton.TextButtonStyle clear = new TextButton.TextButtonStyle();
+        clear.font = skin.getFont("hud-mini");
+        clear.up = box("button-confirm-clear", rgba(12, 17, 19, .9f), CORAL, 1, 3, null, 2, 4, 22);
+        clear.over = box("button-confirm-clear-over", alpha(CORAL, .45f), CORAL, 1, 3, null, 2, 4, 22);
+        clear.down = clear.over;
+        clear.fontColor = CORAL;
+        clear.overFontColor = Color.WHITE;
+        skin.add("hud-confirm-clear", clear);
+        // The placed unit's height steps above the pair (GpuDeployConfirm): the same small box, in the accent.
+        TextButton.TextButtonStyle step = new TextButton.TextButtonStyle();
+        step.font = skin.getFont("hud-mini");
+        step.up = box("button-confirm-step", rgba(12, 17, 19, .9f), MAIN, 1, 3, null, 2, 4, 22);
+        step.over = box("button-confirm-step-over", alpha(MAIN, .35f), MAIN, 1, 3, null, 2, 4, 22);
+        step.down = step.over;
+        step.fontColor = MAIN;
+        step.overFontColor = Color.WHITE;
+        skin.add("hud-confirm-step", step);
         // ImageTextButton lays out in a row, so a utility places an icon Image above this style's label.
         TextButton.TextButtonStyle utility = utility(hud, "hud-utility", 6, 9, 5, 62, 56);
         skin.add("hud-utility", utility);

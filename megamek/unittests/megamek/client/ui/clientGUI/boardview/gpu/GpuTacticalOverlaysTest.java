@@ -38,8 +38,10 @@ import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.gpu.BoardSource.UiPreferences.Overlays;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.AfterEach;
@@ -281,16 +283,24 @@ class GpuTacticalOverlaysTest {
               null));
     }
 
-    /** The local turn of an own unit; in FIRING the fire orders are active, so the weapons panel shows. */
+    /**
+     * The local turn of an own unit; in FIRING the fire orders are active, so the weapons panel shows; else the move's
+     * fire preview is, so the contacts panel shows.
+     */
     private static GpuBoardSource.Frame frame(GamePhase phase, List<BoardScene.Command> global) {
         GpuFireOrders.Snapshot fire = !phase.isFiring() ? GpuFireOrders.Snapshot.EMPTY
               : new GpuFireOrders.Snapshot(true, true, 1, GpuFireOrders.Focus.NONE, -1, List.of(), List.of(),
                     List.of(), 0, false, false, "", null, null, null, List.of(), null, Map.of(), 0, 0, null);
+        GpuFirePreview.Snapshot preview = phase.isFiring() ? GpuFirePreview.Snapshot.NONE
+              : new GpuFirePreview.Snapshot(true, true, 1, false, new Coords(5, 5), 0, 0, "None", 0, 0, "", false, 0,
+                    0, List.of());
         GpuBattleStatus.Snapshot status = GpuHudFixtures.status(3, phase, true, 1, 0,
               GpuHudFixtures.unit(1, OWN, true, true));
         return new GpuBoardSource.Frame(mock(BoardScene.class), List.of(), null, global, "", null, 0, "", null,
-              GpuReportLog.Snapshot.EMPTY, status, GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY, fire,
-                    GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
+              GpuReportLog.Snapshot.EMPTY, status, new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY,
+                    GpuMovePlan.Snapshot.EMPTY, fire, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
+                    preview, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY, RulerModel.Snapshot.NONE,
+                    GpuPlayers.Snapshot.EMPTY));
     }
 
     /** MegaMek's default keys, H shown as "H", with the given overlays and minimap, and the contacts panel. */

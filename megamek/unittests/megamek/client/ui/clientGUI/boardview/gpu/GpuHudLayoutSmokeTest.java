@@ -28,6 +28,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -101,6 +102,9 @@ class GpuHudLayoutSmokeTest {
 
     private static void show(GpuHud hud, GpuHudTestStage harness, Layout layout, int width, int height) {
         hud.state.forcesGrid = layout.grid();
+        // The stand-ins take the open forces list's and conditions card's slots, not the rail's or the strip's.
+        hud.state.forcesPinned = true;
+        hud.state.conditionsExpanded = true;
         if (hud.state.logOpen() != layout.panels().contains("log-panel")) {
             hud.state.toggleLog();
         }
@@ -329,17 +333,24 @@ class GpuHudLayoutSmokeTest {
               && area.y + area.height <= bound.y + bound.height + .5f;
     }
 
-    /** The local turn of the layout's phase; the weapons panel shows while the fire orders are active. */
+    /**
+     * The local turn of the layout's phase; the weapons panel shows while the fire orders are active, the contacts
+     * panel while the move's fire preview is.
+     */
     private static GpuBoardSource.Frame frame(Layout layout) {
         GpuFireOrders.Snapshot fire = !layout.panels().contains("weapons-panel") ? GpuFireOrders.Snapshot.EMPTY
               : new GpuFireOrders.Snapshot(true, true, 1, GpuFireOrders.Focus.NONE, -1, List.of(), List.of(),
                     List.of(), 0, false, false, "", null, null, null, List.of(), null, Map.of(), 0, 0, null);
+        GpuFirePreview.Snapshot preview = !layout.panels().contains("contacts-panel") ? GpuFirePreview.Snapshot.NONE
+              : new GpuFirePreview.Snapshot(true, true, UNIT, false, new Coords(5, 5), 0, 0, "None", 0, 0, "", false,
+                    0, 0, List.of());
         GpuBattleStatus.UnitStatus unit = new GpuBattleStatus.UnitStatus(UNIT, GpuBattleStatus.Side.OWN, false,
               "Atlas AS7-D", "Atlas", "AS7-D", 100, "Assault", "", "Pilot", 4, 5, 1, 1, 0, 0, "30", 3, "5", 0, "", 0,
               0, 0, 0, false, false, false, false, Entity.DMG_NONE, List.of(), "", new Coords(5, 5), 0, null,
               List.of(), 0, 0, Player.PLAYER_NONE, List.of());
         return GpuHudFixtures.frame(GpuHudFixtures.status(3, layout.phase(), true, 1, 0, unit),
-              GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY, fire, GpuPhysicalOptions.Snapshot.EMPTY,
-                    GpuUnitRecord.Snapshot.EMPTY));
+              new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY, fire,
+                    GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY, preview, GpuChat.Snapshot.EMPTY,
+                    GpuToasts.Snapshot.EMPTY, RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY));
     }
 }

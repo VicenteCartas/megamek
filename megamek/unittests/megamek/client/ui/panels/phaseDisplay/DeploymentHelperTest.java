@@ -43,11 +43,14 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.HashSet;
+import java.util.List;
 
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay.DeploymentPosition;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.board.DeploymentElevationType;
+import megamek.common.board.ElevationOption;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.units.AeroSpaceFighter;
 import megamek.common.units.BipedMek;
@@ -171,5 +174,28 @@ class DeploymentHelperTest {
         deploymentHelper.applyDeploymentElevation(mek, groundBoard, 2);
 
         assertEquals(2, mek.getElevation());
+    }
+
+    @Test
+    @DisplayName("Without a dialog the placement keeps the unit's height, else the nearest one the hex allows")
+    void nearestHeightOptionKeepsOrApproachesTheHeight() {
+        var options = List.of(new ElevationOption(0, DeploymentElevationType.ON_GROUND),
+              new ElevationOption(3, DeploymentElevationType.ALTITUDE),
+              new ElevationOption(5, DeploymentElevationType.ALTITUDE));
+
+        assertEquals(3, DeploymentHelper.nearestHeightOption(options, 3).elevation());
+        assertEquals(5, DeploymentHelper.nearestHeightOption(options, 4).elevation());
+        assertEquals(0, DeploymentHelper.nearestHeightOption(options, -1).elevation());
+    }
+
+    @Test
+    @DisplayName("A height above a VTOL's open-ended option is allowed as that height")
+    void heightOptionAllowsHeightsAboveTheOpenEndedOption() {
+        var options = List.of(new ElevationOption(1, DeploymentElevationType.ELEVATION),
+              new ElevationOption(10, DeploymentElevationType.ELEVATIONS_ABOVE));
+
+        assertEquals(new ElevationOption(14, DeploymentElevationType.ELEVATIONS_ABOVE),
+              DeploymentHelper.heightOption(options, 14));
+        assertEquals(null, DeploymentHelper.heightOption(options, 0));
     }
 }

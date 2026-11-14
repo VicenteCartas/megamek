@@ -35,6 +35,7 @@ import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
+import megamek.client.bot.AIType;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
@@ -218,6 +219,8 @@ class GpuHexPickTest {
         princess.setTeam(1);
         princess.setBot(true);
         fixture.game.addPlayer(3, princess);
+        // Only a CASPAR bot takes unit orders such as a Move Order
+        fixture.game.recordBotType(princess.getName(), AIType.CASPAR);
         Entity atlas = new MekFileParser(new File("testresources/megamek/common/units/Atlas AS7-D.mtf")).getEntity();
         atlas.setId(2);
         atlas.setOwner(princess);

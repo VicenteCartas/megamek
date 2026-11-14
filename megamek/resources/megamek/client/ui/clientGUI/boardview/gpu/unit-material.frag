@@ -12,8 +12,32 @@ uniform float u_damageEnabled;
 uniform float u_damageOpacity;
 // How much of the unit shows (GpuUnitShader.Shown): 1 but while it fades out.
 uniform float u_unitOpacity;
+// The deployment's materialize (GpuUnitShader.Shown#materialize): x its progress, 1 when whole; y and z the unit's
+// lowest and highest board height; w the size of the noise's cells.
+uniform vec4 u_materialize;
+in vec3 v_unitWorld;
 in vec2 v_damageUV;
 in float v_damageMask;
+
+float materializeHash(vec3 cell) {
+    return fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+}
+
+// Builds the unit up from its feet: what lies above a ragged rising edge is not there yet, and the edge glows the
+// hologram's cyan, so the placement's ghost seems to turn solid.
+vec3 unitMaterialize(vec3 colour) {
+    if (u_materialize.x >= 1.0) {
+        return colour;
+    }
+    float height = (v_unitWorld.z - u_materialize.y) / max(u_materialize.z - u_materialize.y, 1e-3);
+    float ragged = materializeHash(floor(v_unitWorld / u_materialize.w)) - 0.5;
+    float past = u_materialize.x * 1.25 - 0.1 - height + ragged * 0.12;
+    if (past < 0.0) {
+        discard;
+    }
+    float edge = 1.0 - smoothstep(0.0, 0.09, past);
+    return mix(colour, vec3(0.45, 1.6, 1.9), edge);
+}
 
 // Smooth, non-periodic coordinate warping breaks the mirrored grid with one texture lookup.
 vec2 damageHash(vec2 cell) {

@@ -30,6 +30,7 @@ import javax.swing.JPopupMenu;
 import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
+import megamek.client.bot.AIType;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
@@ -163,6 +164,8 @@ class GpuBotCommandsTest {
         player(fixture, 4, "Opponent", 2, false);
         player(fixture, 5, "Enemy bot", 2, true);
         player(fixture, 6, "Bot Two", 1, true);
+        // Only a CASPAR bot takes unit orders (Move Order, Quick Orders)
+        fixture.game.recordBotType(princess.getName(), AIType.CASPAR);
         unit(fixture, 2, princess, new Coords(6, 6));
         unit(fixture, 3, fixture.game.getPlayer(4), new Coords(9, 9));
         Client client = mock(Client.class);

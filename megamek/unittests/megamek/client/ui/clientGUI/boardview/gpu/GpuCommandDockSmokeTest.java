@@ -486,19 +486,21 @@ class GpuCommandDockSmokeTest {
                   List.of(label(dock, "dock-title"), label(dock, "dock-span"), label(dock, "dock-foot-bold")));
             assertNull(dock.find("dock-stop"));
 
-            // Generic phases: the first five available commands in MegaMek's order, Done with MegaMek's label, and
-            // the rest in More.
+            // Generic phases: the first available commands in MegaMek's order (deployment shows two, and keeps
+            // turning, the next unit and removal in More), Done with MegaMek's label, and the rest in More.
             ran.clear();
             Shot deploy = deployment();
             dock = dock(hud, deploy);
             show(hud, dock, deploy);
-            assertEquals(List.of("dock-command-deployTurn", "dock-command-deployUnload", "dock-command-deployRemove",
-                  "dock-command-deployDock", "dock-command-deployClimb"), names(dock.root(), "dock-command-"));
+            assertEquals(List.of("dock-command-deployUnload", "dock-command-deployDock"),
+                  names(dock.root(), "dock-command-"));
             assertEquals("DEPLOY", button(dock, "dock-main").getText().toString());
             clickAndShow(hud, dock, deploy, "dock-command-deployUnload", "dock-main");
             assertEquals(List.of("deployUnload", DONE), ran);
-            assertNull(dock.dock().more(), "Disabled deployment actions do not open an empty drawer");
-            assertNull(dock.find("dock-more"));
+            GpuCommandDock.More more = dock.dock().more();
+            assertNotNull(more, "Turning and removal stay in More");
+            assertTrue(more.commands().stream().map(BoardScene.Command::id).toList()
+                  .containsAll(List.of("deployTurn", "deployRemove")));
             // A display whose Done also skips shows it once.
             Shot generic = withInfo(nonPlanner(), DONE, DONE);
             show(hud, dock, generic);

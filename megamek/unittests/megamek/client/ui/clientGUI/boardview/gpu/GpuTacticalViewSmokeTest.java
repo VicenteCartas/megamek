@@ -945,9 +945,9 @@ class GpuTacticalViewSmokeTest {
      * and each row drives its overlay: Status badges off keeps the VTOL's elevation pill and drops the Atlas's heat
      * pip, bars and conditions; Rear arcs off clears the hovered Bulldog's amber; Links off (the View menu's item, run
      * by the row) removes the spotting link; Level shading lightens the level-3 plateau and leaves level 0; H collapses
-     * the panel. Captures the panel beside the minimap, beside the contacts with the minimap closed and at the right
-     * edge with no right-hand panel, at 1920 x 1080 and 1280 x 800, and a player's choice with the panel collapsed
-     * (the overlay-panel mock's frames A, C and B).
+     * the panel. Captures the panel beside the minimap and, with the minimap closed, at the right edge, as the firing
+     * phase has no fire preview and so no contacts panel, at 1920 x 1080 and 1280 x 800, and a player's choice with
+     * the panel collapsed (the overlay-panel mock's frames A, C and B).
      */
     @Test
     void theOverlaysPanelDrivesItsOverlaysAndStandsBesideTheRightColumn() throws Exception {
@@ -1019,15 +1019,13 @@ class GpuTacticalViewSmokeTest {
         if (width == 1920) {
             drive(view, fixture);
         }
-        // Beside the minimap's top; beside the contacts, which move up into its place; at the right edge.
+        // Beside the minimap's top; at the right edge once it closes, as the contacts show only with a fire preview.
         assertBeside("minimap");
         capture("tactical-overlays-" + width + "-minimap.png");
         SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance().setMinimapEnabled(false));
         await(view, fixture, () -> !fixture.source.uiPreferences().minimapEnabled(), "The minimap closes");
-        assertBeside("contacts-panel");
-        capture("tactical-overlays-" + width + "-contacts.png");
-        SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance().toggleGpuContactsEnabled());
-        await(view, fixture, () -> !fixture.source.uiPreferences().contactsEnabled(), "The contacts panel closes");
+        render(view);
+        assertFalse(GpuBoardTestUi.shown(actor("contacts-panel")), "No contacts panel without a fire preview");
         var panel = stageBounds(actor("tactical-overlays"));
         assertEquals(GpuBoardTestUi.stage().getWidth() - GpuBoardHud.GAP, panel.x + panel.width, .5f,
               "At the right edge without a right-hand panel");

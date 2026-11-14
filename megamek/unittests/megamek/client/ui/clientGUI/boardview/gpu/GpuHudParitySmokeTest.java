@@ -148,8 +148,9 @@ class GpuHudParitySmokeTest {
                     publish(live, status -> turn(status, false, Entity.NONE));
                     live.draw(10, .1f);
                     live.zoom(new Coords(13, 10), MOCK_HEX);
+                    // No fire preview in a report phase, so no contacts panel.
                     shot(live, "01", "01-initiative.jpg", HEADER, MINIMAP, FORCES,
-                          top("initiative-card", 680, 216, 560, 259), top("contacts-panel", 1590, 312, 310, 403),
+                          top("initiative-card", 680, 216, 560, 259),
                           bottom("command-dock", 670, 933, 580, 117));
                 });
             } finally {
@@ -372,8 +373,9 @@ class GpuHudParitySmokeTest {
                     if (kick != null) {
                         click(live, kick);
                     }
+                    // No fire preview in the physical phase, so no contacts panel.
                     shot(live, "09", "09-physical-attacks.jpg", HEADER, MINIMAP, FORCES,
-                          top("contacts-panel", 1590, 312, 310, 403), bottom("unit-card", 20, 809, 300, 251),
+                          bottom("unit-card", 20, 809, 300, 251),
                           bottom("command-dock", 670, 871, 580, 179));
                 });
             } finally {

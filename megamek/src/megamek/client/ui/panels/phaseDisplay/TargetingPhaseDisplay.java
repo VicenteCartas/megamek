@@ -1382,7 +1382,7 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponD
                 String t = (phase.isTargeting()) ? Messages.getString("TargetingPhaseDisplay.its_your_turn")
                       : Messages.getString("TargetingPhaseDisplay.its_your_tag_turn");
                 setStatusBarText(t + s);
-                clientgui.bingOthersTurn();
+                clientgui.bingMyTurn();
             } else {
                 endMyTurn();
                 if (e.getPlayer() != null) {

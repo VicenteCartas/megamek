@@ -65,6 +65,7 @@ import megamek.common.util.C3Util.MismatchingC3MException;
 import megamek.common.util.C3Util.MissingC3MException;
 import megamek.common.util.CollectionUtil;
 import megamek.logging.MMLogger;
+import megamek.server.commands.PingCommand;
 
 /**
  * The changes the lobby makes to players, units, forces and the map, and sends to the server, independent of any
@@ -248,6 +249,21 @@ public class LobbyCommands {
      */
     public void toggleGameMaster() {
         client().sendChat(GAME_MASTER_COMMAND);
+    }
+
+    /**
+     * Pings player {@code id}, as the Swing lobby's player menu did: another player is pinged alone, the local
+     * player's own id pings everyone. A disconnected player, who could not hear it, is not pinged. The ping goes
+     * through the {@code /ping} command, so the server applies the same checks and cooldown as when it is typed.
+     */
+    public void ping(int id) {
+        Player target = game().getPlayer(id);
+        if (target == null || target.isGhost()) {
+            return;
+        }
+        Player local = client().getLocalPlayer();
+        boolean everyone = local != null && local.getId() == target.getId();
+        client().sendChat(PingCommand.commandText(everyone ? null : target));
     }
 
     /** Votes in the running Game Master vote: for the request when {@code allow}, else against it. */

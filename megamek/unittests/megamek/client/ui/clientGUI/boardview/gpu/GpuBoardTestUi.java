@@ -243,6 +243,11 @@ final class GpuBoardTestUi {
 
     private static void clickActor(Actor actor) {
         assertTrue(actor != null, "Missing UI action");
+        // The battle HUD's camera presets, wireframe and tuning utilities hang in the View popover: open it first.
+        Actor popover = stage().getRoot().findActor("utility-view-menu");
+        if (popover != null && actor.isDescendantOf(popover) && !popover.isVisible()) {
+            clickActor(stage().getRoot().findActor("utility-view"));
+        }
         // Controls can move below the fold of a scrolling panel. Scroll them into view before real input.
         for (Actor parent = actor.getParent(); parent != null; parent = parent.getParent()) {
             if (parent instanceof ScrollPane scroll) {

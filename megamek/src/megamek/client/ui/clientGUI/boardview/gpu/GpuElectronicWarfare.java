@@ -73,6 +73,7 @@ final class GpuElectronicWarfare implements Disposable {
     private boolean tacticalView;
     private boolean fieldsAll;
     private boolean hatchAll;
+    private boolean fillAll;
     private FieldShader shader;
 
     /**
@@ -190,13 +191,17 @@ final class GpuElectronicWarfare implements Disposable {
     }
 
     /**
-     * Advances the pulse clocks and submits the covered chunks in view. In the Tactical View ({@code tactical}),
-     * {@code fields} outlines every field and {@code hatch} hatches every jammed hex, not only the open field's.
+     * Advances the pulse clocks and submits the covered chunks in view. {@code fields} outlines every field, in either
+     * view; in the Tactical View ({@code tactical}) {@code hatch} hatches every jammed hex, not only the open field's.
+     * {@code fill} (deployment's ECM overlay) also tints every covered hex in its side's colour and hatches every
+     * jammed hex in either view, so the fields read at a glance.
      */
-    void submit(ModelBatch batch, Camera camera, float deltaSeconds, boolean tactical, boolean fields, boolean hatch) {
+    void submit(ModelBatch batch, Camera camera, float deltaSeconds, boolean tactical, boolean fields, boolean hatch,
+          boolean fill) {
         float step = Math.min(Math.max(deltaSeconds, 0), .1f);
         hoverClock += step;
         selectionClock += step;
+        fillAll = fill;
         if (cells == null) { return; }
         prepare();
         tacticalView = tactical;
@@ -250,6 +255,7 @@ final class GpuElectronicWarfare implements Disposable {
             program.setUniformi("u_tactical", tacticalView ? 1 : 0);
             program.setUniformi("u_fieldsAll", fieldsAll ? 1 : 0);
             program.setUniformi("u_hatchAll", hatchAll ? 1 : 0);
+            program.setUniformi("u_fill", fillAll ? 1 : 0);
             program.setUniformi("u_openKinds", openKinds());
             program.setUniformf("u_strength", shown.strength() / 128f);
             Coords centre = open == null ? new Coords(0, 0) : open.source().position();
