@@ -533,7 +533,8 @@ final class LobbyMapSetupView {
             boardWidth.value(picture.boardWidth());
             boardHeight.value(picture.boardHeight());
             showSizes(picture);
-            if (!search.field.getText().trim().equals(picture.search())) {
+            // As the size ranges: while the player types, an older echo must not undo the newer keys or move the caret
+            if (!search.field.hasKeyboardFocus() && !search.field.getText().trim().equals(picture.search())) {
                 search.field.setText(picture.search());
             }
         } finally {
