@@ -1458,16 +1458,16 @@ final class GpuHud implements GpuBoardHud {
         place(solutionSlot, width - gap - m.right(), height - rightReserve - solutionHeight, m.right(),
               solutionHeight);
 
-        // Middle band between the columns: the dock beside the unit card, one bar along the bottom edge, with the hint
-        // line and a pick's chip above it. It starts after the left column, which the unit card fills, or the wider
-        // grid and the open unit sheet.
+        // Middle band between the columns: the dock along the bottom edge, centred in the window where the band allows,
+        // with the hint line and a pick's chip above it. It starts after the left column, which the unit card fills, or
+        // the wider grid and the open unit sheet.
         // In deployment the record stacks above the unit card, so the force's cards never move when it opens.
         float bandLeft = gap + Math.max(sheet && !deploying ? m.grid() : forcesWidth, m.left()) + gap;
         float bandRight = width - gap - rightWidth - gap;
         float dockWidth = Math.min(m.dock(), bandRight - bandLeft);
         float dockHeight = height(dockSlot);
         float dockTop = height - gap - dockHeight;
-        float dockX = staging ? centred(dockWidth, 0, width) : bandLeft;
+        float dockX = staging ? centred(dockWidth, 0, width) : centred(dockWidth, bandLeft, bandRight);
         float chatRight = dockX + dockWidth;
         float chatBottom = dockTop;
         if (deploying) {
