@@ -475,7 +475,7 @@ class GpuLogPanelSmokeTest {
         }
         GpuHudTestStage.run(hud -> {
             Panel panel = new Panel(hud);
-            GpuPhaseHeader header = new GpuPhaseHeader(hud.kit, null, panel.state);
+            GpuPhaseHeader header = new GpuPhaseHeader(hud.kit);
             GpuInitiativeCard card = new GpuInitiativeCard(hud.kit, null, panel.state);
             Container<Actor> slot = new Container<>(header.actor()).top().left().fillX();
             hud.window.addActor(slot);
@@ -573,7 +573,7 @@ class GpuLogPanelSmokeTest {
         hud.stage.touchUp((int) point.x, (int) point.y, 0, Input.Buttons.LEFT);
     }
 
-    /** The visible, non-empty label texts, including buttons except the header's playback-speed controls. */
+    /** The visible, non-empty label texts, including buttons. */
     private static List<String> texts(Actor actor) {
         List<String> texts = new ArrayList<>();
         collect(actor, texts);
@@ -581,8 +581,7 @@ class GpuLogPanelSmokeTest {
     }
 
     private static void collect(Actor actor, List<String> texts) {
-        if (actor == null || !actor.isVisible()
-              || (actor.getName() != null && actor.getName().startsWith("phase-speed-"))) {
+        if (actor == null || !actor.isVisible()) {
             return;
         }
         if (actor instanceof Label label && label.getText().length() > 0) {

@@ -5,6 +5,7 @@ import static megamek.client.ui.gdx.UiKit.onChange;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.StringJoiner;
 
@@ -33,11 +34,12 @@ import megamek.client.ui.util.KeyCommandBind;
 
 /**
  * Top-right utilities, the Tactical View chip and the Tactical View's north mark (C.1 G4). The row holds the
- * developer's Tuning, View, the Tactical View, the minimap, contacts, the log and the Menu; View opens a popover with
- * the camera presets and the wireframe view. They show the camera, the wireframe view, the minimap and contacts
- * preferences, the log's presented events and the HUD's open panels, and run the camera's Tactical View, the tuning
- * model's wireframe view, the View menu's minimap item, the contacts preference and the HUD's own toggles. The
- * Tactical View's overlays have their own panel, GpuTacticalOverlays.
+ * playback speeds, the developer's Tuning, View, the Tactical View, the minimap, contacts, the log and the Menu; View
+ * opens a popover with the camera presets and the wireframe view. They show the playback's speed, the camera, the
+ * wireframe view, the minimap and contacts preferences, the log's presented events and the HUD's open panels, and run
+ * the playback history's speed, the camera's Tactical View, the tuning model's wireframe view, the View menu's minimap
+ * item, the contacts preference and the HUD's own toggles. The Tactical View's overlays have their own panel,
+ * GpuTacticalOverlays.
  */
 final class GpuUtilityBar implements GpuHud.Component {
     /** The row's gap (#sys). */
@@ -53,11 +55,15 @@ final class GpuUtilityBar implements GpuHud.Component {
     /** The chip's padding at its sides, its rails' 14 at the left (GpuBoardSkin's panel-rails). */
     private static final float CHIP_SIDE = 14;
     private static final Color NORTH = new Color(226 / 255f, 235 / 255f, 215 / 255f, .7f);
+    /** The playback's speeds, Instant last. */
+    private static final List<UnitMotion.Speed> SPEEDS = List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL,
+          UnitMotion.Speed.DOUBLE, UnitMotion.Speed.QUADRUPLE, UnitMotion.Speed.INSTANT);
 
     private final GpuHudState state;
     private final BoardCamera camera;
     private final GpuBoardTuning tuning;
     private final Table root = new Table();
+    private final UiKit.Segmented speeds;
     private final Container<Label> north;
     private final Table chip = new Table();
     private final UiButton view;
@@ -107,8 +113,10 @@ final class GpuUtilityBar implements GpuHud.Component {
         log = iconButton(ui, "report", Messages.getString("GpuBoard.hud.util.log"), "utility-log");
         menu = iconButton(ui, "menu", Messages.getString("GpuBoard.hud.menu.title"), "utility-menu");
         menuTip = tipLabel(menu);
-        // The developer's Tuning leads the row with its caption.
-        root.add(tuningButton).height(HEIGHT);
+        // The playback speeds lead the row, then the developer's Tuning with its caption.
+        speeds = speeds(ui, state);
+        root.add(speeds).height(HEIGHT);
+        root.add(tuningButton).height(HEIGHT).padLeft(GAP);
         for (UiButton utility : List.of(view, tactical, map, contacts, log, menu)) {
             root.add(utility).size(HEIGHT).padLeft(GAP);
         }
@@ -158,6 +166,39 @@ final class GpuUtilityBar implements GpuHud.Component {
         north.setTransform(true);
         // Part of the board drawing in the prototype: presses pass through it to the board.
         north.setTouchable(Touchable.disabled);
+    }
+
+    /**
+     * The playback speeds as one utility of sections, 0.5x to 4x and Instant (a skip icon), the history's speed
+     * pressed. They pace the playback and the other players' moves, in every phase and turn.
+     */
+    private static UiKit.Segmented speeds(UiKit ui, GpuHudState state) {
+        UiKit.Segmented speeds = ui.segmented("hud-pill", false, SPEEDS.stream()
+              .map(speed -> speed == UnitMotion.Speed.INSTANT ? ""
+                    : Messages.getString("GpuBoard.hud.util.speedRate", speed.rate / UnitMotion.Speed.NORMAL.rate))
+              .toArray(String[]::new));
+        speeds.setName("utility-speeds");
+        // The utilities' bracketed face around the pill's sections.
+        speeds.setBackground(ui.skin.get("hud-utility-small", TextButton.TextButtonStyle.class).up);
+        speeds.pad(3);
+        for (int i = 0; i < SPEEDS.size(); i++) {
+            UnitMotion.Speed speed = SPEEDS.get(i);
+            UiButton button = speeds.buttons.get(i);
+            button.setName("utility-speed-" + speed.name().toLowerCase(Locale.ROOT));
+            button.pad(0, 7, 0, 7);
+            UiKit.size(button.getLabel(), "hud-small", 11);
+            String tip = Messages.getString("GpuBoard.hud.util.speed");
+            if (speed == UnitMotion.Speed.INSTANT) {
+                Actor icon = ui.icon("skip", 16, Color.WHITE);
+                button.icons.add(icon);
+                button.clearChildren();
+                button.add(icon).size(16);
+                tip = Messages.getString("GpuBoard.hud.util.instant");
+            }
+            ui.tip(button).getActor().setText(tip);
+            onChange(button, () -> state.history.speed(speed));
+        }
+        return speeds;
     }
 
     /** A row of the View popover. */
@@ -303,6 +344,7 @@ final class GpuUtilityBar implements GpuHud.Component {
     @Override
     public void update(GpuHud.Inputs inputs) {
         this.inputs = inputs;
+        speeds.select(SPEEDS.indexOf(state.history.speed()));
         boolean tacticalView = inputs.view().tactical();
         BoardScene.Command minimap = minimapCommand(inputs);
         // K12: the round's reviewable events the board has presented, which the log lists (C.6; game.js S.events)

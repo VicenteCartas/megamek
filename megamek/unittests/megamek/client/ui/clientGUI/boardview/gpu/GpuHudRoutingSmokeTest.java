@@ -261,13 +261,20 @@ class GpuHudRoutingSmokeTest {
             float zoom = camera.camera.zoom;
             routing.wheel(routing.screen(EMPTY_HEX));
             assertTrue(camera.camera.zoom < zoom, "The wheel zooms over the board");
-            Actor header = routing.find("phase-header");
-            Vector3 overHeader = routing.screen(header);
+            // The phase header is text over the board: the wheel zooms through it.
             zoom = camera.camera.zoom;
-            routing.wheel(overHeader);
+            routing.wheel(routing.screen(routing.find("phase-header")));
+            assertTrue(camera.camera.zoom < zoom, "The wheel zooms through the phase header");
+            // Over a panel (the forces panel's corner) it does not.
+            Actor forces = routing.find("forces-panel");
+            Vector2 corner = forces.localToStageCoordinates(new Vector2(3, forces.getHeight() - 3));
+            routing.hud.stage.stageToScreenCoordinates(corner);
+            Vector3 overPanel = new Vector3(corner.x, corner.y, 0);
+            zoom = camera.camera.zoom;
+            routing.wheel(overPanel);
             assertEquals(zoom, camera.camera.zoom, "Not over a panel");
             // A press on a panel belongs to it: no board click.
-            routing.touch(overHeader, Input.Buttons.LEFT, 0, 0);
+            routing.touch(overPanel, Input.Buttons.LEFT, 0, 0);
             verifyNoInteractions(routing.moves);
             verify(routing.source, never()).hover(any(), anyInt());
         });
@@ -1161,7 +1168,8 @@ class GpuHudRoutingSmokeTest {
     }
 
     /**
-     * L1 and L4: the Tactical View's north mark is centred at top 84 over the board, and a middle-area panel with no
+     * L1 and L4: the Tactical View's north mark is centred over the board below the phase header and the Tactical View
+     * chip, at top 84 at least, and a middle-area panel with no
      * room for its minimum height hides instead of spilling over the dock: the LOS card below the initiative card on
      * a 900 x 600 stage (E rule 6; the display scale keeps a real window at 960 x 640 units at least), while at the
      * 960 x 640 minimum it shows above the dock.
@@ -1180,7 +1188,15 @@ class GpuHudRoutingSmokeTest {
             float stageWidth = routing.hud.stage.getWidth();
             float stageHeight = routing.hud.stage.getHeight();
             assertEquals(stageWidth / 2, corner.x + north.getWidth() / 2, .51f, "centred");
-            assertEquals(GpuUtilityBar.NORTH_TOP, stageHeight - corner.y - north.getHeight(), .51f, "its top");
+            float top = stageHeight - corner.y - north.getHeight();
+            assertTrue(top >= GpuUtilityBar.NORTH_TOP - .51f, "its top");
+            for (String above : List.of("phase-header", "tactical-chip")) {
+                Actor actor = routing.find(above);
+                if (shown(actor)) {
+                    float bottom = stageHeight - actor.localToStageCoordinates(new Vector2()).y;
+                    assertTrue(top >= bottom, "below the " + above);
+                }
+            }
             routing.capture("i1a2-tactical-north");
             routing.view.setTacticalView(false);
         });

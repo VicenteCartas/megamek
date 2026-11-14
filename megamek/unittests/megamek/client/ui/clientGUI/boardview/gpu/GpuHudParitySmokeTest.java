@@ -107,8 +107,8 @@ class GpuHudParitySmokeTest {
     }
 
     // The mock's frames, found by their corner brackets in the shots (SP/p1/corners.py).
-    private static final Region HEADER = top("phase-header", 20, 20, 300, 84);
-    private static final Region HEADER_RIBBON = top("phase-header", 20, 20, 300, 100);
+    // The phase header is centred text over the board, sized to its turn order, no longer the mock's frame: reported.
+    private static final Region HEADER = free("phase-header", 20, 20, 300, 84);
     private static final Region MINIMAP = top("minimap", 1590, 90, 310, 210);
     // The forces list is narrower than the mock's column of 300 (the user's request of 2026-10-02).
     private static final int FORCES_WIDTH = Math.round(GpuHud.FORCES_WIDTH);
@@ -189,7 +189,7 @@ class GpuHudParitySmokeTest {
 
                 // 11: no route yet, the forces as a grid.
                 live.hud.state.forcesGrid = true;
-                shot(live, "11", "11-force-grid.jpg", HEADER_RIBBON, MINIMAP, top("forces-panel", 20, 132, 630, 282),
+                shot(live, "11", "11-force-grid.jpg", HEADER, MINIMAP, top("forces-panel", 20, 132, 630, 282),
                       top("contacts-panel", 1590, 312, 310, 506), CARD, PLAN_DOCK);
                 live.hud.state.forcesGrid = false;
 
@@ -200,7 +200,7 @@ class GpuHudParitySmokeTest {
                 field.setText("Moving Alpha to the ridge");
                 field.setCursorPosition(field.getText().length());
                 live.hud.stage.setKeyboardFocus(field);
-                shot(live, "16", "16-chat.jpg", HEADER_RIBBON, MINIMAP, FORCES_RIBBON,
+                shot(live, "16", "16-chat.jpg", HEADER, MINIMAP, FORCES_RIBBON,
                       bottom("chat-panel", 1560, 694, 340, 320), CARD, PLAN_DOCK);
                 live.hud.stage.setKeyboardFocus(null);
                 live.hud.state.chatOpen = false;
@@ -209,14 +209,14 @@ class GpuHudParitySmokeTest {
                 live.hud.state.overview = true;
                 live.draw(2, .1f);
                 click(live, "force-overview-grouping-status");
-                shot(live, "12", "12-force-overview.jpg", HEADER_RIBBON,
+                shot(live, "12", "12-force-overview.jpg", HEADER,
                       new Region("force-overview", 20, 90, 1920 - 2 * (int) GpuBoardHud.GAP, 920, Edge.TOP));
                 live.hud.state.overview = false;
 
                 // 02: a walk of two hexes north, the fire preview from its end with the Timber Wolf's row open.
                 plan(live, board, ATLAS_MOVED, false);
                 click(live, "contacts-preview-" + TIMBER_WOLF);
-                shot(live, "02", "02-movement-fire-preview.jpg", HEADER_RIBBON, MINIMAP, FORCES_RIBBON,
+                shot(live, "02", "02-movement-fire-preview.jpg", HEADER, MINIMAP, FORCES_RIBBON,
                       top("contacts-panel", 1590, 312, 310, 698), CARD, PLAN_DOCK);
                 click(live, "contacts-preview-" + TIMBER_WOLF);
 
@@ -225,7 +225,7 @@ class GpuHudParitySmokeTest {
                 live.hud.state.forcesGrid = true;
                 crowd(live);
                 live.zoom(new Coords(13, 11), 85);
-                shot(live, "14", "14-large-battle-100v100.jpg", HEADER_RIBBON, MINIMAP,
+                shot(live, "14", "14-large-battle-100v100.jpg", HEADER, MINIMAP,
                       top("forces-panel", 20, 132, 630, 693), top("contacts-panel", 1590, 312, 310, 698), CARD,
                       bottom("command-dock", 670, 875, 580, 175));
                 live.hud.state.forcesGrid = false;
@@ -244,7 +244,7 @@ class GpuHudParitySmokeTest {
                 plan(live, board, new Coords(14, 14), true);
                 plan(live, board, new Coords(15, 12), false);
                 live.zoom(new Coords(14, 13), MOCK_HEX);
-                shot(live, "03", "03-waypoint-route.jpg", HEADER_RIBBON, MINIMAP, FORCES_RIBBON,
+                shot(live, "03", "03-waypoint-route.jpg", HEADER, MINIMAP, FORCES_RIBBON,
                       top("contacts-panel", 1590, 312, 310, 506), CARD, PLAN_DOCK);
 
                 // 04: the Atlas walked and its turn ended; Princess moves, the Warhammer is up next (C.5).
@@ -269,7 +269,7 @@ class GpuHudParitySmokeTest {
                 live.draw(10, .1f);
                 awaitPreview(live, board.source, WARHAMMER, status -> turn(status, false, Entity.NONE));
                 live.zoom(new Coords(14, 13), MOCK_HEX);
-                shot(live, "04", "04-opponent-turn.jpg", HEADER_RIBBON, MINIMAP, FORCES_RIBBON,
+                shot(live, "04", "04-opponent-turn.jpg", HEADER, MINIMAP, FORCES_RIBBON,
                       top("contacts-panel", 1590, 312, 310, 506), CARD, bottom("command-dock", 670, 933, 580, 116));
             });
         }
@@ -324,7 +324,7 @@ class GpuHudParitySmokeTest {
                 publish(live, UnaryOperator.identity());
                 live.draw(10, .1f);
                 live.zoom(new Coords(13, 10), 75);
-                shot(live, "15", "15-compact-1280x720.jpg", top("phase-header", 16, 16, 250, 81),
+                shot(live, "15", "15-compact-1280x720.jpg", free("phase-header", 16, 16, 250, 81),
                       top("solution-card", 712, 90, 270, 146), top("minimap", 994, 90, 270, 180),
                       top("forces-panel", 16, 109, Math.min(FORCES_WIDTH, 250), 356),
                       top("weapons-panel", 994, 282, 270, 368),

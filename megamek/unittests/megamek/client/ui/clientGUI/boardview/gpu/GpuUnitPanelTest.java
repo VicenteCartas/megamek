@@ -158,20 +158,19 @@ class GpuUnitPanelTest {
     @Test
     void theSheetFillsTheLeftColumnAboveTheMiniCardAndKeepsClearOfTheDock() throws Exception {
         // Window, display scale, sheet height and dock clearance at 1778 x 1000, 1536 x 864 and 1280 x 720 stages.
-        // The shared HUD margin is 10, the sheet's distance from the dock beside it; normalize the changing phase header
-        // to 84 units (80 when narrow).
-        float[][] stages = { { 1920, 1080, 1.08f, 772, 10, 84 }, { 1920, 1080, 1.25f, 636, 10, 84 },
-              { 1280, 720, 1, 496, 10, 80 } };
+        // The shared HUD margin is 10, the sheet's distance from the dock beside it.
+        float[][] stages = { { 1920, 1080, 1.08f, 868, 10 }, { 1920, 1080, 1.25f, 732, 10 },
+              { 1280, 720, 1, 588, 10 } };
         for (float[] stage : stages) {
             hud.resize((int) stage[0], (int) stage[1], stage[2]);
             show(ATLAS, SheetTab.SYSTEMS, true, GamePhase.FIRING);
-            Rectangle phase = bounds("phase-header");
             Rectangle sheet = bounds("record-sheet");
             Rectangle card = bounds("unit-card");
             Rectangle strip = bounds("forces-panel");
             String size = hud.stage.getWidth() + " x " + hud.stage.getHeight();
-            assertEquals(stage[3], sheet.height + phase.height - stage[5], .5f, "sheet height at " + size);
-            assertEquals(12, phase.y - strip.y - strip.height, .5f, "the strip 12 below the phase header");
+            assertEquals(stage[3], sheet.height, .5f, "sheet height at " + size);
+            assertEquals(GpuHud.Metrics.of(hud.stage.getWidth(), hud.stage.getHeight()).gap(),
+                  hud.stage.getHeight() - strip.y - strip.height, .5f, "the strip at the top");
             assertEquals(44, card.height, .5f, "the mini card while the sheet is open at " + size);
             assertEquals(44, strip.height, .5f, "the forces strip at " + size);
             assertEquals(GpuHud.Metrics.of(hud.stage.getWidth(), hud.stage.getHeight()).grid(), sheet.width, .5f);

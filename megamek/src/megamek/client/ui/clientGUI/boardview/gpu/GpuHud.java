@@ -57,11 +57,16 @@ final class GpuHud implements GpuBoardHud {
     private static final float QUEUE_MIN_WIDTH = 140;
     /**
      * The forces list's width, at most the left column's (the user's request of 2026-10-02: the prototype's column of
-     * 300 left the rows much room to spare). The phase header and the unit card keep the column; the forces grid
-     * keeps its own width.
+     * 300 left the rows much room to spare). The unit card keeps the column; the forces grid keeps its own width.
      */
     static final float FORCES_WIDTH = 250;
     private static final float INITIATIVE_WIDTH = 560;
+    /**
+     * The phase header's greatest share of the window's width, and the least room beside the utilities that keeps it
+     * in their row: its phase line and a short turn order.
+     */
+    private static final float PHASE_SHARE = .6f;
+    private static final float PHASE_MIN = 300;
     /**
      * The side panels fade to {@link #FADED} once the camera moved this long, in seconds, over FADE_OUT seconds, and
      * come back over FADE_IN seconds when it stops.
@@ -306,7 +311,7 @@ final class GpuHud implements GpuBoardHud {
         this.deployConfirm = deployConfirm;
         targetCards = new GpuTargetCards(kit, source, state, contextMenu);
         losPanel = new GpuLosPanel(kit.ui, stage, source, camera);
-        phaseHeader = new GpuPhaseHeader(kit, source, state);
+        phaseHeader = new GpuPhaseHeader(kit);
         GpuInitiativeCard initiativeCard = new GpuInitiativeCard(kit, source, state);
         conditionsCard = new GpuConditionsCard(kit, source, state);
         forces = new GpuForcesPanel(kit, source, state, contextMenu, this::select);
@@ -364,7 +369,9 @@ final class GpuHud implements GpuBoardHud {
               slot(popover, otherUnitCard.overlay()),
               slot(popover, recordSheet.overlay()),
               slot(popover, contextMenu.actor()), slot(popover, dock.confirmation().actor())));
-        phaseSlot = panel(panels, phaseHeader.actor()).top().left().fillX();
+        // Text over the board: it counts as a panel for the labels' placement, but presses pass through it.
+        phaseSlot = slot(panels, phaseHeader.actor()).top().fillX();
+        panelSlots.add(phaseSlot);
         conditionsSlot = panel(panels, conditionsCard.actor()).top().left().fillX();
         forcesSlot = panel(panels, forces.actor()).top().left().fillX();
         queueSlot = panel(panels, deployQueue.actor()).fill();
@@ -1379,8 +1386,7 @@ final class GpuHud implements GpuBoardHud {
         boolean staging = GpuInitiativeCard.staging(shownStatus);
         unitSlot.setVisible(!covered && !staging);
         otherUnitSlot.setVisible(!covered && !staging);
-        // The order card names the phase itself; the phase plate (and its playback speed) and the conditions wait for
-        // the board.
+        // The order card names the phase itself; the phase header and the conditions wait for the board.
         phaseSlot.setVisible(!staging);
         conditionsSlot.setVisible(!staging);
         // The dock keeps its chat footer even when unit commands are unavailable. Deployment has none: the force's
@@ -1420,19 +1426,30 @@ final class GpuHud implements GpuBoardHud {
         float utilityHeight = utilitySlot.getPrefHeight();
         place(utilitySlot, utilityLeft, gap, utilityWidth, utilityHeight);
 
-        // Left column: phase header, forces between it and the unit card. While the unit sheet is open (unit panel
-        // design 3.3) the forces shrink to their strip, the card to its mini form, and the sheet fills the column
-        // between them at the grid's width; it does not move the dock.
-        float phaseHeight = height(phaseSlot);
-        float phaseTop = utilityLeft < m.left() + 2 * gap ? utilityHeight + 2 * gap : gap;
-        // The deployment strip is one line, as wide as its text up to the utilities.
-        float phaseWidth = phaseHeader.slim()
-              ? Math.max(m.left(), Math.min(phaseHeader.stripWidth(), utilityLeft - STACK - gap)) : m.left();
-        place(phaseSlot, gap, phaseTop, phaseWidth, phaseHeight);
+        // Top centre: the phase header, as wide as its turn order needs, at most PHASE_SHARE of the window, between the
+        // columns and clear of the utilities on both sides of the centre (the user's design of 2026-11-14). Where the
+        // utilities leave less than PHASE_MIN beside them, it lies below their row.
+        float phaseLeft = 2 * gap + leftWidth();
+        float phaseRight = width - 2 * gap - rightWidth();
+        float phaseRoom = Math.min(width * PHASE_SHARE, phaseRight - phaseLeft);
+        float besideUtilities = 2 * (utilityLeft - STACK - width / 2);
+        boolean phaseBelow = besideUtilities < PHASE_MIN;
+        if (!phaseBelow) {
+            phaseRight = Math.min(phaseRight, utilityLeft - STACK);
+            phaseRoom = Math.min(Math.min(phaseRoom, besideUtilities), phaseRight - phaseLeft);
+        }
+        float phaseTop = phaseBelow ? utilityHeight + 2 * gap : gap;
+        float phaseWidth = Math.min(phaseRoom, phaseSlot.getPrefWidth());
+        place(phaseSlot, centred(phaseWidth, phaseLeft, phaseRight), phaseTop, phaseWidth, height(phaseSlot));
+        float phaseBottom = shown(phaseSlot) ? phaseTop + phaseSlot.getHeight() : 0;
+
+        // Left column: forces from the top (below the utilities where they reach over it) to the unit card. While the
+        // unit sheet is open (unit panel design 3.3) the forces shrink to their strip, the card to its mini form, and
+        // the sheet fills the column between them at the grid's width; it does not move the dock.
         float cardHeight = height(unitSlot);
         place(unitSlot, gap, height - gap - cardHeight, m.left(), cardHeight);
         float forcesWidth = state.forcesGrid && !sheet ? m.grid() : m.forces();
-        float forcesTop = phaseTop + phaseHeight + STACK;
+        float forcesTop = utilityLeft < m.left() + 2 * gap ? utilityHeight + 2 * gap : gap;
         float forcesBottom = cardHeight > 0 ? height - gap - cardHeight - STACK : height - gap;
         float forcesHeight = sheet ? height(forcesSlot) : forcesBottom - forcesTop;
         // The folded rail is as tall as its units, within the column.
@@ -1562,9 +1579,9 @@ final class GpuHud implements GpuBoardHud {
                   aboveHeight);
         }
 
-        // Top row: the conditions card beside the left column (the sheet's width while it is open), the tactical chip
-        // centred in the room that is left.
-        float conditionsX = gap + Math.max(leftWidth(), phaseHeader.slim() ? phaseSlot.getWidth() : 0) + STACK;
+        // Top row: the conditions card beside the left column (the sheet's width while it is open), below the phase
+        // header where they would meet; the tactical chip centred under the header.
+        float conditionsX = gap + leftWidth() + STACK;
         // A narrow window has no space beside the toolbar; keep the card usable in the middle band below it.
         boolean conditionsBelow = conditionsX + CONDITIONS_WIDTH + STACK > utilityLeft;
         float conditionsRight = conditionsBelow ? bandRight : utilityLeft - STACK;
@@ -1572,15 +1589,22 @@ final class GpuHud implements GpuBoardHud {
         if (!state.conditionsExpanded) {
             conditionsWidth = conditionsCard.stripWidth(conditionsWidth);
         }
-        place(conditionsSlot, conditionsX, conditionsBelow ? rightStart : gap, conditionsWidth, height(conditionsSlot));
-        float chipLeft = Math.max(gap + m.left(), shown(conditionsSlot) ? conditionsX + conditionsWidth : 0) + STACK;
-        float chipRight = utilityLeft - STACK;
+        float conditionsTop = conditionsBelow ? rightStart : gap;
+        if (overlapsHorizontally(phaseSlot, conditionsX, conditionsWidth) && shown(phaseSlot)) {
+            conditionsTop = Math.max(conditionsTop, phaseBottom + STACK);
+        }
+        place(conditionsSlot, conditionsX, conditionsTop, conditionsWidth, height(conditionsSlot));
+        float chipLeft = Math.max(gap + leftWidth(), shown(conditionsSlot) ? conditionsX + conditionsWidth : 0) + STACK;
+        float chipRight = width - gap - rightWidth() - STACK;
         float chipWidth = chipSlot.getPrefWidth();
+        float chipTop = Math.max(gap, phaseBottom + STACK);
         chipSlot.setVisible(chipRight - chipLeft >= chipWidth);
-        place(chipSlot, centred(chipWidth, chipLeft, chipRight), gap, chipWidth, height(chipSlot));
+        place(chipSlot, centred(chipWidth, chipLeft, chipRight), chipTop, chipWidth, height(chipSlot));
         // The north mark stays centred under the chip's place, whether or not the chip has room (G4).
         float northWidth = northSlot.getPrefWidth();
-        place(northSlot, (width - northWidth) / 2, GpuUtilityBar.NORTH_TOP, northWidth, northSlot.getPrefHeight());
+        place(northSlot, (width - northWidth) / 2,
+              Math.max(GpuUtilityBar.NORTH_TOP, chipTop + chipSlot.getPrefHeight() + STACK), northWidth,
+              northSlot.getPrefHeight());
 
         // The Tactical View's overlays: a column at the top right, left of the right column's top panel (the minimap,
         // else the panel that moves up in its place), at the window's right edge while the column is empty. Expanded
@@ -1603,10 +1627,10 @@ final class GpuHud implements GpuBoardHud {
 
         // Panels of the middle area, each below what it would overlap; one without room for its minimum is hidden.
         stack(initiativeSlot, initiativeX, height * INITIATIVE_TOP, initiativeWidth,
-              List.of(conditionsSlot, chipSlot, overlaysSlot));
+              List.of(phaseSlot, conditionsSlot, chipSlot, overlaysSlot));
         if (beside) {
             stack(solutionSlot, width - gap - 2 * m.right() - STACK, SECOND_ROW, m.right(),
-                  List.of(conditionsSlot, chipSlot, overlaysSlot));
+                  List.of(phaseSlot, conditionsSlot, chipSlot, overlaysSlot));
         }
 
         // Overlays: forces overview, centred dialogs and toasts.

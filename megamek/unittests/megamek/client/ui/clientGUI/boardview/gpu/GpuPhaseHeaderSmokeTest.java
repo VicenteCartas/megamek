@@ -29,13 +29,15 @@ import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
+import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
-import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.enums.GamePhase;
 import megamek.common.planetaryConditions.Fog;
@@ -46,10 +48,10 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The G1 components: in the component harness, the phase header and the initiative card beside the hud-v3 shots 01,
- * 02, 04, 14 and 15; in GpuHud's own layout of every component, the three G1 panels inside the window and clear of
- * the other panels at 900 x 600, 1280 x 720 and 1920 x 1080; and the conditions card over a real capture, whose close
- * button runs MegaMek's View-menu item.
+ * The G1 components: in the component harness, the phase header's texts and turn order (shots 02, 04, 14 and 15 and a
+ * long deployment) and the initiative card beside the hud-v3 shot 01; in GpuHud's own layout of every component, the
+ * three G1 panels inside the window and clear of the other panels at 900 x 600, 1280 x 720 and 1920 x 1080; and the
+ * conditions card over a real capture, whose close button runs MegaMek's View-menu item.
  */
 @Tag("on-demand")
 class GpuPhaseHeaderSmokeTest {
@@ -64,7 +66,7 @@ class GpuPhaseHeaderSmokeTest {
     void headerAndInitiativeCardBesideTheMock() {
         GpuHudTestStage.run(hud -> {
             GpuHudState state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
-            GpuPhaseHeader header = new GpuPhaseHeader(hud.kit, null, state);
+            GpuPhaseHeader header = new GpuPhaseHeader(hud.kit);
             GpuInitiativeCard card = new GpuInitiativeCard(hud.kit, null, state);
             GpuConditionsCard conditions = new GpuConditionsCard(hud.kit, null, state);
             try {
@@ -79,7 +81,6 @@ class GpuPhaseHeaderSmokeTest {
 
                 // Shot 01: round 3, the initiative report with the mock's dice; Princess wins, you move first.
                 Pixmap shot = render(hud, state, header, conditions, card, initiative, List.of(), "g1-initiative");
-                hud.compare("g1-header-01", shot, header.actor(), SHOT_01, 20, 20);
                 hud.compare("g1-initiative-card-01", shot, card.actor(), SHOT_01, 680, 216);
                 shot.dispose();
                 Group root = (Group) card.actor();
@@ -111,55 +112,48 @@ class GpuPhaseHeaderSmokeTest {
                 hud.compare("g1-initiative-card-total-01", shot, card.actor(), SHOT_01, 680, 216);
                 shot.dispose();
                 // Shot 02: the local movement turn of the Atlas, first of ten activations.
-                shot = render(hud, state, header, conditions, card, moving, CONDITIONS, "g1-movement");
-                hud.compare("g1-header-02", shot, header.actor(), "02-movement-fire-preview.jpg", 20, 20);
-                shot.dispose();
-                // Shot 04: the opponent's turn names its identified unit; the first activation is done.
-                shot = render(hud, state, header, conditions, card, status(GamePhase.MOVEMENT, false, Entity.NONE,
-                      opponent, 1, List.of()), List.of(), "g1-opponent");
-                hud.compare("g1-header-04", shot, header.actor(), "04-opponent-turn.jpg", 20, 20);
-                shot.dispose();
-                // The playback's speeds at the round line's right outside the local turn, as on the opponent's turn;
-                // the history's speed is pressed.
-                Group head = (Group) header.actor();
-                assertTrue(head.<UiButton>findActor("phase-speed-normal").isChecked(), "1x is the history's speed");
-                state.history.speed(UnitMotion.Speed.DOUBLE);
+                render(hud, state, header, conditions, card, moving, CONDITIONS, "g1-movement").dispose();
+                assertEquals(List.of("ROUND 03", "MOVEMENT", upper("GpuBoard.hud.phase.yourTurn")),
+                      GpuBoardTestUi.texts(header.actor()), "Your turn, without the unit's name");
+                // Shot 04: the opponent's turn names its player, not its unit; the first activation is done.
                 render(hud, state, header, conditions, card, status(GamePhase.MOVEMENT, false, Entity.NONE,
-                      opponent, 1, List.of()), List.of(), "g1-opponent-2x").dispose();
-                assertTrue(head.<UiButton>findActor("phase-speed-double").isChecked(), "2x is pressed");
-                assertEquals("ROUND 03", head.<Label>findActor("phase-round").getText().toString(),
-                      "with room the round reads in full");
-                state.history.speed(UnitMotion.Speed.NORMAL);
-                // Shot 14: the dense ribbon of a 100 v 100 battle, 48 of its 200 activations from the current first
-                // one; then the window that has scrolled on to start eight before activation 21.
+                      opponent, 1, List.of()), List.of(), "g1-opponent").dispose();
+                assertEquals(List.of("ROUND 03", "MOVEMENT",
+                            UiTheme.upper(Messages.getString("GpuBoard.hud.phase.playerTurn", second.playerName()))),
+                      GpuBoardTestUi.texts(header.actor()));
+                // A turn without its player's name is the opponent's.
+                List<GpuBattleStatus.Slot> unnamed = new ArrayList<>(opponent);
+                unnamed.set(1, new GpuBattleStatus.Slot(second.playerId(), "", second.rgb(), ENEMY, TIMBER_WOLF));
+                render(hud, state, header, conditions, card, status(GamePhase.MOVEMENT, false, Entity.NONE,
+                      unnamed, 1, List.of()), List.of(), "g1-opponent-unnamed").dispose();
+                assertTrue(GpuBoardTestUi.texts(header.actor()).contains(upper("GpuBoard.hud.phase.opponentTurn")));
+                // Shot 14: the turn order of a 100 v 100 battle, 200 activations that scroll to the current one
+                // and fade at the sides beyond the room: the first, one in the middle and the last.
                 List<GpuBattleStatus.Slot> battle = new ArrayList<>();
                 for (int turn = 0; turn < 200; turn++) {
                     battle.add(turns.get(turn % turns.size()));
                 }
-                shot = render(hud, state, header, conditions, card, status(GamePhase.MOVEMENT, true,
-                      GpuHudFixtures.ATLAS, battle, 0, List.of()), List.of(), "g1-large-battle");
-                hud.compare("g1-header-14", shot, header.actor(), "14-large-battle-100v100.jpg", 20, 20);
-                shot.dispose();
-                render(hud, state, header, conditions, card, status(GamePhase.MOVEMENT, true, GpuHudFixtures.ATLAS,
-                      battle, 20, List.of()), List.of(), "g1-large-battle-turn-21").dispose();
+                for (int current : new int[] { 0, 100, 199 }) {
+                    render(hud, state, header, conditions, card, status(GamePhase.MOVEMENT, current % 2 == 0,
+                          GpuHudFixtures.ATLAS, battle, current, List.of()), List.of(),
+                          "g1-large-battle-turn-" + (current + 1)).dispose();
+                }
+                // A long deployment: 146 of the local player's turns after one of Princess's.
+                List<GpuBattleStatus.Slot> deployment = new ArrayList<>(List.of(turns.get(1)));
+                for (int turn = 0; turn < 146; turn++) {
+                    deployment.add(turns.get(0));
+                }
+                render(hud, state, header, conditions, card, new GpuBattleStatus.Snapshot(0, GamePhase.DEPLOYMENT,
+                      false, moving.localPlayerId(), Entity.NONE, deployment, 0, moving.units(), List.of(), false),
+                      List.of(), "g1-deployment").dispose();
+                assertEquals(List.of("DEPLOYMENT", UiTheme.upper(Messages.getString("GpuBoard.hud.phase.playerTurn",
+                      turns.get(1).playerName()))), GpuBoardTestUi.texts(header.actor()), "No round before the first");
                 // Shot 15 at 1280 x 720: declaring attacks with five own units pending, narrow metrics.
                 hud.size(1280, 720);
-                shot = render(hud, state, header, conditions, card, status(GamePhase.FIRING, true,
-                      GpuHudFixtures.ATLAS, turns, 0, List.of()), List.of(), "g1-firing-1280x720");
-                hud.compare("g1-header-15", shot, header.actor(), "15-compact-1280x720.jpg", 16, 16);
-                shot.dispose();
-                // The round text follows the line's width of the frame before: a second frame settles it. The speeds
-                // show outside the local turn only, so the opponent's turn fills the narrow line.
-                render(hud, state, header, conditions, card, status(GamePhase.FIRING, false, Entity.NONE,
-                      turns, 0, List.of()), List.of(), "g1-firing-1280x720-opponent").dispose();
-                render(hud, state, header, conditions, card, status(GamePhase.FIRING, false, Entity.NONE,
-                      turns, 0, List.of()), List.of(), "g1-firing-1280x720-opponent").dispose();
-                Rectangle frame = GpuHudTestStage.bounds(header.actor());
-                Rectangle last = GpuHudTestStage.bounds(((Group) header.actor()).findActor("phase-speed-instant"));
-                assertTrue(last.x + last.width <= frame.x + frame.width - 2, "The speeds fit the narrow header");
-                Label round = ((Group) header.actor()).findActor("phase-round");
-                assertEquals("03", round.getText().toString(), "without room only the round's number");
-                assertTrue(round.getPrefWidth() <= round.getWidth() + .5f, "which fits");
+                render(hud, state, header, conditions, card, status(GamePhase.FIRING, true,
+                      GpuHudFixtures.ATLAS, turns, 0, List.of()), List.of(), "g1-firing-1280x720").dispose();
+                assertEquals(List.of("ROUND 03", upper("GpuBoard.hud.phase.firing"),
+                      upper("GpuBoard.hud.phase.yourTurn")), GpuBoardTestUi.texts(header.actor()));
             } finally {
                 header.dispose();
                 card.dispose();
@@ -319,6 +313,11 @@ class GpuPhaseHeaderSmokeTest {
         }
     }
 
+    /** A message's text in capitals, as the header shows it. */
+    private static String upper(String key) {
+        return UiTheme.upper(Messages.getString(key));
+    }
+
     /** The mock's two sides of shot 01 (2 + 1 = 3 against 5 + 5 = 10), with the given kept dice. */
     private static List<GpuBattleStatus.InitiativeSide> sides(List<Integer> own, List<Integer> enemy) {
         return List.of(new GpuBattleStatus.InitiativeSide("Player", PlayerColour.BLUE.getColour().getRGB(), OWN, 3,
@@ -374,8 +373,8 @@ class GpuPhaseHeaderSmokeTest {
 
     /**
      * Shows one status (and condition lines, which also switch the conditions card on) in the harness: each
-     * component updates, then goes to its slot's anchor (plan C.1): the header at the top of the left column, the
-     * conditions card right of it, the initiative card centred at 20 % of the height. Twice, so that the components
+     * component updates, then goes to its slot's anchor: the header at the top centre, the conditions card beside the
+     * left column, the initiative card centred at 20 % of the height. Twice, so that the components
      * can use the width of the previous layout, as they do from one frame to the next. Draws and captures {name}.png.
      */
     private static Pixmap render(GpuHudTestStage hud, GpuHudState state, GpuPhaseHeader header,
@@ -389,7 +388,10 @@ class GpuPhaseHeaderSmokeTest {
             conditions.update(inputs);
             card.update(inputs);
             hud.window.clearChildren();
-            place(hud, header.actor(), m.gap(), m.gap(), m.left());
+            // Top centre, as wide as its turn order needs within the room between the columns.
+            float room = Math.min(m.width() * .6f, m.width() - 4 * m.gap() - m.left() - m.right());
+            float width = Math.min(room, ((Table) header.actor()).getPrefWidth());
+            place(hud, header.actor(), (m.width() - width) / 2, m.gap(), width);
             place(hud, conditions.actor(), m.gap() + m.left() + 12, m.gap(), 260);
             place(hud, card.actor(), (m.width() - 560) / 2, m.height() * .2f, 560);
         }

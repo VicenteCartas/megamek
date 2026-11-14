@@ -608,8 +608,8 @@ final class GpuCommandDock implements GpuHud.Component {
             }
             case PLAYBACK -> {
                 row1.add(previous).width(SQUARE).height(PLAIN);
-                // The play button takes the rest (.b.wide: flex 1); the speeds live in the phase header (the user's
-                // decision of 2026-10-03).
+                // The play button takes the rest (.b.wide: flex 1); the speeds live in the utility row (the user's
+                // decision of 2026-11-14).
                 row1.add(play).growX().height(PLAIN);
                 row1.add(next).width(SQUARE).height(PLAIN);
                 row1.add(counter).minWidth(0).height(PLAIN).padLeft(GAP + 6).padRight(6);

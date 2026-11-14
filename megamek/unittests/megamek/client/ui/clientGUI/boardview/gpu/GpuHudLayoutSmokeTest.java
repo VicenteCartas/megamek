@@ -129,17 +129,32 @@ class GpuHudLayoutSmokeTest {
         shown.forEach(actor -> slots.put(actor.getName(), GpuHudTestStage.bounds(actor)));
         if (!layout.overlays()) {
             Rectangle phase = slots.get("phase-header"), utilities = slots.get("utility-bar"), minimap = slots.get("minimap");
-            assertEquals(metrics.gap(), phase.x, .5f);
-            float phaseTop = utilities.x < metrics.left() + 2 * metrics.gap()
+            // The phase header: at the top gap, or below the utilities where they leave it too little room beside them
+            // (the overlap checks below keep it clear of them); between the columns, centred in the window as far as
+            // they allow, and no wider than 60 % of the window.
+            float left = layout.grid() ? metrics.grid() : metrics.left();
+            float right = hud.state.logOpen() ? metrics.log() : metrics.right();
+            float bandLeft = 2 * metrics.gap() + left;
+            float bandRight = width - 2 * metrics.gap() - right;
+            float phaseTop = height - phase.y - phase.height;
+            assertTrue(Math.abs(phaseTop - metrics.gap()) < .5f
+                  || Math.abs(phaseTop - (utilities.height + 2 * metrics.gap())) < .5f, "The phase header's top in " + name);
+            assertTrue(phase.x >= bandLeft - .5f && phase.x + phase.width <= bandRight + .5f, "between the columns");
+            assertTrue(Math.abs(phase.x + phase.width / 2 - width / 2f) < .5f || Math.abs(phase.x - bandLeft) < .5f,
+                  "centred in the window where the columns allow, in " + name);
+            assertTrue(phase.width <= width * .6f + .5f, "within 60 % of the window in " + name);
+            // The forces start at the top, below the utilities where they reach over the left column.
+            Rectangle forcesArea = slots.get("forces-panel");
+            float forcesTop = utilities.x < metrics.left() + 2 * metrics.gap()
                   ? utilities.height + 2 * metrics.gap() : metrics.gap();
-            assertEquals(phaseTop, height - phase.y - phase.height, .5f);
+            assertEquals(forcesTop, height - forcesArea.y - forcesArea.height, .5f, "The forces at the top in " + name);
             assertEquals(metrics.gap(), height - utilities.y - utilities.height, .5f);
             assertEquals(metrics.gap(), utilities.y - minimap.y - minimap.height, .5f);
             Rectangle conditions = slots.get("conditions-card");
             if (conditions != null) {
                 assertEquals(260, conditions.width, .5f, "Reference windows keep the conditions card usable");
                 if (conditions.x + conditions.width + 12 > utilities.x) {
-                    assertEquals(metrics.gap(), utilities.y - conditions.y - conditions.height, .5f,
+                    assertTrue(utilities.y - conditions.y - conditions.height >= metrics.gap() - .5f,
                           "Conditions move below the toolbar when there is no room beside it");
                 }
             }
@@ -200,7 +215,7 @@ class GpuHudLayoutSmokeTest {
             }
         }
         // The forces panel is as tall as its content (the user's rule of 2026-10-02): a long list ends 12 above the
-        // unit card, a short one keeps its own height under the phase header.
+        // unit card, a short one keeps its own height at the top.
         Rectangle forces = slots.get("forces-panel");
         Rectangle card = slots.get("unit-card");
         if (!layout.overlays() && forces != null && card != null) {
@@ -218,8 +233,8 @@ class GpuHudLayoutSmokeTest {
     private static float[] size(String name, Layout layout, GpuHud.Metrics metrics) {
         boolean moving = layout.phase() == GamePhase.MOVEMENT;
         return switch (name) {
-            // Header: 84 without the movement ribbon and 100 with it; 4 less with the narrow phase name (shot 15: 80).
-            case "phase-header" -> new float[] { metrics.left(), (moving ? 100 : 84) - (metrics.narrow() ? 4 : 0) };
+            // Header: its three lines of text, the turn order as wide as twelve turns at their widest.
+            case "phase-header" -> new float[] { 417, 60 };
             // Unit card: 222 in shot 02, 252 with a chip line, which a window of 800 or less hides (226 in shot 15).
             case "unit-card" -> new float[] { metrics.left(), metrics.lowHeight() ? 226 : moving ? 222 : 252 };
             // Dock heights measured per variant: movement 174, weapons 158, initiative 116.
