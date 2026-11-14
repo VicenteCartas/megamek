@@ -301,15 +301,20 @@ final class GpuUnitShader extends DefaultShader {
     public void render(Renderable part, Attributes attributes) {
         var paint = attributes.get(GpuUnitCamouflage.Paint.class, GpuUnitCamouflage.Paint.TYPE);
         var damage = attributes.get(UnitDamageDisplay.Overlay.class, UnitDamageDisplay.Overlay.TYPE);
+        var diffuse = attributes.get(TextureAttribute.class, TextureAttribute.Diffuse);
+        // A sampler the draw does not read still holds a texture on its unit (GpuModelMaterial#spare).
+        var spare = GpuModelMaterial.spare(attributes);
+        int spareUnit = spare == null ? -1 : context.textureBinder.bind(spare);
         set(damageEnabled, damage == null ? 0f
               : part.material.id.endsWith(UnitDamageDisplay.WRECKED_SUFFIX) ? 2f : 1f);
         if (damage != null) {
             set(damageOpacity, damage.opacity);
             set(damageTexture, context.textureBinder.bind(damage.texture));
             set(damageTransform, damage.cos, damage.sin, damage.offsetU, damage.offsetV);
+        } else if (spareUnit >= 0) {
+            set(damageTexture, spareUnit);
         }
         set(rotation, paint == null ? 1 : paint.cos, paint == null ? 0 : paint.sin);
-        var diffuse = attributes.get(TextureAttribute.class, TextureAttribute.Diffuse);
         boolean camo = paint != null && diffuse != null;
         set(camoEnabled, camo ? 1f : 0f);
         if (paint != null) {
@@ -324,11 +329,15 @@ final class GpuUnitShader extends DefaultShader {
         set(markerEnabled, marker ? 1f : 0f);
         if (marker) {
             set(markerTexture, context.textureBinder.bind(paint.marker));
+        } else if (spareUnit >= 0) {
+            set(markerTexture, spareUnit);
         }
         boolean plate = paint != null && paint.plate != null;
         set(paintPlateEnabled, plate ? 1f : 0f);
         if (plate) {
             set(paintPlate, context.textureBinder.bind(paint.plate));
+        } else if (spareUnit >= 0) {
+            set(paintPlate, spareUnit);
         }
         float shown = part.userData instanceof Shown unit ? unit.opacity : 1;
         set(opacity, shown);

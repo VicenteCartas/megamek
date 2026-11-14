@@ -245,7 +245,14 @@ final class GpuGroundDamage implements Disposable {
 
     /** Even a disabled array sampler needs a binding distinct from the shader's 2D samplers. */
     TextureArray binding() {
-        if (texture == null) { texture = new TextureArray(new TileData(1)); capacity = 1; }
+        if (texture == null) {
+            // A draw asks for it with its other arrays already on their units, and libGDX ends a load with the active
+            // unit's array unbound: that unit keeps the array the draw put there.
+            int bound = org.lwjgl.opengl.GL11C.glGetInteger(GL30.GL_TEXTURE_BINDING_2D_ARRAY);
+            texture = new TextureArray(new TileData(1));
+            capacity = 1;
+            Gdx.gl.glBindTexture(GL30.GL_TEXTURE_2D_ARRAY, bound);
+        }
         return texture;
     }
     float width() { return worldWidth; }

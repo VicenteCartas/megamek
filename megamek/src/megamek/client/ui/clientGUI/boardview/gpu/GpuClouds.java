@@ -58,6 +58,9 @@ final class GpuClouds implements Disposable {
             throw failure;
         }
         shadow.getColorBufferTexture().setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+        // Its levels exist from the start: under a clear sky nothing draws it (#update), and a texture that asks for
+        // levels it lacks cannot be sampled, which macOS's driver reports of every unit it sits on.
+        Gdx.gl.glGenerateMipmap(GL20.GL_TEXTURE_2D);
         attribute = new GpuCloudShadow(shadow.getColorBufferTexture(), projection);
     }
 

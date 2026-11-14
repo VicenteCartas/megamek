@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.Arrays;
 
+import com.badlogic.gdx.graphics.GLTexture;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
@@ -246,8 +247,9 @@ final class GpuModelMaterial extends Attribute {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 var surface = attributes.get(GpuModelMaterial.class, TYPE);
-                if (surface.map == null) { target.set(id, 0); }
-                else { target.set(id, surface.map); }
+                var map = surface.map == null ? spare(attributes) : surface.map;
+                if (map == null) { target.set(id, 0); }
+                else { target.set(id, map); }
             }
         });
         // A recolourable model's shared mesh drawn one by one (tilted or faded placements, hover copies, combat scars, the
@@ -272,6 +274,18 @@ final class GpuModelMaterial extends Attribute {
                 target.program.setUniform3fv(target.loc(id), linear, 0, linear.length);
             }
         });
+    }
+
+    /**
+     * A texture the draw already holds, for a sampler it does not read: that sampler's unit must still hold one (the
+     * macOS driver reports a sampler whose unit holds none). The part's own, else the cloud shadow's, which every lit
+     * draw has; null for a draw with neither.
+     */
+    static GLTexture spare(Attributes attributes) {
+        var diffuse = attributes.get(TextureAttribute.class, TextureAttribute.Diffuse);
+        if (diffuse != null) { return diffuse.textureDescription.texture; }
+        var clouds = GpuEnvironmentLighting.cloudShadow(attributes);
+        return clouds == null ? null : clouds.texture;
     }
 
     @Override
