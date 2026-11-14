@@ -75,7 +75,8 @@ import megamek.logging.MMLogger;
  * <ul>
  *   <li>{@link #generateFormation(Parameters, int, int, boolean)} (and its overloads) — builds a list of
  *       {@link MekSummary} units that satisfy the formation's rules, sampled from a {@link UnitTable}.</li>
- *   <li>{@link #qualifies(List)} — tests whether an existing list of units already meets the formation's rules.</li>
+ *   <li>{@link #qualifies(List)} — tests whether an existing list of units already meets the formation's rules, and
+ *       {@link #qualify(List)} tells requirement by requirement how they meet them.</li>
  * </ul>
  *
  * @author Neoancient
@@ -1440,75 +1441,114 @@ public class FormationType {
      * @return Whether the list of units meets the qualifications for this formation.
      */
     public boolean qualifies(List<MekSummary> units) {
-        if (units.stream().anyMatch(ms -> !isAllowedUnitType(ModelRecord.parseUnitType(ms.getUnitType())))) {
-            return false;
+        return qualify(units).qualifies();
+    }
+
+    /**
+     * Measures a list of units against the formation type requirement by requirement: which units meet each, and which
+     * requirements they fall short of. Note that unit roles are not available for all units; the result tells when a
+     * shortfall could be down to that.
+     *
+     * @param units A list of units to test
+     *
+     * @return How the units meet each of this formation's requirements
+     */
+    public FormationQualification qualify(List<MekSummary> units) {
+        List<FormationQualification.Requirement> requirements = new ArrayList<>();
+        List<MekSummary> allowed = units.stream()
+              .filter(ms -> isAllowedUnitType(ModelRecord.parseUnitType(ms.getUnitType())))
+              .toList();
+        requirements.add(everyUnit(FormationQualification.Kind.UNIT_TYPE, "Unit type", units, allowed));
+        List<MekSummary> weighed = units.stream()
+              .filter(ms -> ms.getWeightClass() >= minWeightClass && ms.getWeightClass() <= maxWeightClass)
+              .toList();
+        boolean restricted = minWeightClass > EntityWeightClass.WEIGHT_ULTRA_LIGHT
+              || maxWeightClass < EntityWeightClass.WEIGHT_COLOSSAL;
+        if (restricted || weighed.size() < units.size()) {
+            String range = EntityWeightClass.getClassName(Math.max(minWeightClass, EntityWeightClass.WEIGHT_LIGHT))
+                  + "-"
+                  + EntityWeightClass.getClassName(Math.min(maxWeightClass, EntityWeightClass.WEIGHT_ASSAULT));
+            requirements.add(everyUnit(FormationQualification.Kind.WEIGHT_CLASS, range, units, weighed));
         }
-        if (!idealRole.equals(UnitRole.UNDETERMINED)) {
-            if (units.stream().allMatch(ms -> ms.getRole() == idealRole)) {
-                return true;
-            }
+        List<MekSummary> main = units.stream().filter(mainCriteria).toList();
+        if (mainDescription != null || main.size() < units.size()) {
+            requirements.add(everyUnit(FormationQualification.Kind.MAIN,
+                  mainDescription == null ? name : mainDescription, units, main));
         }
-        for (MekSummary ms : units) {
-            if (!mainCriteria.test(ms) ||
-                  ms.getWeightClass() < minWeightClass ||
-                  ms.getWeightClass() > maxWeightClass) {
-                return false;
-            }
+        int[] counts = new int[otherCriteria.size()];
+        List<List<MekSummary>> matches = new ArrayList<>();
+        for (int i = 0; i < otherCriteria.size(); i++) {
+            Constraint constraint = otherCriteria.get(i);
+            matches.add(units.stream().filter(constraint::matches).toList());
+            counts[i] = constraint.getMinimum(units.size());
         }
         for (int i = 0; i < otherCriteria.size(); i++) {
-            final Constraint c = otherCriteria.get(i);
-            if (c.isPairedWithPrevious()) {
-                continue;
+            Constraint constraint = otherCriteria.get(i);
+            boolean met = matches.get(i).size() >= counts[i];
+            // Either of an "or" pair meets both
+            if (constraint.isPairedWithNext() && i + 1 < otherCriteria.size()) {
+                met |= matches.get(i + 1).size() >= counts[i + 1];
+            } else if (constraint.isPairedWithPrevious() && i > 0) {
+                met |= matches.get(i - 1).size() >= counts[i - 1];
             }
-            long matches = units.stream().filter(c::matches).count();
-            if (matches < c.getMinimum(units.size())) {
-                if (c.isPairedWithNext() && i + 1 < otherCriteria.size()) {
-                    // The pair is satisfied only if the alternative also meets its minimum.
-                    final Constraint alternative = otherCriteria.get(i + 1);
-                    long altMatches = units.stream().filter(alternative::matches).count();
-                    if (altMatches < alternative.getMinimum(units.size())) {
-                        return false;
-                    }
-                    i++;
-                } else {
-                    return false;
-                }
-            }
+            requirements.add(new FormationQualification.Requirement(FormationQualification.Kind.CONSTRAINT,
+                  constraint.getDescription(), counts[i], matches.get(i), met, constraint.isPairedWithPrevious()));
         }
         if (groupingCriteria != null) {
-            /*
-             * First group by chassis, then test whether each group fulfills the
-             * requirement.
-             * If not, regroup by name.
-             */
-            List<MekSummary> groupedUnits = units.stream()
-                  .filter(ms -> groupingCriteria.appliesTo(ModelRecord.parseUnitType(ms.getUnitType())))
-                  .toList();
-            if (!groupedUnits.isEmpty()) {
-                Map<String, List<MekSummary>> groups = groupedUnits.stream()
-                      .collect(Collectors.groupingBy(MekSummary::getChassis));
-                GROUP_LOOP:
-                for (List<MekSummary> group : groups.values()) {
-                    for (int i = 0; i < group.size() - 1; i++) {
-                        for (int j = i + 1; j < group.size(); j++) {
-                            if (!groupingCriteria.matches(group.get(i), group.get(j))) {
-                                groups = groupedUnits.stream().collect(Collectors.groupingBy(MekSummary::getName));
-                                break GROUP_LOOP;
-                            }
-                        }
+            requirements.add(grouping(units));
+        }
+        boolean ideal = !idealRole.equals(UnitRole.UNDETERMINED)
+              && units.stream().allMatch(ms -> ms.getRole() == idealRole);
+        List<MekSummary> unknownRoles = units.stream()
+              .filter(ms -> ms.getRole() == null || ms.getRole() == UnitRole.UNDETERMINED)
+              .toList();
+        return new FormationQualification(name, requirements,
+              idealRole.equals(UnitRole.UNDETERMINED) ? null : idealRole, ideal, unknownRoles);
+    }
+
+    private static FormationQualification.Requirement everyUnit(FormationQualification.Kind kind,
+          String description, List<MekSummary> units, List<MekSummary> matching) {
+        return new FormationQualification.Requirement(kind, description, units.size(), matching,
+              matching.size() == units.size(), false);
+    }
+
+    /**
+     * How the units make up the groups the grouping criteria ask for. They're first grouped by chassis; if any of
+     * those groups doesn't hold together, by name.
+     */
+    private FormationQualification.Requirement grouping(List<MekSummary> units) {
+        List<MekSummary> groupedUnits = units.stream()
+              .filter(ms -> groupingCriteria.appliesTo(ModelRecord.parseUnitType(ms.getUnitType())))
+              .toList();
+        if (groupedUnits.isEmpty()) {
+            return new FormationQualification.Requirement(FormationQualification.Kind.GROUPING,
+                  groupingCriteria.getDescription(), 0, List.of(), true, false);
+        }
+        Map<String, List<MekSummary>> groups = groupedUnits.stream()
+              .collect(Collectors.groupingBy(MekSummary::getChassis));
+        GROUP_LOOP:
+        for (List<MekSummary> group : groups.values()) {
+            for (int i = 0; i < group.size() - 1; i++) {
+                for (int j = i + 1; j < group.size(); j++) {
+                    if (!groupingCriteria.matches(group.get(i), group.get(j))) {
+                        groups = groupedUnits.stream().collect(Collectors.groupingBy(MekSummary::getName));
+                        break GROUP_LOOP;
                     }
                 }
-                int groupSize = Math.min(groupingCriteria.getGroupSize(), groupedUnits.size());
-                int numGroups = Math.min(groupingCriteria.getNumGroups(), groupedUnits.size() / groupSize);
-                /* Allow for the possibility that two or more groups may be identical */
-                int groupCount = 0;
-                for (List<MekSummary> g : groups.values()) {
-                    groupCount += g.size() / groupSize;
-                }
-                return groupCount >= numGroups;
             }
         }
-        return true;
+        int groupSize = Math.min(groupingCriteria.getGroupSize(), groupedUnits.size());
+        int numGroups = Math.min(groupingCriteria.getNumGroups(), groupedUnits.size() / groupSize);
+        /* Allow for the possibility that two or more groups may be identical */
+        int groupCount = 0;
+        List<MekSummary> grouped = new ArrayList<>();
+        for (List<MekSummary> g : groups.values()) {
+            int whole = g.size() / groupSize;
+            groupCount += whole;
+            grouped.addAll(g.subList(0, whole * groupSize));
+        }
+        return new FormationQualification.Requirement(FormationQualification.Kind.GROUPING,
+              groupingCriteria.getDescription(), numGroups * groupSize, grouped, groupCount >= numGroups, false);
     }
 
     /**
