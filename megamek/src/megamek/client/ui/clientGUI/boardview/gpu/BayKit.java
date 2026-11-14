@@ -46,7 +46,8 @@ final class BayKit {
                 HabitatKit.Fittings fittings, boolean varyBays, KitDoors.Style largeDoor) { }
 
     /**
-     * A flat surface over the piece: a board material, {@code repeat} units a repeat on the board's axes, at a height per
+     * A flat surface over the piece: a board material, {@code repeat} units a repeat on the board's axes (a flat roof's
+     * along the building, {@link #module}), at a height per
      * level of detail (the last for any further), kept {@code inset} off the walls; with {@code underlay} (a glass roof),
      * a planted bed just under it, so the glass shows a greenhouse rather than the ground down a seam; with
      * {@code aviationLights} (a roof), aviation obstruction lights on its convex corners ({@link GeneratedKit#lights}).
@@ -184,7 +185,8 @@ final class BayKit {
         Map<String, Float> boardUVs = new HashMap<>();
         for (Slab slab : new Slab[] { spec.roof(), spec.floors() }) { boardUVs.put(board(slab.material()), (float) slab.repeat()); }
         boardUVs.put(board(spec.floors().material()) + GeneratedMesh.BUILDING_FLOOR, (float) spec.floors().repeat());
-        boardUVs.put(board(deck(spec.roof())), (float) spec.roof().repeat());
+        // A flat roof's deck along the building: each part carries its way, which the vertex stage maps (module).
+        boardUVs.put(board(deck(spec.roof())), -(float) spec.roof().repeat());
         if (spec.sidewalk() != null) { boardUVs.put(board(spec.sidewalk().material()), (float) spec.sidewalk().repeat()); }
         // With fittings, each roof module comes once per layout: roof roles numbered on, each naming its module and layout.
         Map<String, String> modules = new LinkedHashMap<>();
@@ -264,10 +266,12 @@ final class BayKit {
                   halfLength));
             if (lit) { GeneratedKit.lights(result, "-notch-" + notch, notched, facet, deck, lod); }
         }
-        // A vault's corner linked both ways, where the hexes round it are one building: no valley (ConnectedKit#CROWN).
-        if (role.startsWith("roof") && spec.roof().vault() != null && !square && piece.direction() != null && piece.walls().isEmpty()
-              && Integer.bitCount(KitOutline.links(piece)) == 2) {
-            result.put("-crown", crown(spec.roof(), piece, lod, spec.roof().height(lod) - .02));
+        // A roof's corner linked both ways, where the hexes round it are one building (ConnectedKit#CROWN): a vault's lies
+        // level there, no valley; a flat deck runs on the board's axes there, as no one run of the building does.
+        if (role.startsWith("roof") && !square && (spec.roof().vault() != null || !seamed)
+              && piece.direction() != null && piece.walls().isEmpty() && Integer.bitCount(KitOutline.links(piece)) == 2) {
+            result.put("-crown", spec.roof().vault() != null ? crown(spec.roof(), piece, lod, spec.roof().height(lod) - .02)
+                  : module(spec, modelled, role, piece, 0, lod, square, footprintScale, layout, halfLength, true));
         }
         // A storey's other junctions at the corner, held by its corner piece linked both ways (ConnectedKit places them).
         List<Run> runs = spec.modules().get(role);
@@ -303,12 +307,18 @@ final class BayKit {
               KitOutline.mitre(at, normal(wall.p(), wall.q()), KitOutline.partnerNormal(junction, corner), ends ? wall.p() : wall.q())));
     }
 
-    /**
-     * One piece of a module: its walls' runs (and sidewalk), a roof's seams, its floor or roof slab and a roof's fittings
-     * of {@code layout} ({@code null}: none), cut to its corner; {@code closed}, the links a roof closes.
-     */
     private static GeneratedMesh module(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece, int closed,
           int lod, boolean square, float footprintScale, Map<String, List<double[]>> layout, double halfLength) {
+        return module(spec, modelled, role, piece, closed, lod, square, footprintScale, layout, halfLength, false);
+    }
+
+    /**
+     * One piece of a module: its walls' runs (and sidewalk), a roof's seams, its floor or roof slab and a roof's fittings
+     * of {@code layout} ({@code null}: none), cut to its corner; {@code closed}, the links a roof closes. A flat roof's
+     * deck runs along the building ({@link #barrels}), or on the board's axes in a {@code crown}.
+     */
+    private static GeneratedMesh module(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece, int closed,
+          int lod, boolean square, float footprintScale, Map<String, List<double[]>> layout, double halfLength, boolean crown) {
         boolean ground = role.startsWith("base"), top = role.startsWith("roof"), cap = piece.tags().endsWith("-cap");
         List<Run> runs = spec.modules().get(role);
         Run run = runs.get(Math.min(lod, runs.size() - 1));
@@ -352,6 +362,8 @@ final class BayKit {
         double inset = slab.inset();
         // Seams part a roof's modules: each module's slab textured along it, not on the board's axes.
         double[] along = seamed ? axis(square, piece) : null;
+        // Any other roof's deck runs along the building, as a real roof's courses follow its eaves: each run on its part.
+        List<Barrel> courses = top && !seamed && !crown ? barrels(square, piece) : null;
         for (var polygon : piece.polygons()) {
             for (var part : inset > 0 ? KitOutline.inset(polygon, edges, inset) : List.of(polygon)) {
                 // The authored rim has a horizontal lip at this height; keep the deck just underneath it.
@@ -362,8 +374,15 @@ final class BayKit {
                 }
                 if (along != null) {
                     flat(result, top ? deck(slab) : slab.material(), part, height, slab.repeat(), along);
+                } else if (courses != null) {
+                    for (Barrel barrel : courses) {
+                        var own = barrel.within().isEmpty() ? part : KitOutline.clipped(part, barrel.within());
+                        if (!own.isEmpty()) { flat(result, board(deck(slab)), own, height, slab.repeat(), barrel.axis(), true); }
+                    }
+                } else if (top) {
+                    flat(result, board(deck(slab)), part, height, slab.repeat(), NO_WAY, true);
                 } else {
-                    flat(result, top ? board(deck(slab)) : board(slab.material()) + GeneratedMesh.BUILDING_FLOOR, part, height, slab.repeat(), null);
+                    flat(result, board(slab.material()) + GeneratedMesh.BUILDING_FLOOR, part, height, slab.repeat(), null);
                 }
                 if (top) { result.slab(GeneratedMesh.BUILDING_BODY, part, height - 1.2, height, false); }
                 // A glass roof's underlay: the biodome's planted bed, which the sun lights through the glass.
@@ -385,6 +404,9 @@ final class BayKit {
 
     /** The dark of a module's inside, as vertex colour on the building body. */
     private static final float DARK = .17f;
+
+    /** A crown's deck carries no way, where no one run of the building lies: the vertex stage keeps the board's axes. */
+    private static final double[] NO_WAY = { 0, 0 };
 
     /**
      * The piece a rounded corner's facet takes ({@code null}: bays, as any wall): the run's {@code round}, or its
@@ -1213,13 +1235,20 @@ final class BayKit {
         result.polygon(surface.material(), nx * out[0] + ny * out[1] + nz * out[2] >= 0 ? vertices : vertices.reversed());
     }
 
+    private static void flat(GeneratedMesh result, String material, List<double[]> polygon, double z, double repeat,
+          double[] along) {
+        flat(result, material, polygon, z, repeat, along, false);
+    }
+
     /**
      * An upward polygon: with {@code along} null, on the board's texture axes (a {@link GeneratedMesh#BOARD_UV} part)
      * about {@code repeat} units a repeat, whole repeats per hex column across and per half hex up, so it continues across
-     * every hexside; else {@code repeat} units a repeat along {@code along} from the hex's centre.
+     * every hexside; else {@code repeat} units a repeat along {@code along} from the hex's centre, or with
+     * {@code carried} its UVs carry {@code along} itself, which the vertex stage maps along the board (a negative
+     * {@link GpuModelMaterial#boardUV}).
      */
     private static void flat(GeneratedMesh result, String material, List<double[]> polygon, double z, double repeat,
-          double[] along) {
+          double[] along, boolean carried) {
         double area = 0;
         for (int i = 0; i < polygon.size(); i++) {
             double[] a = polygon.get(i), b = polygon.get((i + 1) % polygon.size());
@@ -1229,8 +1258,9 @@ final class BayKit {
         List<float[]> vertices = new ArrayList<>();
         for (int i = 0; i < polygon.size(); i++) {
             double[] point = polygon.get(area > 0 ? i : polygon.size() - 1 - i);
-            double u = along == null ? point[0] * across / (1.5 * R) : (point[0] * along[0] + point[1] * along[1]) / repeat;
-            double v = along == null ? -point[1] * up / H : -(point[1] * along[0] - point[0] * along[1]) / repeat;
+            double u = along == null ? point[0] * across / (1.5 * R)
+                  : carried ? along[0] : (point[0] * along[0] + point[1] * along[1]) / repeat;
+            double v = along == null ? -point[1] * up / H : carried ? along[1] : -(point[1] * along[0] - point[0] * along[1]) / repeat;
             vertices.add(new float[] { (float) point[0], (float) point[1], (float) z, 0, 0, 1, 1, 1, 1, 1, (float) u, (float) v });
         }
         result.polygon(material, vertices);

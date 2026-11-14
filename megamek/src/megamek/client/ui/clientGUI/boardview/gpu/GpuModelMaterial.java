@@ -48,8 +48,9 @@ final class GpuModelMaterial extends Attribute {
     static Texture fadeGlass;
     static float fadeSide;
     /**
-     * Units a texture repeat along the board's axes (RigidGlb.Data#boardUVs), 0 for the authored UVs: the vertex stage
-     * maps every texture from the board position (GpuUnitShader#linearVertex), so turned and repeated pieces join.
+     * Units a texture repeat along the board's axes (RigidGlb.Data#boardUVs), negative along the way each part carries
+     * in its UVs (a roof's courses, BayKit), 0 for the authored UVs: the vertex stage maps every texture from the board
+     * position (GpuUnitShader#linearVertex), so turned and repeated pieces join.
      */
     final float boardUV;
 

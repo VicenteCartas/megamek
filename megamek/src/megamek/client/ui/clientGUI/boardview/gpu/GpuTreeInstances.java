@@ -790,10 +790,11 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         // An impostor's quad stands where it shows, at the depth of its plant's front (tree-instances.glsl).
         source = insert(source, "gl_Position = u_projViewTrans * pos;",
               "gl_Position = u_projViewTrans * pos;\n#ifdef impostorFlag\ngl_Position.z = impostorFrontZ(a_position, gl_Position);\n#endif\n");
-        // A material mapped along the board keeps its place on a falling piece (tree-instances.glsl, fallRest).
-        String boardUV = "v_modelUV = vec2(pos.x, -pos.y) / u_modelBoardUV;";
-        if (source.contains(boardUV)) {
-            source = insert(source, boardUV, "v_modelUV = vec2(fallRest(pos.xyz).x, -fallRest(pos.xyz).y) / u_modelBoardUV;");
+        // A material mapped along the board keeps its place on a falling piece (tree-instances.glsl, fallRest), its way
+        // turned as the instance stands.
+        if (source.contains(GpuUnitShader.BOARD_REST)) {
+            source = insert(source, GpuUnitShader.BOARD_REST, "vec2 boardRest = fallRest(pos.xyz).xy;");
+            source = insert(source, GpuUnitShader.BOARD_WAY, "vec2 boardWay = instanceTurn(vec3(a_texCoord0, 0.0)).xy;");
         }
         // An impostor's quad faces the camera; its texels carry their own normals (impostor-sample.glsl).
         return insert(source, "vec3 normal = normalize(u_normalMatrix * a_normal);",

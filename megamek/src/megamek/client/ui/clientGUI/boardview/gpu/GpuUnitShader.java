@@ -23,6 +23,12 @@ import com.badlogic.gdx.math.Matrix4;
 /** Unit paint, damage and imported surface lighting. The ModelBatch owns the provider and its shaders. */
 final class GpuUnitShader extends DefaultShader {
     private static final String MAIN = "void main() {";
+    /**
+     * Where a vertex of a material textured along the board rests, and its part's way there (its UVs, turned with it):
+     * the model vertex stage's; GpuTreeInstances places both by the instance.
+     */
+    static final String BOARD_REST = "vec2 boardRest = pos.xy;";
+    static final String BOARD_WAY = "vec2 boardWay = (u_worldTrans * vec4(a_texCoord0, 0.0, 0.0)).xy;";
 
     private final int rotation = register("u_camoRotation");
     private final int camoEnabled = register("u_camoEnabled");
@@ -174,15 +180,24 @@ final class GpuUnitShader extends DefaultShader {
         source = replaceOnce(source, "#if defined(diffuseTextureFlag) || defined(specularTextureFlag) || defined(emissiveTextureFlag)",
               "#if defined(diffuseTextureFlag) || defined(specularTextureFlag) || defined(emissiveTextureFlag) || defined(modelSurfaceFlag)",
               "vertex");
+        // A material textured along the board (GpuModelMaterial#boardUV) maps its colour, emission and surface maps from
+        // where it rests on the board, one repeat per |u_modelBoardUV| units: north up, or with a negative repeat along
+        // the way its part carries, one sense for both directions, north up where it carries none (MeepleShatter#boardUV
+        // bakes the same), so turned and neighbouring pieces' floors and roofs join. The depth pass keeps the authored
+        // UVs (only an alpha-tested material would show it).
         source = replaceOnce(source, MAIN,
-              "#ifdef modelSurfaceFlag\nout vec2 v_modelUV;\nuniform float u_modelBoardUV;\n#endif\n" + MAIN
+              "#ifdef modelSurfaceFlag\nout vec2 v_modelUV;\nuniform float u_modelBoardUV;\n"
+                    + "vec2 boardUV(vec2 rest, vec2 way, float repeat) {\n"
+                    + "    if (repeat > 0.0 || dot(way, way) < 1e-8) { return vec2(rest.x, -rest.y) / abs(repeat); }\n"
+                    + "    way = normalize(way);\n"
+                    + "    if (way.y < -1e-4 || abs(way.y) <= 1e-4 && way.x < 0.0) { way = -way; }\n"
+                    + "    return vec2(dot(rest, way), rest.x * way.y - rest.y * way.x) / -repeat;\n"
+                    + "}\n#endif\n" + MAIN
                     + "\n#ifdef modelSurfaceFlag\nv_modelUV = a_texCoord0;\n#endif\n", "vertex");
-        // A material textured along the board's axes (GpuModelMaterial#boardUV) maps its colour, emission and surface
-        // maps from its board position, north up, one repeat per u_modelBoardUV units: turned and neighbouring pieces'
-        // floors join. The depth pass keeps the authored UVs (only an alpha-tested material would show it).
         String placed = "gl_Position = u_projViewTrans * pos;";
-        source = replaceOnce(source, placed, placed + "\n#ifdef modelSurfaceFlag\nif (u_modelBoardUV > 0.0) {\n"
-              + "    v_modelUV = vec2(pos.x, -pos.y) / u_modelBoardUV;\n"
+        source = replaceOnce(source, placed, placed + "\n#ifdef modelSurfaceFlag\nif (u_modelBoardUV != 0.0) {\n"
+              + "    " + BOARD_REST + "\n    " + BOARD_WAY + "\n"
+              + "    v_modelUV = boardUV(boardRest, boardWay, u_modelBoardUV);\n"
               + "#ifdef diffuseTextureFlag\n    v_diffuseUV = u_diffuseUVTransform.xy + v_modelUV * u_diffuseUVTransform.zw;\n#endif\n"
               + "#ifdef emissiveTextureFlag\n    v_emissiveUV = u_emissiveUVTransform.xy + v_modelUV * u_emissiveUVTransform.zw;\n#endif\n"
               + "}\n#endif\n", "vertex");

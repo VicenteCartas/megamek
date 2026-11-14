@@ -8428,7 +8428,7 @@ final class GpuTerrain implements Disposable {
         opaque(copy);
         copy.set(IntAttribute.createCullFace(GL20.GL_NONE));
         var surface = copy.get(GpuModelMaterial.class, GpuModelMaterial.TYPE);
-        if (surface != null && surface.boardUV > 0) { copy.set(surface.ownUVs()); }
+        if (surface != null && surface.boardUV != 0) { copy.set(surface.ownUVs()); }
         return copy;
     }
 

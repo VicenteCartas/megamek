@@ -74,8 +74,8 @@ final class MeepleShatter {
     /**
      * One drawn part to break: its mesh range, the material it draws with, and the transform from its mesh into the
      * cut's frame, null for none. {@code boardUV}: the units one texture repeat spans for a material textured along
-     * the board's axes (GpuModelMaterial#boardUV), whose pieces take those UVs from where they lie on the board when cut,
-     * as the vertex stage maps them; 0 keeps the mesh's own UVs.
+     * the board (GpuModelMaterial#boardUV, negative along its part's way), whose pieces take those UVs from where they
+     * lie on the board when cut, as the vertex stage maps them ({@link #boardUV}); 0 keeps the mesh's own UVs.
      */
     record Source(MeshPart part, Material material, Matrix4 transform, float boardUV) {
         Source(NodePart part) { this(part.meshPart, part.material, null, 0); }
@@ -300,6 +300,23 @@ final class MeepleShatter {
     }
 
     /**
+     * GpuUnitShader.linearVertex's board mapping (boardUV) of a point at x, y on the board into {@code uv} at
+     * {@code at}: north up, one repeat per {@code repeat} units; with a negative repeat along {@code way}, one sense for
+     * both directions, north up where it is none.
+     */
+    static void boardUV(float x, float y, Vector3 way, float repeat, float[] uv, int at) {
+        float u = x, v = -y, length = (float) Math.hypot(way.x, way.y);
+        if (repeat < 0 && length > 1e-4f) {
+            float wayX = way.x / length, wayY = way.y / length;
+            if (wayY < -1e-4f || Math.abs(wayY) <= 1e-4f && wayX < 0) { wayX = -wayX; wayY = -wayY; }
+            u = x * wayX + y * wayY;
+            v = x * wayY - y * wayX;
+        }
+        uv[at] = u / Math.abs(repeat);
+        uv[at + 1] = v / Math.abs(repeat);
+    }
+
+    /**
      * The source's triangles, unindexed, as vertex records of its channel, brought into the cut's frame: positions by
      * its transform, normals and tangents turned with it, a mirrored transform's triangles wound back the right way
      * round, and board UVs baked where they lie.
@@ -314,6 +331,7 @@ final class MeepleShatter {
         int end = part.offset + part.size;
         float[] record = new float[stride];
         var point = new Vector3();
+        var way = new Vector3();
         int first = result.size;
         for (int index = part.offset; index < end; index++) {
             int vertex = indices.length == 0 ? index : Short.toUnsignedInt(indices[index]);
@@ -327,10 +345,11 @@ final class MeepleShatter {
                 turn(record, channel.tangent, transform);
                 turn(record, channel.binormal, transform);
             }
-            if (source.boardUV() > 0 && channel.texture >= 0) {
-                // GpuUnitShader.linearVertex's board mapping: north up, one repeat per boardUV units.
-                record[channel.texture] = (record[channel.position] + origin.x) / source.boardUV();
-                record[channel.texture + 1] = -(record[channel.position + 1] + origin.y) / source.boardUV();
+            if (source.boardUV() != 0 && channel.texture >= 0) {
+                way.set(record[channel.texture], record[channel.texture + 1], 0);
+                if (transform != null) { way.rot(transform); }
+                boardUV(record[channel.position] + origin.x, record[channel.position + 1] + origin.y, way, source.boardUV(),
+                      record, channel.texture);
             }
             result.addAll(record);
         }
