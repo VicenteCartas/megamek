@@ -275,6 +275,11 @@ final class GpuUnitShader extends DefaultShader {
          * clock, so an instance a frame no longer updates still ends whole.
          */
         long materializeStart;
+        /**
+         * The same build up set by the frame, 1 when whole: a destroyed unit an action builds up and down
+         * (UnitPlayback#built). The shader shows the lesser of the two.
+         */
+        float built = 1;
         float bottom;
         float top;
 
@@ -283,7 +288,11 @@ final class GpuUnitShader extends DefaultShader {
             if (start == 0) {
                 return 1;
             }
-            float t = Math.min(1, TimeUtils.timeSinceMillis(start) / (float) MATERIALIZE_MILLIS);
+            return eased(Math.min(1, TimeUtils.timeSinceMillis(start) / (float) MATERIALIZE_MILLIS));
+        }
+
+        /** The build up's ease out, from its share of time {@code t} (0 to 1). */
+        static float eased(float t) {
             return 1 - (1 - t) * (1 - t);
         }
     }
@@ -341,7 +350,8 @@ final class GpuUnitShader extends DefaultShader {
         }
         float shown = part.userData instanceof Shown unit ? unit.opacity : 1;
         set(opacity, shown);
-        float built = part.userData instanceof Shown unit ? Shown.materialized(unit.materializeStart) : 1;
+        float built = part.userData instanceof Shown unit
+              ? Math.min(Shown.materialized(unit.materializeStart), unit.built) : 1;
         if (built < 1 && part.userData instanceof Shown unit) {
             set(materialize, built, unit.bottom, unit.top, Math.max(1e-3f, (unit.top - unit.bottom) / 28));
         } else {

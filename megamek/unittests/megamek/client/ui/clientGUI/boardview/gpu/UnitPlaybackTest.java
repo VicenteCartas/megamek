@@ -644,6 +644,85 @@ class UnitPlaybackTest {
         assertFalse(playback.busy());
     }
 
+    @Test
+    void aReviewOfAUnitGoneSinceBuildsItUpPausesPlaysPausesAndBuildsItDown() {
+        var retained = UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5),
+              ResolvedAttack.Kind.SHOT, true);
+        var playback = new UnitPlayback();
+        playback.review(retained);
+        playback.reviewGone(true);
+        // At 2x the playback's clock runs one second a second.
+        float build = UnitPlayback.BUILD_SECONDS;
+        float pause = UnitPlayback.BUILD_PAUSE_SECONDS;
+        float attack = playback.attack().duration;
+        assertEquals(0, playback.built(), "Nothing shows before the build");
+        playback.advance(build, UnitMotion.Speed.DOUBLE);
+        assertEquals(1, playback.built(), 1e-5f, "Whole once built");
+        playback.advance(pause - .01, UnitMotion.Speed.DOUBLE);
+        assertEquals(0, playback.attack().seconds, "The attack waits through the pause");
+        playback.advance(.01 + attack, UnitMotion.Speed.DOUBLE);
+        assertEquals(attack, playback.attack().seconds, 1e-4f, "then plays");
+        playback.reviewGone(false);
+        assertTrue(playback.builds(), "The build is decided before the review's clock starts");
+        playback.advance(pause, UnitMotion.Speed.DOUBLE);
+        assertEquals(1, playback.built(), 1e-4f, "Whole through the pause after it");
+        playback.advance(build / 2, UnitMotion.Speed.DOUBLE);
+        float down = playback.built();
+        assertTrue(down > 0 && down < 1, "then builds down");
+        playback.advance(build / 2 + .01, UnitMotion.Speed.DOUBLE);
+        assertFalse(playback.reviewing(), "and the review ends once it is gone");
+
+        playback.review(retained);
+        playback.reviewGone(false);
+        playback.advance(.1, UnitMotion.Speed.DOUBLE);
+        assertEquals(.1f, playback.attack().seconds, 1e-5f, "A review of units still there plays at once");
+        assertEquals(1, playback.built());
+    }
+
+    @Test
+    void aLiveAttackOfAUnitDestroyedEarlierBuildsItUpPausesPlaysPausesAndBuildsItDown() {
+        var standing = UnitPlaybackFixture.unit(1, 4);
+        var destroyed = dead(UnitPlaybackFixture.unit(2, 5));
+        var shot = UnitPlaybackFixture.attack(destroyed, standing, ResolvedAttack.Kind.SHOT, false);
+        var playback = new UnitPlayback();
+        playback.accept(List.of(shot), UnitPlaybackFixture.scene(standing, destroyed), ignored -> false);
+        // At 2x the playback's clock runs one second a second.
+        float build = UnitPlayback.BUILD_SECONDS;
+        float pause = UnitPlayback.BUILD_PAUSE_SECONDS;
+        playback.advance(0, UnitMotion.Speed.DOUBLE);
+        float attack = playback.attack().duration;
+        assertTrue(playback.builds(), "The destroyed attacker builds up");
+        assertEquals(0, playback.built(), "from nothing");
+        playback.advance(build, UnitMotion.Speed.DOUBLE);
+        assertEquals(1, playback.built(), 1e-5f, "Whole once built");
+        playback.advance(pause - .01, UnitMotion.Speed.DOUBLE);
+        assertEquals(0, playback.attack().seconds, "The attack waits through the pause");
+        playback.advance(.01 + attack, UnitMotion.Speed.DOUBLE);
+        assertEquals(attack, playback.attack().seconds, 1e-4f, "then plays");
+        playback.advance(pause, UnitMotion.Speed.DOUBLE);
+        assertEquals(1, playback.built(), 1e-4f, "Whole through the pause after it");
+        playback.advance(build / 2, UnitMotion.Speed.DOUBLE);
+        float down = playback.built();
+        assertTrue(down > 0 && down < 1, "then builds down");
+        playback.advance(100, UnitMotion.Speed.DOUBLE);
+        assertFalse(playback.busy());
+
+        var between = UnitPlaybackFixture.attack(standing, UnitPlaybackFixture.unit(3, 6), ResolvedAttack.Kind.SHOT, false);
+        playback.accept(List.of(between), UnitPlaybackFixture.scene(standing, UnitPlaybackFixture.unit(3, 6)),
+              ignored -> false);
+        playback.advance(.1, UnitMotion.Speed.DOUBLE);
+        assertFalse(playback.builds(), "An attack between standing units");
+        assertEquals(.1f, playback.attack().seconds, 1e-5f, "plays at once");
+    }
+
+    /** {@code unit} destroyed: its captured pose is dead. */
+    private static BoardScene.Unit dead(BoardScene.Unit unit) {
+        var state = new UnitModelState(null, null, new UnitModelState.Pose(null, 0, 0, null, true));
+        return new BoardScene.Unit(unit.id(), unit.part(), unit.name(), unit.location(), unit.image(), false,
+              unit.annotations(), unit.height(), unit.airborne(),
+              new BoardScene.UnitModel("", "", "", 1, 0, BoardScene.LocationDamage.NONE, state), unit.outlineRgb());
+    }
+
     private static BoardScene.Movement move(int id) {
         return new BoardScene.Movement(id, 0, List.of(UnitPlaybackFixture.unit(id, 0).location(), UnitPlaybackFixture.unit(id, 4).location()),
               EntityMovementType.MOVE_WALK, 0, 4, UnitPlaybackFixture.unit(id, 4));

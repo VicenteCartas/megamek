@@ -846,15 +846,19 @@ class GpuBattleView extends ApplicationAdapter {
             attackEffects.clearArtilleryBlasts();
         }
         updateSlowMotion();
+        aliveUnits.clear();
+        for (var unit : scene.units()) {
+            if (!unit.dead()) { aliveUnits.add(unit.id()); }
+        }
+        // A review of a unit destroyed or removed since builds it up before the attack and down after it.
+        UnitAttack reviewed = playback.reviewing() ? playback.attack() : null;
+        playback.reviewGone(reviewed != null && Stream.of(reviewed.event.attacker(), reviewed.event.target())
+              .anyMatch(unit -> unit != null && reviewedDead(unit)));
         history.advance(Gdx.graphics.getDeltaTime() * timeScale, state -> preparePlaybackCamera(state, scene));
         // The impact frame's explosion and debris already use full speed, without waiting for the next frame.
         updateSlowMotion();
         // Historical review is presentation only: it must never signal a live movement completion to Swing.
         source.playbackState(frame, history.running());
-        aliveUnits.clear();
-        for (var unit : scene.units()) {
-            if (!dead(unit)) { aliveUnits.add(unit.id()); }
-        }
         scene = playback.present(scene);
         BoardSource.Frame unitFrame = frame.withScene(scene);
         if (ui instanceof GpuHud hud) {
@@ -1851,7 +1855,10 @@ class GpuBattleView extends ApplicationAdapter {
         equipmentAppearance.keySet().retainAll(unitInstances.keySet());
         // A materialize lasts only while this frame's pass below renews it: no instance keeps a cut it set before.
         for (ModelInstance instance : unitInstances.values()) {
-            if (instance.userData instanceof GpuUnitShader.Shown shown) { shown.materializeStart = 0; }
+            if (instance.userData instanceof GpuUnitShader.Shown shown) {
+                shown.materializeStart = 0;
+                shown.built = 1;
+            }
         }
         hits.keySet().retainAll(scene.units().stream().map(BoardScene.Unit::id).collect(Collectors.toSet()));
         hits.values().removeIf(hit -> hoverClock - hit.clock() > HIT_MEMORY_SECONDS);
@@ -1891,10 +1898,10 @@ class GpuBattleView extends ApplicationAdapter {
             GpuUnitModel visual = unit.sensorContact() ? markers.model(BoardMarker.Kind.SENSOR_CONTACT)
                   : unitModels == null ? null : unitModels.get(unit.model(), unit.id(), unit.part());
             boolean authored = !unit.sensorContact() && visual != null;
-            boolean dead = dead(unit);
+            boolean dead = unit.dead();
             // A review holds the units of its attack as they were (UnitPlayback#present): one the game has dead or gone
-            // since plays it fading in and out, as one destroyed in its own turn does, and does not die again.
-            boolean reviewedDead = playback.reviewing() && !unit.sensorContact() && !aliveUnits.contains(unit.id());
+            // since plays it as one destroyed earlier in the phase does, and does not die again.
+            boolean reviewedDead = playback.reviewing() && reviewedDead(unit);
             var death = playback.attacks().stream().filter(attack -> attack.death() && attack.event.entityId() == unit.id())
                   .findFirst().orElse(null);
             float collapse = death == null ? dead ? 1 : 0 : death.event.result().crewLoss() ? 0 : death.deathProgress();
@@ -1930,7 +1937,9 @@ class GpuBattleView extends ApplicationAdapter {
                 // explosion only to make meshes.
                 casualties.prepare(death, standing, unit);
             }
-            float ghost = destroyed ? ghost(unit, death) : 0;
+            // One destroyed before the action builds up for it and back down (UnitPlayback#built), whole meanwhile.
+            boolean rebuilt = destroyed && death == null && playback.builds();
+            float ghost = destroyed ? ghost(unit, death, rebuilt) : 0;
             // The unit being deployed under the pointer (GpuBoardSource#deploymentPreview): drawn as the plan's
             // ghost, never picked, marked or shadowed.
             boolean placing = !destroyed && placingPreview(unit);
@@ -2078,7 +2087,8 @@ class GpuBattleView extends ApplicationAdapter {
             }
             float hoverLift = 0;
             long arrivalStart = placing ? 0 : arrivalStarts.getOrDefault(unit.id(), 0L);
-            float arrival = GpuUnitShader.Shown.materialized(arrivalStart);
+            shown.built = rebuilt && ghost > 0 ? playback.built() : 1;
+            float arrival = Math.min(GpuUnitShader.Shown.materialized(arrivalStart), shown.built);
             // A flier holds still while it materializes, and bobs once it is whole.
             if (airborne && collapse == 0 && arrival >= 1) {
                 hoverLift = hoverOffset(hoverClock, unit.id(), unit.part());
@@ -2137,17 +2147,12 @@ class GpuBattleView extends ApplicationAdapter {
         crowds.pack(occupiedGround);
     }
 
-    /** Destroyed, or doomed and about to be: its wreck, or its death playing. */
-    private static boolean dead(BoardScene.Unit unit) {
-        return !unit.sensorContact() && unit.model() != null && unit.model().state() != null
-              && unit.model().state().pose().dead();
+    /** Whether a unit a review holds is one the frame's scene has dead or gone: {@link #aliveUnits} lacks it. */
+    private boolean reviewedDead(BoardScene.Unit unit) {
+        return !unit.sensorContact() && !aliveUnits.contains(unit.id());
     }
 
-    /**
-     * How much shows of a destroyed unit: attacks resolve together, and one it fired or took after its death plays on
-     * the unit itself, which fades in as that attack or the death begins and out as the attack ends. None without one:
-     * the hit that killed it plays on the unit.
-     */
+
     /**
      * Deployment's materialize: since when each unit has been seen waiting off the board this phase, and when each
      * placed unit began to build up (by anyone). A unit builds up as it appears on a hex after it waited off the board
@@ -2236,7 +2241,7 @@ class GpuBattleView extends ApplicationAdapter {
         Map<Coords, List<Integer>> stacks = new HashMap<>();
         for (BoardScene.Unit unit : scene.units()) {
             if (unit.part() >= 0 || unit.airborne() || unit.attachment() != null || unit.sensorContact()
-                  || unit.footprint().size() > 1 || UnitAnimator.troops(unit) || dead(unit) || placingPreview(unit)) {
+                  || unit.footprint().size() > 1 || UnitAnimator.troops(unit) || unit.dead() || placingPreview(unit)) {
                 continue;
             }
             stacks.computeIfAbsent(unit.location().coords(), ignored -> new ArrayList<>()).add(unit.id());
@@ -2271,13 +2276,22 @@ class GpuBattleView extends ApplicationAdapter {
         return false;
     }
 
-    private float ghost(BoardScene.Unit unit, UnitAttack death) {
+    /**
+     * How much shows of a destroyed unit: attacks resolve together, and one it fired or took after its death plays on
+     * the unit itself. It shows {@code whole} while its action builds it up and down, as long as any of it is built
+     * (UnitPlayback#built); else, as
+     * when it dies in that action, it fades in as that attack or the death begins and out as the attack ends. None
+     * without one: the hit that killed it plays on the unit.
+     */
+    private float ghost(BoardScene.Unit unit, UnitAttack death, boolean whole) {
         float shown = 0;
         for (var attack : playback.attacks()) {
             var attacker = attack.event.attacker();
             var target = attack.event.target();
             if (attack.death() || death != null && death.cause == attack
                   || (attacker == null || attacker.id() != unit.id()) && (target == null || target.id() != unit.id())) { continue; }
+            // Nothing at all, hologram included, before it builds up and once it has built down.
+            if (whole) { return playback.built() > 0 ? 1 : 0; }
             float since = death == null ? attack.seconds : Math.min(attack.seconds, death.seconds);
             shown = Math.max(shown, MathUtils.clamp(since / GHOST_FADE_SECONDS, 0, 1)
                   * MathUtils.clamp((attack.duration - attack.seconds) / GHOST_FADE_SECONDS, 0, 1));
@@ -3428,7 +3442,7 @@ class GpuBattleView extends ApplicationAdapter {
             for (BoardScene.Unit unit : scene.units()) {
                 var instance = unitInstances.get(unit.id() + ":" + unit.part());
                 // A wreck has no gameplay, nor its ghost: a click on it takes the ground beneath.
-                if (instance == null || dead(unit) || unitGhosts.containsKey(instance)) { continue; }
+                if (instance == null || unit.dead() || unitGhosts.containsKey(instance)) { continue; }
                 float distance = unitPicking.distance(instance, ray);
                 if (distance < nearest) {
                     nearest = distance;

@@ -824,6 +824,11 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             this(id, part, name, location, image, sensorContact, annotations, height, airborne, model, outlineRgb, footprint, null);
         }
 
+        /** Destroyed, or doomed and about to be: its wreck, or its death playing. */
+        boolean dead() {
+            return !sensorContact && model != null && model.state() != null && model.state().pose().dead();
+        }
+
         Unit withAttachment(Attachment value) {
             return new Unit(id, part, name, location, image, sensorContact, annotations, height, airborne, model, outlineRgb,
                   footprint, value, heat);

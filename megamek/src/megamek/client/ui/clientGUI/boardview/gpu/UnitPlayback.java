@@ -13,6 +13,9 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import com.badlogic.gdx.math.MathUtils;
 
 import megamek.common.units.EntityMovementType;
 
@@ -65,6 +68,25 @@ final class UnitPlayback {
     private BoardScene.Animation stepFrom;
     /** A retained attack that a review re-presents over the waiting live queue (A.10), or null. */
     private UnitAttack review;
+    /**
+     * An action whose attacks involve a unit already destroyed (a review: one the game has destroyed or removed since;
+     * live: one whose death played before) builds it up from its feet before them, as a deployed unit does, and back
+     * down after them, with a pause between each (the user's design of 2026-11-14): the build's and the pause's
+     * playback seconds, a deployed unit's build and half a second of real time at 1x, and their sum before the attacks.
+     */
+    static final float BUILD_SECONDS =
+          (float) (GpuUnitShader.Shown.MATERIALIZE_MILLIS / 1000.0 * UnitMotion.Speed.NORMAL.rate);
+    static final float BUILD_PAUSE_SECONDS = (float) (.5 * UnitMotion.Speed.NORMAL.rate);
+    private static final float BUILD_LEAD = BUILD_SECONDS + BUILD_PAUSE_SECONDS;
+    /** The review's playback seconds so far, its build and pauses included, and their share before the attack. */
+    private float reviewClock;
+    private float reviewLead;
+    /**
+     * The live action's share before its attacks (0 without a destroyed participant) and its build clock: the lead
+     * before the action's own clock starts, then as much again after it completes, before its hold.
+     */
+    private float actionLead;
+    private float actionBuild;
     /** The shoves that pushed their target off the board as they played live, which a review of them plays again. */
     private final Set<UUID> pushedOffResults = new HashSet<>();
     private List<UnitAttack> reviewed = List.of();
@@ -202,9 +224,10 @@ final class UnitPlayback {
             // A review plays alone: the live queue waits, paused or not, so the two never interleave (A.10).
             if (cameraReady.test(this)) {
                 float previous = review.seconds;
-                review.seconds = (float) Math.min(review.duration, review.seconds + Math.max(0, seconds) * speed.rate);
+                reviewClock += (float) (Math.max(0, seconds) * speed.rate);
+                review.seconds = MathUtils.clamp(reviewClock - reviewLead, 0, review.duration);
                 cue(review, previous);
-                if (review.seconds >= review.duration) {
+                if (reviewClock >= review.duration + 2 * reviewLead) {
                     review(null);
                 }
             }
@@ -235,6 +258,8 @@ final class UnitPlayback {
                     combatTerrainRelease = terrainRelease();
                     if (attack.shot()) { volley.add(attack, 0); }
                     collectVolley();
+                    actionLead = attacks.stream().anyMatch(this::involvesDestroyed) ? BUILD_LEAD : 0;
+                    actionBuild = 0;
                 } else if (active instanceof BoardScene.Detonation detonation) {
                     combatSeconds = 0;
                     // One of a chain goes off as it starts, on its cause's front (#chained); any other after a moment.
@@ -259,6 +284,14 @@ final class UnitPlayback {
             }
             if (!completed) {
                 if (!cameraReady.test(this)) { return; }
+                if (actionBuild < actionLead) {
+                    // Its destroyed participants build up, then a pause, before the action's own clock starts.
+                    double wait = Math.min(remaining, (actionLead - actionBuild) / speed.rate);
+                    actionBuild += (float) (wait * speed.rate);
+                    remaining -= wait;
+                    if (actionLead - actionBuild > 1e-6f) { return; }
+                    actionBuild = actionLead;
+                }
                 // Shown for a frame, its structures are falling: the next ones give way now.
                 if (collapsesOn() && combatSeconds > 0) { combatDuration = combatSeconds; }
                 UnitMotion motion = active instanceof BoardScene.Movement ? motions.get(active.entityId()) : null;
@@ -343,6 +376,14 @@ final class UnitPlayback {
                     return;
                 }
             }
+            if (actionBuild < 2 * actionLead) {
+                // A pause after the action, then they build back down, before its hold.
+                double wait = Math.min(remaining, (2 * actionLead - actionBuild) / speed.rate);
+                actionBuild += (float) (wait * speed.rate);
+                remaining -= wait;
+                if (2 * actionLead - actionBuild > 1e-6f) { return; }
+                actionBuild = 2 * actionLead;
+            }
             double pause = Math.min(remaining, hold);
             if (attachment != null) { attachment.seconds += (float) (pause * speed.rate); }
             hold -= pause;
@@ -354,6 +395,8 @@ final class UnitPlayback {
             attack = null;
             attacks.forEach(this::completeAttack);
             attacks.clear();
+            actionLead = 0;
+            actionBuild = 0;
             reactions.clear();
             volley.clear();
             volleyScene = null;
@@ -438,9 +481,50 @@ final class UnitPlayback {
     void review(BoardScene.Combat event) {
         review = event == null ? null : new UnitAttack(event);
         reviewed = review == null ? List.of() : List.of(review);
+        reviewClock = 0;
+        reviewLead = 0;
     }
 
     boolean reviewing() { return review != null; }
+
+    /**
+     * Whether the review re-presents a participant the game has destroyed or removed since, as the view sees it before
+     * each advance; only its answer before the review's clock starts counts.
+     */
+    void reviewGone(boolean gone) {
+        if (review != null && reviewClock == 0) {
+            reviewLead = gone ? BUILD_LEAD : 0;
+        }
+    }
+
+    /**
+     * Whether the presented action, a review ({@link #reviewGone}) or the live one ({@link #involvesDestroyed}),
+     * builds its destroyed participants up and down.
+     */
+    boolean builds() { return review != null ? reviewLead > 0 : actionLead > 0; }
+
+    /**
+     * How far such a participant is built up: from 0 to 1 over the build before the attacks, eased as a deployed
+     * unit's, whole through the pauses and the attacks, and back to 0 in reverse after them; 1 without such an action.
+     */
+    float built() {
+        if (!builds()) {
+            return 1;
+        }
+        float left = review != null ? Math.min(reviewClock, review.duration + 2 * reviewLead - reviewClock)
+              : actionBuild <= actionLead ? actionBuild : 2 * actionLead - actionBuild;
+        return GpuUnitShader.Shown.eased(MathUtils.clamp(left / BUILD_SECONDS, 0, 1));
+    }
+
+    /**
+     * Whether a live attack involves a unit whose death already played: its captured attacker or target is dead, and
+     * no death of it plays in the same action (the view fades a unit that dies within its action instead).
+     */
+    private boolean involvesDestroyed(UnitAttack shot) {
+        return !shot.death() && Stream.of(shot.event.attacker(), shot.event.target())
+              .anyMatch(unit -> unit != null && unit.dead() && attacks.stream()
+                    .noneMatch(other -> other.death() && other.event.entityId() == unit.id()));
+    }
 
     /**
      * The live attacks not presented yet, by their resolution id: the queued ones and the shots under way before their
@@ -862,6 +946,8 @@ final class UnitPlayback {
         active = null;
         attack = null;
         attacks.clear();
+        actionLead = 0;
+        actionBuild = 0;
         reactions.clear();
         volley.clear();
         volleyScene = null;
