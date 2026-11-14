@@ -420,6 +420,12 @@ final class UnitMotion {
 
     void append(List<BoardScene.Waypoint> path, EntityMovementType type, int jumpMP, boolean transport, int movementMP, int members,
           double speedGainPerHex, double gravity) {
+        append(path, type, jumpMP, transport, movementMP, members, speedGainPerHex, gravity, false);
+    }
+
+    /** {@code through}: the unit does not brake for the path's end, where what follows takes it on (#rampTravel). */
+    void append(List<BoardScene.Waypoint> path, EntityMovementType type, int jumpMP, boolean transport, int movementMP, int members,
+          double speedGainPerHex, double gravity, boolean through) {
         if (path.isEmpty()) {
             return;
         }
@@ -446,7 +452,7 @@ final class UnitMotion {
         transport &= type != EntityMovementType.MOVE_JUMP;
         remaining.add(playback(List.copyOf(points), type, jumpMP, transport, ++sequence, movementMP,
               members > 1 && !transport ? GROUP_START_JITTER_SECONDS : 0,
-              members > 0 && !transport ? FORMATION_SETTLE_SECONDS : 0, Math.max(0, speedGainPerHex), gravity));
+              members > 0 && !transport ? FORMATION_SETTLE_SECONDS : 0, Math.max(0, speedGainPerHex), gravity, through));
     }
 
     /** Only the render copy folds intermediate facing steps into travel; explicit state changes still stop. */
@@ -477,7 +483,8 @@ final class UnitMotion {
 
     /** Each leg earns its own travel time. Boarding and gear dwell never make the intervening travel faster. */
     private static Playback playback(List<BoardScene.Waypoint> path, EntityMovementType type, int jumpMP,
-          boolean transport, long sequence, int movementMP, double stagger, double settle, double speedGainPerHex, double gravity) {
+          boolean transport, long sequence, int movementMP, double stagger, double settle, double speedGainPerHex, double gravity,
+          boolean through) {
         List<PosturePause> postures = new ArrayList<>();
         if (type == EntityMovementType.MOVE_JUMP) {
             JumpArc arc = jumpArc(path, jumpMP, gravity);
@@ -535,7 +542,7 @@ final class UnitMotion {
                 blockStart = travel.size();
             }
         }
-        if (type != EntityMovementType.MOVE_NONE) { time += rampTravel(travel, blockStart, path, speedGainPerHex); }
+        if (type != EntityMovementType.MOVE_NONE) { time += rampTravel(travel, blockStart, path, speedGainPerHex, through ? 1 : 0); }
         return new Playback(path, time + (transport ? UNLOAD_SECONDS : 0), null, type, transport, sequence,
               List.copyOf(travel), List.copyOf(gear), List.copyOf(postures), stagger, settle);
     }
@@ -562,8 +569,16 @@ final class UnitMotion {
         return time + POSTURE_SECONDS;
     }
 
-    /** Anticipate corners, preserve their exit momentum, and build speed through the middle of the continuous route. */
     private static double rampTravel(List<Travel> travel, int first, List<BoardScene.Waypoint> path, double speedGainPerHex) {
+        return rampTravel(travel, first, path, speedGainPerHex, 0);
+    }
+
+    /**
+     * Anticipate corners, preserve their exit momentum, and build speed through the middle of the continuous route, which
+     * ends at no more than {@code arrival} of the pace: 0 stops there.
+     */
+    private static double rampTravel(List<Travel> travel, int first, List<BoardScene.Waypoint> path, double speedGainPerHex,
+          double arrival) {
         if (first == travel.size()) {
             return 0;
         }
@@ -585,7 +600,7 @@ final class UnitMotion {
             for (int i = corners.get(block); i < corners.get(block + 1); i++) {
                 distances[block] += travel.get(i).distance();
             }
-            speeds[block + 1] = block == distances.length - 1 ? 0 : cornerSpeed(path, corners.get(block + 1));
+            speeds[block + 1] = block == distances.length - 1 ? arrival : cornerSpeed(path, corners.get(block + 1));
             speeds[block + 1] = Math.min(speeds[block + 1], Math.sqrt(speeds[block] * speeds[block] + distances[block] / RAMP_HEXES));
         }
         // Short stretches may never reach the corner cap; propagate braking requirements back from the destination.

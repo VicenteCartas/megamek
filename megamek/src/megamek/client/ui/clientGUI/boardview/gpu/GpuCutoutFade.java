@@ -158,15 +158,13 @@ final class GpuCutoutFade implements Disposable {
         Gdx.gl.glGetIntegerv(GL20.GL_FRAMEBUFFER_BINDING, query);
         int scene = query.get(0);
         if (scene == 0) { return -1; }
-        query.clear();
-        Gdx.gl.glGetFramebufferAttachmentParameteriv(GL20.GL_FRAMEBUFFER, GL20.GL_DEPTH_ATTACHMENT,
-              GL20.GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, query);
-        int type = query.get(0);
+        // Through LWJGL's core entry: libGDX routes this query to EXT_framebuffer_object, which a core context on macOS
+        // lacks, and LWJGL then aborts the JVM (GpuLinearOverlay asks the same way).
+        int type = org.lwjgl.opengl.GL30C.glGetFramebufferAttachmentParameteri(GL20.GL_FRAMEBUFFER,
+              GL20.GL_DEPTH_ATTACHMENT, GL20.GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE);
         if (type != GL20.GL_TEXTURE && type != GL20.GL_RENDERBUFFER) { return -1; }
-        query.clear();
-        Gdx.gl.glGetFramebufferAttachmentParameteriv(GL20.GL_FRAMEBUFFER, GL20.GL_DEPTH_ATTACHMENT,
-              GL20.GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, query);
-        int depth = query.get(0);
+        int depth = org.lwjgl.opengl.GL30C.glGetFramebufferAttachmentParameteri(GL20.GL_FRAMEBUFFER,
+              GL20.GL_DEPTH_ATTACHMENT, GL20.GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
         query.clear();
         Gdx.gl.glGetIntegerv(GL20.GL_VIEWPORT, query);
         int width = query.get(0) + query.get(2), height = query.get(1) + query.get(3);

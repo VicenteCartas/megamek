@@ -474,20 +474,24 @@ final class GpuPlaybackHistory {
 
     /**
      * The presented steps: each attack the playback no longer waits for (its shot landed), and each card-only step
-     * that no waiting attack precedes. Newly presented steps move the cursor and pop up on the board, unless a review
-     * runs.
+     * that no waiting attack precedes; a piloting roll once its unit's move, a fall included, has played
+     * (UnitPlayback#moving). Newly presented steps move the cursor and pop up on the board, unless a review runs.
      */
     private void updatePlayed() {
         Set<UUID> waiting = playback.waiting();
+        Set<Integer> moving = playback.moving();
         for (BoardScene.Animation event : held) {
             if (event instanceof BoardScene.Combat combat) {
                 waiting.add(combat.result().id());
+            } else if (event instanceof BoardScene.Movement move) {
+                moving.add(move.entityId());
             }
         }
         List<Step> next = new ArrayList<>();
         boolean blocked = false;
         for (Step step : steps) {
-            boolean waits = step.attack() != null ? waiting.contains(step.attack().id()) : blocked;
+            boolean waits = step.attack() != null ? waiting.contains(step.attack().id())
+                  : blocked || step.roll() != null && moving.contains(step.roll().entityId());
             blocked |= step.attack() != null && waits;
             if (!waits) {
                 next.add(step);

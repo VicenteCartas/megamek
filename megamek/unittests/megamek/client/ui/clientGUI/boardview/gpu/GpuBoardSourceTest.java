@@ -48,6 +48,7 @@ import megamek.common.equipment.WeaponMounted;
 import megamek.common.event.GameAttackResolvedEvent;
 import megamek.common.event.GameNuclearDetonationEvent;
 import megamek.common.event.entity.GameEntityChangeEvent;
+import megamek.common.icons.Camouflage;
 import megamek.common.interfaces.IEntityRemovalConditions;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.options.OptionsConstants;
@@ -1043,7 +1044,8 @@ class GpuBoardSourceTest {
                 ally.setTeam(fixture.player.getTeam());
                 Player enemy = new Player(2, "Enemy");
                 enemy.setTeam(2);
-                enemy.setColour(PlayerColour.RED);
+                // The lobby stores a chosen colour as a colour camouflage and leaves the colour field alone.
+                enemy.setCamouflage(Camouflage.of(PlayerColour.RED));
                 fixture.game.addPlayer(ally.getId(), ally);
                 fixture.game.addPlayer(enemy.getId(), enemy);
                 preferences.setTeamColoring(true);
@@ -1056,7 +1058,7 @@ class GpuBoardSourceTest {
                 }
                 preferences.setTeamColoring(false);
                 fixture.source.refresh();
-                assertEquals(enemy.getColour().getColour(false).getRGB(),
+                assertEquals(PlayerColour.RED.getColour(false).getRGB(),
                       fixture.source.takeFrame().scene().units().getFirst().outlineRgb());
             });
         } finally {

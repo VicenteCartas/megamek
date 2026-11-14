@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.ShortBuffer;
@@ -46,6 +47,7 @@ import org.lwjgl.opengl.GL30C;
 import org.lwjgl.opengl.GL31C;
 import org.lwjgl.opengl.GL32C;
 import org.lwjgl.opengl.GL43C;
+import org.lwjgl.system.MemoryUtil;
 import megamek.logging.MMLogger;
 
 /**
@@ -127,8 +129,8 @@ final class GpuIndirectInstances implements Disposable {
 
     /**
      * Whether the context has OpenGL 4.3's compute passes, storage buffers and multi-draw indirect (Windows, Linux),
-     * else the 4.1 way (macOS, or {@link #GL41}): the same pools, lists and passes, a pass's runs copied buffer to buffer
-     * and each command drawn alone, without culling.
+     * else the 4.1 way (macOS, or {@link #GL41}): the same pools, lists and passes, a pass's runs uploaded from the
+     * instances kept in memory (GpuBufferStore) and each command drawn alone, without culling.
      */
     private static boolean fullContext() {
         return !GL41 && GL.getCapabilities().OpenGL43;
@@ -147,14 +149,14 @@ final class GpuIndirectInstances implements Disposable {
     /** One vertex layout's parts: their vertices, indices and the vertex array that draws them with the instances. */
     private final class Pool {
         final VertexAttributes layout, instanceLayout;
-        final GpuBufferStore vertices, indices = new GpuBufferStore(Short.BYTES);
+        final GpuBufferStore vertices, indices = new GpuBufferStore(Short.BYTES, !full);
         final View[] views = new View[Pass.values().length * 2];
         private final Binding[] bindings = new Binding[Pass.values().length];
 
         Pool(VertexAttributes layout) {
             this.layout = layout;
             instanceLayout = GpuTreeInstances.instanceAttributes(layout);
-            vertices = new GpuBufferStore(layout.vertexSize);
+            vertices = new GpuBufferStore(layout.vertexSize, !full);
         }
 
         View view(Pass pass, boolean mirrored) {
@@ -501,11 +503,13 @@ final class GpuIndirectInstances implements Disposable {
     private final Map<VertexAttributes, Pool> pools = new HashMap<>();
     private final Map<Range, Geometry> geometriesByRange = new HashMap<>();
     private final Map<Key, Group> groupsByKey = new HashMap<>();
-    private final GpuBufferStore instances = new GpuBufferStore(STRIDE * Float.BYTES);
+    private final GpuBufferStore instances;
     /** The falling pieces' records ({@link Pieces#record}); its first is no record (an instance's 0 names none). */
-    private final GpuBufferStore records = new GpuBufferStore(RECORD_FLOATS * Float.BYTES);
+    private final GpuBufferStore records;
     /** Each geometry's bounding sphere in its model's frame, centre and radius ({@link #cull}). */
-    private final GpuBufferStore bounds = new GpuBufferStore(4 * Float.BYTES);
+    private final GpuBufferStore bounds;
+    /** A pass's instances gathered for their upload (the 4.1 way). */
+    private ByteBuffer gathered = BufferUtils.newByteBuffer(1 << 16);
     private final int recordsTexture;
     private int recordsGeneration = -1;
     private final Drawn[] passes = new Drawn[Pass.values().length];
@@ -610,6 +614,9 @@ final class GpuIndirectInstances implements Disposable {
         this.compact = compact;
         this.cull = cull;
         full = compact != 0;
+        instances = new GpuBufferStore(STRIDE * Float.BYTES, !full);
+        records = new GpuBufferStore(RECORD_FLOATS * Float.BYTES, !full);
+        bounds = new GpuBufferStore(4 * Float.BYTES, !full);
         // Which way this card draws, once a process: a field report names it.
         if (!logged) {
             logged = true;
@@ -1173,14 +1180,17 @@ final class GpuIndirectInstances implements Disposable {
         } else if (full) {
             compact(drawn, runs);
         } else {
-            // The 4.1 way: a copy a run, buffer to buffer.
-            GL15C.glBindBuffer(GL31C.GL_COPY_READ_BUFFER, instances.handle);
-            GL15C.glBindBuffer(GL31C.GL_COPY_WRITE_BUFFER, drawn.output);
-            long instance = (long) STRIDE * Float.BYTES;
+            // The 4.1 way: the runs, which follow one another in the pass's buffer, gathered from the instances kept in
+            // memory and uploaded at once.
+            int instance = STRIDE * Float.BYTES;
+            if (gathered.capacity() < placed * instance) { gathered = BufferUtils.newByteBuffer(placed * instance * 2); }
+            long to = MemoryUtil.memAddress(gathered.clear());
             for (int r = 0; r < runs; r++) {
-                GL31C.glCopyBufferSubData(GL31C.GL_COPY_READ_BUFFER, GL31C.GL_COPY_WRITE_BUFFER, jobs[r * 4] * instance,
-                      jobs[r * 4 + 1] * instance, jobs[r * 4 + 2] * instance);
+                MemoryUtil.memCopy(instances.address(jobs[r * 4]), to + (long) jobs[r * 4 + 1] * instance,
+                      (long) jobs[r * 4 + 2] * instance);
             }
+            GL15C.glBindBuffer(GL31C.GL_COPY_WRITE_BUFFER, drawn.output);
+            GL15C.glBufferSubData(GL31C.GL_COPY_WRITE_BUFFER, 0, gathered.limit(placed * instance));
         }
     }
 

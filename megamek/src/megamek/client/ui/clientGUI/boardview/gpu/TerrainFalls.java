@@ -73,11 +73,15 @@ final class TerrainFalls {
 
     /**
      * Whether the structures {@code transition} brings down are ready to be taken: none still waits for the read of a
-     * cut the store holds or for its list (#reading). Bounded by what is read, never by a clock.
+     * cut the store holds or for its list (#reading), and no bridge's span still stands in its chunk, waiting for the
+     * terrain to show it gone (#startSpans): a unit on it falls on the transition's clock, with its pieces. Bounded by
+     * what is read and by the terrain's commit, never by a clock.
      */
     boolean ready(BoardScene.TileTransition transition) {
-        return fallsFor == transition || transition.collapses().isEmpty() || terrain.coverScene == null || terrain.columns()
-              || !reading(transition.collapses());
+        if (transition.collapses().isEmpty() || terrain.coverScene == null || terrain.columns()) { return true; }
+        if (fallsFor != transition && reading(transition.collapses())) { return false; }
+        return transition.collapses().stream().map(BoardScene.TileTransition.Collapse::coords)
+              .noneMatch(at -> spansFalling.containsKey(at) || !destruction.taken(at) && spanTile(at) != null);
     }
 
 

@@ -419,6 +419,26 @@ class GpuPlaybackHistoryTest {
         assertFalse(playback.reviewing(), "A new round ends the review");
     }
 
+    @Test
+    void aPilotingRollPopsUpOnceItsUnitsMoveHasPlayed() {
+        UnitPlayback playback = new UnitPlayback();
+        GpuPlaybackHistory history = new GpuPlaybackHistory(playback);
+        BoardScene scene = scene(KING_CRAB);
+        // The server reports the roll of a fall before it sends the path that led to it.
+        GpuReportLog.PsrItem fall = new GpuReportLog.PsrItem(3L << 32 | 41, 3, GamePhase.MOVEMENT, 7, 5, 4, false,
+              "the bridge gave way");
+        GpuReportLog.Snapshot reports = log(List.of(entry(GpuReportLog.Kind.PSR, -1, -1, null, List.of(fall.id()), null)),
+              List.of(), List.of(fall));
+        frame(history, List.of(), scene, log(List.of(), List.of(), List.of()), 0);
+        var walk = new BoardScene.Movement(7, 0, List.of(KING_CRAB.location(), unit(7, 9).location()),
+              EntityMovementType.MOVE_WALK, 0, 4, unit(7, 9));
+        frame(history, List.of(walk), scene, reports, .01);
+        assertTrue(playback.busy());
+        assertTrue(history.takeShown().isEmpty(), "The roll waits for the move it was made in");
+        frame(history, List.of(), scene, reports, 60);
+        assertEquals(List.of("roll 7"), names(history.takeShown()), "It pops up as the move ends");
+    }
+
     /** One frame of the board view: the history takes the frame's events and log, then advances. */
     private static void frame(GpuPlaybackHistory history, List<BoardScene.Animation> events, BoardScene scene,
           GpuReportLog.Snapshot log, double seconds) {

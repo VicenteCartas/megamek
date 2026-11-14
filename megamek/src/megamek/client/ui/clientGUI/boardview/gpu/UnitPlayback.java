@@ -462,6 +462,23 @@ final class UnitPlayback {
     }
 
     /**
+     * The units whose move waits or is under way, a fall behind a hit or a collapse included, until it has landed: what
+     * follows the playback shows a unit's piloting roll as its move ends, not as its report arrives.
+     */
+    Set<Integer> moving() {
+        Set<Integer> ids = new HashSet<>();
+        if (active instanceof BoardScene.Movement move && !completed) { ids.add(move.entityId()); }
+        for (var event : pending) {
+            if (event instanceof BoardScene.Movement move) { ids.add(move.entityId()); }
+        }
+        for (var reaction : reactions) {
+            var motion = motions.get(reaction.movement().entityId());
+            if (motion != null && motion.isMoving()) { ids.add(reaction.movement().entityId()); }
+        }
+        return ids;
+    }
+
+    /**
      * Interpolate only a displacement actually present in the post-resolution checkpoint, or for a reviewed shove in
      * the live scene.
      */
@@ -651,10 +668,25 @@ final class UnitPlayback {
               || combatSeconds + 1e-7 < combatTerrainRelease;
     }
 
-    /** Resolved terrain may prepare during travel; the presentation checkpoint still releases it only at impact. */
+    /**
+     * Resolved terrain may prepare during travel; the presentation checkpoint still releases it only at impact. So may
+     * the terrain without the structures a move brings down as it ends (GpuBoardSource#stepsOnto), while its unit
+     * walks: a bridge's span falls only once the terrain shows it gone (TerrainFalls#startSpans).
+     */
     BoardScene preparingTerrain() {
+        if (completed) { return null; }
+        if (active instanceof BoardScene.Movement) {
+            if (!(pending.peekFirst() instanceof BoardScene.TileTransition falling) || falling.collapses().isEmpty()) {
+                return null;
+            }
+            for (var event : pending) {
+                if (event instanceof BoardScene.SceneUpdate update) { return update.scene(); }
+                if (event != falling && !(event instanceof BoardScene.Movement move && move.forced())) { return null; }
+            }
+            return null;
+        }
         if (!(active instanceof BoardScene.Combat) && !(active instanceof BoardScene.Detonation)
-              || completed || !beforeTerrainRelease()) { return null; }
+              || !beforeTerrainRelease()) { return null; }
         if (volleyScene != null) { return volleyScene; }
         return pending.peekFirst() instanceof BoardScene.SceneUpdate update ? update.scene() : null;
     }
@@ -778,8 +810,12 @@ final class UnitPlayback {
         var unit = movement.unit();
         int members = unit != null && unit.model() != null && unit.model().state() != null
               && unit.model().state().structure().activeTroopers() > 0 ? unit.model().figures() : 0;
+        // A walk onto a structure its weight brings down does not stop there: it gives way as the unit gets onto it.
+        boolean through = pending.peekFirst() instanceof BoardScene.TileTransition falling
+              && falling.collapses(movement.path().getLast().coords());
         motion.append(movement.path(), movement.type(), movement.jumpMP(), transports.test(unit), movement.movementMP(), members,
-              UnitMotion.DEFAULT_SPEED_GAIN_PER_HEX, Float.isFinite(gravityOverride) ? gravityOverride : movement.gravity());
+              UnitMotion.DEFAULT_SPEED_GAIN_PER_HEX, Float.isFinite(gravityOverride) ? gravityOverride : movement.gravity(),
+              through);
         return motion;
     }
 
