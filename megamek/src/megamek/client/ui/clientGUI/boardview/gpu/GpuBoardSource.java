@@ -336,6 +336,20 @@ final class GpuBoardSource implements BoardSource {
         });
     }
 
+    /**
+     * GL thread: a deployment double click's second half, after its click: MegaMek's Done deploys the unit, while the
+     * click left it placed on {@code coords} of the shown board. A click that placed nothing deploys nothing.
+     */
+    void deployAt(Coords coords) {
+        command(() -> {
+            if (isCurrentView(view) && phasePanel.get() instanceof DeploymentDisplay deployment
+                  && deployment.currentEntity() instanceof Entity entity && coords.equals(entity.getPosition())
+                  && entity.getBoardId() == view.getBoardId() && deployment.getButDone().isEnabled()) {
+                deployment.getButDone().doClick(0);
+            }
+        });
+    }
+
     BoardClientState currentView() {
         return view;
     }

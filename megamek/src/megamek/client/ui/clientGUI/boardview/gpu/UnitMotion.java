@@ -22,7 +22,13 @@ final class UnitMotion {
     private static final double JUMP_DURATION_SCALE = 1.1;
     static final double MIN_UNIT_SPEED = .65;
     static final double MAX_UNIT_SPEED = 2.5;
+    /** The hexes over which travel would reach its pace from nothing, and brakes to a stop. */
     static final double RAMP_HEXES = 2.5;
+    /**
+     * The share of its pace at which travel sets off, gaining speed as it would have from nothing: from nothing, a unit
+     * spent 3.2 hex paces in its first hex, most of the ramp's time. A stretch too short to brake from it sets off slower.
+     */
+    static final double LAUNCH_SPEED = .3;
     static final double DEFAULT_SPEED_GAIN_PER_HEX = .03;
     private static final double TURN_SPEED_DROP_PER_FACING = .3;
     private static final double MIN_CORNER_SPEED = .5;
@@ -596,6 +602,7 @@ final class UnitMotion {
         corners.add(travel.size());
         double[] distances = new double[corners.size() - 1];
         double[] speeds = new double[corners.size()];
+        speeds[0] = LAUNCH_SPEED;
         for (int block = 0; block < distances.length; block++) {
             for (int i = corners.get(block); i < corners.get(block + 1); i++) {
                 distances[block] += travel.get(i).distance();

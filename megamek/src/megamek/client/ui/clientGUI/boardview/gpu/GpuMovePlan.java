@@ -230,6 +230,21 @@ final class GpuMovePlan implements AutoCloseable {
         command(md -> plot(md, hex, boardId, pin, floorElevation(hex, boardId, pointedZ)));
     }
 
+    /**
+     * A double click's second half, after its {@link #planTo}: confirms the move as Confirm move does (MegaMek's Done)
+     * while the route ends legally on {@code hex}. A click that stopped short of it (beyond the MP, an occupied hex, a
+     * transport to mount) confirms nothing.
+     */
+    void confirmAt(Coords hex, int boardId) {
+        command(md -> {
+            MovePath path = md.getPlannedMovement();
+            if ((path.length() > base(path)) && hex.equals(path.getFinalCoords()) && (path.getFinalBoardId() == boardId)
+                  && path.isMoveLegal() && md.getButDone().isEnabled()) {
+                md.getButDone().doClick(0);
+            }
+        });
+    }
+
     /** G7: pins the destination ("+ Waypoint"). */
     void pinDestination() {
         command(this::pin);

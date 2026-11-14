@@ -306,9 +306,12 @@ class UnitPlaybackTest {
         assertEquals(1, completions.size());
         assertEquals(BoardGeometry.center(air.location().coords(), 0), motion.position());
         assertNull(motion.sample().gear(), "Continuing flight must not repeat the takeoff transition");
+        // Where the flight alone is after half its time.
+        var alone = new UnitMotion(flight.path().getFirst());
+        alone.append(flight.path(), flight.type(), 0);
+        alone.advance(alone.remainingSeconds() / 2, 1);
         playback.advance(motion.remainingSeconds() / (2 * UnitMotion.Speed.NORMAL.rate), UnitMotion.Speed.NORMAL);
-        assertTrue(motion.position().epsilonEquals(BoardGeometry.center(air.location().coords(), 0)
-              .lerp(BoardGeometry.center(end.location().coords(), 0), .5f), .001f));
+        assertTrue(motion.position().epsilonEquals(alone.position(), .001f));
         playback.finish();
         assertEquals(2, completions.size());
         assertSame(flight, completions.getLast());

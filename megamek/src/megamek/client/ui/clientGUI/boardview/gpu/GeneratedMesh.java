@@ -48,6 +48,12 @@ final class GeneratedMesh {
     /** A mesh's vertex count limit: kit parts index their vertices with shorts. */
     private static final int MESH_VERTICES = 65_536;
     final Map<String, FloatArray> parts = new LinkedHashMap<>();
+    /** The level of detail it is generated for, 0 the near one: a generator lays at a far level only what shows there. */
+    final int lod;
+
+    GeneratedMesh() { this(0); }
+
+    GeneratedMesh(int lod) { this.lod = lod; }
 
     /** A half plane: the side where {@code at(x, y) >= 0} is kept. */
     interface Keep {

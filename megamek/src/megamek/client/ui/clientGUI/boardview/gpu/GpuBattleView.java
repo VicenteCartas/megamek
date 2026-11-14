@@ -100,6 +100,8 @@ class GpuBattleView extends ApplicationAdapter {
     private static final float FLIGHT_HEXES_PER_SECOND = 1.5f;
     /** How long (ms) a drag-aimed deployment waits for its placement to show before it gives up turning the unit. */
     private static final long PLACEMENT_WAIT = 1500;
+    /** The longest time (ms) between the clicks of a board double click, libGDX's tap interval. */
+    private static final long DOUBLE_CLICK_MILLIS = 400;
     /** The zoom factor of one ZOOM_IN or ZOOM_OUT bind; the Menu's View zoom items use it as well. */
     static final float ZOOM_STEP = 1.2f;
     /** Degrees a middle drag orbits the camera per layout unit, on the board and on the minimap (C.4). */
@@ -3206,6 +3208,9 @@ class GpuBattleView extends ApplicationAdapter {
         private Coords pendingHex;
         private Coords pendingAim;
         private long pendingSince;
+        /** The hex and time of the last plain left click, which a second one there makes a double click. */
+        private Coords clickedHex;
+        private long clickedAt;
         /**
          * A Select press that grabbed no selected item: its drag draws a selection box (Shift adds, Ctrl removes) and a
          * release without a drag is a click. Only a press on the selection, or inside a selected object's outline,
@@ -3664,7 +3669,8 @@ class GpuBattleView extends ApplicationAdapter {
                 float pointedZ = picked.pointedZ();
                 if (ui instanceof GpuHud hud) {
                     // The shared phase tool handles a press; releasing Shift first must not turn it into placement.
-                    hud.boardClick(picked.coords(), picked.entityId(), button, gestureModifiers, x, y, pointedZ);
+                    hud.boardClick(picked.coords(), picked.entityId(), button, gestureModifiers, x, y, pointedZ,
+                          doubleClick(button, picked.coords()));
                 } else if (button == Input.Buttons.RIGHT) {
                     ((GpuMapHud) ui).boardMenu(picked.coords(), pointedZ, x, y);
                 } else if (measurementGesture) {
@@ -3682,6 +3688,19 @@ class GpuBattleView extends ApplicationAdapter {
             }
             reset();
             return true;
+        }
+
+        /**
+         * Whether this short click is the second of a double click: two plain left clicks on one hex, the second within
+         * {@link #DOUBLE_CLICK_MILLIS} of the first. A third click starts a new pair.
+         */
+        private boolean doubleClick(int button, Coords coords) {
+            boolean plain = button == Input.Buttons.LEFT && gestureModifiers == 0 && coords != null;
+            long now = TimeUtils.millis();
+            boolean second = plain && coords.equals(clickedHex) && now - clickedAt <= DOUBLE_CLICK_MILLIS;
+            clickedHex = plain && !second ? coords : null;
+            clickedAt = now;
+            return second;
         }
 
         void reset() {

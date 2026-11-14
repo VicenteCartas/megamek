@@ -35,19 +35,44 @@ class BoardMultiHexBuildingTest {
     void neighbouringDomeSharesMeetOnTheirCommonHexside() {
         Map<Coords, Integer> heights = flower(3, 2);
         BoardScene scene = scene(heights, DOME, Map.of(), Set.of());
-        Map<Coords, List<Vector3>> glass = new HashMap<>(), frame = new HashMap<>();
+        Map<Coords, List<Vector3>> glass = new HashMap<>();
+        List<Map<Coords, List<Vector3>>> frames = new ArrayList<>();
+        for (int lod = 0; lod < BoardMultiHexBuilding.LODS; lod++) { frames.add(new HashMap<>()); }
         for (Coords at : heights.keySet()) {
             var layout = layout(scene, at);
             assertEquals(1, layout.domes().size(), "Every hex of a seven-hex dome lies under it: " + at);
             glass.put(at, world(at, BoardMultiHexBuilding.glass(layout)));
-            frame.put(at, world(at, BoardMultiHexBuilding.model(layout, 0)));
+            for (int lod = 0; lod < BoardMultiHexBuilding.LODS; lod++) {
+                frames.get(lod).put(at, world(at, BoardMultiHexBuilding.model(layout, lod)));
+            }
         }
+        List<Map<Coords, List<Vector3>>> shared = new ArrayList<>(frames);
+        shared.add(glass);
         for (int direction = 0; direction < 6; direction++) {
             Coords ring = CENTRE.translated(direction);
-            for (var shares : List.of(glass, frame)) {
+            // At every level: a far level's shares close on their hexsides as the near one's do.
+            for (var shares : shared) {
                 assertMeet(shares.get(CENTRE), shares.get(ring), CENTRE, direction);
                 assertMeet(shares.get(ring), shares.get(ring.translated((direction + 2) % 6)), ring, (direction + 2) % 6);
             }
+        }
+    }
+
+    @Test
+    void farLevelsKeepTheLitWindowsAndLampsWithFewerTriangles() {
+        var scene = scene(flower(3, 2), DOME, Map.of(), Set.of());
+        int previous = Integer.MAX_VALUE;
+        for (int lod = 0; lod < BoardMultiHexBuilding.LODS; lod++) {
+            int triangles = 0, windows = 0, lamps = 0;
+            for (Coords at : flower(3, 2).keySet()) {
+                var model = BoardMultiHexBuilding.model(layout(scene, at), lod);
+                for (var mesh : model.meshes) { triangles += mesh.vertices.length / RigidGlb.STRIDE / 3; }
+                windows += vertices(model, BoardMultiHexBuilding.WINDOW).size();
+                lamps += vertices(model, BoardMultiHexBuilding.LIGHT).size();
+            }
+            assertTrue(windows > 0 && lamps > 0, "Level " + lod + " keeps the windows and lamps that light at night");
+            assertTrue(triangles < previous, "Level " + lod + " draws fewer triangles than the one before");
+            previous = triangles;
         }
     }
 

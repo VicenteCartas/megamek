@@ -10,6 +10,7 @@ import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.ROOF_INSET;
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.normal;
 
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -106,15 +107,23 @@ final class HabitatKit {
                 throw new IllegalArgumentException("Habitat kit " + name + " names a joint and a corner piece for each upright");
             }
         }
-        List<KitOutline.Piece> pieces = KitOutline.footprint(square, spec.lone().bandEnd(), false, footprintScale).stream()
+        List<KitOutline.Piece> outlines = KitOutline.footprint(square, spec.lone().bandEnd(), false, footprintScale);
+        List<KitOutline.Piece> pieces = outlines.stream()
               .map(piece -> KitOutline.rounded(piece, spec.cornerRadius(), spec.cornerSegments())).toList();
+        // A far level rounds the convex corners in half the segments, as the eave its edge.
+        int farSegments = Math.max(1, spec.cornerSegments() / 2);
+        Map<KitOutline.Piece, KitOutline.Piece> far = new IdentityHashMap<>();
+        for (int i = 0; i < outlines.size(); i++) {
+            far.put(pieces.get(i), KitOutline.rounded(outlines.get(i), spec.cornerRadius(), farSegments));
+        }
         // A roof for each layout of its fittings; one bare roof without any.
         List<Map<String, List<double[]>>> roofs = spec.fittings() == null ? List.of(Map.of()) : spec.fittings().of(square);
         List<String> roles = new ArrayList<>();
         roles.add("base0");
         for (int k = 0; k < spec.storeys().size(); k++) { roles.add("floor" + k); }
         for (int k = 0; k < roofs.size(); k++) { roles.add("roof" + k); }
-        var levels = GeneratedKit.lods(name, square, modelled, roles, pieces, Map.of(), (role, piece, lod) -> {
+        var levels = GeneratedKit.lods(name, square, modelled, roles, pieces, Map.of(), (role, near, lod) -> {
+            var piece = lod == 0 ? near : far.get(near);
             boolean roof = role.startsWith("roof");
             // The deck must be inset along the same walls as its rim. A separate cap would sit under the open deck.
             if (roof && piece.tags().endsWith("-cap")) { return Map.of("", new GeneratedMesh()); }
@@ -160,7 +169,7 @@ final class HabitatKit {
                 result.put(twin.getKey(), mesh);
                 // Its aviation lights beside it (GeneratedKit#lights), on the roof's plating or parapet foot.
                 if (roof && spec.aviationLights()) {
-                    double facet = spec.cornerRadius() * Math.PI / Math.max(1, spec.cornerSegments());
+                    double facet = spec.cornerRadius() * Math.PI / Math.max(1, lod == 0 ? spec.cornerSegments() : farSegments);
                     GeneratedKit.lights(result, twin.getKey(), outline, facet, lightDeck(spec), lod);
                 }
             }
@@ -316,10 +325,9 @@ final class HabitatKit {
         return new Pier(wall.p()[0], wall.p()[1], n, false);
     }
 
-    /** Whether a wall's start holds a pier: every corner; at the near level, every joint and cut too. */
-    private static boolean piered(Spec spec, KitOutline.Wall wall, int lod) {
-        return spec.piers() != null
-              && (wall.start() == KitOutline.End.CORNER || wall.start() != KitOutline.End.ROUND && lod == 0);
+    /** Whether a wall's start holds a pier: every corner, joint and cut, at every level (from far a dark stripe each). */
+    private static boolean piered(Spec spec, KitOutline.Wall wall) {
+        return spec.piers() != null && wall.start() != KitOutline.End.ROUND;
     }
 
     /** Where a roof's aviation lights stand: on its plating, or at its parapet's foot. */
@@ -367,13 +375,14 @@ final class HabitatKit {
             double[] u = wallU(wall, square);
             face(geometry, material(spec, "wall"), wall.p(), wall.q(), normal(wall.p(), wall.q()), z0, z0 + LEVEL,
                   u[0] + storey.shift(), u[1] + storey.shift(), ground ? .72 : 1, v0);
-            KitOutline.wallBody(geometry, wall, piece.walls(), z0, z0 + LEVEL, 0, 2);
+            // A far level is the outer hull: no wall thickness.
+            if (lod == 0) { KitOutline.wallBody(geometry, wall, piece.walls(), z0, z0 + LEVEL, 0, 2); }
             if (ground && spec.skirt() != null) {
                 var band = new GeneratedMesh();
                 skirt(spec, band, wall, piece.walls(), z0);
                 geometry.add(mitred(band, wall));
             }
-            if (piered(spec, wall, lod)) { piers.add(pierAt(wall, piece.walls())); }
+            if (piered(spec, wall)) { piers.add(pierAt(wall, piece.walls())); }
         }
         return new Laid(geometry, piers);
     }
@@ -402,7 +411,9 @@ final class HabitatKit {
                   : KitOutline.inset(polygon, piece.walls(), ROOF_INSET + radius);
             for (var part : laid) {
                 plate(geometry, roof + GeneratedMesh.ROOF_DECK, part, deck, plating, 1);
-                geometry.slab(GeneratedMesh.BUILDING_BODY, part, deck - 1.2, deck, false);
+                // A far level lays no body under the deck, but under a parapet's, the roof's foot, which every level
+                // stands on (ConnectedKit#grounds).
+                if (lod == 0 || spec.parapet() != null) { geometry.slab(GeneratedMesh.BUILDING_BODY, part, deck - 1.2, deck, false); }
             }
         }
         for (var wall : piece.walls()) {
@@ -427,7 +438,7 @@ final class HabitatKit {
             }
             geometry.add(mitred(band, wall));
             // Closed link walls span the hexside before the sector cut; place each top only in the piece holding it.
-            if (piered(spec, wall, lod) && (piece.direction() == null || KitOutline.inSector(piece.direction(), wall.p()))) {
+            if (piered(spec, wall) && (piece.direction() == null || KitOutline.inSector(piece.direction(), wall.p()))) {
                 piers.add(pierAt(wall, piece.walls()));
             }
         }

@@ -1128,6 +1128,15 @@ final class GpuHud implements GpuBoardHud {
      * click takes the unit {@link #clickedUnit} gives.
      */
     void boardClick(Coords coords, int unitId, int button, int modifiers, int x, int y, float pointedZ) {
+        boardClick(coords, unitId, button, modifiers, x, y, pointedZ, false);
+    }
+
+    /**
+     * The click, which as the second of a double click ({@code doubleClick}) also sends what it did in the local turn:
+     * the unit it placed in deployment, the route it plotted in the movement planner.
+     */
+    void boardClick(Coords coords, int unitId, int button, int modifiers, int x, int y, float pointedZ,
+          boolean doubleClick) {
         if (inputs == null || inputs.dialog() != null || coords == null || inputs.frame().scene() == null) {
             return;
         }
@@ -1142,7 +1151,7 @@ final class GpuHud implements GpuBoardHud {
             source.click(coords, false, clickModifiers);
         } else if (button == Input.Buttons.LEFT) {
             leftClick(coords, GpuHudState.unit(inputs.frame().status(), clickedUnit(coords, unitId)), modifiers,
-                  pointedZ);
+                  pointedZ, doubleClick);
         }
     }
 
@@ -1200,9 +1209,11 @@ final class GpuHud implements GpuBoardHud {
 
     /**
      * Left click by phase: the HUD's own gestures during the local turn, MegaMek's board tool for everything else of
-     * that turn, and the selection rule outside it, as for a unit row.
+     * that turn, and the selection rule outside it, as for a unit row. A double click's second click then confirms the
+     * route it plotted (Confirm move) or deploys the unit it placed (Deploy), when the route or the unit ends there.
      */
-    private void leftClick(Coords coords, GpuBattleStatus.UnitStatus unit, int modifiers, float pointedZ) {
+    private void leftClick(Coords coords, GpuBattleStatus.UnitStatus unit, int modifiers, float pointedZ,
+          boolean doubleClick) {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         GpuHudData data = inputs.frame().panels();
         GamePhase phase = status.phase();
@@ -1220,6 +1231,9 @@ final class GpuHud implements GpuBoardHud {
                 source.moves().faceToward(coords, inputs.frame().scene().boardId());
             } else if (unit == null || control) {
                 source.moves().planTo(coords, inputs.frame().scene().boardId(), control, pointedZ);
+                if (doubleClick) {
+                    source.moves().confirmAt(coords, inputs.frame().scene().boardId());
+                }
             } else {
                 select(unit.id());
             }
@@ -1264,6 +1278,9 @@ final class GpuHud implements GpuBoardHud {
             if (unit != null && !own) { state.inspected = unit.id(); }
             source.hover(coords, modifiers);
             source.click(coords, false, modifiers);
+            if (doubleClick && phase.isDeployment()) {
+                source.deployAt(coords);
+            }
         }
     }
 

@@ -231,7 +231,8 @@ final class BayKit {
         double facet = spec.cornerRadius() * Math.PI / Math.max(1, spec.cornerSegments()), deck = spec.roof().height(lod);
         if (lit) { GeneratedKit.lights(result, "", piece, facet, deck, lod); }
         int links = closing ? KitOutline.links(piece) : 0;
-        boolean fills = !role.startsWith("roof") && !piece.tags().endsWith("-cap") && joined(spec, role, lod);
+        // A far hull's joints are no grooves: nothing to fill.
+        boolean fills = !role.startsWith("roof") && !piece.tags().endsWith("-cap") && joined(spec, role, lod) && !(spec.hull() && lod > 0);
         if (fills) { putFill(result, "-fill", fill(spec, modelled, role, piece, 0, lod, square)); }
         boolean jointed = spec.modules().values().stream().flatMap(List::stream).anyMatch(run -> run.joints() != null);
         // A storey's sills, where the storey standing on it closes links it keeps (ConnectedKit places them).
@@ -344,12 +345,14 @@ final class BayKit {
         }
         // Closed modules: a module parted from the next at its joints has its own side along each, behind the grooves,
         // and a seamed roof a floor under its grooves. Where the next module does not meet it exactly, these show, never
-        // the inside.
-        if (run.joints() != null && !cap && !square) {
+        // the inside. A far hull has neither (its joints are faces on its walls' planes, its seams cover their grooves),
+        // but keeps a seam's pocket, which closes the groove against a taller neighbour's open storey.
+        boolean hidden = spec.hull() && lod > 0;
+        if (run.joints() != null && !cap && !square && !hidden) {
             for (var joint : joints) { side(result, joint, piece.walls(), run.joints().length()); }
         }
         if (seamed) {
-            for (var polygon : piece.polygons()) {
+            for (var polygon : hidden ? List.<List<double[]>>of() : piece.polygons()) {
                 for (var part : KitOutline.inset(polygon, piece.walls(), .5)) { underside(result, part, -chamfer - .01); }
             }
             for (var joint : joints) { pocket(result, joint, chamfer); }
@@ -366,7 +369,6 @@ final class BayKit {
         // Any other roof's deck runs along the building, as a real roof's courses follow its eaves: each run on its part.
         List<Barrel> courses = top && !seamed && !crown ? barrels(square, piece) : null;
         // A far hull hides its roof's body.
-        boolean hidden = spec.hull() && lod > 0;
         for (var polygon : piece.polygons()) {
             for (var part : inset > 0 ? KitOutline.inset(polygon, edges, inset) : List.of(polygon)) {
                 // The authored rim has a horizontal lip at this height; keep the deck just underneath it.

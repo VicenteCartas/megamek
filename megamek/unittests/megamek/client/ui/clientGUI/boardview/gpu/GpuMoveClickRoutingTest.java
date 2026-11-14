@@ -416,6 +416,35 @@ class GpuMoveClickRoutingTest {
     }
 
     /**
+     * A double click plans the move as a click does and confirms it (MegaMek's Done sends it), running for a hex past
+     * the walk MP. One on a hex beyond the running MP, where the route stops short, sends nothing.
+     */
+    @Test
+    void aDoubleClickPlansAndConfirmsTheMove() throws Exception {
+        Coords far = GpuMovementFixture.START.translated(0, 8);
+        Coords run = GpuMovementFixture.START.translated(0, 5);
+        onSwing(() -> {
+            for (int distance = 0; distance <= 8; distance++) {
+                moving.board.game.getBoard().setHex(GpuMovementFixture.START.translated(0, distance), new Hex(0));
+            }
+            return null;
+        });
+        List<String> sent = new ArrayList<>();
+        doAnswer(call -> {
+            MovePath path = call.getArgument(1);
+            sent.add(call.getArgument(0) + "@" + path.getFinalCoords() + " " + path.getLastStepMovementType());
+            return null;
+        }).when(moving.client).moveEntity(anyInt(), any());
+
+        selectAndMode(SAGITTAIRE, GpuMovePlan.Mode.AUTO);
+        doubleClick(far, ground(far));
+        assertEquals(List.of(), sent, "the route stops short of the hex");
+
+        doubleClick(run, ground(run));
+        assertEquals(List.of(SAGITTAIRE + "@" + run + " " + EntityMovementType.MOVE_RUN), sent);
+    }
+
+    /**
      * Foot infantry inside a building, an own platoon on the ground floor of the next building hex: the pointed ground
      * floor plans the move to that floor, as in an empty hex, and so does the platoon's model, at MegaMek's own floor.
      */
@@ -633,6 +662,14 @@ class GpuMoveClickRoutingTest {
     private void click(Coords coords, int unitId, int modifiers, float pointedZ) throws Exception {
         hudUpdate(null);
         hud.boardClick(coords, unitId, Input.Buttons.LEFT, modifiers, 100, 100, pointedZ);
+        settle();
+    }
+
+    /** A 3D double click on a hex without a unit: GpuBattleView.touchUp hands its second click over as one. */
+    private void doubleClick(Coords coords, float pointedZ) throws Exception {
+        click(coords, Entity.NONE, 0, pointedZ);
+        hudUpdate(null);
+        hud.boardClick(coords, Entity.NONE, Input.Buttons.LEFT, 0, 100, 100, pointedZ, true);
         settle();
     }
 

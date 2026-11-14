@@ -32,7 +32,7 @@ final class TreeLod {
     static final int LEVELS = PIXELS.length + 1;
     /** Seconds a tree takes to dissolve from one level into the next (GpuTreeInstances.Stand#detail). */
     static final float DISSOLVE = .25f;
-    private static final float HYSTERESIS = 0.1f;
+    static final float HYSTERESIS = 0.1f;
 
     private TreeLod() { }
 
