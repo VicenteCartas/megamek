@@ -38,8 +38,8 @@ import megamek.client.ui.gdx.UiSliderInput;
 import megamek.client.ui.gdx.UiTheme;
 
 /**
- * The developer GPU tuning utility (user correction 5, C.1 G17), which goes before release: its bracket utility
- * button, before Help and Menu in gameplay, and its panel below that row, 360 wide and ending at least 70 above the
+ * The developer GPU tuning utility (user correction 5, C.1 G17), which goes before release: its captioned utility
+ * button, first in the utility row in gameplay, and its panel below that row, 360 wide and ending at least 70 above the
  * window's bottom, whose pages scroll. The Board and Atmosphere pages show the two pages of the
  * {@link GpuBoardTuning} model row by row in the hud-v3 look: captions, sliders with their readings, checkboxes,
  * choices, the mode, preset and weather buttons, notes, and "Planetary conditions…", whose model button opens the
@@ -104,7 +104,7 @@ final class GpuTuningPanel implements GpuHud.Component {
         });
         root.setName("tuning-panel");
         root.top().right();
-        button = GpuUtilityBar.popoverItem(ui, "tune", "GpuBoard.hud.tuning.title", "tuning-button");
+        button = GpuUtilityBar.utility(ui, "tune", "GpuBoard.hud.tuning.title", "tuning-button");
         onChange(button, () -> state.toggle(GpuHudState.Dialog.TUNING));
     }
 

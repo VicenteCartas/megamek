@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.gdx.UiKit.onChange;
 import static megamek.client.ui.gdx.UiKit.text;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -11,6 +12,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.IntConsumer;
+import java.util.stream.Stream;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.Batch;
@@ -206,14 +208,20 @@ final class GpuForcesPanel implements GpuHud.Component {
         full.add(ui.header(text("GpuBoard.hud.forces.title"), null, overview, searchToggle, gridToggle, pin)).growX()
               .row();
 
-        // Grid only: the grouping and filter selects. G12 opens their lists; until then a click steps to the next.
+        // Grid only: the grouping and filter selects (G12), each opening its list below it. A filter that would list
+        // no unit of the shown tab is disabled there; All units always stays.
         groupingSelect = ui.select("", false);
         groupingSelect.setName("forces-grouping");
-        onChange(groupingSelect,
-              () -> grouping = Grouping.values()[(grouping.ordinal() + 1) % Grouping.values().length]);
+        onChange(groupingSelect, () -> menu.list(groupingSelect,
+              Arrays.stream(Grouping.values()).map(each -> text(each.key)).toList(), grouping.ordinal(),
+              index -> grouping = Grouping.values()[index]));
         filterSelect = ui.select("", false);
         filterSelect.setName("forces-filter");
-        onChange(filterSelect, () -> filter = Filter.values()[(filter.ordinal() + 1) % Filter.values().length]);
+        onChange(filterSelect, () -> menu.list(filterSelect,
+              Arrays.stream(Filter.values()).map(each -> text(each.key)).toList(), filter.ordinal(),
+              index -> Filter.values()[index] == Filter.ALL
+                    || tabUnits().anyMatch(unit -> passes(unit, Filter.values()[index])),
+              index -> filter = Filter.values()[index]));
         for (UiButton face : List.of(groupingSelect, filterSelect)) {
             // The mock's .fsel is a native select: 29 units tall, its text 13.5 in and its arrow near the edge.
             face.pad(7.5f, 13.5f, 7.5f, 6);
@@ -240,7 +248,8 @@ final class GpuForcesPanel implements GpuHud.Component {
         searchCell = full.add((Actor) null).growX();
         full.row();
 
-        list.top();
+        // Left: a grid group narrower than the list (a half one alone on its row) starts at the left edge.
+        list.top().left();
         ScrollPane scroll = ui.scrollList(list);
         scroll.setName("forces-list");
         full.add(scroll).growX().row();
@@ -436,8 +445,7 @@ final class GpuForcesPanel implements GpuHud.Component {
                   .row());
         }
 
-        List<UnitStatus> listed = units.stream().filter(unit -> (unit.side() == Side.ENEMY) == shown.contacts())
-              .filter(this::matches).filter(unit -> !shown.grid() || passes(unit)).toList();
+        List<UnitStatus> listed = tabUnits().filter(unit -> !shown.grid() || passes(unit, shown.filter())).toList();
         Map<String, List<UnitStatus>> groups = groups(listed, shown.grid() ? shown.grouping() : Grouping.FORMATION);
         // While the same groups list the same units, only the rows' and tiles' contents change: re-adding them would
         // cancel a press on one (Scene2D unfocuses removed actors), and status updates arrive during the enemy's turn.
@@ -507,9 +515,15 @@ final class GpuForcesPanel implements GpuHud.Component {
         return GpuHudKit.matches(unit, formation(unit), shown.query());
     }
 
+    /** The units of the shown tab that match the search, before the grid's filter. */
+    private Stream<UnitStatus> tabUnits() {
+        return shown.units().stream().filter(unit -> (unit.side() == Side.ENEMY) == shown.contacts())
+              .filter(this::matches);
+    }
+
     /** The grid's filter (C8); damaged or impaired includes heat effects, as the prototype's "Running hot". */
-    private boolean passes(UnitStatus unit) {
-        return switch (shown.filter()) {
+    private static boolean passes(UnitStatus unit, Filter filter) {
+        return switch (filter) {
             case ALL -> true;
             case NEEDS_ORDERS -> unit.pending();
             case ACTED -> unit.done();

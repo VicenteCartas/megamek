@@ -402,11 +402,11 @@ final class GpuHud implements GpuBoardHud {
         // The aimed shot dialog's window-sized scrim over the panels and menus, under the toasts and the native modal.
         spanning.add(slot(dialogs, aim.actor()));
 
-        // The developer tuning utility sits in the utility bar's View popover; its panel places itself.
+        // The developer tuning utility leads the utility bar; its panel places itself.
         // Before release, delete this block, the tuningModel parameter, GpuHudState.Dialog.TUNING and GpuTuningPanel.
         parts.add(tuning);
         spanning.add(slot(dialogs, tuning.actor()));
-        // The View popover hangs over the Tuning panel it opens, so its Tuning item can close the panel again.
+        // The View popover hangs over the panels, the Tuning panel too.
         spanning.add(slot(dialogs, utilities.popover()));
         this.utilities = utilities;
 

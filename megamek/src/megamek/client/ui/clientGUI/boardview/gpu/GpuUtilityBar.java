@@ -32,9 +32,9 @@ import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.KeyCommandBind;
 
 /**
- * Top-right utilities, the Tactical View chip and the Tactical View's north mark (C.1 G4). The row holds View, the
- * Tactical View, the minimap, contacts, the log and the Menu; View opens a popover with the camera presets, the
- * wireframe view and the developer's tuning. They show the camera, the wireframe view, the minimap and contacts
+ * Top-right utilities, the Tactical View chip and the Tactical View's north mark (C.1 G4). The row holds the
+ * developer's Tuning, View, the Tactical View, the minimap, contacts, the log and the Menu; View opens a popover with
+ * the camera presets and the wireframe view. They show the camera, the wireframe view, the minimap and contacts
  * preferences, the log's presented events and the HUD's open panels, and run the camera's Tactical View, the tuning
  * model's wireframe view, the View menu's minimap item, the contacts preference and the HUD's own toggles. The
  * Tactical View's overlays have their own panel, GpuTacticalOverlays.
@@ -98,8 +98,8 @@ final class GpuUtilityBar implements GpuHud.Component {
         root.setName("utility-bar");
         chip.setName("tactical-chip");
         UiKit ui = kit.ui;
-        // The row keeps what a player reaches for in play; the camera presets, the wireframe view and the developer's
-        // tuning sit in the View popover, and Help is a page of the Menu (and its key).
+        // The row keeps what a player reaches for in play; the camera presets and the wireframe view sit in the View
+        // popover, and Help is a page of the Menu (and its key).
         view = iconButton(ui, "show", Messages.getString("GpuBoard.hud.util.view"), "utility-view");
         tactical = iconButton(ui, "tactical", Messages.getString("GpuBoard.hud.util.tactical"), "utility-tactical");
         map = iconButton(ui, "map", Messages.getString("GpuBoard.hud.util.map"), "utility-map");
@@ -107,8 +107,9 @@ final class GpuUtilityBar implements GpuHud.Component {
         log = iconButton(ui, "report", Messages.getString("GpuBoard.hud.util.log"), "utility-log");
         menu = iconButton(ui, "menu", Messages.getString("GpuBoard.hud.menu.title"), "utility-menu");
         menuTip = tipLabel(menu);
-        root.add(view).size(HEIGHT);
-        for (UiButton utility : List.of(tactical, map, contacts, log, menu)) {
+        // The developer's Tuning leads the row with its caption.
+        root.add(tuningButton).height(HEIGHT);
+        for (UiButton utility : List.of(view, tactical, map, contacts, log, menu)) {
             root.add(utility).size(HEIGHT).padLeft(GAP);
         }
 
@@ -123,7 +124,6 @@ final class GpuUtilityBar implements GpuHud.Component {
         wireframeMark = ui.icon("check", 14, Color.WHITE);
         wireframe.icons.add(wireframeMark);
         wireframe.add(wireframeMark).padLeft(10);
-        viewMenu.add(tuningButton).row();
         viewMenu.setVisible(false);
         viewMenu.setTouchable(Touchable.childrenOnly);
         // The HUD lays this layer over the panels, so the popover is not covered by the minimap or the right column.
@@ -138,8 +138,6 @@ final class GpuUtilityBar implements GpuHud.Component {
         onChange(tactical, () -> setTactical(!camera.tactical()));
         // The thermal wireframe view, a switch of the tuning model the board reads; the popover stays to show it.
         onChange(wireframe, () -> tuning.setWireframe(!tuning.wireframe()));
-        // The tuning panel opens where the popover hangs.
-        onChange(tuningButton, () -> setViewOpen(false));
         onChange(map, () -> runMinimap(inputs));
         // The contacts panel's preference, remembered as the minimap's is; the client's settings change on Swing.
         onChange(contacts, () -> source.command(() -> GUIPreferences.getInstance().toggleGpuContactsEnabled()));
@@ -317,7 +315,7 @@ final class GpuUtilityBar implements GpuHud.Component {
         if (viewOpen && state.dialog != dialogAtOpen) {
             setViewOpen(false);
         }
-        view.pressed(viewOpen || state.dialog == GpuHudState.Dialog.TUNING || tuning.wireframe());
+        view.pressed(viewOpen || tuning.wireframe());
         if (viewOpen) {
             placeViewMenu();
         }

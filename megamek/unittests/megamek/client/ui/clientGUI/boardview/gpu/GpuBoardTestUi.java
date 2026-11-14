@@ -243,7 +243,7 @@ final class GpuBoardTestUi {
 
     private static void clickActor(Actor actor) {
         assertTrue(actor != null, "Missing UI action");
-        // The battle HUD's camera presets, wireframe and tuning utilities hang in the View popover: open it first.
+        // The battle HUD's camera presets and wireframe view hang in the View popover: open it first.
         Actor popover = stage().getRoot().findActor("utility-view-menu");
         if (popover != null && actor.isDescendantOf(popover) && !popover.isVisible()) {
             clickActor(stage().getRoot().findActor("utility-view"));

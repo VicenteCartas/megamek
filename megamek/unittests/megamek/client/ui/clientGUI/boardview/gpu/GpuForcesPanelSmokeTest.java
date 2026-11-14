@@ -12,7 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntConsumer;
+import java.util.function.IntPredicate;
 import java.util.function.UnaryOperator;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -48,6 +52,7 @@ import megamek.common.units.Entity;
 import megamek.common.units.EntityWeightClass;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.mockito.invocation.Invocation;
 
 /**
  * The forces navigator (G2) in the component harness: its list and grid beside the hud-v3 shots 01-04, 08-11, 14
@@ -475,14 +480,14 @@ class GpuForcesPanelSmokeTest {
             show(hud, panel, frame);
             assertEquals(List.of(1, 2, 3, 4, 5), listed(panel, "forces-unit-"));
 
-            // The grid's grouping select steps through formation, readiness and weight class (C8).
+            // The grid's grouping select lists formation, readiness and weight class (C8).
             panel.state.forcesGrid = true;
             show(hud, panel, frame);
             assertEquals(List.of("Alpha lance", "Bravo lance"), groups(panel));
-            click(hud, panel.find("forces-grouping"), Input.Buttons.LEFT);
+            assertEquals(List.of(true, true, true), choose(hud, panel, "forces-grouping", 1));
             show(hud, panel, frame);
             assertEquals(List.of("Acted", "Needs orders"), groups(panel));
-            click(hud, panel.find("forces-grouping"), Input.Buttons.LEFT);
+            choose(hud, panel, "forces-grouping", 2);
             show(hud, panel, frame);
             assertEquals(List.of("Assault", "Heavy", "Light"), groups(panel), "Heaviest first");
             hud.capture("forces-grid-weight").dispose();
@@ -495,14 +500,20 @@ class GpuForcesPanelSmokeTest {
             assertEquals(List.of("Assault", "Heavy", "Light", "Small Support Vehicle"), groups(panel));
             assertEquals(List.of(1, 2, 3, 4, 5, 13), listed(panel, "forces-tile-"));
             show(hud, panel, frame);
+            // A filter that would list no unit of the tab is disabled: "war" matches the Warhammer only, which has not
+            // acted.
+            search(hud, panel, frame, "war");
+            assertEquals(List.of(true, true, false, true), choose(hud, panel, "forces-filter", 0));
+            click(hud, panel.find("forces-search"), Input.Buttons.LEFT);
+            show(hud, panel, frame);
             // The filter: needs orders, acted, then damaged or impaired (heat effects count).
-            click(hud, panel.find("forces-filter"), Input.Buttons.LEFT);
+            assertEquals(List.of(true, true, true, true), choose(hud, panel, "forces-filter", 1));
             show(hud, panel, frame);
             assertEquals(List.of(2, 3, 4, 5), listed(panel, "forces-tile-"));
-            click(hud, panel.find("forces-filter"), Input.Buttons.LEFT);
+            choose(hud, panel, "forces-filter", 2);
             show(hud, panel, frame);
             assertEquals(List.of(1), listed(panel, "forces-tile-"));
-            click(hud, panel.find("forces-filter"), Input.Buttons.LEFT);
+            choose(hud, panel, "forces-filter", 3);
             show(hud, panel, frame);
             assertEquals(List.of(2, 3), listed(panel, "forces-tile-"), "Prone impairs, hull down does not");
             click(hud, panel.find("forces-tile-3"), Input.Buttons.LEFT);
@@ -557,6 +568,24 @@ class GpuForcesPanelSmokeTest {
         Vector2 point = centre(hud, actor);
         hud.stage.touchDown((int) point.x, (int) point.y, 0, button);
         hud.stage.touchUp((int) point.x, (int) point.y, 0, button);
+    }
+
+    /**
+     * Clicks the grid select {@code select} and chooses {@code choice} in the select list it opens; returns which of the
+     * list's choices are enabled.
+     */
+    private static List<Boolean> choose(GpuHudTestStage hud, Panel panel, String select, int choice) {
+        clearInvocations(panel.menu);
+        click(hud, panel.find(select), Input.Buttons.LEFT);
+        List<Invocation> lists = mockingDetails(panel.menu).getInvocations().stream()
+              .filter(call -> call.getMethod().getName().equals("list")).toList();
+        assertEquals(1, lists.size(), select + " opens its list");
+        Object[] list = lists.getFirst().getArguments();
+        assertSame(panel.find(select), list[0], "below the select");
+        List<Boolean> enabled = IntStream.range(0, ((List<?>) list[1]).size())
+              .mapToObj(index -> list.length < 5 || ((IntPredicate) list[3]).test(index)).toList();
+        ((IntConsumer) list[list.length - 1]).accept(choice);
+        return enabled;
     }
 
     /** The actor's centre in screen coordinates. */

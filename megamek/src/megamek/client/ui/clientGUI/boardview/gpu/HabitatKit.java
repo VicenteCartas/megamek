@@ -10,7 +10,6 @@ import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.ROOF_INSET;
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.normal;
 
 import java.util.ArrayList;
-import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -107,23 +106,15 @@ final class HabitatKit {
                 throw new IllegalArgumentException("Habitat kit " + name + " names a joint and a corner piece for each upright");
             }
         }
-        List<KitOutline.Piece> outlines = KitOutline.footprint(square, spec.lone().bandEnd(), false, footprintScale);
-        List<KitOutline.Piece> pieces = outlines.stream()
+        List<KitOutline.Piece> pieces = KitOutline.footprint(square, spec.lone().bandEnd(), false, footprintScale).stream()
               .map(piece -> KitOutline.rounded(piece, spec.cornerRadius(), spec.cornerSegments())).toList();
-        // A far level rounds the convex corners in half the segments, as the eave its edge.
-        int farSegments = Math.max(1, spec.cornerSegments() / 2);
-        Map<KitOutline.Piece, KitOutline.Piece> far = new IdentityHashMap<>();
-        for (int i = 0; i < outlines.size(); i++) {
-            far.put(pieces.get(i), KitOutline.rounded(outlines.get(i), spec.cornerRadius(), farSegments));
-        }
         // A roof for each layout of its fittings; one bare roof without any.
         List<Map<String, List<double[]>>> roofs = spec.fittings() == null ? List.of(Map.of()) : spec.fittings().of(square);
         List<String> roles = new ArrayList<>();
         roles.add("base0");
         for (int k = 0; k < spec.storeys().size(); k++) { roles.add("floor" + k); }
         for (int k = 0; k < roofs.size(); k++) { roles.add("roof" + k); }
-        var levels = GeneratedKit.lods(name, square, modelled, roles, pieces, Map.of(), (role, near, lod) -> {
-            var piece = lod == 0 ? near : far.get(near);
+        var levels = GeneratedKit.lods(name, square, modelled, roles, pieces, Map.of(), (role, piece, lod) -> {
             boolean roof = role.startsWith("roof");
             // The deck must be inset along the same walls as its rim. A separate cap would sit under the open deck.
             if (roof && piece.tags().endsWith("-cap")) { return Map.of("", new GeneratedMesh()); }
@@ -169,7 +160,7 @@ final class HabitatKit {
                 result.put(twin.getKey(), mesh);
                 // Its aviation lights beside it (GeneratedKit#lights), on the roof's plating or parapet foot.
                 if (roof && spec.aviationLights()) {
-                    double facet = spec.cornerRadius() * Math.PI / Math.max(1, lod == 0 ? spec.cornerSegments() : farSegments);
+                    double facet = spec.cornerRadius() * Math.PI / Math.max(1, spec.cornerSegments());
                     GeneratedKit.lights(result, twin.getKey(), outline, facet, lightDeck(spec), lod);
                 }
             }

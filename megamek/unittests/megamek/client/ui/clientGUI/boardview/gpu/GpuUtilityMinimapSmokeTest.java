@@ -278,16 +278,15 @@ class GpuUtilityMinimapSmokeTest {
         assertFalse(parts.state.logOpen());
         List<String> row = new ArrayList<>();
         ((Table) parts.utilities.actor()).getCells().forEach(cell -> row.add(cell.getActor().getName()));
-        assertEquals(List.of("utility-view", "utility-tactical", "utility-map", "utility-contacts", "utility-log",
-              "utility-menu"), row);
+        assertEquals(List.of("tuning-button", "utility-view", "utility-tactical", "utility-map", "utility-contacts",
+              "utility-log", "utility-menu"), row);
         Actor popover = hud.stage.getRoot().findActor("utility-view-menu");
         assertFalse(popover.isVisible(), "View starts closed");
         click(hud, "utility-view");
         assertTrue(popover.isVisible(), "View opens its popover");
         List<String> items = new ArrayList<>();
         ((Table) popover).getCells().forEach(cell -> items.add(cell.getActor().getName()));
-        assertEquals(List.of("map-view-top", "map-view-isometric", "map-view-fit", "utility-wireframe",
-              "tuning-button"), items);
+        assertEquals(List.of("map-view-top", "map-view-isometric", "map-view-fit", "utility-wireframe"), items);
         Rectangle view = GpuHudTestStage.bounds(hud.stage.getRoot().findActor("utility-view"));
         Rectangle hanging = GpuHudTestStage.bounds(popover);
         assertTrue(hanging.y + hanging.height <= view.y, "The popover hangs below the row");

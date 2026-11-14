@@ -152,7 +152,7 @@ class GpuTuningPanelSmokeTest {
 
         /** A left click at the actor's centre through the HUD's stage, once its page shows it; then a frame. */
         void click(Actor actor) {
-            // The Tuning utility hangs in the View popover: open it first, as a player would.
+            // An item of the View popover: open it first, as a player would.
             Actor popover = hud.stage.getRoot().findActor("utility-view-menu");
             if (popover != null && actor.isDescendantOf(popover) && !popover.isVisible()) {
                 click("utility-view");
@@ -677,10 +677,6 @@ class GpuTuningPanelSmokeTest {
                                 assertEquals(guiScale, preferences.getGUIScale(), "Swing's GUI scale is untouched");
                                 assertEquals(1, preferences.getBoardUiScale(), "so is the 3D UI scale");
                                 assertEquals(full, stage.getWidth(), .5f, "and the HUD's layout");
-                                Actor popover = stage.getRoot().findActor("utility-view-menu");
-                                if (popover != null && !popover.isVisible()) {
-                                    stage.getRoot().findActor("utility-view").fire(new ChangeListener.ChangeEvent());
-                                }
                                 Actor tune = stage.getRoot().findActor("tuning-button");
                                 Vector2 at = windowPoint(stage, tune, tune.getWidth() / 2, tune.getHeight() / 2);
                                 mouse(User32.WM_MOUSEMOVE, 0, at);

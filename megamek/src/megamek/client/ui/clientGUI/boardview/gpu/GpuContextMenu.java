@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.IntConsumer;
+import java.util.function.IntPredicate;
 import java.util.stream.IntStream;
 
 import com.badlogic.gdx.math.Vector2;
@@ -477,11 +478,16 @@ final class GpuContextMenu implements GpuHud.Component {
      * one calls {@code choose} with its index.
      */
     void list(Actor face, List<String> choices, int selected, IntConsumer choose) {
+        list(face, choices, selected, index -> true, choose);
+    }
+
+    /** The select list with the choices {@code enabled} refuses shown disabled. */
+    void list(Actor face, List<String> choices, int selected, IntPredicate enabled, IntConsumer choose) {
         cancel();
         UiMenuList list = new UiMenuList(ui);
         for (int index = 0; index < choices.size(); index++) {
             int choice = index;
-            item(list, choices.get(index), null, index == selected, true, () -> choose.accept(choice));
+            item(list, choices.get(index), null, index == selected, enabled.test(index), () -> choose.accept(choice));
         }
         popover.header(null, null).content(list).openedFrom(face);
         Vector2 corner = face.localToStageCoordinates(new Vector2());
