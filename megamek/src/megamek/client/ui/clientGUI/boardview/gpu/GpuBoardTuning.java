@@ -515,11 +515,11 @@ final class GpuBoardTuning {
         });
         section(skin, "ECM pulse");
         ecmPulse = checkbox(skin, "Pulse the open ECM field", "tuning-ecm-pulse");
-        ecmPulse.addListener(new TextTooltip("Hovering or selecting an ECM or ECCM unit sends a glow from the unit "
-              + "across the hexes only its field covers, flashing at the border; a hover repeats it, a selection "
-              + "runs it " + GpuElectronicWarfare.SELECTION_CYCLES + " times.", skin, "menu"));
+        ecmPulse.addListener(new TextTooltip("Hovering or selecting an ECM or ECCM unit sends one glow from the unit "
+              + "across the hexes only its field covers, flashing at the border; hovering and selecting the same "
+              + "unit share it, and the field stays open until it completes.", skin, "menu"));
         ecmPulseKnobs = controls(skin, List.of(new Knob("ECM pulse intensity", 0, 2, .05f, "%.2f"),
-              new Knob("ECM pulse period s", 1, 5, .1f, "%.1f")), this::applyEcmPulse, 0);
+              new Knob("ECM pulse duration s", 1, 5, .05f, "%.2f")), this::applyEcmPulse, 0);
         ecmPulse.addListener(new ChangeListener() {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
@@ -1107,7 +1107,7 @@ final class GpuBoardTuning {
         setValues(pulse, new float[] { GpuRoutePulse.SPEED, GpuRoutePulse.INTENSITY });
         applyPulse();
         ecmPulse.setChecked(GpuElectronicWarfare.PULSE);
-        setValues(ecmPulseKnobs, new float[] { GpuElectronicWarfare.PULSE_INTENSITY, GpuElectronicWarfare.PULSE_PERIOD });
+        setValues(ecmPulseKnobs, new float[] { GpuElectronicWarfare.PULSE_INTENSITY, GpuElectronicWarfare.PULSE_DURATION });
         applyEcmPulse();
         setValues(visibility, new float[] { GpuTerrain.DEFAULT_BUILDING_OPACITY * 100,
               GpuUnitVisibility.DEFAULT_OUTLINE_INTENSITY * 100 });
@@ -1610,7 +1610,7 @@ final class GpuBoardTuning {
     private void applyEcmPulse() {
         GpuElectronicWarfare.pulse = ecmPulse.isChecked();
         GpuElectronicWarfare.pulseIntensity = value(ecmPulseKnobs, 0);
-        GpuElectronicWarfare.pulsePeriod = value(ecmPulseKnobs, 1);
+        GpuElectronicWarfare.pulseDuration = value(ecmPulseKnobs, 1);
         ecmPulseKnobs.forEach(control -> control.slider().setDisabled(!ecmPulse.isChecked()));
         updateReadings(ecmPulseKnobs);
     }

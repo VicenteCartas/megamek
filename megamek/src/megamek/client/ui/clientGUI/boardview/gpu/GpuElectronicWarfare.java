@@ -43,19 +43,17 @@ final class GpuElectronicWarfare implements Disposable {
     static final boolean PULSE = true;
     /** The pulse's brightness; 0 shows none. */
     static final float PULSE_INTENSITY = 1;
-    /** Seconds per cycle: the wave crosses the field in 60 % of it, flashes at the border for 17 %, then rests. */
-    static final float PULSE_PERIOD = 2.4f;
-    /** A selected emitter pulses this many cycles, then rests until another unit is selected; a hover repeats. */
-    static final int SELECTION_CYCLES = 2;
+    /** Seconds of the one pulse a field sends when it opens: the wave crosses the field in 78 % of it, then flashes. */
+    static final float PULSE_DURATION = 1.85f;
     /** The pulse glows in the side colour with this much more chroma: the pastel side colours vanish on pavement. */
     private static final float PULSE_CHROMA = 1.6f;
 
     // The values in use: render-thread state that GpuBoardTuning's controls edit and its Defaults restores.
     static boolean pulse = PULSE;
     static float pulseIntensity = PULSE_INTENSITY;
-    static float pulsePeriod = PULSE_PERIOD;
+    static float pulseDuration = PULSE_DURATION;
 
-    /** The field shown in full, and whether the pointer opened it (it pulses on) or the selection did. */
+    /** The field shown in full, and whether the pointer opened it or the selection did. */
     record Open(BoardElectronicWarfare.Source source, boolean hovered) { }
 
     private final GpuHexSurface.Cache carriers = new GpuHexSurface.Cache();
@@ -68,8 +66,7 @@ final class GpuElectronicWarfare implements Disposable {
     private Set<Coords> chunks = Set.of();
     private int tuning = -1;
     private int selected = Entity.NONE;
-    private float hoverClock;
-    private float selectionClock;
+    private float pulseClock;
     private boolean tacticalView;
     private boolean fieldsAll;
     private boolean hatchAll;
@@ -79,6 +76,9 @@ final class GpuElectronicWarfare implements Disposable {
     /**
      * Follows the scene's snapshot and the pointer. {@code finished} is the terrain's surface function when the terrain
      * changed (or on the first update), else null; {@code hover} and {@code hoveredUnit} are the pointed hex and unit.
+     * A field pulses once when it opens, whether the pointer or the selection opened it; hovering and selecting the
+     * same unit keeps the one pulse. A field stays open until its pulse completes, unless the pointer or a new
+     * selection opens another.
      */
     void update(BoardScene next, @Nullable Function<Coords, BoardTacticalGeometry.Surface> finished,
           @Nullable Coords hover, int hoveredUnit) {
@@ -86,14 +86,15 @@ final class GpuElectronicWarfare implements Disposable {
         if (Gdx.gl30 == null || warfare.width() != next.width() || warfare.height() != next.height()) {
             warfare = BoardElectronicWarfare.EMPTY;
         }
-        if (next.selectedId() != selected) {
-            selected = next.selectedId();
-            selectionClock = 0;
-        }
+        boolean selectionChanged = next.selectedId() != selected;
+        selected = next.selectedId();
         Open opened = open(warfare, hoveredUnit, hover, selected);
-        if (opened != null && opened.hovered() && (open == null || !open.hovered()
-              || !open.source().equals(opened.source()))) {
-            hoverClock = 0;
+        if (pulseTime() >= 0 && (opened == null || !opened.hovered() && !selectionChanged)
+              && warfare.sources().contains(open.source())) {
+            opened = open;
+        }
+        if (opened != null && (open == null || !open.source().equals(opened.source()))) {
+            pulseClock = 0;
         }
         boolean reset = scene == null || scene.boardId() != next.boardId() || scene.width() != next.width()
               || scene.height() != next.height() || tuning != BoardGeometry.revision();
@@ -143,15 +144,9 @@ final class GpuElectronicWarfare implements Disposable {
         return texels;
     }
 
-    /** Seconds into the pulse's cycle, or -1 while it rests: a hover repeats it, a selection runs SELECTION_CYCLES. */
-    static float phase(boolean hovered, float clock, float period) {
-        return !hovered && clock >= SELECTION_CYCLES * period ? -1 : clock % period;
-    }
-
-    /** The open field's pulse time now, or -1 when nothing pulses (for reviews and tests). */
+    /** Seconds into the open field's pulse, or -1 when nothing pulses or the pulse completed. */
     float pulseTime() {
-        if (open == null || !pulse || pulseIntensity <= 0) { return -1; }
-        return phase(open.hovered(), open.hovered() ? hoverClock : selectionClock, pulsePeriod);
+        return open == null || !pulse || pulseIntensity <= 0 || pulseClock >= pulseDuration ? -1 : pulseClock;
     }
 
     @Nullable Open opened() {
@@ -191,16 +186,14 @@ final class GpuElectronicWarfare implements Disposable {
     }
 
     /**
-     * Advances the pulse clocks and submits the covered chunks in view. {@code fields} outlines every field, in either
+     * Advances the pulse clock and submits the covered chunks in view. {@code fields} outlines every field, in either
      * view; in the Tactical View ({@code tactical}) {@code hatch} hatches every jammed hex, not only the open field's.
      * {@code fill} (deployment's ECM overlay) also tints every covered hex in its side's colour and hatches every
      * jammed hex in either view, so the fields read at a glance.
      */
     void submit(ModelBatch batch, Camera camera, float deltaSeconds, boolean tactical, boolean fields, boolean hatch,
           boolean fill) {
-        float step = Math.min(Math.max(deltaSeconds, 0), .1f);
-        hoverClock += step;
-        selectionClock += step;
+        pulseClock += Math.min(Math.max(deltaSeconds, 0), .1f);
         fillAll = fill;
         if (cells == null) { return; }
         prepare();
@@ -263,7 +256,7 @@ final class GpuElectronicWarfare implements Disposable {
                   (centre.getY() + (centre.getX() & 1) * .5f + .5f) * BoardGeometry.TILE_HEIGHT);
             program.setUniformf("u_pulseBorder", border);
             program.setUniformf("u_pulseTime", pulseTime());
-            program.setUniformf("u_pulsePeriod", pulsePeriod);
+            program.setUniformf("u_pulseDuration", pulseDuration);
             Color glow = open != null && open.source().own() ? ownPulse : enemyPulse;
             program.setUniformf("u_pulseColour", glow.r, glow.g, glow.b, pulseIntensity);
             program.setUniformf("u_own", UiTheme.MINT.r, UiTheme.MINT.g, UiTheme.MINT.b);

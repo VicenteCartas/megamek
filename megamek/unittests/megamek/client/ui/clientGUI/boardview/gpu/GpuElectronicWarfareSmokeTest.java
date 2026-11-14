@@ -124,7 +124,11 @@ class GpuElectronicWarfareSmokeTest {
         for (float time : new float[] { .30f, .80f, 1.25f, 1.50f }) {
             capturePulse(view, pass, output, "ecm-3d-hover", time);
         }
+        // The pointer leaves mid-pulse: the field stays open until the pulse completes, then closes.
         hover(view, megamek.common.units.Entity.NONE, null);
+        render(view, 1);
+        assertEquals(scenario.warwolf.getId(), pass.opened().source().entityId(), "The pulse completes");
+        awaitClosed(view, pass);
 
         // Tactical View, option B: every outline and the hatch on every jammed hex, then the Jamming row off.
         view.setTacticalView(true);
@@ -170,6 +174,7 @@ class GpuElectronicWarfareSmokeTest {
         assertEquals(scenario.warwolf.getId(), pass.opened().source().entityId(), "Hovering still opens the field");
         capture(output, "ecm-tactical-fields-off-hover").dispose();
         hover(view, megamek.common.units.Entity.NONE, null);
+        awaitClosed(view, pass);
         pressOverlay(view, "overlay-fields");
         await(view, scenario, () -> scenario.fixture.source.uiPreferences().overlays().ecmFields(),
               "The Fields row switches back");
@@ -227,19 +232,21 @@ class GpuElectronicWarfareSmokeTest {
         hoveredUnit.setInt(view, unit);
     }
 
-    /** Renders until the pulse reaches {@code time} in its first cycle, then writes the frame. */
+    /** Renders until the open field's pulse completes and the field closes. */
+    private static void awaitClosed(GpuBattleView view, GpuElectronicWarfare pass) {
+        long deadline = System.nanoTime() + 10_000_000_000L;
+        while (pass.opened() != null) {
+            assertTrue(System.nanoTime() < deadline, "The field closes once its pulse completes");
+            render(view, 1);
+        }
+    }
+
+    /** Renders until the hover's one pulse reaches {@code time}, then writes the frame. */
     private static void capturePulse(GpuBattleView view, GpuElectronicWarfare pass, File output, String name,
           float time) throws Exception {
         long deadline = System.nanoTime() + 20_000_000_000L;
-        float previous = pass.pulseTime();
-        // Wait for the next cycle when the wanted time has passed in this one.
-        while (pass.pulseTime() >= time - .02f || pass.pulseTime() < 0) {
-            assertTrue(System.nanoTime() < deadline, "The hovered field pulses");
-            render(view, 1);
-            if (pass.pulseTime() < previous) { break; }
-            previous = pass.pulseTime();
-        }
         while (pass.pulseTime() < time) {
+            assertTrue(pass.pulseTime() >= 0, "The hovered field's one pulse reaches " + time);
             assertTrue(System.nanoTime() < deadline, "The pulse advances");
             render(view, 1);
         }

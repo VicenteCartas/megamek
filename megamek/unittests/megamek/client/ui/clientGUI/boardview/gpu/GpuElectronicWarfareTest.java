@@ -123,17 +123,6 @@ class GpuElectronicWarfareTest {
     }
 
     @Test
-    void aSelectionPulsesTwiceThenRestsWhileAHoverRepeats() {
-        float period = GpuElectronicWarfare.PULSE_PERIOD;
-        assertEquals(0.3f, GpuElectronicWarfare.phase(false, 0.3f, period), 1e-5f);
-        assertEquals(0.3f, GpuElectronicWarfare.phase(false, period + 0.3f, period), 1e-4f);
-        assertEquals(-1, GpuElectronicWarfare.phase(false, 2 * period + 0.3f, period));
-        assertEquals(-1, GpuElectronicWarfare.phase(false, 60, period));
-        assertEquals(0.3f, GpuElectronicWarfare.phase(true, 2 * period + 0.3f, period), 1e-4f);
-        assertEquals(0.3f, GpuElectronicWarfare.phase(true, 20 * period + 0.3f, period), 1e-3f);
-    }
-
-    @Test
     void oneUnitWithEcmAndEccmCountsOnceAndUnseenFieldsSetNothing() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             fixture.addEcm();

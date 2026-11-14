@@ -17,8 +17,8 @@ uniform int u_openKinds;       // the open source's side and kind bits; 0 when n
 uniform float u_strength;      // the ECM Transparency setting / 128
 uniform vec2 u_pulseCentre;    // the open source's hex centre, in board pixels
 uniform float u_pulseBorder;   // the field's edge, in hexes from the source
-uniform float u_pulseTime;     // seconds into the pulse's cycle; negative while it rests
-uniform float u_pulsePeriod;   // seconds per cycle
+uniform float u_pulseTime;     // seconds into the pulse; negative when none shows
+uniform float u_pulseDuration; // seconds the pulse lasts
 uniform vec4 u_pulseColour;    // rgb, and the tuned intensity
 uniform vec3 u_own;            // own and allied fields
 uniform vec3 u_enemy;          // enemy fields and the jammed hatch
@@ -90,9 +90,9 @@ vec4 over(vec4 below, vec4 paint) {
     return vec4(paint.rgb * paint.a + below.rgb * (1.0 - paint.a), paint.a + below.a * (1.0 - paint.a));
 }
 
-/** The wave leaves the source, crosses the field, flashes at its border, then rests (times scale with the period). */
+/** The wave leaves the source, crosses the field, then flashes at its border (times scale with the duration). */
 float pulse(float d, float time) {
-    float travel = u_pulsePeriod * (1.45 / 2.4), flash = u_pulsePeriod * (0.40 / 2.4);
+    float travel = u_pulseDuration * (1.45 / 1.85), flash = u_pulseDuration * (0.40 / 1.85);
     float a = 0.0;
     if (time < travel) {
         float x = u_pulseBorder * time / travel - d;          // > 0 behind the front
