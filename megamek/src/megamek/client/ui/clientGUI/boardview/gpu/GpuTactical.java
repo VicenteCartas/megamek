@@ -116,32 +116,37 @@ final class GpuTactical implements Disposable {
     private final float outlineSpeed;
     private double scrollDistance;
     private final Function<Coords, BoardTacticalGeometry.Surface> terrain;
+    /** Each hex's installed bridge, or null for none: the deployment tint covers it with the hex's terrain. */
+    private final Function<Coords, BoardBridge.Shape> bridges;
 
     GpuTactical() {
         this(OUTLINE_SCROLL_SPEED);
     }
 
     GpuTactical(float outlineSpeed) {
-        this(outlineSpeed, null, null, null);
+        this(outlineSpeed, null, coords -> null, null, null);
     }
 
     GpuTactical(Function<Coords, BoardTacticalGeometry.Surface> terrain) {
-        this(OUTLINE_SCROLL_SPEED, terrain, null, null);
+        this(OUTLINE_SCROLL_SPEED, terrain, coords -> null, null, null);
     }
 
     /**
-     * The labels and the ruler draw with the view's sprite and shape programs ({@code sprites}, {@code shapes}), which
-     * their batch and renderer do not own.
+     * The installed terrain's surfaces and bridges ({@code terrain}, {@code bridges}). The labels and the ruler draw
+     * with the view's sprite and shape programs ({@code sprites}, {@code shapes}), which their batch and renderer do
+     * not own.
      */
-    GpuTactical(Function<Coords, BoardTacticalGeometry.Surface> terrain, ShaderProgram sprites, ShaderProgram shapes) {
-        this(OUTLINE_SCROLL_SPEED, terrain, sprites, shapes);
+    GpuTactical(Function<Coords, BoardTacticalGeometry.Surface> terrain, Function<Coords, BoardBridge.Shape> bridges,
+          ShaderProgram sprites, ShaderProgram shapes) {
+        this(OUTLINE_SCROLL_SPEED, terrain, bridges, sprites, shapes);
     }
 
     // Without shared programs the text batch and the ruler compile and own libGDX's own.
     private GpuTactical(float outlineSpeed, Function<Coords, BoardTacticalGeometry.Surface> terrain,
-          ShaderProgram sprites, ShaderProgram shapes) {
+          Function<Coords, BoardBridge.Shape> bridges, ShaderProgram sprites, ShaderProgram shapes) {
         this.outlineSpeed = outlineSpeed;
         this.terrain = terrain;
+        this.bridges = bridges;
         textBatch = new SpriteBatch(1000, sprites);
         rulerShapes = new ShapeRenderer(5000, shapes);
         wallMaterial.set(new DepthTestAttribute(GL20.GL_LEQUAL, 0, COPLANAR_DEPTH_FAR, false));
@@ -239,7 +244,7 @@ final class GpuTactical implements Disposable {
         List<BoardTactical.Wall> commands = new ArrayList<>(scene.tactical().walls());
         commands.addAll(BoardDeploymentGeometry.walls(scene, perimeter));
         commands = BoardRangeBorder.join(commands);
-        deploymentTint.updateDeployment(scene, deployment.values(), surfaces);
+        deploymentTint.updateDeployment(scene, deployment.values(), surfaces, bridges);
         // Unit bases draw in their own pass (GpuUnitBases), so the regular-border mask always applies.
         boolean masked = hexMasks.update(scene, surfaces, true);
         addFills(scene, masked ? List.of() : scene.tactical().fills(), new Group(0, null), groups, nextFills,

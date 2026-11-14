@@ -135,9 +135,14 @@ class GpuHexSurfaceSmokeTest {
         var wall = face(new Vector3(95, -10, 0), new Vector3(95, -10, 1000), new Vector3(105, -10, 0));
         var surface = new BoardTacticalGeometry.Surface(List.of(ground, water), List.of(slope),
               List.of(ground, bed), List.of(water), List.of(slope, wall), List.of());
+        List<BoardBridge.Facet> deck = new ArrayList<>();
+        BoardBridge.triangle(deck, new Vector3(110, -10, 30), new Vector3(120, -10, 30), new Vector3(110, -20, 30),
+              BoardBridge.Part.TOP);
+        var bridge = BoardBridge.shape(BoardScene.Surface.CONCRETE, 1, deck);
         Set<Vector3> expected = Set.of(ground.a(), ground.b(), ground.c(), water.a(), water.b(), water.c(),
-              slope.a(), slope.b(), slope.c(), bed.a(), bed.b(), bed.c(), wall.a(), wall.b(), wall.c());
-        GpuHexSurface carrier = new GpuHexSurface(scene, chunk, ignored -> surface, true);
+              slope.a(), slope.b(), slope.c(), bed.a(), bed.b(), bed.c(), wall.a(), wall.b(), wall.c(),
+              deck.getFirst().a(), deck.getFirst().b(), deck.getFirst().c());
+        GpuHexSurface carrier = new GpuHexSurface(scene, chunk, ignored -> surface, ignored -> bridge);
         GpuHexSurface regular = null;
         try {
             regular = new GpuHexSurface(scene, chunk, ignored -> surface);
@@ -151,13 +156,15 @@ class GpuHexSurfaceSmokeTest {
                 }
                 indices += mesh.getNumIndices();
             }
-            assertEquals(expected, actual, "A whole-section tint keeps all terrain, including vertical/outlying cliffs");
-            assertEquals(15, indices, "Each source triangle is retained once");
+            assertEquals(expected, actual,
+                  "A whole-section tint keeps all terrain, including vertical/outlying cliffs, and the hex's bridge");
+            assertEquals(18, indices, "Each source triangle is retained once");
             assertEquals(9, meshes(regular).getFirst().getNumIndices(), "Regular border carriers still include lying slopes");
             assertEquals(1000 + 2 * BoardGeometry.HEX_SCALE, carrier.bounds().max.z);
-            assertEquals(105, carrier.bounds().max.x);
-            assertEquals(carrier.bounds().max.z, GpuHexSurface.bounds(scene, chunk, ignored -> surface, true).max.z);
-            assertEquals(carrier.bounds().max.x, GpuHexSurface.bounds(scene, chunk, ignored -> surface, true).max.x);
+            assertEquals(120, carrier.bounds().max.x);
+            var whole = GpuHexSurface.bounds(scene, chunk, ignored -> surface, ignored -> bridge);
+            assertEquals(carrier.bounds().max.z, whole.max.z);
+            assertEquals(carrier.bounds().max.x, whole.max.x);
             assertEquals(regular.bounds().max.z, GpuHexSurface.bounds(scene, chunk, ignored -> surface).max.z);
         } finally {
             if (regular != null) { regular.dispose(); }

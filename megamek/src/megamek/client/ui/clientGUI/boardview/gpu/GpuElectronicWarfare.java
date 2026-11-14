@@ -99,7 +99,7 @@ final class GpuElectronicWarfare implements Disposable {
               || scene.height() != next.height() || tuning != BoardGeometry.revision();
         if (reset) { carriers.clear(); }
         if (reset || finished != null) {
-            carriers.update(next, finished != null ? finished : BoardTacticalGeometry.surfaces(next), false);
+            carriers.update(next, finished != null ? finished : BoardTacticalGeometry.surfaces(next), null);
         }
         scene = next;
         tuning = BoardGeometry.revision();

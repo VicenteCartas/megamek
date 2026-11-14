@@ -69,7 +69,7 @@ class GpuDeploymentZoneSmokeTest {
         try {
             tactical.update(fixture.scene());
             tint.updateDeployment(fixture.scene(), BoardDeploymentGeometry.zoneFills(fixture.scene()).values(),
-                  fixture.surfaces()::get);
+                  fixture.surfaces()::get, coords -> null);
             assertTrue(tactical.deploymentActive());
             assertEquals(SIZE * SIZE, BoardDeploymentGeometry.zoneFills(fixture.scene()).size());
             for (boolean perspective : new boolean[] { false, true }) {

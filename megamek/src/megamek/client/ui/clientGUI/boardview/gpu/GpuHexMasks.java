@@ -53,23 +53,28 @@ final class GpuHexMasks implements Disposable {
         List<BoardTactical.Fill> commands = next.tactical().fills();
         List<Entry> entries = enabled ? entries(next, commands) : null;
         if (!next.tactical().walls().isEmpty() || !next.tactical().flatWalls().isEmpty()) { entries = null; }
-        return update(next, commands, entries, finished, false);
+        return update(next, commands, entries, finished, null);
     }
 
-    /** Tint each captured deployment hex's complete terrain, including its slopes and cliff faces. */
+    /**
+     * Tint each captured deployment hex's complete terrain, including its slopes and cliff faces, and its bridge
+     * ({@code bridges}: each hex's installed one, or null for none).
+     */
     void updateDeployment(BoardScene next, Collection<BoardTactical.Fill> commands,
-          Function<Coords, BoardTacticalGeometry.Surface> finished) {
+          Function<Coords, BoardTacticalGeometry.Surface> finished, Function<Coords, BoardBridge.Shape> bridges) {
         List<BoardTactical.Fill> captured = List.copyOf(commands);
         List<Entry> entries = new ArrayList<>();
         for (BoardTactical.Fill fill : captured) {
             Coords coords = BoardTacticalGeometry.borderCoords(next, fill.border());
             if (coords != null) { entries.add(new Entry(fill, coords, 0)); }
         }
-        update(next, captured, entries, finished, true);
+        update(next, captured, entries, finished, bridges);
     }
 
+    /** {@code bridges} selects the whole-hex tint and gives its hexes' bridges; null draws the regular borders. */
     private boolean update(BoardScene next, List<BoardTactical.Fill> commands, List<Entry> entries,
-          Function<Coords, BoardTacticalGeometry.Surface> finished, boolean tint) {
+          Function<Coords, BoardTacticalGeometry.Surface> finished, Function<Coords, BoardBridge.Shape> bridges) {
+        boolean tint = bridges != null;
         if (entries == null || entries.isEmpty() || Gdx.gl30 == null) {
             clear();
             return false;
@@ -77,7 +82,7 @@ final class GpuHexMasks implements Disposable {
         boolean reset = scene == null || scene.boardId() != next.boardId() || scene.width() != next.width()
               || scene.height() != next.height() || tuning != BoardGeometry.revision() || this.tint != tint;
         if (reset) { clear(); }
-        carriers.update(next, finished, tint);
+        carriers.update(next, finished, bridges);
         scene = next;
         this.tint = tint;
         tuning = BoardGeometry.revision();

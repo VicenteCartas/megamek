@@ -39,11 +39,16 @@ final class GpuHexSurface implements Disposable {
 
     /** Chunk coordinates, not tile coordinates: (1, 0) begins at column {@link GpuTerrain#CHUNK_SIZE}. */
     GpuHexSurface(BoardScene scene, Coords chunk, Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
-        this(scene, chunk, surfaces, false);
+        this(scene, chunk, surfaces, null);
     }
 
+    /**
+     * {@code bridges} (each hex's installed bridge, or null for none) selects a whole-hex tint's carriers: every hex's
+     * complete terrain and its bridge, once.
+     */
     GpuHexSurface(BoardScene scene, Coords chunk, Function<Coords, BoardTacticalGeometry.Surface> surfaces,
-          boolean wholeHex) {
+          Function<Coords, BoardBridge.Shape> bridges) {
+        boolean wholeHex = bridges != null;
         MeshBuilder builder = null;
         ObjectIntMap<Vector3> indices = new ObjectIntMap<>();
         float[] vertex = new float[5];
@@ -67,8 +72,9 @@ final class GpuHexSurface implements Disposable {
                     float minY = -bottom * BoardGeometry.hexScale(), maxY = -top * BoardGeometry.hexScale();
                     for (int cx = firstX; cx <= lastX; cx++) {
                         for (int cy = firstY; cy <= lastY; cy++) {
-                            var surface = dependencies.computeIfAbsent(new Coords(cx, cy), surfaces);
-                            for (var faces : wholeHex ? List.of(surface.faces(), surface.water(), surface.walls())
+                            Coords source = new Coords(cx, cy);
+                            var surface = dependencies.computeIfAbsent(source, surfaces);
+                            for (var faces : wholeHex ? whole(surface, bridges.apply(source))
                                   : List.of(surface.top(), surface.slopes())) {
                                 for (BoardSurface.Face face : faces) {
                                     if (!wholeHex && !intersects(face, minX, minY, maxX, maxY)) { continue; }
@@ -92,6 +98,13 @@ final class GpuHexSurface implements Disposable {
             dispose();
             throw failure;
         }
+    }
+
+    /** A whole hex: its ground, water and walls, and the facets its bridge is drawn from. */
+    private static List<List<BoardSurface.Face>> whole(BoardTacticalGeometry.Surface surface, BoardBridge.Shape bridge) {
+        List<BoardSurface.Face> span = bridge == null ? List.of() : bridge.facets().stream().map(facet ->
+              new BoardSurface.Face(facet.a(), facet.b(), facet.c(), BoardSurface.Finish.TOP)).toList();
+        return List.of(surface.faces(), surface.water(), surface.walls(), span);
     }
 
     private static short vertex(MeshBuilder builder, ObjectIntMap<Vector3> indices, Vector3 point, float[] vertex) {
@@ -118,11 +131,11 @@ final class GpuHexSurface implements Disposable {
 
     /** No-upload visibility bound. Callers may cache this until the board, tuning or terrain changes. */
     static BoundingBox bounds(BoardScene scene, Coords chunk, Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
-        return bounds(scene, chunk, surfaces, false);
+        return bounds(scene, chunk, surfaces, null);
     }
 
     static BoundingBox bounds(BoardScene scene, Coords chunk, Function<Coords, BoardTacticalGeometry.Surface> surfaces,
-          boolean wholeHex) {
+          Function<Coords, BoardBridge.Shape> bridges) {
         int startX = chunk.getX() * GpuTerrain.CHUNK_SIZE, startY = chunk.getY() * GpuTerrain.CHUNK_SIZE;
         int endX = Math.min(scene.width(), startX + GpuTerrain.CHUNK_SIZE);
         int endY = Math.min(scene.height(), startY + GpuTerrain.CHUNK_SIZE);
@@ -131,11 +144,11 @@ final class GpuHexSurface implements Disposable {
         float minY = -(endY + .5f) * BoardGeometry.TILE_HEIGHT * BoardGeometry.hexScale();
         float maxY = -startY * BoardGeometry.TILE_HEIGHT * BoardGeometry.hexScale();
         BoundingBox result = new BoundingBox().inf();
-        if (wholeHex) {
+        if (bridges != null) {
             for (int x = startX; x < endX; x++) {
                 for (int y = startY; y < endY; y++) {
-                    var surface = surfaces.apply(new Coords(x, y));
-                    for (var faces : List.of(surface.faces(), surface.water(), surface.walls())) {
+                    Coords coords = new Coords(x, y);
+                    for (var faces : whole(surfaces.apply(coords), bridges.apply(coords))) {
                         for (var face : faces) { result.ext(face.a()).ext(face.b()).ext(face.c()); }
                     }
                 }
@@ -183,6 +196,7 @@ final class GpuHexSurface implements Disposable {
         bounds.ext(pageBounds);
     }
 
+    /** A hex's bridge is installed with its support (GpuTerrain's tile collection), so the surfaces answer for it too. */
     boolean current(Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
         for (var entry : dependencies.entrySet()) {
             if (surfaces.apply(entry.getKey()) != entry.getValue()) { return false; }
@@ -244,15 +258,19 @@ final class GpuHexSurface implements Disposable {
         private final Map<Coords, BoundingBox> bounds = new HashMap<>();
         private BoardScene scene;
         private Function<Coords, BoardTacticalGeometry.Surface> terrain;
-        private boolean wholeHex;
+        private Function<Coords, BoardBridge.Shape> bridges;
 
-        /** Drops the carriers whose terrain changed, and the bounds when the tiles or the surfaces changed. */
-        void update(BoardScene next, Function<Coords, BoardTacticalGeometry.Surface> finished, boolean whole) {
-            if (whole != wholeHex) { clear(); }
+        /**
+         * Drops the carriers whose terrain changed, and the bounds when the tiles or the surfaces changed.
+         * {@code whole}: the bridges of whole-hex carriers (see the constructor), null for regular ones.
+         */
+        void update(BoardScene next, Function<Coords, BoardTacticalGeometry.Surface> finished,
+              Function<Coords, BoardBridge.Shape> whole) {
+            if (whole != bridges) { clear(); }
             if (scene != null && (scene.tiles() != next.tiles() || terrain != finished)) { bounds.clear(); }
             scene = next;
             terrain = finished;
-            wholeHex = whole;
+            bridges = whole;
             surfaces.entrySet().removeIf(entry -> {
                 if (entry.getValue().current(finished)) { return false; }
                 entry.getValue().dispose();
@@ -275,9 +293,9 @@ final class GpuHexSurface implements Disposable {
         void submit(ModelBatch batch, Camera camera, Shader shader, Material material, Object state,
               Collection<Coords> chunks) {
             for (Coords coords : chunks) {
-                BoundingBox box = bounds.computeIfAbsent(coords, key -> GpuHexSurface.bounds(scene, key, terrain, wholeHex));
+                BoundingBox box = bounds.computeIfAbsent(coords, key -> GpuHexSurface.bounds(scene, key, terrain, bridges));
                 if (!camera.frustum.boundsInFrustum(box)) { continue; }
-                surfaces.computeIfAbsent(coords, key -> new GpuHexSurface(scene, key, terrain, wholeHex))
+                surfaces.computeIfAbsent(coords, key -> new GpuHexSurface(scene, key, terrain, bridges))
                       .submit(batch, camera, shader, material, state);
             }
         }

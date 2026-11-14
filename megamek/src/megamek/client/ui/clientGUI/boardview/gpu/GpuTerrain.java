@@ -6422,6 +6422,13 @@ final class GpuTerrain implements Disposable {
         return installedSettings.call(() -> tacticalSurface(coverScene, chunk, coords, floor));
     }
 
+    /** The hex's installed bridge, whose facets it is drawn from: the deployment tint covers them; null for none. */
+    BoardBridge.Shape tacticalBridge(Coords coords) {
+        if (coverScene == null || coverScene.tile(coords) == null) { return null; }
+        return chunks.get(coords.getX() / CHUNK_SIZE * chunkRows + coords.getY() / CHUNK_SIZE).tileMeshes.get(coords)
+              .bridgeShape;
+    }
+
     /** Only nearby installed receivers are read; stamps never scan or rebuild the board's terrain. */
     private List<GpuSurfaceScars.Source> scarSources(Vector3 point, float radius) {
         List<GpuSurfaceScars.Source> result = new ArrayList<>();

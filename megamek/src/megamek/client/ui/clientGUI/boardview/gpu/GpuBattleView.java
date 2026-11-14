@@ -550,7 +550,7 @@ class GpuBattleView extends ApplicationAdapter {
         offscreenLinks = new GpuGlsl.Preparation();
         GpuGlsl.linkOffscreen(offscreenLinks);
         fireControl = new GpuFireControl(sprites());
-        tactical = new GpuTactical(terrain::tacticalSurface, sprites(), shapes());
+        tactical = new GpuTactical(terrain::tacticalSurface, terrain::tacticalBridge, sprites(), shapes());
         // As each frame configures it (renderFrame): its sky is generated once, for these settings.
         atmosphere = new GpuAtmosphere(boardCamera.tactical() ? BoardAtmosphere.DEFAULTS : tuning.atmosphere(),
               tuning.atmosphereOptions());
