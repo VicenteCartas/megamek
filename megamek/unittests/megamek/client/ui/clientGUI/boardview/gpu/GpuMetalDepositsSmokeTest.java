@@ -33,8 +33,6 @@ class GpuMetalDepositsSmokeTest {
         var rough = GpuSceneryPlacementSmokeTest.capture(
               new GpuSceneryPlacementSmokeTest.Sample("rough-comparison", 0, "", "", "rough:1", false), true);
         var centre = new Coords(2, 2);
-        assertEquals(plain.tile(centre).decals(), scene.tile(centre).decals(), "Enhanced never projects the old ore sprite");
-        assertTrue(scene.tile(centre).detailedGround());
         File output = new File(System.getProperty("megamek.gpu.screenshots"), "metal-deposits");
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();

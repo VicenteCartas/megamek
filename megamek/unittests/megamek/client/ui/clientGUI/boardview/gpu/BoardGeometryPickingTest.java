@@ -40,9 +40,9 @@ class BoardGeometryPickingTest {
             for (int y = 0; y < board.getHeight(); y++) {
                 var hex = board.getHex(x, y);
                 int depth = hex.containsTerrain(Terrains.WATER) ? hex.terrainLevel(Terrains.WATER) : -1;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), hex.getLevel(), depth, false, 0,
-                      BoardFeatures.surface(hex), null, null, List.of(), List.of(),
-                      BoardLiquid.capture(hex), null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), hex.getLevel(), depth, false, 0,
+                      BoardFeatures.surface(hex), List.of(), List.of(),
+                      BoardLiquid.capture(hex), null));
             }
         }
         BoardScene scene = new BoardScene(0, board.getWidth(), board.getHeight(), tiles,
@@ -178,8 +178,8 @@ class BoardGeometryPickingTest {
             for (int y = 0; y < 3; y++) {
                 BoardLiquid liquid = x == 1 && y == 1 ? BoardLiquid.WATER : x == 3 && y == 1
                       ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.NONE;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, liquid == BoardLiquid.WATER ? 3 : liquid.present() ? 0 : -1,
-                      false, 0, BoardScene.Surface.SAND, null, null, List.of(), List.of(), liquid, null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), 0, liquid == BoardLiquid.WATER ? 3 : liquid.present() ? 0 : -1,
+                      false, 0, BoardScene.Surface.SAND, List.of(), List.of(), liquid, null));
             }
         }
         BoardScene scene = new BoardScene(0, 5, 3, tiles, List.of(), List.of(), -1, "", List.of());
@@ -219,9 +219,9 @@ class BoardGeometryPickingTest {
                 boolean ice = x == 1 && y == 1;
                 boolean water = ice || x == 3 && y >= 1 && y <= 5;
                 int level = y < 3 ? 3 : x == 5 && y == 5 ? 1 : 0;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, water ? 2 : -1, ice, 0,
-                      BoardScene.Surface.SAND, null, null, List.of(), List.of(),
-                      water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), level, water ? 2 : -1, ice, 0,
+                      BoardScene.Surface.SAND, List.of(), List.of(),
+                      water ? BoardLiquid.WATER : BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -236,7 +236,7 @@ class BoardGeometryPickingTest {
     void terrainImpactsUseThePickedMaterialAndCacheItForPlayback() {
         for (var material : BoardScene.Surface.values()) {
             for (int water : new int[] { -1, 2 }) {
-                var tile = new BoardScene.Tile(new Coords(0, 0), 0, water, false, 0, material, null, List.of(),
+                var tile = BoardScenes.newTile(new Coords(0, 0), 0, water, false, 0, material, List.of(),
                       List.of());
                 var board = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
                 var cache = new BoardSurface.Cache();
@@ -311,7 +311,7 @@ class BoardGeometryPickingTest {
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < 12; x++) {
             for (int y = 0; y < 5; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 2, -1, false, 0, BoardScene.Surface.GRASS, null,
+                tiles.add(BoardScenes.newTile(new Coords(x, y), 2, -1, false, 0, BoardScene.Surface.GRASS,
                       List.of(), List.of()));
             }
         }
@@ -349,8 +349,7 @@ class BoardGeometryPickingTest {
     @Test
     void recessedWaterUsesRealDepthAndStillPicksItsHex() {
         for (int depth : new int[] { 0, 1, 2, 7 }) {
-            BoardScene.Tile wet = new BoardScene.Tile(new Coords(0, 0), 2, depth, false, 0, BoardScene.Surface.GRASS,
-                  null, List.of(), List.of());
+            BoardScene.Tile wet = BoardScenes.newTile(new Coords(0, 0), 2, depth, false, 0, BoardScene.Surface.GRASS, List.of(), List.of());
             BoardScene scene = new BoardScene(0, 1, 1, List.of(wet), List.of(), List.of(), -1, "", List.of());
             assertTrue(BoardGeometry.groundZ(wet) < BoardGeometry.waterZ(wet));
             assertEquals(2 * BoardGeometry.LEVEL - (depth == 0 ? 2 * BoardGeometry.HEX_SCALE : depth * BoardGeometry.LEVEL),

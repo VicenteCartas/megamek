@@ -483,6 +483,8 @@ public final class BoardFile {
         String ruins = hex.getRuins().stream().sorted(Comparator.comparingInt(Terrain::getType))
               .map(ruin -> saveConnections ? ruin.toBoardString() : ruin.toString()).collect(Collectors.joining(";"));
         if (!ruins.isEmpty()) { node.put("ruins", ruins); }
+        if (hex.getRailRuinLevel(false) != null) { node.put("groundRailRuinLevel", hex.getRailRuinLevel(false)); }
+        if (hex.getRailRuinLevel(true) != null) { node.put("bridgeRailRuinLevel", hex.getRailRuinLevel(true)); }
         if (hex.getTheme() != null && !hex.getTheme().isEmpty()) { node.put("theme", hex.getTheme()); }
         if (!hex.getAppearance().isEmpty()) {
             ObjectNode styles = node.putObject("appearance");
@@ -566,6 +568,14 @@ public final class BoardFile {
             Hex hex = new Hex(integer(node, "elevation", 0), terrain, string(node, "theme", null));
             String ruins = string(node, "ruins", ""); validateTerrain(ruins);
             for (String ruin : ruins.split(";")) { if (!ruin.isEmpty()) { hex.addRuin(new Terrain(ruin)); } }
+            for (boolean deck : List.of(false, true)) {
+                String key = deck ? "bridgeRailRuinLevel" : "groundRailRuinLevel";
+                if (node.has(key)) {
+                    Terrain rail = hex.getRuin(deck ? Terrains.BRIDGE_RAIL : Terrains.RAIL);
+                    require(rail != null, key + " needs a destroyed rail");
+                    hex.addRailRuin(rail, integer(node, key, 0));
+                }
+            }
             readVisuals(node, hex); hex.duplicateDecorationIds();
             return hex;
         } catch (RuntimeException failure) { throw new IOException("Invalid clipboard hex", failure); }

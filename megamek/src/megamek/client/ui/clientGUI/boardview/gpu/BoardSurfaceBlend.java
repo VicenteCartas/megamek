@@ -6,12 +6,10 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
-import megamek.common.board.TilesetScenery;
 import megamek.common.units.Terrains;
 
 /** Surface cover at a world position. Rendering and grass placement query the same immutable board snapshot. */
@@ -77,16 +75,6 @@ public final class BoardSurfaceBlend {
 
     /** The 2D tileset's ground_fluff transitions: desert, grass, tropical grass, Mars and Moon. */
     public static boolean hasTransition(Hex hex) { return transitionFamily(hex) >= 0; }
-
-    /** Omit legacy paint only when native ground can actually display the captured material mixture. */
-    public static boolean replacesTransition(Hex hex, Map<Integer, String> models, Set<Integer> blankTerrains) {
-        return hasTransition(hex) && BoardFeatures.detailedGround(hex, models, blankTerrains);
-    }
-
-    public static boolean replacesTransition(Hex hex, Map<Integer, String> models, Set<Integer> blankTerrains,
-          TilesetScenery.Scenery scenery) {
-        return hasTransition(hex) && BoardFeatures.detailedGround(hex, models, blankTerrains, scenery);
-    }
 
     static int transitionFamily(Hex hex) {
         if (hex.getAppearance().containsKey("ground")) { hex = megamek.common.board.BoardEditorBlueprint.get().artwork(hex, "ground"); }
@@ -160,13 +148,6 @@ public final class BoardSurfaceBlend {
 
     static final Cover NO_FOOT = new Cover(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
-    /** Vegetation uses the same exposed substrate windows as the material, including sand reaching a neighbour. */
-    static float grass(BoardScene.Tile tile, Cover cover, float x, float y) {
-        if (tile.surface() != BoardScene.Surface.GRASS || cover.sand() <= 0) { return cover.grass(); }
-        float metre = BoardRelief.metres(1);
-        return cover.grass() + cover.sand() * sandExposure(x / metre, y / metre);
-    }
-
     /** Loose surface deposits do not turn the supporting cliff into sandstone or erase the theme's geology. */
     private static Cover cover(BoardScene.Tile tile, float z) {
         Cover top = cover(tile);
@@ -195,7 +176,7 @@ public final class BoardSurfaceBlend {
     }
 
     static boolean natural(BoardScene.Tile tile) {
-        return tile != null && !tile.ultraSublevel() && !tile.backdrop().present() && tile.detailedGround()
+        return tile != null && !tile.ultraSublevel() && !tile.backdrop().present()
               && !tile.liquid().present() && !tile.liquid().volcanic() && !tile.frozen()
               && (tile.roadExits() == 0 || BoardRoad.rendered(tile)) && tile.surface() != BoardScene.Surface.CONCRETE
               && !tile.slab();
@@ -203,14 +184,14 @@ public final class BoardSurfaceBlend {
 
     /** Land ice is a coat over its ground (GpuIceShader), so that ground blends like any other. */
     private static boolean blendable(BoardScene.Tile tile) {
-        return tile != null && !tile.ultraSublevel() && !tile.backdrop().present() && tile.detailedGround()
+        return tile != null && !tile.ultraSublevel() && !tile.backdrop().present()
               && (!tile.liquid().present() || tile.liquid().volcanic() && !tile.frozen())
               && (tile.roadExits() == 0 || BoardRoad.rendered(tile)) && !tile.slab();
     }
 
     /** Uniform interiors retain the ordinary family material and incur no extra maps or vertex attributes. */
     static boolean boundary(BoardScene scene, BoardScene.Tile tile) {
-        if (tile == null || tile.ultraSublevel() || tile.backdrop().present() || !tile.detailedGround()) { return false; }
+        if (tile == null || tile.ultraSublevel() || tile.backdrop().present()) { return false; }
         Cover own = cover(tile);
         // A building or lake ice blocks neighbouring cover, but cannot erase its own authored ground treatment.
         if (!own.equals(solid(family(tile)))) { return true; }

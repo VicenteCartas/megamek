@@ -42,6 +42,7 @@ uniform vec3 u_modelLight;
 // The heightmap parallax's shift of every map read (model-surface.glsl), zero without one.
 vec2 modelShift = vec2(0.0);
 // CUTOUT_FADE
+// LEVEL_DISSOLVE
 
 void main() {
 #ifdef lightingFlag
@@ -116,5 +117,9 @@ void main() {
 #endif
 #ifdef cutoutFadeFlag
     cutoutFadeWrite(fragColor);
+#endif
+#ifdef levelDissolveFlag
+    // Last, after every texture read: a discard leaves its neighbours' derivatives undefined.
+    levelDissolve();
 #endif
 }

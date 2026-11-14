@@ -57,12 +57,15 @@ class GpuShadowCacheSmokeTest {
     }
 
     private void check(GpuBoardFixture fixture, BoardScene scene) throws Exception {
+        BoardQuality previousQuality = BoardQuality.current;
         GpuTerrain terrain = new GpuTerrain();
         Model model = new ModelBuilder().createBox(20, 20, 20, new Material(ColorAttribute.createDiffuse(Color.WHITE)),
               VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal);
         GLProfiler profiler = new GLProfiler(Gdx.graphics);
         profiler.enable();
         try {
+            // These draw counts measure caster reuse, without High's separate shadow mip-generation draws.
+            terrain.setQuality(BoardQuality.MEDIUM);
             BoardCamera camera = new BoardCamera();
             camera.resize(1280, 900);
             camera.fit(scene);
@@ -117,14 +120,32 @@ class GpuShadowCacheSmokeTest {
                 if (step < 3) {
                     assertTrue(cached < full / 2, "Unit motion must not redraw the static board: " + cached + " / " + full);
                 }
-                if (step == 4) {
+                if (step == 4 || step == 8) {
                     assertEquals(0, cached, "Removing the last unit only blits depth, with no geometry draw or color draw-buffer call");
                 }
-                if (step >= 5) {
+                if (step == 7) {
+                    assertTrue(cached <= full + 1, "Terrain invalidation may copy its static depth once for moving debris");
+                } else if (step == 5 || step == 6) {
                     assertEquals(full, cached, "Camera, light and terrain changes must not pay an extra cache copy");
                 }
                 System.out.printf("SHADOW step=%d cached=%d full=%d%n", step, cached, full);
             }
+            // A collapse invalidates static terrain while debris keeps moving. The invalidation pass must also
+            // supply the next frame's static depth, rather than redrawing the board twice in consecutive frames.
+            camera.look(center, .5f);
+            terrain.renderShadows(camera.camera, List.of(unit));
+            terrain.refreshShadows();
+            terrain.renderShadows(camera.camera, List.of(unit));
+            unit.transform.trn(2, 0, 0);
+            profiler.reset();
+            terrain.renderShadows(camera.camera, List.of(unit));
+            int afterInvalidation = profiler.getDrawCalls();
+            byte[] reused = depth(terrain);
+            profiler.reset();
+            fullPass(terrain, List.of(unit));
+            assertTrue(afterInvalidation < profiler.getDrawCalls() / 2,
+                  "Moving debris immediately after invalidation must reuse the static pass");
+            assertArrayEquals(depth(terrain), reused);
             profiler.disable();
             double[][] times = new double[2][60];
             for (int frame = -10; frame < times[0].length; frame++) {
@@ -152,6 +173,7 @@ class GpuShadowCacheSmokeTest {
             profiler.disable();
             model.dispose();
             terrain.dispose();
+            BoardQuality.current = previousQuality;
         }
     }
 

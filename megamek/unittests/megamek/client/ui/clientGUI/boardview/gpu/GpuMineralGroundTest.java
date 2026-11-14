@@ -89,38 +89,6 @@ class GpuMineralGroundTest {
         }
     }
 
-    @Test
-    void grassUsesAcceptedSoilCoverageWithoutClearingRejectedDepositsOrOuterHalos() {
-        var rejected = new BoardScene.Feature(DEPOSIT.asset(), 18, 0, 0, 9, .2f, 0,
-              BoardScene.FeatureKind.METAL);
-        assertEquals(grass(scene("road:1:9", List.of())), grass(scene("road:1:9", List.of(rejected))),
-              "A road-rejected deposit clears neither soil nor grass beside the road");
-        var plain = grass(scene("", List.of()));
-        var planted = grass(scene("", List.of(DEPOSIT)));
-        assertTrue(plain.containsAll(planted), "Only covered roots disappear; every other root keeps its place and rank");
-        assertTrue(planted.size() < plain.size());
-        int softEdge = 0;
-        for (var root : plain) {
-            float coverage = GpuMineralGround.coverage(List.of(DEPOSIT),
-                  (root.get(0) - BoardGeometry.centerX(CENTER)) / BoardGeometry.hexScale(),
-                  (root.get(1) - BoardGeometry.centerY(CENTER)) / BoardGeometry.hexScale());
-            if (coverage == 0) { assertTrue(planted.contains(root), "No bare grass halo beyond the soil's soft edge"); }
-            if (coverage > 0 && planted.contains(root)) { softEdge++; }
-        }
-        assertTrue(softEdge > 0, "Grass thins gradually at the soil edge rather than stopping at a hard circle");
-    }
-
-    private static Set<List<Float>> grass(BoardScene scene) {
-        var tile = scene.tile(CENTER);
-        var support = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
-        FloatArray roots = GpuGroundCover.plant(scene, tile, support, null);
-        Set<List<Float>> result = new HashSet<>();
-        for (int i = 0; i < roots.size; i += 4) {
-            result.add(List.of(roots.get(i), roots.get(i + 1), roots.get(i + 2), roots.get(i + 3)));
-        }
-        return result;
-    }
-
     private static BoardScene scene(String terrain, List<BoardScene.Feature> features) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         var pool = new BoardScene.PixelPool();
@@ -128,7 +96,7 @@ class GpuMineralGroundTest {
             for (int y = 0; y < 5; y++) {
                 Coords at = new Coords(x, y);
                 Hex hex = new Hex(at.equals(CENTER) ? 1 : 0, at.equals(CENTER) ? terrain : "", "");
-                var artwork = new BoardArtwork.HexImage(at, null, null, List.of(), Map.of(), null);
+                var artwork = new BoardArtwork.HexImage(at, List.of(), Map.of(), null);
                 var tile = BoardScene.captureTile(hex, artwork, null, pool, unused -> null);
                 tiles.add(tile.withFeatures(at.equals(CENTER) ? features : List.of()));
             }

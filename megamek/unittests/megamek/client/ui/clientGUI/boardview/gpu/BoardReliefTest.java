@@ -14,12 +14,12 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
-/** Rim prominence by drop, concrete slabs, tree pits, special artwork, joined landforms and compressed elevations. */
+/** Rim prominence by drop, concrete slabs, tree pits, joined landforms and compressed elevations. */
 class BoardReliefTest {
 
     /** Largest distance the cliff's upper tenth stands out beyond the logical edge. */
     private static float rimReach(int level) {
-        BoardScene scene = BoardScenes.reliefScene(level, true, BoardScene.Surface.SAND);
+        BoardScene scene = BoardScenes.reliefScene(level, BoardScene.Surface.SAND);
         BoardSurface surface = new BoardSurface(scene, scene.tile(BoardScenes.RELIEF_CENTER));
         Vector3 center = BoardGeometry.center(BoardScenes.RELIEF_CENTER, level);
         float apothem = BoardGeometry.HEIGHT / 2, reach = 0;
@@ -50,25 +50,13 @@ class BoardReliefTest {
     }
 
     @Test
-    void specialArtworkKeepsALevelTopInsideItsSculptedOutline() {
-        BoardScene scene = BoardScenes.reliefScene(2, false, BoardScene.Surface.GRASS);
-        BoardSurface surface = new BoardSurface(scene, scene.tile(BoardScenes.RELIEF_CENTER));
-        for (BoardSurface.Face face : surface.faces) {
-            for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
-                assertEquals(2 * BoardGeometry.LEVEL, p.z, .001f, "Special ground art stays on its game level");
-            }
-        }
-        assertTrue(surface.relief.sculpted(), "Its cliffs are still sculpted");
-    }
-
-    @Test
     void joinedLandformsShareHeightsAcrossFamiliesAndKeepAnchorsLevel() {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 1, -1, false, 0,
-                      x < 2 ? BoardScene.Surface.GRASS : BoardScene.Surface.SAND, null, null,
-                      List.of(), List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), 1, -1, false, 0,
+                      x < 2 ? BoardScene.Surface.GRASS : BoardScene.Surface.SAND,
+                      List.of(), List.of(), BoardLiquid.NONE, null));
             }
         }
         BoardScene scene = new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());
@@ -112,8 +100,8 @@ class BoardReliefTest {
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 3; y++) {
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, level.applyAsInt(coords), -1, false, 0,
-                      paved.test(coords) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(coords, level.applyAsInt(coords), -1, false, 0,
+                      paved.test(coords) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, List.of(), List.of(), BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 5, 3, tiles, List.of(), List.of(), -1, "", List.of());
@@ -166,7 +154,7 @@ class BoardReliefTest {
         try {
             BoardGeometry.tune(new BoardGeometry.Tuning(1, previous.unitScale(), previous.unitHeightScale(), 1,
                   previous.gridShade(), previous.multiHexUnitScale()));
-            BoardScene scene = BoardScenes.reliefScene(3, true, BoardScene.Surface.ROCK);
+            BoardScene scene = BoardScenes.reliefScene(3, BoardScene.Surface.ROCK);
             float floor = BoardGeometry.floor(scene);
             for (BoardScene.Tile tile : scene.tiles()) {
                 BoardSurface surface = new BoardSurface(scene, tile);
@@ -270,8 +258,7 @@ class BoardReliefTest {
                 BoardLiquid liquid = !pool ? BoardLiquid.NONE
                       : molten ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.WATER;
                 BoardScene.Surface family = x == 4 && y == 1 ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SAND;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), pool ? 0 : 2, pool ? 1 : -1, false, 0, family, null,
-                      null, List.of(), List.of(), liquid, null, !(x == 0 && y == 0)));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), pool ? 0 : 2, pool ? 1 : -1, false, 0, family, List.of(), List.of(), liquid, null));
             }
         }
         return new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());

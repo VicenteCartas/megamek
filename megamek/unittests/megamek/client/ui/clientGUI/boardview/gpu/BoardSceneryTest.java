@@ -100,20 +100,17 @@ class BoardSceneryTest {
             for (String decoration : List.of("geyser:1")) {
                 var hex = new Hex(0, support + ";" + decoration, "");
                 var image = capture(hex);
-                assertTrue(alpha(image.tilesetDecals()) + alpha(image.tilesetScenery()) > 0,
+                assertTrue(alpha(image.tilesetScenery()) > 0,
                       "Tactical View must retain " + decoration);
                 assertEquals(BoardScene.Pixels.capture(bare.tileset(), null), BoardScene.Pixels.capture(image.tileset(), null),
                       "The ground must not retain a duplicate of " + decoration);
                 var tile = tile(hex, image);
-                assertEquals(tile.tilesetDecals(), tile.withText(List.of()).tilesetDecals(),
-                      "Label refreshes must retain painted artwork");
                 assertEquals(tile.tilesetScenery(), tile.withText(List.of()).tilesetScenery(),
                       "Label refreshes must retain object artwork");
             }
             var skylight = drawn(support + ";fluff:6:0");
             assertTrue(skylight.hex().containsTerrain(Terrains.FLUFF), "The token stays for the 2D board");
             assertNull(skylight.tile().tilesetScenery(), "The Tactical View shows the skylight object, not its sprite");
-            assertNull(skylight.tile().tilesetDecals());
             assertEquals(BoardScene.Pixels.capture(bare.tileset(), null), skylight.tile().tileset(),
                   "The Tactical View's base tile has no copy of it either");
         }
@@ -127,7 +124,6 @@ class BoardSceneryTest {
             var captured = capture(rubble);
             assertEquals(List.of("scenery/saxarba/misc/rubble_" + families.get(type - 1)), captured.scenery().models());
             assertEquals(type, rubble.terrainLevel(Terrains.RUBBLE));
-            assertEquals(0, alpha(captured.decals()), "The modeled pile replaces its painted duplicate");
             if (type > 5) { continue; }
             var cleared = new Hex(0, "ground_fluff:2000;fluff:" + (2000 + type), "");
             var path = capture(cleared);
@@ -163,18 +159,14 @@ class BoardSceneryTest {
         var hex = new Hex(0, "road:1:5;road_fluff:1;ground_fluff:1:3;fluff:6:0", "");
         var image = capture(hex);
         assertEquals(0, image.scenery().cosmeticRoadExits());
-        assertEquals(0, alpha(image.decals()));
-        assertTrue(tile(hex, image).detailedGround());
     }
     @Test
     void fccwCraneSkylightsAndLedgesKeepPhysicalGroundAndReplaceTheirPaintedObjects() {
         for (String terrain : List.of("fluff:7:0", "fluff:6:0", "fluff:8:0", "fluff:2:3")) {
             var drawn = drawn("pavement:1;" + terrain);
             assertFalse(drawn.hex().getDecorations().isEmpty(), terrain);
-            assertTrue(drawn.tile().detailedGround(), terrain);
             assertTrue(drawn.tile().features().stream().anyMatch(f -> f.decoration() != null), terrain);
             assertTrue(drawn.tile().features().stream().noneMatch(f -> f.kind() == BoardScene.FeatureKind.SCENERY), terrain);
-            assertNull(drawn.tile().decals(), "A modeled object must not leave its painted twin: " + terrain);
             assertNotNull(drawn.tile().tileset(), "Tactical artwork remains available");
         }
     }
@@ -231,7 +223,6 @@ class BoardSceneryTest {
             assertTrue(image.scenery().models().isEmpty(), terrain);
             // A surface symbol is a legacy decal: the conversion turns it into a decal both views draw.
             assertFalse(image.scenery().decals().isEmpty(), terrain);
-            assertTrue(tile(hex, image).detailedGround(), terrain);
         }
     }
 
@@ -259,10 +250,8 @@ class BoardSceneryTest {
         for (String terrain : List.of("road:2:9", "road:1:9;road_fluff:3", "road:1:9;fluff:5:2")) {
             var drawn = drawn(terrain);
             assertFalse(drawn.hex().getDecorations().isEmpty(), terrain);
-            assertNull(drawn.tile().decals(), terrain);
             assertEquals(9, drawn.tile().roadExits(), terrain);
             assertTrue(drawn.tile().road() != BoardRoad.Kind.NONE, terrain);
-            assertTrue(drawn.tile().detailedGround(), terrain);
         }
     }
 
@@ -275,9 +264,7 @@ class BoardSceneryTest {
             assertEquals(exits[variant], drawn.hex().getTerrain(Terrains.ROAD).getExits(), "The lane is rules terrain");
             assertEquals(BoardRoad.Kind.PAVED, tile.road());
             assertEquals(exits[variant], tile.roadExits());
-            assertNull(tile.decals());
             assertTrue(BoardRoad.rendered(tile));
-            assertTrue(tile.detailedGround());
             // One standard car-park decal per side of the lane with cars, its aisle (along the decal's width) through
             // the same exits; the other side is turned 180 degrees (sized for its own cars).
             var lanes = lanes(drawn.legacy());
@@ -310,8 +297,6 @@ class BoardSceneryTest {
             var hex = new Hex(0, terrain, "");
             var image = capture(hex);
             var tile = tile(hex, image);
-            assertEquals(0, alpha(image.decals()), terrain);
-            assertEquals(0, alpha(image.tilesetDecals()), "Classic uses the shared road material: " + terrain);
             assertEquals(bare, BoardScene.Pixels.capture(image.tileset(), null), "No duplicate road in the base artwork");
             assertEquals(BoardRoad.capture(hex), tile.road(), terrain);
             assertEquals(9, tile.roadExits());
@@ -322,7 +307,6 @@ class BoardSceneryTest {
             hex.setAppearance(java.util.Map.of("road", new megamek.common.board.HexAppearance(design, null, null, null)));
             var image = capture(hex);
             assertEquals(bare, BoardScene.Pixels.capture(image.tileset(), null), design);
-            assertEquals(0, alpha(image.tilesetDecals()), design);
         }
     }
 

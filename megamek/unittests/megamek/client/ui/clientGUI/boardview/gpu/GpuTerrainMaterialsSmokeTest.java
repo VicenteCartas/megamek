@@ -139,8 +139,8 @@ class GpuTerrainMaterialsSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 6; x++) {
             for (int y = 0; y < 6; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), y < 3 ? levels : 0, -1, false, 0, family, null, null,
-                      List.of(), List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), y < 3 ? levels : 0, -1, false, 0, family,
+                      List.of(), List.of(), BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 6, 6, tiles, List.of(), List.of(), -1, "", List.of());

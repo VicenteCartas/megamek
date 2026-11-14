@@ -121,7 +121,7 @@ class GpuRoughSmokeTest {
         Map<Mesh, float[]> vertices = new IdentityHashMap<>();
         int checked = 0;
         for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
-            for (Object value : (Array<?>) GpuTestSupport.field(chunk, "terrainRenderables")) {
+            for (Object value : (Array<?>) GpuTestSupport.field(GpuTestSupport.field(chunk, "ground"), "terrainRenderables")) {
                 Renderable part = (Renderable) value;
                 Mesh mesh = part.meshPart.mesh;
                 int stride = mesh.getVertexSize() / Float.BYTES;
@@ -167,10 +167,9 @@ class GpuRoughSmokeTest {
                     if (x >= 5) { hex.addTerrain(new Terrain(Terrains.FLUFF, x >= 8 ? 2 : teethVariant)); }
                 }
                 if (y == 2) { hex.addTerrain(new Terrain(Terrains.ROAD, 1, true, 18)); }
-                tiles.add(new BoardScene.Tile(coords, hex.getLevel(), -1, false, y == 2 ? 18 : 0,
-                      BoardFeatures.surface(hex), null, null,
-                      BoardFeatures.capture(hex, coords, Map.of()), List.of(), BoardLiquid.NONE, null,
-                      BoardFeatures.detailedGround(hex, Map.of()), BoardRoad.capture(hex)));
+                tiles.add(BoardScenes.newTile(coords, hex.getLevel(), -1, false, y == 2 ? 18 : 0,
+                      BoardFeatures.surface(hex),
+                      BoardFeatures.capture(hex, coords, Map.of()), List.of(), BoardLiquid.NONE, null, BoardRoad.capture(hex)));
             }
         }
         return new BoardScene(0, 11, 7, tiles, List.of(), List.of(), -1, "", List.of());

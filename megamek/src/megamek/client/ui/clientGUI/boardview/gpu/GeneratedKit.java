@@ -87,15 +87,14 @@ final class GeneratedKit {
     }
 
     /**
-     * {@code kit} with its roofs standing on the storey under them: a bays kit lays its near roof from 0 up, its edge's
-     * bevel and the deck's body reaching below, which the lowest point (ConnectedKit's ground) would lift it by. Farther
-     * levels keep their place against the near one's (a lower far deck stays where it stood).
+     * {@code kit} with its roofs standing on the storey under them at every level: a bays kit lays its roofs from 0 up,
+     * its edge's bevel and the deck's body reaching below, which the lowest point (ConnectedKit's ground) would lift it by;
+     * a far hull's roof (BayKit.Spec#hull) has no body to reach as low.
      */
     private static ConnectedKit.Kit seated(ConnectedKit.Kit kit) {
-        Map<String, Float> near = kit.grounds().getFirst();
         List<Map<String, Float>> grounds = kit.grounds().stream().map(ground -> {
             Map<String, Float> seated = new HashMap<>(ground);
-            seated.replaceAll((role, z) -> role.startsWith("roof") ? z - near.get(role) : z);
+            seated.replaceAll((role, z) -> role.startsWith("roof") ? 0f : z);
             return Map.copyOf(seated);
         }).toList();
         return new ConnectedKit.Kit(kit.lods(), kit.pieces(), kit.parts(), kit.roles(), kit.symmetric(), grounds, kit.doors());
@@ -122,7 +121,7 @@ final class GeneratedKit {
      * ({@code vaulted}: its other one, where it names one); its fittings for both footprints, none under a vault;
      * colours as linear tints.
      */
-    private static JsonNode resolved(JsonNode file, String name, boolean vaulted) {
+    static JsonNode resolved(JsonNode file, String name, boolean vaulted) {
         ObjectNode own = (ObjectNode) variant(file.path("variants"), name);
         JsonNode shared = file.path("shared");
         ObjectNode result = JSON.createObjectNode();

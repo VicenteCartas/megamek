@@ -173,7 +173,7 @@ class GpuFamilyProgramsSmokeTest {
                     terrain.update(after, camera.camera);
                     do {
                         long frameStart = System.nanoTime();
-                        terrain.refine(camera.camera, true);
+                        terrain.refine(camera.camera);
                         frame.render(terrain, camera, after);
                         longest = Math.max(longest, (System.nanoTime() - frameStart) / 1e6);
                         frames++;
@@ -507,7 +507,7 @@ class GpuFamilyProgramsSmokeTest {
         Set<Material> marked = Collections.newSetFromMap(new IdentityHashMap<>());
         for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
             for (Object value : (com.badlogic.gdx.utils.Array<?>)
-                  GpuTestSupport.field(chunk, "terrainRenderables")) {
+                  GpuTestSupport.field(GpuTestSupport.field(chunk, "ground"), "terrainRenderables")) {
                 Material material = ((Renderable) value).material;
                 if (material.has(GpuFamilyPrograms.Constants.TYPE)) { marked.add(material); }
             }
@@ -713,10 +713,11 @@ class GpuFamilyProgramsSmokeTest {
             int chunkIndex = 0;
             for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
                 for (String layer : List.of("terrainRenderables", "scatterRenderables")) {
+                    Object owner = layer.equals("terrainRenderables") ? GpuTestSupport.field(chunk, "ground") : chunk;
                     var triangles = new ArrayList<String>();
                     var vertices = new IdentityHashMap<Mesh, float[]>();
                     var indices = new IdentityHashMap<Mesh, short[]>();
-                    for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(chunk, layer)) {
+                    for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(owner, layer)) {
                         Renderable part = (Renderable) value;
                         Mesh mesh = part.meshPart.mesh;
                         int stride = mesh.getVertexSize() / Float.BYTES;

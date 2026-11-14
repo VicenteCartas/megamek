@@ -341,7 +341,7 @@ class GpuTerrainScalingSmokeTest {
                 continue;
             }
             Map<Mesh, float[]> vertices = new IdentityHashMap<>();
-            for (Object value : (Array<?>) GpuTestSupport.field(chunk, "terrainRenderables")) {
+            for (Object value : (Array<?>) GpuTestSupport.field(GpuTestSupport.field(chunk, "ground"), "terrainRenderables")) {
                 Renderable part = (Renderable) value;
                 if (!part.material.has(Attribute.getAttributeType("boardSculpt"))) { continue; }
                 Mesh mesh = part.meshPart.mesh;

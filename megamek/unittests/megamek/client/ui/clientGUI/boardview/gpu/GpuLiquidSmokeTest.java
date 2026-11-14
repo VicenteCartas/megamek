@@ -290,7 +290,7 @@ class GpuLiquidSmokeTest {
     }
 
     private static BoardScene.Tile tile(Coords coords, int elevation, BoardLiquid liquid, boolean frozen) {
-        return new BoardScene.Tile(coords, elevation, liquid.present() && !liquid.molten() ? 2 : -1, frozen, 0,
-              BoardScene.Surface.ROCK, null, null, List.of(), List.of(), liquid);
+        return BoardScenes.newTile(coords, elevation, liquid.present() && !liquid.molten() ? 2 : -1, frozen, 0,
+              BoardScene.Surface.ROCK, List.of(), List.of(), liquid);
     }
 }

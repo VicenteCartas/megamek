@@ -704,6 +704,10 @@ public class SerializationHelper {
                     reader.moveDown();
                     Class<?> componentType = componentType(components, reader.getNodeName());
                     if (componentType != null) {
+                        // Interface components and collection serialization proxies carry their concrete type in XML.
+                        // Resolve it through XStream's mapper, including its type-permission checks.
+                        String storedType = reader.getAttribute("class");
+                        if (storedType != null) { componentType = xStream.getMapper().realClass(storedType); }
                         readValues.put(reader.getNodeName(), context.convertAnother(null, componentType));
                     }
                     reader.moveUp();

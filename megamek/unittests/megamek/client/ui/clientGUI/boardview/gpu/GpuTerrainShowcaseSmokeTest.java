@@ -254,8 +254,8 @@ class GpuTerrainShowcaseSmokeTest {
                     rough.addTerrain(new Terrain(Terrains.ROUGH, 1));
                     features.addAll(BoardFeatures.capture(rough, coords, Map.of()));
                 }
-                var tile = new BoardScene.Tile(coords, level, depth, false, 0, family, null, null, features, List.of(),
-                      water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true);
+                var tile = BoardScenes.newTile(coords, level, depth, false, 0, family, features, List.of(),
+                      water ? BoardLiquid.WATER : BoardLiquid.NONE, null);
                 tiles.add(family == BoardScene.Surface.LUNAR ? tile.lunar(true) : tile);
             }
         }

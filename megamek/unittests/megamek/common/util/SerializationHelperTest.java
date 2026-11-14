@@ -36,8 +36,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.thoughtworks.xstream.XStream;
+import com.thoughtworks.xstream.security.ForbiddenClassException;
 import megamek.common.RulesRef;
 import megamek.common.SourceBookCode;
 import megamek.common.units.HeatBreakdown;
@@ -170,6 +172,23 @@ class SerializationHelperTest {
 
     /** A record holding another record. */
     record NestedRecords(PrimitiveComponents inner, String name) {}
+
+    record InterfaceComponent(CharSequence value) {}
+
+    @Test
+    void recordInterfaceComponentUsesTheStoredConcreteType() {
+        InterfaceComponent original = new InterfaceComponent("saved value");
+        String xml = SerializationHelper.getSaveGameXStream().toXML(original);
+        assertEquals(original, SerializationHelper.getLoadSaveGameXStream().fromXML(xml));
+    }
+
+    @Test
+    void storedRecordComponentTypeStillRequiresPermission() {
+        String xml = SerializationHelper.getSaveGameXStream().toXML(new InterfaceComponent("saved value"));
+        var loader = SerializationHelper.getLoadSaveGameXStream();
+        loader.denyTypes(new Class<?>[] { String.class });
+        assertThrows(ForbiddenClassException.class, () -> loader.fromXML(xml));
+    }
 
     @Test
     void recordOfPrimitivesSurvivesSaveGameRoundTrip() {

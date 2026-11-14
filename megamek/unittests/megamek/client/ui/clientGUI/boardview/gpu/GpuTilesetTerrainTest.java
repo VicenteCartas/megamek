@@ -121,7 +121,7 @@ class GpuTilesetTerrainTest {
             for (int y = 0; y < 3; y++) {
                 Coords coords = new Coords(x, y);
                 int level = coords.equals(CENTER.translated(0)) ? 0 : coords.equals(CENTER.translated(3)) ? 3 : 2;
-                tiles.add(new BoardScene.Tile(coords, level, -1, false, 0, BoardScene.Surface.GRASS, null,
+                tiles.add(BoardScenes.newTile(coords, level, -1, false, 0, BoardScene.Surface.GRASS,
                       List.of(), List.of()));
             }
         }
@@ -157,8 +157,8 @@ class GpuTilesetTerrainTest {
                 Coords coords = new Coords(x, y);
                 int road = coords.equals(CENTER) ? 1 : coords.equals(north) ? 1 << 3 : 0;
                 // Road exits make a road only with a kind of road (BoardRoad.rendered).
-                tiles.add(new BoardScene.Tile(coords, coords.equals(north) ? 0 : 1, -1, false, road,
-                      BoardScene.Surface.GRASS, null, null, List.of(), List.of(), BoardLiquid.NONE, null, false,
+                tiles.add(BoardScenes.newTile(coords, coords.equals(north) ? 0 : 1, -1, false, road,
+                      BoardScene.Surface.GRASS, List.of(), List.of(), BoardLiquid.NONE, null,
                       road == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED));
             }
         }
@@ -220,8 +220,8 @@ class GpuTilesetTerrainTest {
         for (int x = 0; x < 3; x++) {
             for (int y = 0; y < 3; y++) {
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, 0, coords.equals(south) ? -1 : coords.equals(north) ? 4 : 2,
-                      false, 0, BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(coords, 0, coords.equals(south) ? -1 : coords.equals(north) ? 4 : 2,
+                      false, 0, BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());
@@ -251,9 +251,9 @@ class GpuTilesetTerrainTest {
             for (int y = 0; y < 3; y++) {
                 Coords coords = new Coords(x, y);
                 boolean low = coords.equals(north) || coords.equals(CENTER.translated(3)) || coords.equals(CENTER.translated(4));
-                tiles.add(new BoardScene.Tile(coords, low ? 1 : coords.equals(CENTER.translated(5)) ? 3 : 2,
+                tiles.add(BoardScenes.newTile(coords, low ? 1 : coords.equals(CENTER.translated(5)) ? 3 : 2,
                       coords.equals(CENTER.translated(4)) ? -1 : 1, coords.equals(CENTER.translated(3)), 0,
-                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                      BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());
@@ -281,8 +281,8 @@ class GpuTilesetTerrainTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) {
             Coords at = new Coords(x, y);
-            tiles.add(new BoardScene.Tile(at, at.equals(CENTER) ? 6 : 1, at.equals(CENTER) ? 1 : -1,
-                  false, 0, BoardScene.Surface.GRASS, null, List.of(), List.of()));
+            tiles.add(BoardScenes.newTile(at, at.equals(CENTER) ? 6 : 1, at.equals(CENTER) ? 1 : -1,
+                  false, 0, BoardScene.Surface.GRASS, List.of(), List.of()));
         }
         BoardScene scene = new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());
         var tile = scene.tile(CENTER);
@@ -317,7 +317,7 @@ class GpuTilesetTerrainTest {
                 Coords at = new Coords(x, y);
                 boolean dry = false;
                 for (int d = 0; d < 6; d++) { dry |= (mask & 1 << d) != 0 && at.equals(CENTER.translated(d)); }
-                tiles.add(new BoardScene.Tile(at, 0, dry ? -1 : 2, false, 0, BoardScene.Surface.GRASS, null, List.of(),
+                tiles.add(BoardScenes.newTile(at, 0, dry ? -1 : 2, false, 0, BoardScene.Surface.GRASS, List.of(),
                       List.of()));
             }
             BoardScene scene = new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());

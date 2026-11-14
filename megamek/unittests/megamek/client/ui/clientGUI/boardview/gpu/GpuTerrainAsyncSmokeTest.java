@@ -124,10 +124,9 @@ class GpuTerrainAsyncSmokeTest {
                                 var at = new Coords(scene.width() / 2, scene.height() / 2);
                                 var tile = scene.tile(at);
                                 var tiles = new ArrayList<>(scene.tiles());
-                                tiles.set(tiles.indexOf(tile), new BoardScene.Tile(at, tile.elevation() + 1,
-                                      tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.decals(),
-                                      tile.decalsWithoutLimbs(),
-                                      tile.features(), tile.text(), tile.liquid(), tile.tileset(), tile.detailedGround(), tile.road()));
+                                tiles.set(tiles.indexOf(tile), BoardScenes.newTile(at, tile.elevation() + 1,
+                                      tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(),
+                                      tile.features(), tile.text(), tile.liquid(), tile.tileset(), tile.road()));
                                 scene = new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles,
                                       scene.units(), scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(),
                                       scene.light(), scene.firingLines(), scene.rangeBorders(), scene.markers(), scene.tactical(),

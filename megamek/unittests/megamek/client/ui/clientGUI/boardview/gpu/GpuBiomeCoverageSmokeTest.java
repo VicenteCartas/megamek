@@ -210,8 +210,7 @@ class GpuBiomeCoverageSmokeTest {
         var kind = fixture == 2 && changed ? BoardScene.Biome.NONE : biome;
         boolean frozen = fixture == 3 && changed;
         var liquid = fixture == 4 && changed ? BoardLiquid.WATER : BoardLiquid.NONE;
-        return new BoardScene.Tile(coords, elevation, liquid.present() ? 1 : -1, frozen, 0, BoardScene.Surface.GRASS,
-              null, null, List.of(), List.of(), liquid, null, true,
+        return BoardScenes.newTile(coords, elevation, liquid.present() ? 1 : -1, frozen, 0, BoardScene.Surface.GRASS, List.of(), List.of(), liquid, null,
               BoardRoad.Kind.NONE, BoardFireSmoke.NONE, kind, false, fixture == 5 && changed);
     }
 }

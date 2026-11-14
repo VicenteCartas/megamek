@@ -68,7 +68,7 @@ class GpuOrchardSmokeTest {
                             names.add(name);
                             var tree = new BoardScene.Feature(name, 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE);
                             // Keep terrain/scatter detail fixed while measuring the submitted tree geometry.
-                            var tile = new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, null,
+                            var tile = BoardScenes.newTile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS,
                                   List.of(tree), List.of());
                             BoardScene scene = scene(List.of(tile), 1, 1);
                             terrain.update(scene);
@@ -173,9 +173,8 @@ class GpuOrchardSmokeTest {
 
     private static BoardScene.Tile tile(Coords coords, Hex hex, List<BoardScene.Feature> features) {
         int exits = hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() : 0;
-        return new BoardScene.Tile(coords, hex.getLevel(), -1, false, exits, BoardFeatures.surface(hex), null, null,
-              features, List.of(), BoardLiquid.NONE, null,
-              BoardFeatures.detailedGround(hex, Map.of()), BoardRoad.capture(hex));
+        return BoardScenes.newTile(coords, hex.getLevel(), -1, false, exits, BoardFeatures.surface(hex),
+              features, List.of(), BoardLiquid.NONE, null, BoardRoad.capture(hex));
     }
 
     private static BoardScene orchard() {

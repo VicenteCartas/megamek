@@ -5,7 +5,6 @@ import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
 import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
-import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -224,30 +223,21 @@ final class BoardRoadGrade {
     }
 
     /**
-     * Grades are immutable and each hex builds its own and its neighbours': share them per scene snapshot, as the
-     * concrete fit is shared; so are the road surfaces they mesh, which neighbours sample. Two snapshots stay cached
-     * while workers move from one to the next.
+     * Grades are immutable and each hex builds its own and its neighbours': they are shared per ground
+     * ({@link BoardGround#roadGrades}), as the concrete fit is; so are the road surfaces they mesh, which neighbours
+     * sample. A grade reads only the ground's own inputs ({@link BoardScene.Tile.Ground}) and its routes, never what
+     * stands on it, so every scene of one ground shares them, and they last as long as that ground does.
      */
-    private record Cache(WeakReference<List<BoardScene.Tile>> tiles, float scale, float level,
-          Map<Long, Optional<BoardRoadGrade>> grades, Map<Coords, List<BoardSurface.Face>> roads) {
-        private static volatile Cache current, previous;
-
-        boolean matches(BoardScene scene) {
-            return tiles.get() == scene.tiles() && scale == BoardGeometry.hexScale() && level == BoardGeometry.level();
+    record Cache(float scale, float level, Map<Long, Optional<BoardRoadGrade>> grades,
+          Map<Coords, List<BoardSurface.Face>> roads) {
+        Cache() {
+            this(BoardGeometry.hexScale(), BoardGeometry.level(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>());
         }
 
-        static Cache of(BoardScene scene) {
-            Cache first = current, second = previous;
-            if (first != null && first.matches(scene)) { return first; }
-            if (second != null && second.matches(scene)) { return second; }
-            synchronized (Cache.class) {
-                if (current != null && current.matches(scene)) { return current; }
-                previous = current;
-                current = new Cache(new WeakReference<>(scene.tiles()), BoardGeometry.hexScale(), BoardGeometry.level(),
-                      new ConcurrentHashMap<>(), new ConcurrentHashMap<>());
-                return current;
-            }
-        }
+        /** Whether it was built at the caller's scale: a change of the board's geometry starts a new one. */
+        boolean current() { return scale == BoardGeometry.hexScale() && level == BoardGeometry.level(); }
+
+        static Cache of(BoardScene scene) { return scene.ground().roadGrades(); }
     }
 
     /** The directions a hex's carriageway or apron runs out by; 0 where it reserves no ground. */

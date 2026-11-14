@@ -189,9 +189,8 @@ class GpuRailBridgeRampSmokeTest {
             hex.setDecorations(List.of(new BoardDecoration("rail-" + at, "prop", RailRoute.Kind.RAIL.asset, null,
                   0, 0, 0, false, 1, placement, 0).withConnections(9)));
         }
-        var tile = new BoardScene.Tile(at, 0, ground.waterDepth(), false, 0, ground.surface(), null, null,
-              BoardFeatures.capture(hex, at, Map.of()), List.of(), ground.liquid(), null,
-              true, BoardRoad.Kind.NONE);
+        var tile = BoardScenes.newTile(at, 0, ground.waterDepth(), false, 0, ground.surface(),
+              BoardFeatures.capture(hex, at, Map.of()), List.of(), ground.liquid(), null, BoardRoad.Kind.NONE);
         return bridge ? BridgeScenes.appearance(tile, Map.of("bridge", HexAppearance.TRUSS_PILLARS)) : tile;
     }
 }

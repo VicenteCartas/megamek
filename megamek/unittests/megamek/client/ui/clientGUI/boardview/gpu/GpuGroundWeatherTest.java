@@ -111,9 +111,9 @@ class GpuGroundWeatherTest {
     void weatherStartsAtTheLowestHexLevelRegardlessOfDepthOrBoardElevation() {
         for (int base : new int[] { -3, 0, 4 }) {
             for (int wetLevel : new int[] { base, base + 2 }) {
-                var wet = new BoardScene.Tile(new Coords(0, 0), wetLevel, 12, false, 0, BoardScene.Surface.GRASS, null,
+                var wet = BoardScenes.newTile(new Coords(0, 0), wetLevel, 12, false, 0, BoardScene.Surface.GRASS,
                       List.of(), List.of());
-                var dry = new BoardScene.Tile(new Coords(1, 0), base, -1, false, 0, BoardScene.Surface.GRASS, null,
+                var dry = BoardScenes.newTile(new Coords(1, 0), base, -1, false, 0, BoardScene.Surface.GRASS,
                       List.of(), List.of());
                 BoardScene scene = new BoardScene(0, 2, 1, List.of(wet, dry), List.of(), List.of(), -1, "", List.of());
                 assertEquals(base * BoardGeometry.LEVEL, BoardGeometry.weatherBase(scene));
@@ -196,8 +196,7 @@ class GpuGroundWeatherTest {
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 var at = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(at, levels[y][x], -1, false, 0, BoardScene.Surface.GRASS,
-                      null, null, List.of(), List.of(), BoardLiquid.NONE, null, false, BoardRoad.Kind.NONE,
+                tiles.add(BoardScenes.newTile(at, levels[y][x], -1, false, 0, BoardScene.Surface.GRASS, List.of(), List.of(), BoardLiquid.NONE, null, BoardRoad.Kind.NONE,
                       BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false, 0, false,
                       BoardSurfaceBlend.solid(BoardScene.Surface.GRASS), List.of(pits).contains(at)));
             }

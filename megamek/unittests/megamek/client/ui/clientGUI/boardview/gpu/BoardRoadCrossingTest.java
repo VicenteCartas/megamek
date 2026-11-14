@@ -87,7 +87,7 @@ class BoardRoadCrossingTest {
               new Case("bridge:1:27;bridge_elev:2;bridge_cf:40;bridge_road:1:9;bridge_rail:1:18", true, 2),
               new Case("rail:1:18;bridge:1:9;bridge_elev:2;bridge_cf:40;bridge_road:1:9", true, 0))) {
             var hex = new Hex(0, example.terrain(), "");
-            var artwork = new BoardArtwork.HexImage(AT, null, null, List.of(), Map.of(), null);
+            var artwork = new BoardArtwork.HexImage(AT, List.of(), Map.of(), null);
             var tile = BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool(),
                   c -> c.equals(AT) ? hex : new Hex(0));
             int exits = example.deck() ? tile.deckRoadExits() : tile.roadExits();

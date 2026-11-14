@@ -272,8 +272,8 @@ class GpuFieldOfViewSmokeTest {
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, coords.equals(raised) ? LEVELS : 0, -1, false, 0,
-                      BoardScene.Surface.CONCRETE, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(coords, coords.equals(raised) ? LEVELS : 0, -1, false, 0,
+                      BoardScene.Surface.CONCRETE, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -408,8 +408,8 @@ class GpuFieldOfViewSmokeTest {
         List<BoardFieldOfView.Hex> hexes = new ArrayList<>();
         for (int x = 0; x < 9; x++) {
             for (int y = 0; y < 7; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), 0, -1, false, 0,
+                      BoardScene.Surface.GRASS, List.of(), List.of()));
                 var visibility = x < 3 ? BoardFieldOfView.Visibility.VISIBLE
                       : x < 6 ? BoardFieldOfView.Visibility.SENSOR : BoardFieldOfView.Visibility.BLOCKED;
                 hexes.add(new BoardFieldOfView.Hex(visibility, 0, x >= 6));

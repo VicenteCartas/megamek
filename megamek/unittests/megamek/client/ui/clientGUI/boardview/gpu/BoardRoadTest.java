@@ -40,10 +40,9 @@ class BoardRoadTest {
 
     /** {@code t} with its road's finish authored as the colony's slabs. */
     private static BoardScene.Tile slabs(BoardScene.Tile t) {
-        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
-              t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(), t.detailedGround(),
+        return BoardScenes.newTile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.features(), t.text(), t.liquid(), t.tileset(),
               t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(), t.groundCover(),
-              t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(),
+              t.ultraSublevel(), t.tilesetScenery(),
               Map.of("road", new megamek.common.board.HexAppearance(null, null, "colony-slabs", null)), t.cover(), t.barren(),
               t.deckRoad(), t.deckRoadExits(), t.deckMud(), t.railBed(), t.corridor(), t.deckCorridor(), t.backdrop());
     }
@@ -607,35 +606,17 @@ class BoardRoadTest {
     }
 
     @Test
-    void roadKindsUseEngineGroundButUnknownArtworkAndSpecialCombinationsRemainVisible() {
+    void roadTerrainSelectsItsNativeKind() {
         Hex hex = new Hex(0);
         for (int level = 1; level <= 4; level++) {
             hex.addTerrain(new Terrain(Terrains.ROAD, level, true, 9));
             assertNotEquals(BoardRoad.Kind.NONE, BoardRoad.capture(hex));
-            assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
-            hex.addTerrain(new Terrain(Terrains.ROAD_FLUFF, 1));
-            assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "Standard bends use the native road and ground");
-            for (int fluff : new int[] { 2, 3 }) {
-                hex.addTerrain(new Terrain(Terrains.ROAD_FLUFF, fluff));
-                assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Preserve special road artwork " + fluff);
-            }
-            hex.removeTerrain(Terrains.ROAD_FLUFF);
-            hex.addTerrain(new Terrain(Terrains.RUBBLE, 1));
-            assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Preserve the unsupported combination with rubble");
-            hex.removeTerrain(Terrains.RUBBLE);
-            hex.addTerrain(new Terrain(Terrains.WATER, 0));
-            assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "A road through water lies on its bed");
-            hex.removeTerrain(Terrains.WATER);
-            hex.addTerrain(new Terrain(Terrains.ICE, 1));
-            assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "The native ice material supports roads on dry ground");
-            hex.removeTerrain(Terrains.ICE);
         }
         hex.addTerrain(new Terrain(Terrains.ROAD, 17, true, 9));
         assertEquals(BoardRoad.Kind.PAVED, BoardRoad.capture(hex));
-        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
         hex.removeTerrain(Terrains.ROAD);
         hex.addTerrain(new Terrain(Terrains.ROAD_FLUFF, 1));
-        assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Standalone artwork is not a captured road");
+        assertEquals(BoardRoad.Kind.NONE, BoardRoad.capture(hex));
     }
 
     @Test

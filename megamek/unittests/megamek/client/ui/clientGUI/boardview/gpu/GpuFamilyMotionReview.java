@@ -60,8 +60,7 @@ final class GpuFamilyMotionReview {
                 if (frame % 12 == 0) {
                     for (boolean top : List.of(false, true)) {
                         renderer.topView = top;
-                        renderer.frame(List.of(terrain, instance), instance.transform.getTranslation(new Vector3()), null,
-                              "family-" + family + (top ? "-top" : "-iso"), frame);
+                        renderer.frame(List.of(terrain, instance), instance.transform.getTranslation(new Vector3()), null);
                     }
                 }
             }
@@ -146,9 +145,7 @@ final class GpuFamilyMotionReview {
                         assertTrue(UnitBounds.world(instance).isValid(), "Conversion bounds");
                         for (boolean top : List.of(false, true)) {
                             renderer.topView = top;
-                            renderer.frame(List.of(instance), origin, null,
-                                  "conversion-" + entity.getClass().getSimpleName() + (reverse ? "-reverse" : "-forward")
-                                        + (top ? "-top" : "-iso"), frame);
+                            renderer.frame(List.of(instance), origin, null);
                         }
                     }
                 }
@@ -165,8 +162,8 @@ final class GpuFamilyMotionReview {
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 6; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), y <= 2 ? 1 : 0, -1, false, 9,
-                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), y <= 2 ? 1 : 0, -1, false, 9,
+                      BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 5, 6, tiles, List.of(), List.of(), -1, "", List.of());

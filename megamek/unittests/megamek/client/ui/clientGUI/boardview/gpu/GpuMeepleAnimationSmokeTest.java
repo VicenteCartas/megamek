@@ -111,7 +111,7 @@ class GpuMeepleAnimationSmokeTest {
         MeepleAnimator.place(model, instance, voluntary, UnitMotion.Sample.STILL, renderer.camera, ground, 0);
         assertEquals(standing / 2, UnitBounds.world(instance).getDepth(), .001f);
         assertEquals(1, new Vector3(Vector3.Z).rot(instance.transform).nor().z, .001f);
-        renderer.frame(List.of(instance), ground, null, "meeple-voluntary", 0);
+        renderer.frame(List.of(instance), ground, null);
         var shortened = instance.transform.cpy();
         MeepleAnimator.place(model, instance, unit.at(unit.location().withHullDown(true)), UnitMotion.Sample.STILL, renderer.camera, ground, 0);
         assertArrayEquals(shortened.val, instance.transform.val, .001f, "Hull-down shares the voluntary-prone pose");
@@ -162,7 +162,7 @@ class GpuMeepleAnimationSmokeTest {
                       "Upper end points where the unit fell: " + side + (totalWarfare ? ", Total Warfare" : ", Core"));
                 assertEquals(.5f, UnitBounds.world(instance).min.z, .001f);
                 if (facing == 0) {
-                    renderer.frame(List.of(instance), ground, null, "meeple-fall-" + side + (totalWarfare ? "-tw" : "-core"), 0);
+                    renderer.frame(List.of(instance), ground, null);
                 }
                 var toppled = instance.transform.cpy();
                 MeepleAnimator.place(model, instance, unit.at(point), UnitMotion.Sample.STILL, renderer.camera, ground, facing * 60, null, true);
@@ -172,7 +172,7 @@ class GpuMeepleAnimationSmokeTest {
                       "Top-view artwork follows the resolved facing, without the face-up pose's extra half turn");
                 assertEquals(standing / 2, UnitBounds.world(instance).getDepth(), .001f, "Prone weapons retain their lowered origin");
                 renderer.topView = true;
-                renderer.frame(List.of(instance), ground, null, "meeple-prone-top-" + side, facing);
+                renderer.frame(List.of(instance), ground, null);
                 renderer.topView = false;
                 MeepleAnimator.place(model, instance, unit.at(point), UnitMotion.Sample.STILL, renderer.camera, ground, facing * 60);
                 assertArrayEquals(toppled.val, instance.transform.val, .001f, "Switching back restores the same toppled pose");
@@ -217,7 +217,7 @@ class GpuMeepleAnimationSmokeTest {
             MeepleAnimator.place(model, instance, conversion.displayed(), UnitMotion.Sample.STILL, renderer.camera, ground, 0, conversion, false);
             float height = new Vector3(Vector3.Z).rot(instance.transform).len() * MeepleVisual.HEIGHT;
             assertEquals((2 - conversion.progress()) * standingHeight / 2, height, .001f);
-            renderer.frame(List.of(instance), ground, null, "meeple-conversion", (int) (t * 1000));
+            renderer.frame(List.of(instance), ground, null);
         }
         var occupied = List.of(unit.location().coords(), unit.location().coords().translated(0), unit.location().coords().translated(3));
         var large = new BoardScene.Unit(unit.id(), -1, unit.name(), unit.location(), unit.image(), false, null, 4, false,
@@ -259,7 +259,7 @@ class GpuMeepleAnimationSmokeTest {
             assertFalse(model.instance.getNode(MeepleVisual.ROOT).parts.get(1).material.has(UnitDamageDisplay.Overlay.TYPE));
             var ground = BoardGeometry.center(unit.location().coords(), 0);
             MeepleAnimator.place(model, instance, unit, UnitMotion.Sample.STILL, renderer.camera, ground, 0);
-            renderer.frame(List.of(instance), ground, null, "meeple-damage", (int) (loss * 100));
+            renderer.frame(List.of(instance), ground, null);
         }
         assertEquals(4, textures.size(), "Each damage band uses its own existing overlay");
     }
@@ -285,7 +285,7 @@ class GpuMeepleAnimationSmokeTest {
             jets.beginFrame(); jets.update("meeple", model, instance, unit, motion.sample()); jets.endFrame();
             assertEquals(frame == 48 ? 0 : 2, jets.emitterCount());
             smoke |= jets.smokeCount() > 0;
-            if (frame % 12 == 0) { renderer.frame(List.of(instance), motion.position(), null, jets, "meeple-jump", frame); }
+            if (frame % 12 == 0) { renderer.frame(List.of(instance), motion.position(), null, jets); }
             if (frame == 36) { verifyVisibleSmoke(instance, motion.position(), renderer, jets); }
         }
         assertTrue(smoke);
@@ -294,11 +294,11 @@ class GpuMeepleAnimationSmokeTest {
 
     private static void verifyVisibleSmoke(ModelInstance instance, Vector3 position,
           GpuPlaybackReview.ReviewRenderer renderer, GpuJumpJets jets) {
-        renderer.frame(List.of(instance), position, null, "meeple-jump-no-exhaust", 36);
+        renderer.frame(List.of(instance), position, null);
         renderer.output.pixels().begin();
         var before = Pixmap.createFromFrameBuffer(0, 0, 640, 480);
         renderer.output.pixels().end();
-        renderer.frame(List.of(instance), position, null, jets, "meeple-jump", 36);
+        renderer.frame(List.of(instance), position, null, jets);
         renderer.output.pixels().begin();
         var after = Pixmap.createFromFrameBuffer(0, 0, 640, 480);
         renderer.output.pixels().end();
@@ -354,7 +354,7 @@ class GpuMeepleAnimationSmokeTest {
                 if (previous != null) { assertTrue(world.getTranslation(new Vector3()).dst(previous.getTranslation(new Vector3())) > 1); }
                 previous = world;
                 renderer.viewOffset.y = hostile ? 150 : -150;
-                renderer.frame(List.of(host, ba), ground, null, "meeple-riders-" + wholeToken + "-" + hostile, frame);
+                renderer.frame(List.of(host, ba), ground, null);
             }
             var landed = passenger.withAttachment(null).at(new BoardScene.Waypoint(unit.location().coords().translated(3), 0, 0));
             var release = new UnitAttachmentMotion(new BoardScene.AttachmentChange(0, passenger, landed, unit, BoardScene.Release.THROWN));
@@ -419,7 +419,7 @@ class GpuMeepleAnimationSmokeTest {
                 MeepleAnimator.attacks(unit, source, List.of(attack), instances, false);
                 if (seconds == 0 || seconds == attack.duration) { assertArrayEquals(rest.val, source.transform.val, .002f); }
                 else { assertTrue(source.transform.getTranslation(new Vector3()).dst(rest.getTranslation(new Vector3())) > .1f); }
-                renderer.frame(List.of(source, target), origin, null, "meeple-" + kind, (int) (seconds * 100));
+                renderer.frame(List.of(source, target), origin, null);
             }
         }
         var prone = unit.at(unit.location().withProneCause(ProneCause.VOLUNTARY));
@@ -437,7 +437,7 @@ class GpuMeepleAnimationSmokeTest {
         MeepleAnimator.attacks(unit, source, List.of(lance), instances, false);
         assertTrue(source.transform.getTranslation(new Vector3()).dst(swing.getTranslation(new Vector3())) > .1f,
               "A lance thrust uses forward reach instead of the club's sideways swing");
-        renderer.frame(List.of(source, target), origin, null, "meeple-lance", 0);
+        renderer.frame(List.of(source, target), origin, null);
         MeepleAnimator.place(model, source, prone, UnitMotion.Sample.STILL, renderer.camera, origin, 0);
         var lowered = source.transform.cpy();
         var physical = new UnitAttack(UnitPlaybackFixture.attack(prone, victim, ResolvedAttack.Kind.PUNCH, true));
@@ -461,7 +461,7 @@ class GpuMeepleAnimationSmokeTest {
         assertArrayEquals(lowered.val, source.transform.val, .001f, "Prone shooting retains its supported pose");
         renderer.camera.viewportWidth = 320;
         renderer.camera.viewportHeight = 240;
-        renderer.frame(List.of(source, target), origin, effects, "meeple-volley", 0);
+        renderer.frame(List.of(source, target), origin, effects);
         var center = UnitAttack.center(source, unit.location(), new Vector3());
         var picking = new UnitPicking();
         for (var attack : volley) {

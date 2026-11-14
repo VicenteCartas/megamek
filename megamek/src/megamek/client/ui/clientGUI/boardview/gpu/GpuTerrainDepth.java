@@ -42,15 +42,25 @@ final class GpuTerrainDepth implements RenderableProvider {
     }
 
     /** Persistent ranges borrowing static instance meshes/materials; capture again when the owning chunk changes. */
-    static Array<Renderable> snapshot(List<ModelInstance> instances) {
+    static Array<Renderable> snapshot(List<ModelInstance> instances) { return snapshot(instances, null); }
+
+    /** As {@link #snapshot(List)}; {@code owners}, unless null, takes each part's instance's index among instances. */
+    static Array<Renderable> snapshot(List<ModelInstance> instances, com.badlogic.gdx.utils.IntArray owners) {
         Array<Renderable> result = new Array<>();
         Pool<Renderable> pool = new Pool<>() {
             @Override
             protected Renderable newObject() { return new Renderable(); }
         };
-        for (ModelInstance instance : instances) { instance.getRenderables(result, pool); }
+        if (owners != null) { owners.clear(); }
+        for (int index = 0; index < instances.size(); index++) {
+            instances.get(index).getRenderables(result, pool);
+            while (owners != null && owners.size < result.size) { owners.add(index); }
+        }
         for (int i = result.size - 1; i >= 0; i--) {
-            if (result.get(i).meshPart.size == 0) { result.removeIndex(i); }
+            if (result.get(i).meshPart.size == 0) {
+                result.removeIndex(i);
+                if (owners != null) { owners.removeIndex(i); }
+            }
         }
         return result;
     }

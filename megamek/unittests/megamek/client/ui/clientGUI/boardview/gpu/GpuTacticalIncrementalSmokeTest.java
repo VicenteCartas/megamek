@@ -181,8 +181,8 @@ class GpuTacticalIncrementalSmokeTest {
         for (int x = 0; x < 4; x++) {
             for (int y = 0; y < 2; y++) {
                 boolean owner = x == 3 && y == 0;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), owner ? level : neighbor, owner ? depth : -1,
-                      owner && frozen, 0, BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), owner ? level : neighbor, owner ? depth : -1,
+                      owner && frozen, 0, BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 4, 2, tiles, List.of(), List.of(), -1, "", List.of(), null,
@@ -483,8 +483,8 @@ class GpuTacticalIncrementalSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 4; x++) {
             for (int y = 0; y < 2; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 3 && y == 0 ? raised : 0,
-                      x == 2 ? 2 : -1, y == 1 && x == 2, 0, BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), x == 3 && y == 0 ? raised : 0,
+                      x == 2 ? 2 : -1, y == 1 && x == 2, 0, BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 4, 2, tiles, List.of(), List.of(), -1, "", List.of(), null,

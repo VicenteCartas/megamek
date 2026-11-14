@@ -114,7 +114,7 @@ class GpuRoadBatchSmokeTest {
     private static List<Overlay> splitRoads(GpuTerrain terrain) throws ReflectiveOperationException {
         List<Overlay> result = new ArrayList<>();
         for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
-            List<ModelInstance> target = (List<ModelInstance>) GpuTestSupport.field(chunk, "overlays");
+            List<ModelInstance> target = (List<ModelInstance>) GpuTestSupport.field(GpuTestSupport.field(chunk, "ground"), "overlays");
             List<ModelInstance> batched = List.copyOf(target);
             Array<Renderable> parts = new Array<>();
             for (Renderable part : GpuTerrainDepth.snapshot(target)) {

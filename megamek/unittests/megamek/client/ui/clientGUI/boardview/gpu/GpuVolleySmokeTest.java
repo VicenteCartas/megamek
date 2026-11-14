@@ -80,7 +80,7 @@ class GpuVolleySmokeTest {
                             animator.aim(body, attacker, attack, UnitAttack.center(target, victim.location(), new Vector3()), target);
                             effects.update(List.of(attack), library, Map.of("9300:-1", source, "9301:-1", target));
                             renderer.frame(List.of(source, target), position.cpy().lerp(BoardGeometry.center(victim.location().coords(), 0), .5f),
-                                  effects, indirect ? "lrm20-indirect-12-hits" : "lrm20-direct-12-hits", frame);
+                                  effects);
                             if (frame == 18) {
                                 assertEquals(20, effects.missileCount(), "Twenty missiles, independent of authored emitter count or twelve hits");
                                 assertTrue(effects.smokeCount() > 20);
@@ -135,7 +135,7 @@ class GpuVolleySmokeTest {
                             attack.seconds = .25f + frame * (attack.duration - .25f) / 12;
                             effects.update(attack, library, Map.of("9300:-1", source, "9301:-1", target));
                             renderer.frame(List.of(source, target), position.cpy().lerp(BoardGeometry.center(victim.location().coords(), 0), .5f),
-                                  effects, "ammo-" + ammo, frame);
+                                  effects);
                             assertTrue(effects.smokeCount() <= GpuMissileEffects.SMOKE_BUDGET);
                         }
                     }
@@ -159,7 +159,7 @@ class GpuVolleySmokeTest {
                         animator.aimShots(body, attacker, playback.attacks(), ignored -> target);
                         effects.update(playback.attacks(), library, Map.of("9300:-1", source, "9301:-1", target));
                         renderer.frame(List.of(source, target), position.cpy().lerp(BoardGeometry.center(victim.location().coords(), 0), .5f),
-                              effects, "atlas-mixed-volley", frame);
+                              effects);
                         if (frame == 19) { assertEquals(26, effects.missileCount(), "The Atlas fires LRM20 and SRM6 together"); }
                     }
                     // A new loadout arriving during old-shot recovery must not be replaced again by effects/aim lookups.

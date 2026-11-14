@@ -12,11 +12,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.Pixmap;
-import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector3;
@@ -96,8 +93,7 @@ class GpuDefensePlaybackSmokeTest {
                                     for (boolean top : List.of(false, true)) {
                                         renderer.topView = top;
                                         renderer.frame(List.of(sourceModel, targetModel), BoardGeometry.center(source.location().coords(), 0)
-                                                    .lerp(BoardGeometry.center(target.location().coords(), 0), .5f), effects,
-                                              "interception-" + name + (top ? "-top" : "-iso"), frame);
+                                                    .lerp(BoardGeometry.center(target.location().coords(), 0), .5f), effects);
                                     }
                                 }
                             }
@@ -121,7 +117,7 @@ class GpuDefensePlaybackSmokeTest {
                         model.place(instance, renderer.camera, motion.position(), motion.facing(), after);
                         for (boolean top : List.of(false, true)) {
                             renderer.topView = top;
-                            waterFrame(renderer, scene, instance, splash, Map.of(1, motion), frame);
+                            waterFrame(renderer, scene, instance, splash, Map.of(1, motion));
                             maxSpray = Math.max(maxSpray, splash.particleCount());
                         }
                         if (frame == 30) {
@@ -136,16 +132,16 @@ class GpuDefensePlaybackSmokeTest {
                             for (boolean top : List.of(false, true)) {
                                 renderer.topView = top;
                                 instance.transform.set(placement).trn(0, 0, water - torso.getCenterZ());
-                                waterFrame(renderer, scene, instance, splash, Map.of(1, motion), -1);
+                                waterFrame(renderer, scene, instance, splash, Map.of(1, motion));
                                 assertEquals(1, splash.rippleCount(), "A partially immersed body makes a surface ripple");
                                 var bounds = UnitBounds.world(instance);
                                 instance.transform.trn(0, 0, water - bounds.max.z - 1);
-                                waterFrame(renderer, scene, instance, splash, Map.of(1, motion), -1);
+                                waterFrame(renderer, scene, instance, splash, Map.of(1, motion));
                                 assertEquals(0, splash.rippleCount(), "A fully submerged body must not leave a ripple");
                                 assertTrue(splash.particleCount() > 0, "Previously emitted entry spray may finish fading");
                                 bounds = UnitBounds.world(instance);
                                 instance.transform.trn(0, 0, water - bounds.min.z + 1);
-                                waterFrame(renderer, scene, instance, splash, Map.of(1, motion), -1);
+                                waterFrame(renderer, scene, instance, splash, Map.of(1, motion));
                                 assertEquals(0, splash.rippleCount(), "A body clear above the surface makes no ripple");
                             }
                             instance.transform.set(placement);
@@ -176,7 +172,7 @@ class GpuDefensePlaybackSmokeTest {
     }
 
     private static void waterFrame(GpuPlaybackReview.ReviewRenderer renderer, BoardScene scene, ModelInstance model,
-          GpuWaterImpacts splash, Map<Integer, UnitMotion> motions, int frame) {
+          GpuWaterImpacts splash, Map<Integer, UnitMotion> motions) {
         var center = BoardGeometry.center(scene.units().getFirst().location().coords(), 0);
         renderer.begin();
         renderer.camera.viewportWidth = 180;
@@ -204,14 +200,6 @@ class GpuDefensePlaybackSmokeTest {
                   "Spray must not start before the torso enters the water");
             assertTrue(contact.x >= bounds.min.x && contact.x <= bounds.max.x);
             assertTrue(contact.y >= bounds.min.y && contact.y <= bounds.max.y, "Splash must originate on the posed body, not its movement anchor");
-        }
-        if (frame % 4 == 0) {
-            renderer.output.display();
-            File output = new File(System.getProperty("megamek.gpu.screenshots"), "playback-water-fall-" + (renderer.topView ? "top" : "iso"));
-            assertTrue(output.isDirectory() || output.mkdirs());
-            var pixels = Pixmap.createFromFrameBuffer(0, 0, 640, 480);
-            PixmapIO.writePNG(new FileHandle(new File(output, String.format("%03d.png", frame))), pixels, -1, true);
-            pixels.dispose();
         }
         renderer.output.scene().end();
     }

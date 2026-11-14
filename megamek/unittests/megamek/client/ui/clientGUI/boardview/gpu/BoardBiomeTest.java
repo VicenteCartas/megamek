@@ -68,17 +68,14 @@ class BoardBiomeTest {
     void fieldsUseCropBiomeWithoutLegacyPropsAndWetGroundKeepsItsOwnBiome() {
         Hex hex = new Hex(0);
         hex.addTerrain(new Terrain(Terrains.FIELDS, 1));
-        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
         assertEquals(BoardScene.Biome.FIELD, BoardFeatures.biome(hex));
         assertEquals(BoardScene.Surface.GRASS, BoardFeatures.surface(hex), "Field banks retain the native grass mantle");
         assertTrue(BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream().noneMatch(f -> f.asset().equals("vegetation/field")));
         hex.addTerrain(new Terrain(Terrains.FORTIFIED, 1));
-        assertFalse(BoardFeatures.detailedGround(hex, Map.of()));
         assertTrue(BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream().noneMatch(f -> f.asset().equals("vegetation/field")));
         hex.removeAllTerrains();
         for (int level = 1; level <= 3; level++) {
             hex.addTerrain(new Terrain(Terrains.SWAMP, level));
-            assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
             assertEquals(level == 1 ? BoardScene.Biome.MARSH : BoardScene.Biome.QUICKSAND, BoardFeatures.biome(hex));
             assertEquals(level == 1 ? BoardScene.Surface.GRASS : BoardScene.Surface.DIRT, BoardFeatures.surface(hex));
             assertFalse(BoardLiquid.capture(hex).present(), "Shallow visual pools do not invent gameplay water");
@@ -88,10 +85,8 @@ class BoardBiomeTest {
         hex.removeAllTerrains();
         hex.addTerrain(new Terrain(Terrains.MUD, 1));
         assertEquals(BoardScene.Biome.MUD, BoardFeatures.biome(hex));
-        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
         hex.addTerrain(new Terrain(Terrains.HAZARDOUS_LIQUID, 1));
         assertEquals(BoardScene.Biome.NONE, BoardFeatures.biome(hex));
-        assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "Hazardous water needs the same sculpted bed as clear water");
         assertEquals(BoardLiquid.Kind.HAZARDOUS, BoardLiquid.capture(hex).kind());
     }
 
@@ -164,82 +159,6 @@ class BoardBiomeTest {
         var after = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.QUICKSAND, 0));
         assertFalse(before.tile(center).sameGeometry(after.tile(center)));
         assertNotEquals(BoardSurface.geometryKey(before, before.tile(center)), BoardSurface.geometryKey(after, after.tile(center)));
-    }
-
-    @Test
-    void cropPlantsStandOnTheirGroundOffRoadsAndInsideTheirFieldsLevel() {
-        float metre = BoardRelief.metres(1);
-        Coords center = BoardScenes.CROPS;
-        for (boolean road : new boolean[] { false, true }) {
-            var scene = BoardScenes.scene(c -> {
-                var base = BoardScenes.tile(c, c.getX() <= center.getX() ? BoardScene.Biome.FIELD : BoardScene.Biome.NONE,
-                      c.getY() < center.getY() ? 1 : 0);
-                return new BoardScene.Tile(c, base.elevation(), -1, false, road ? 9 : 0, base.surface(), null, null,
-                      List.of(), List.of(), BoardLiquid.NONE, null, true,
-                      road ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE, BoardFireSmoke.NONE, base.biome());
-            });
-            var tile = scene.tile(center);
-            var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-            var roads = BoardRoad.nearbyWays(scene, tile);
-            int plants = 0;
-            for (var crop : BoardFields.Crop.values()) {
-                var roots = GpuBiomeVegetation.plantStalks(scene, tile, surface, null, crop);
-                for (int i = 0; roots != null && i < roots.size; i += 4, plants++) {
-                    float x = roots.items[i], y = roots.items[i + 1];
-                    float floor = BoardSurface.sampleHeight(surface.top(), x, y, Float.NaN);
-                    assertEquals(floor, roots.items[i + 2] + .018f * metre, .0001f, "A plant stands on its ground");
-                    assertTrue(BoardBiome.coverage(scene, BoardScene.Biome.FIELD, x, y, floor) >= .599f,
-                          "A plant stands on its field's level");
-                    assertTrue(!road || BoardRoad.distance(roads, x, y) >= BoardRoad.SHOULDER + 1,
-                          "No plant stands on the road or its shoulder");
-                }
-            }
-            assertTrue(plants > 0);
-        }
-    }
-
-    @Test
-    void cropPlantsStandInRankOrderOnTheirOwnRowsClearOfTheHeadland() {
-        float metre = BoardRelief.metres(1);
-        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.FIELD, 0));
-        var planted = new HashSet<BoardFields.Crop>();
-        int mixed = 0;
-        for (var tile : scene.tiles()) {
-            var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-            var parcels = new HashSet<Long>();
-            for (var crop : BoardFields.Crop.values()) {
-                var roots = GpuBiomeVegetation.plantStalks(scene, tile, surface, null, crop);
-                if (roots == null) { continue; }
-                planted.add(crop);
-                boolean maize = crop == BoardFields.Crop.MAIZE;
-                for (int i = 0; i < roots.size; i += 4) {
-                    // The grass engine draws a prefix by rank (GpuGroundCover.Batch.prefix).
-                    if (i > 0) { assertTrue(roots.items[i + 3] >= roots.items[i - 1], "Plants come in rank order"); }
-                    float x = roots.items[i] / metre, y = roots.items[i + 1] / metre;
-                    long parcel = BoardFields.parcel(x, y);
-                    parcels.add(parcel);
-                    int code = BoardFields.code(parcel);
-                    assertEquals(crop, BoardFields.crop(code), "A plant stands in its own crop's parcel");
-                    float reach = maize ? GpuBiomeVegetation.ROW_HALF_WIDTH : GpuBiomeVegetation.STALK_REACH;
-                    assertTrue(BoardFields.inside(parcel, x, y) >= BoardFields.HEADLAND + reach - .001f,
-                          "A plant keeps off the headland by its reach");
-                    if (maize) {
-                        // On the planted, alternate furrows, half a step staggered every other row, within their jitter.
-                        float furrow = BoardFields.row(code, x, y);
-                        int row = Math.round(furrow);
-                        assertEquals(0, Math.floorMod(row, 2), "Maize stands on the planted furrows");
-                        assertEquals(row, furrow, .1f / BoardBiome.ROW_METRES + .001f);
-                        float along = y * BoardFields.acrossX(code) - x * BoardFields.acrossY(code)
-                              - ((row / 2) & 1) * GpuBiomeVegetation.CROP_SPACING / 2;
-                        float step = along - GpuBiomeVegetation.CROP_SPACING * Math.round(along / GpuBiomeVegetation.CROP_SPACING);
-                        assertTrue(Math.abs(step) <= .15f + .001f, "Maize stands a step apart along its row: " + step);
-                    }
-                }
-            }
-            if (parcels.size() > 1) { mixed++; }
-        }
-        assertEquals(2, planted.size(), "The fixture plants both crops");
-        assertTrue(mixed > 0, "A hex reaching two planted parcels plants each with its own plants");
     }
 
     @Test

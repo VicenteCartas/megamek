@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Font;
-import java.awt.image.BufferedImage;
 import java.util.List;
 
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
@@ -185,7 +184,7 @@ class GpuScenePlaybackTest {
 
     private static BoardScene elevator(int level, BoardScene.Unit... units) {
         var shaft = new BoardScene.Feature("shaft", 0, 0, 0, 1, 0, 0, BoardScene.FeatureKind.SHAFT);
-        var tile = new BoardScene.Tile(new Coords(0, 0), level, -1, false, 0, null, null, List.of(shaft), List.of());
+        var tile = BoardScenes.newTile(new Coords(0, 0), level, -1, false, 0, null, List.of(shaft), List.of());
         return new BoardScene(0, 1, 1, List.of(tile), List.of(units), List.of(), -1, "END", List.of());
     }
 
@@ -214,11 +213,8 @@ class GpuScenePlaybackTest {
 
     private static BoardScene snapshot(int version, BoardScene.Unit... units) {
         var coords = new Coords(0, 0);
-        var image = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB);
-        image.setRGB(0, 0, 0xFF000000 | version);
-        var pixels = new BoardScene.Pixels(image);
         var feature = new BoardScene.Feature("building-" + version, 0, 0, 0, 1, version, 0, BoardScene.FeatureKind.BUILDING);
-        var tile = new BoardScene.Tile(coords, version, -1, false, 0, BoardScene.Surface.GRASS, pixels,
+        var tile = BoardScenes.newTile(coords, version, -1, false, 0, BoardScene.Surface.GRASS,
               List.of(feature), List.of());
         var marker = new BoardMarker(BoardMarker.Kind.OBJECTIVE, coords, 0, 0xFFFF00, "Objective " + version);
         var text = new BoardTactical.Text("Objective " + version, new Font(Font.SANS_SERIF, Font.PLAIN, 12), 0, 0, 0xFFFF0000);

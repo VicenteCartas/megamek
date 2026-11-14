@@ -29,15 +29,49 @@ class BoardBuildingDesignTest {
         assertEquals(0, habitat.getRGB(40, 325) >>> 24, "Lower window stays unpainted");
         assertEquals(255, habitat.getRGB(40, 130) >>> 24, "Upper wall panel receives tint");
         assertEquals(255, habitat.getRGB(40, 390) >>> 24, "Lower wall panel receives tint");
-        var light = javax.imageio.ImageIO.read(root.resolve("buildings/light-far_albedo.png").toFile());
-        assertEquals(0, light.getRGB(83, 233) >>> 24, "Baked glass stays unpainted at far LOD");
-        assertEquals(0, light.getRGB(118, 400) >>> 24, "Baked roof stays unpainted at far LOD");
-        assertEquals(255, light.getRGB(250, 270) >>> 24, "Baked facade receives tint at far LOD");
+        // The standard kits' far atlases (tools/buildings/far_levels.py): their lit windows stay unpainted, their walls take the tint.
+        java.util.List<java.nio.file.Path> atlases;
+        try (var files = java.nio.file.Files.list(root.resolve("buildings"))) {
+            atlases = files.filter(file -> file.getFileName().toString().matches("building-.*-far_albedo\\.png")).toList();
+        }
+        assertFalse(atlases.isEmpty());
+        for (var file : atlases) {
+            var albedo = javax.imageio.ImageIO.read(file.toFile());
+            var emission = javax.imageio.ImageIO.read(file.resolveSibling(file.getFileName().toString().replace("_albedo", "_emission")).toFile());
+            double litPaint = 0, lit = 0, painted = 0;
+            for (int y = 0; y < albedo.getHeight(); y++) {
+                for (int x = 0; x < albedo.getWidth(); x++) {
+                    double share = (albedo.getRGB(x, y) >>> 24) / 255.0;
+                    int glow = emission.getRGB(x, y);
+                    if (share > .98) { painted++; }
+                    if ((glow >> 16 & 255) + (glow >> 8 & 255) + (glow & 255) > 60) { lit++; litPaint += share; }
+                }
+            }
+            assertTrue(lit > 0 && litPaint / lit < .25, file + ": lit windows stay unpainted at far LOD");
+            assertTrue(painted / (albedo.getWidth() * albedo.getHeight()) > .05, file + ": walls receive tint at far LOD");
+        }
         for (var lod : GpuBuilding.kit("buildings/lunar_habitat/lunar_habitat").lods()) {
             var data = (RigidGlb.Data) lod;
             assertTrue(data.buildingPaint.contains("structures/lunar/habitat-wall"));
             assertTrue(data.paintMasks.contains("structures/lunar/habitat-wall"));
         }
+    }
+
+    @Test void paintMaskedMipsKeepTheUnpaintedColourAndThePaintedShareOfTheLight() {
+        com.badlogic.gdx.utils.GdxNativesLoader.load();
+        // A painted white wall beside unpainted dark glass, as a building's far atlas holds them (alpha: the paint mask).
+        var pixels = new com.badlogic.gdx.graphics.Pixmap(2, 1, com.badlogic.gdx.graphics.Pixmap.Format.RGBA8888);
+        pixels.setBlending(com.badlogic.gdx.graphics.Pixmap.Blending.None);
+        pixels.drawPixel(0, 0, 0xFFFFFFFF);
+        pixels.drawPixel(1, 0, 0x202020_00);
+        var levels = GpuColorTexture.paintLevels(pixels);
+        try {
+            byte[] mip = new byte[4];
+            levels.levels()[0].get(0, mip);
+            double glass = GpuColor.linear(0x20 / 255f), mean = (1 + glass) / 2;
+            assertEquals(GpuColor.display((float) mean) * 255, mip[0] & 255, 1, "The glass keeps its share of the colour");
+            assertEquals(255 / (1 + glass), mip[3] & 255, 1, "The paint tints its share of the light");
+        } finally { levels.image().dispose(); }
     }
 
     @Test void buildingFeaturesCarryTintAndOnlyIsolatedBuildingsRotate() {
@@ -49,7 +83,7 @@ class BoardBuildingDesignTest {
         var feature = BoardFeatures.capture(hex, at, models).stream().filter(f -> f.kind() == BoardScene.FeatureKind.BUILDING).findFirst().orElseThrow();
         assertEquals(-45, feature.rotation()); assertEquals(colours, feature.colours());
         Hex incoming = new Hex(0, "building:1:8;bldg_elev:2;bldg_cf:15", "");
-        feature = BoardFeatures.capture(hex, at, models, Set.of(), cell -> cell.equals(at.translated(0)) ? incoming : null)
+        feature = BoardFeatures.capture(hex, at, models, cell -> cell.equals(at.translated(0)) ? incoming : null)
               .stream().filter(f -> f.kind() == BoardScene.FeatureKind.BUILDING).findFirst().orElseThrow();
         assertEquals(0, feature.rotation()); assertEquals(colours, feature.colours());
         hex.addTerrain(new Terrain(Terrains.BUILDING, 1, true, 8));

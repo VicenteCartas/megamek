@@ -305,7 +305,7 @@ class BoardRailTest {
               BoardScene.Surface.GRASS);
         List<BoardScene.Feature> features = new ArrayList<>(more);
         if (!road && sides != 0) { features.add(rail(at, sides, BoardDecoration.Placement.ground())); }
-        return new BoardScene.Tile(at, level, -1, false, base.roadExits(), base.surface(), null, null, features, List.of(), BoardLiquid.NONE, null, true, base.road());
+        return BoardScenes.newTile(at, level, -1, false, base.roadExits(), base.surface(), features, List.of(), BoardLiquid.NONE, null, base.road());
     }
 
     /**
@@ -458,9 +458,9 @@ class BoardRailTest {
     void onADrawnRoadOnlyTheRailsShowSetIntoIt() {
         // A NE-SW road with a N-S rail across it: street track over the carriageway, full track beyond it.
         var scene = BoardScenes.scene(at -> at.equals(AT)
-              ? new BoardScene.Tile(at, 0, -1, false, 18, BoardScene.Surface.GRASS, null, null, List.of(rail(at, 9,
+              ? BoardScenes.newTile(at, 0, -1, false, 18, BoardScene.Surface.GRASS, List.of(rail(at, 9,
                     BoardDecoration.Placement.ground())),
-                    List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.PAVED)
+                    List.of(), BoardLiquid.NONE, null, BoardRoad.Kind.PAVED)
               : tile(at, 0, 0, false, List.of()));
         var tile = scene.tile(AT);
         assertEquals(18 | 9, tile.wayExits());

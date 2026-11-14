@@ -11,7 +11,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.Set;
 
 import megamek.common.Configuration;
 import megamek.common.Hex;
@@ -37,7 +36,7 @@ class BoardTreeDistributionTest {
                 "vegetation/cactus-organ")).toList();
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, boolean natural) {
-        return BoardFeatures.capture(hex, coords, Map.of(), Set.of(), c -> null, TilesetScenery.Scenery.EMPTY, natural)
+        return BoardFeatures.capture(hex, coords, Map.of(), c -> null, TilesetScenery.Scenery.EMPTY, natural)
               .stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE).toList();
     }
 
@@ -221,8 +220,11 @@ class BoardTreeDistributionTest {
                 var budgets = tree.startsWith("vegetation/pine") ? List.of(1600, 410, 96, 12)
                       : List.of(32000, 10000, 2600, 12);
                 assertTrue(triangles > 0 && triangles <= budgets.get(lod), name);
-                assertEquals(0, low, .001f, name);
-                assertEquals(30, high, .001f, name);
+                // The impostor's quad lies flat about the crown's middle until the game turns it toward the camera.
+                if (lod < 3) {
+                    assertEquals(0, low, .001f, name);
+                    assertEquals(30, high, .001f, name);
+                }
                 for (var material : model.materials) {
                     if (!material.id.endsWith("-cutout")) { continue; }
                     assertEquals(tree.startsWith("vegetation/pine") ? .5f : .3f,

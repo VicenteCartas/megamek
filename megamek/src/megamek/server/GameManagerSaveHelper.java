@@ -33,68 +33,196 @@
 
 package megamek.server;
 
-import java.io.BufferedInputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.InputStream;
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.NotSerializableException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.zip.GZIPOutputStream;
 
+import com.thoughtworks.xstream.XStream;
+import com.thoughtworks.xstream.io.xml.CompactWriter;
 import megamek.MMConstants;
+import megamek.common.game.Game;
+import megamek.common.game.IGame;
 import megamek.common.net.enums.PacketCommand;
 import megamek.common.net.packets.Packet;
 import megamek.common.util.SerializationHelper;
 import megamek.logging.MMLogger;
 
-public record GameManagerSaveHelper(AbstractGameManager gameManager) {
+public final class GameManagerSaveHelper implements AutoCloseable {
     private static final MMLogger LOGGER = MMLogger.create(GameManagerSaveHelper.class);
+    private final AbstractGameManager gameManager;
+    private final Path directory;
+    private final ExecutorService writer;
+    // Bound retained snapshots if storage cannot keep up. Reserve space before capturing another game state.
+    private final Semaphore pending = new Semaphore(4);
+    private boolean closed;
+    // Owned by the writer: keep reflection/type metadata between autosaves, with fresh references for each save.
+    private final XStream saveGameXStream = SerializationHelper.getSaveGameXStream();
+    // Only the caller uses this fallback for game types or scenario state without a native serialization contract.
+    private XStream fallbackXStream;
+
+    private record Snapshot(byte[] bytes, boolean xml) { }
+
+    public GameManagerSaveHelper(AbstractGameManager gameManager) {
+        this(gameManager, Path.of(MMConstants.SAVEGAME_DIR), Executors.newSingleThreadExecutor(task -> {
+            Thread thread = new Thread(task, "Game-save-writer");
+            thread.setDaemon(true);
+            return thread;
+        }));
+    }
+
+    /** The helper owns its writer; shutdown drains accepted saves before returning. */
+    GameManagerSaveHelper(AbstractGameManager gameManager, Path directory, ExecutorService writer) {
+        this.gameManager = gameManager;
+        this.directory = directory;
+        this.writer = writer;
+    }
 
     /**
-     * Saves the game server-side. Will announce the save (or error) in chat if the given sendChat is true.
+     * Captures the game server-side and queues its save. The future and optional chat announcement complete after
+     * the file is written, or report a failure.
      *
      * @param fileName The filename to use
      * @param sendChat When true, the saving (or error) is announced in chat
      */
-    void saveGame(String fileName, boolean sendChat) {
-        // We need to strip the .gz if it exists, otherwise we'll double up on it.
-        if (fileName.endsWith(".gz")) {
-            fileName = fileName.replace(".gz", "");
+    CompletableFuture<Path> saveGame(String fileName, boolean sendChat) {
+        return queueSave(fileName, sendChat, 0, saved -> {});
+    }
+
+    CompletableFuture<Path> saveRollingGame(String fileName, int maximumSaves, boolean sendChat) {
+        return queueSave(fileName, sendChat, maximumSaves, saved -> {});
+    }
+
+    /**
+     * Called while the server owns the game state. Only owned snapshot bytes cross into the writer, never live game
+     * objects. The worker reconstructs that exact state and uses the existing XML save format.
+     */
+    private synchronized CompletableFuture<Path> queueSave(String fileName, boolean sendChat, int maximumSaves,
+          Consumer<Path> afterSave) {
+        if (fileName.endsWith(".gz")) { fileName = fileName.substring(0, fileName.length() - 3); }
+        if (!fileName.endsWith(MMConstants.SAVE_FILE_EXT)) { fileName += MMConstants.SAVE_FILE_EXT; }
+        CompletableFuture<Path> result = new CompletableFuture<>();
+        boolean reserved = false;
+        try {
+            Path requested = directory.resolve(fileName + ".gz");
+            if (closed) { throw new IllegalStateException("Save writer is closed"); }
+            pending.acquire();
+            reserved = true;
+            Snapshot snapshot = snapshot(gameManager.getGame());
+            writer.execute(() -> {
+                try {
+                    Files.createDirectories(directory);
+                    Path target = maximumSaves > 0 ? AutosaveService.uniquePath(requested) : requested;
+                    writeSnapshot(target, snapshot);
+                    if (maximumSaves > 0) { AutosaveService.prune(target, maximumSaves); }
+                    if (sendChat) { gameManager.sendChat("MegaMek", "Game saved to " + target); }
+                    afterSave.accept(target);
+                    result.complete(target);
+                } catch (Exception failure) {
+                    failed(requested.toString(), sendChat, result, failure);
+                } finally {
+                    pending.release();
+                }
+            });
+        } catch (Exception failure) {
+            if (reserved) { pending.release(); }
+            if (failure instanceof InterruptedException) { Thread.currentThread().interrupt(); }
+            failed(fileName, sendChat, result, failure);
         }
+        return result;
+    }
 
-        String finalFileName = fileName;
-        if (!finalFileName.endsWith(MMConstants.SAVE_FILE_EXT)) {
-            finalFileName = fileName + MMConstants.SAVE_FILE_EXT;
-        }
-
-        File saveGameDir = new File(MMConstants.SAVEGAME_DIR);
-        if (!saveGameDir.exists()) {
-            saveGameDir.mkdir();
-        }
-
-        finalFileName = saveGameDir + File.separator + finalFileName;
-
-        try (OutputStream os = new FileOutputStream(finalFileName + ".gz");
-              OutputStream gzo = new GZIPOutputStream(os);
-              Writer writer = new OutputStreamWriter(gzo, StandardCharsets.UTF_8)) {
-            SerializationHelper.getSaveGameXStream().toXML(gameManager.getGame(), writer);
-        } catch (Exception e) {
-            String message = String.format("Unable to save file: %s", finalFileName);
-            LOGGER.error(e, message);
-
-            if (sendChat) {
-                gameManager.sendChat("MegaMek", "Could not save the game to " + finalFileName);
+    private Snapshot snapshot(IGame game) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        if (game instanceof Game) {
+            try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {
+                output.writeObject(game);
+                output.flush();
+                return new Snapshot(bytes.toByteArray(), false);
+            } catch (NotSerializableException unsupported) {
+                // Scripted events and extension state were historically XML-only. Preserve those saves without
+                // making every scenario/game type adopt the fast snapshot format.
+                bytes.reset();
             }
         }
-
-        if (sendChat) {
-            gameManager.sendChat("MegaMek", "Game saved to " + finalFileName);
+        if (fallbackXStream == null) { fallbackXStream = SerializationHelper.getSaveGameXStream(); }
+        try (Writer xml = new OutputStreamWriter(bytes, StandardCharsets.UTF_8)) {
+            fallbackXStream.marshal(game, new CompactWriter(xml));
         }
+        return new Snapshot(bytes.toByteArray(), true);
+    }
+
+    private void failed(String target, boolean sendChat, CompletableFuture<Path> result, Exception failure) {
+        LOGGER.error(failure, "Unable to save file: {}", target);
+        try {
+            if (sendChat) { gameManager.sendChat("MegaMek", "Could not save the game to " + target); }
+        } finally {
+            result.completeExceptionally(failure);
+        }
+    }
+
+    private void writeSnapshot(Path target, Snapshot snapshot) throws Exception {
+        Path temporary = Files.createTempFile(target.toAbsolutePath().getParent(), ".megamek-save-", ".tmp");
+        try {
+            try (OutputStream output = new BufferedOutputStream(Files.newOutputStream(temporary));
+                  GZIPOutputStream gzip = new GZIPOutputStream(output)) {
+                if (snapshot.xml()) {
+                    gzip.write(snapshot.bytes());
+                } else {
+                    // This stream contains only bytes captured above, not an external file or a network payload.
+                    try (ObjectInputStream input = new ObjectInputStream(new ByteArrayInputStream(snapshot.bytes()));
+                          Writer xml = new OutputStreamWriter(gzip, StandardCharsets.UTF_8)) {
+                        saveGameXStream.marshal(input.readObject(), new CompactWriter(xml));
+                    }
+                }
+            }
+            try {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    /** Stop accepting work and finish the saves already accepted, including a save requested just before quitting. */
+    @Override
+    public void close() {
+        synchronized (this) {
+            closed = true;
+            writer.shutdown();
+        }
+        boolean interrupted = false;
+        while (!writer.isTerminated()) {
+            try {
+                writer.awaitTermination(1, TimeUnit.DAYS);
+            } catch (InterruptedException interruption) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) { Thread.currentThread().interrupt(); }
     }
 
     /**
@@ -104,32 +232,27 @@ public record GameManagerSaveHelper(AbstractGameManager gameManager) {
      * @param fileName  The <code>String</code> filename to use
      * @param localPath The <code>String</code> path to the file to be used on the client
      */
-    public void sendSaveGame(int connId, String fileName, String localPath) {
-        saveGame(fileName, false);
+    public CompletableFuture<Path> sendSaveGame(int connId, String fileName, String localPath) {
+        String destination = localPath.replace("|", " ");
+        return queueSave(fileName, false, 0, saved -> sendSavedGame(connId, saved, destination))
+              .whenComplete((saved, failure) -> {
+                  if (failure != null) {
+                      // An explicit failure releases a client waiting to save before quitting, without writing a file.
+                      gameManager.send(connId, new Packet(PacketCommand.SEND_SAVEGAME, fileName, null, destination));
+                      gameManager.sendChat(connId, "***Server", "Could not send the saved game.");
+                  }
+              });
+    }
 
-        String finalFileName = fileName;
-        if (!finalFileName.endsWith(MMConstants.SAVE_FILE_GZ_EXT)) {
-            if (finalFileName.endsWith(MMConstants.SAVE_FILE_EXT)) {
-                finalFileName = fileName + ".gz";
-            } else {
-                finalFileName = fileName + MMConstants.SAVE_FILE_GZ_EXT;
-            }
-        }
-
-        localPath = localPath.replace("|", " ");
-        String localFile = MMConstants.SAVEGAME_DIR + File.separator + finalFileName;
-
-        try (InputStream in = new FileInputStream(localFile); InputStream bin = new BufferedInputStream(in)) {
+    /** Runs on the same writer as file replacement, so another request cannot overwrite this save before delivery. */
+    private void sendSavedGame(int connId, Path saved, String localPath) {
+        try {
             List<Integer> data = new ArrayList<>();
-            int input;
-            while ((input = bin.read()) != -1) {
-                data.add(input);
-            }
-            gameManager.send(connId, new Packet(PacketCommand.SEND_SAVEGAME, finalFileName, data, localPath));
+            for (byte value : Files.readAllBytes(saved)) { data.add(value & 0xff); }
+            gameManager.send(connId, new Packet(PacketCommand.SEND_SAVEGAME, saved.getFileName().toString(), data, localPath));
             gameManager.sendChat(connId, "***Server", "Save game has been sent to you.");
-        } catch (Exception ex) {
-            String message = String.format("Unable to load file: %s", localFile);
-            LOGGER.error(ex, message);
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
         }
     }
 }

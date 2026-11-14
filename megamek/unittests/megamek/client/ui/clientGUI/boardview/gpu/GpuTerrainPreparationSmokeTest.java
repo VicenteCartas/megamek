@@ -36,6 +36,8 @@ import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import megamek.common.planetaryConditions.Atmosphere;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.lwjgl.opengl.GL20C;
@@ -43,6 +45,16 @@ import org.lwjgl.opengl.GL20C;
 /** Material readiness is a draw boundary, including board replacement and changes to lighting flags. */
 @Tag("on-demand")
 class GpuTerrainPreparationSmokeTest {
+    private String programCache;
+
+    @BeforeEach
+    void observeSourceCompilation() { programCache = System.setProperty(GpuProgramCache.PROPERTY, "false"); }
+
+    @AfterEach
+    void restoreProgramCache() {
+        if (programCache == null) { System.clearProperty(GpuProgramCache.PROPERTY); }
+        else { System.setProperty(GpuProgramCache.PROPERTY, programCache); }
+    }
     /**
      * Inspect installed indexed mesh ranges, not sampled pixels or source-generation labels. Returned counts are
      * blended parts, blended ground triangles, blended cliff triangles, blended shore triangles, and concrete cliffs.
@@ -57,9 +69,10 @@ class GpuTerrainPreparationSmokeTest {
         var chunks = GpuTerrain.class.getDeclaredField("chunks");
         chunks.setAccessible(true);
         for (Object chunk : (List<?>) chunks.get(terrain)) {
-            var opaque = chunk.getClass().getDeclaredField("opaque");
+            Object resources = GpuTestSupport.field(chunk, "ground");
+            var opaque = resources.getClass().getDeclaredField("opaque");
             opaque.setAccessible(true);
-            for (var part : GpuTerrainDepth.snapshot((List<ModelInstance>) opaque.get(chunk))) {
+            for (var part : GpuTerrainDepth.snapshot((List<ModelInstance>) opaque.get(resources))) {
                 if (!part.material.has(sculptType)) { continue; }
                 boolean blended = part.material.has(GpuSurfaceBlend.TYPE);
                 if (blended) { counts[0]++; }
@@ -163,6 +176,7 @@ class GpuTerrainPreparationSmokeTest {
             private final Set<String> variants = new HashSet<>();
             private final Set<String> sources = new HashSet<>();
             private final Set<String> compiledSources = new HashSet<>();
+            private boolean compiledGroundIce;
             private final Set<String> compiledIceModes = new HashSet<>();
             private final Set<String> compiledPalettes = new HashSet<>();
 
@@ -220,6 +234,7 @@ class GpuTerrainPreparationSmokeTest {
                             compiledIceModes.add(line.substring("#define ICE_MODE ".length()));
                         }
                     }
+                    compiledGroundIce |= ice && text.contains("uniform float u_iceMode");
                     if (text.contains("#define volcanicFlag") && text.contains("#define terrainBlendFlag")) {
                         compiledPalettes.add(ordinaryFamily == null ? "generic" : ordinaryFamily);
                     }
@@ -287,17 +302,16 @@ class GpuTerrainPreparationSmokeTest {
                     Files.writeString(report, String.format(Locale.ROOT, "phase %d ready after %.3f ms%n",
                           phase, (System.nanoTime() - started) / 1_000_000.0), StandardOpenOption.APPEND);
                     if (phase == 0) {
-                        assertEquals(1, compiledSources.stream().filter(text -> !text.contains("#define SCULPT_FAMILY ")).count(),
-                              "Uniform grass needs one generic sculpt program, which also draws its scars");
+                        // Floor and material-cache programs share sculpt helpers too. Their number is not a
+                        // readiness contract; the first draw below must reuse every required program.
                         assertFalse(variants.contains("terrainBlendFlag"), "A uniform board must not prepare unused blends");
                     }
                     if (phase == 1) {
                         int[] roles = checkBlendedRoles(terrain, "preparation phase " + phase);
                         assertTrue(roles[0] > 0, "The mixed fixture must contain installed blended geometry");
-                        // Frozen land and its dry neighbour share attribute/vertex masks, but compile different
-                        // ICE_MODE programs. Readiness must cover both; their scars draw with the same programs.
-                        assertTrue(compiledIceModes.containsAll(Set.of("1.0", "4.0")),
-                              "Both same-mask ice modes must be compiled before drawing: " + compiledIceModes);
+                        // Frozen land and its dry neighbour use the same ground-ice program, selecting their mode
+                        // through its uniform. That program must be ready before either material draws.
+                        assertTrue(compiledGroundIce, "The shared ground-ice program must be compiled before drawing");
                     }
                     if (phase == 4) {
                         for (String palette : new String[] { "3", "2", "0", "-2", "generic" }) {

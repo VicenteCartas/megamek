@@ -36,9 +36,9 @@ import com.badlogic.gdx.utils.IntArray;
 import megamek.common.board.Coords;
 
 /**
- * Clustered reeds in persistent per-chunk instanced batches, and the planting of a field's crops. Terrain workers plant
- * both with each chunk's finished support ({@link BoardPlants}); this class only shapes, batches and draws the reeds. A
- * field's crops are plants among the grass blades ({@link GpuGroundCover}), planted here ({@link #plantStalks}),
+ * Clustered reeds in persistent per-chunk instanced batches, and a field's crops' sizes. Terrain workers plant the
+ * reeds with each chunk's finished support ({@link BoardPlants}); this class shapes, batches and draws them. A
+ * field's crops are plants among the grass blades, which place themselves ({@link GpuGroundCover}),
  * thinning out as they shrink while each survivor widens by as much, until the ground takes the stand's colour
  * (terrain-biome.glsl).
  */
@@ -91,8 +91,6 @@ final class GpuBiomeVegetation implements Disposable {
     private static final int STRIDE = 4;
     /** A crop plant's mean height in levels, to its tip, wheat and maize alike. */
     static final float CROP_HEIGHT = .9f;
-    // A crop needs this much of the shared coverage field.
-    private static final float CULTIVATED = .60f;
     // Obstacle clearance in metres: the tallest reed or crop with its sway.
     private static final float PLANT_HEIGHT = 2;
     /** Metres a maize plant's leaves reach across its row, which clears its parcel's headland, roads and obstacles. */
@@ -140,117 +138,6 @@ final class GpuBiomeVegetation implements Disposable {
         patch.prepare(scene, tile, density);
         patch.roots.shrink();
         return patch.roots;
-    }
-
-    /**
-     * A field's plants, drawn by {@link GpuGroundCover}: (x, y, z, rank) in rank order, for one crop. Wheat stalks stand
-     * anywhere in their parcels, as many candidates per hex as the grass's; maize plants stand on their parcel's planted
-     * rows, {@link #CROP_SPACING} metres apart and staggered between rows, each with its own rank. A plant grows clear of its parcel's headland by its reach, where the field is cultivated and level and no
-     * road, obstacle or paint is. Candidates are placed before any rejection, so a plant keeps its place and rank at
-     * every detail. Null when none grows.
-     */
-    static FloatArray plantStalks(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface,
-          BoardDecals.Opacity paint, BoardFields.Crop crop) {
-        float metre = BoardRelief.metres(1);
-        Coords coords = tile.coords();
-        float[] xs = new float[6], ys = new float[6];
-        for (int corner = 0; corner < 6; corner++) {
-            var point = BoardGeometry.corner(coords, 0, corner);
-            xs[corner] = point.x / metre;
-            ys[corner] = point.y / metre;
-        }
-        long[] parcels = Arrays.stream(BoardFields.parcels(xs, ys))
-              .filter(parcel -> BoardFields.crop(BoardFields.code(parcel)) == crop).toArray();
-        if (parcels.length == 0) { return null; }
-        var faces = support(tile, surface);
-        if (faces.isEmpty()) { return null; }
-        // Candidates as (x, y, rank), before any rejection.
-        var candidates = new FloatArray();
-        float centerX = BoardGeometry.centerX(coords), centerY = BoardGeometry.centerY(coords);
-        if (crop == BoardFields.Crop.WHEAT) {
-            float halfWidth = BoardGeometry.width() / 2, halfHeight = BoardGeometry.height() / 2;
-            var random = new Random(coords.getX() * 0x2545F4914F6CDD1DL ^ coords.getY() * 0x9E3779B97F4A7C15L);
-            for (int rank = 0; rank < GpuGroundCover.ROOTS_PER_HEX; rank++) {
-                float x, y;
-                do {
-                    x = centerX + (random.nextFloat() * 2 - 1) * halfWidth;
-                    y = centerY + (random.nextFloat() * 2 - 1) * halfHeight;
-                } while (!BoardGeometry.contains(coords, x, y));
-                candidates.addAll(x, y, rank);
-            }
-        } else {
-            for (long parcel : parcels) {
-                int code = BoardFields.code(parcel);
-                float rowX = BoardFields.acrossX(code), rowY = BoardFields.acrossY(code);
-                float u = (centerX * rowX + centerY * rowY) / metre, v = (centerY * rowX - centerX * rowY) / metre;
-                // The planted rows are the ground's alternate furrows; the plants along them stagger by half a step.
-                int first = (int) Math.floor((u - 18) / BoardBiome.ROW_METRES);
-                first += first & 1;
-                for (int ix = first; ix * BoardBiome.ROW_METRES <= u + 18; ix += 2) {
-                    float stagger = ((ix / 2) & 1) * CROP_SPACING / 2;
-                    for (int iy = (int) Math.floor((v - 18) / CROP_SPACING); iy * CROP_SPACING <= v + 18; iy++) {
-                        float a = ix * BoardBiome.ROW_METRES + (BoardRelief.hash(ix * 7 + 1, iy * 3 - 5) - .5f) * .2f;
-                        float b = iy * CROP_SPACING + stagger + (BoardRelief.hash(ix * 5 - 3, iy * 7 + 2) - .5f) * .3f;
-                        float x = (a * rowX - b * rowY) * metre, y = (a * rowY + b * rowX) * metre;
-                        // Each parcel plants only itself: a neighbouring maize parcel's rows run another way.
-                        if (BoardGeometry.contains(coords, x, y) && BoardFields.parcel(x / metre, y / metre) == parcel) {
-                            candidates.addAll(x, y, (int) (BoardRelief.hash(ix * 11 + 4, iy * 13 - 9) * GpuGroundCover.ROOTS_PER_HEX));
-                        }
-                    }
-                }
-            }
-        }
-        var ground = new Support(faces);
-        var roads = BoardRoad.nearbyRoads(scene, tile);
-        var obstacles = new BoardObstacles(scene, tile, true);
-        float levelZ = BoardGeometry.groundZ(tile);
-        var kind = BoardBiome.plantKind(scene, tile);
-        boolean uniform = BoardVegetation.uniform(scene, tile, kind);
-        float reach = crop == BoardFields.Crop.WHEAT ? STALK_REACH : ROW_HALF_WIDTH;
-        var roots = new FloatArray();
-        var root = new Vector3();
-        for (int i = 0; i < candidates.size; i += 3) {
-            float x = candidates.items[i], y = candidates.items[i + 1];
-            long parcel = BoardFields.parcel(x / metre, y / metre);
-            if (BoardFields.crop(BoardFields.code(parcel)) != crop
-                  || BoardFields.inside(parcel, x / metre, y / metre) < BoardFields.HEADLAND + reach) { continue; }
-            var face = ground.face(x, y);
-            if (face == null || !level(face)) { continue; }
-            float z = face.height(x, y);
-            float cover = uniform && Math.abs(z - levelZ) <= .15f * metre ? 1 : BoardBiome.coverage(scene, kind, x, y, z);
-            if (paint != null && cover > 0) { cover *= 1 - paint.at(x, y); }
-            if (cover < CULTIVATED || BoardRoad.distance(roads, x, y) < BoardRoad.SHOULDER + 1) { continue; }
-            if (!obstacles.isEmpty() && obstacles.obstructs(root.set(x, y, z), reach * metre, PLANT_HEIGHT * metre)) {
-                continue;
-            }
-            roots.addAll(x, y, z - .018f * metre, candidates.items[i + 2]);
-        }
-        if (roots.isEmpty()) { return null; }
-        // Wheat's candidates come in rank order already.
-        if (crop == BoardFields.Crop.MAIZE) { sortByRank(roots); }
-        roots.shrink();
-        return roots;
-    }
-
-    /** Roots as (x, y, z, rank) in rank order, as the blades draw a prefix by rank. */
-    private static void sortByRank(FloatArray roots) {
-        int count = roots.size / 4;
-        Integer[] order = new Integer[count];
-        for (int i = 0; i < count; i++) { order[i] = i; }
-        float[] items = roots.items;
-        Arrays.sort(order, (a, b) -> Float.compare(items[a * 4 + 3], items[b * 4 + 3]));
-        float[] sorted = new float[roots.size];
-        for (int i = 0; i < count; i++) { System.arraycopy(items, order[i] * 4, sorted, i * 4, 4); }
-        System.arraycopy(sorted, 0, items, 0, roots.size);
-    }
-
-    /** Whether a face is level enough to cultivate, as the ground's crop rows fade on steeper faces (terrain-biome.glsl). */
-    private static boolean level(BoardSurface.Face face) {
-        Vector3 a = face.a(), b = face.b(), c = face.c();
-        float nx = (b.y - a.y) * (c.z - a.z) - (b.z - a.z) * (c.y - a.y);
-        float ny = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z);
-        float nz = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-        return Math.abs(nz) >= .92f * (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
     }
 
     /** CPU-only reed roots are also useful for verifying ground contact and pool/road exclusion. */

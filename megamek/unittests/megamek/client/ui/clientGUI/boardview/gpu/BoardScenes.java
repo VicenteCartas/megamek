@@ -22,6 +22,7 @@ import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.FloatArray;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
@@ -63,16 +64,16 @@ final class BoardScenes {
     private BoardScenes() { }
 
     static BoardScene.Tile tile(Coords coords, BoardScene.Surface family, int level, int depth, int road) {
-        return new BoardScene.Tile(coords, level, depth, false, road, family, null, null,
-              List.of(), List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null, true);
+        return BoardScenes.newTile(coords, level, depth, false, road, family,
+              List.of(), List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null);
     }
 
     static BoardScene.Tile tile(Coords coords, int family, int level) {
         var surface = family >= BoardSurfaceBlend.CRUST ? BoardScene.Surface.ROCK : BoardScene.Surface.values()[family];
         var liquid = family < BoardSurfaceBlend.CRUST ? BoardLiquid.NONE : new BoardLiquid(
               family == BoardSurfaceBlend.CRUST ? BoardLiquid.Kind.MAGMA_CRUST : BoardLiquid.Kind.MAGMA, "", 0);
-        return new BoardScene.Tile(coords, level, -1, false, 0, surface, null, null,
-              List.of(), List.of(), liquid, null, true);
+        return BoardScenes.newTile(coords, level, -1, false, 0, surface,
+              List.of(), List.of(), liquid, null);
     }
 
     static BoardScene scene(Function<Coords, BoardScene.Tile> tiles) {
@@ -84,8 +85,8 @@ final class BoardScenes {
     }
 
     static BoardScene.Tile tile(Coords coords, BoardRoad.Kind road, int exits, int level, BoardScene.Surface family) {
-        return new BoardScene.Tile(coords, level, -1, false, exits, family, null, null,
-              List.of(), List.of(), BoardLiquid.NONE, null, true, road);
+        return BoardScenes.newTile(coords, level, -1, false, exits, family,
+              List.of(), List.of(), BoardLiquid.NONE, null, road);
     }
 
     static float maskAlpha(GpuRoads.MaskData mask, float x, float y) {
@@ -112,7 +113,7 @@ final class BoardScenes {
         for (int x = 0; x < board.getWidth(); x++) {
             for (int y = 0; y < board.getHeight(); y++) {
                 Coords at = new Coords(x, y);
-                var artwork = new BoardArtwork.HexImage(at, null, null, List.of(), Map.of(), null);
+                var artwork = new BoardArtwork.HexImage(at, List.of(), Map.of(), null);
                 tiles.add(BoardScene.captureTile(board.getHex(at), artwork, null, pixels, board::getHex));
             }
         }
@@ -273,9 +274,8 @@ final class BoardScenes {
                 boolean water = x >= 1 && x <= 7 && (y == 3 || y == 4 && x >= 3 && x <= 6);
                 int depth = !water ? -1 : new int[] { 1, 2, 1, 5, 2, 1, 2 }[x - 1];
                 int level = water ? -2 : y < 3 ? x == 4 ? 9 : x == 5 ? -2 : x < 5 ? 1 : 3 : -2;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, BoardScene.Surface.GRASS, null,
-                      null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE,
-                      null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), level, depth, false, 0, BoardScene.Surface.GRASS, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE,
+                      null));
             }
         }
         return new BoardScene(0, 9, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -311,28 +311,16 @@ final class BoardScenes {
     static BoardScene.Tile tile(Coords coords, BoardScene.Biome kind, int elevation) {
         var base = tile(coords, kind == BoardScene.Biome.MUD || kind == BoardScene.Biome.QUICKSAND
               ? BoardScene.Surface.DIRT : BoardScene.Surface.GRASS, elevation, -1, 0);
-        return new BoardScene.Tile(coords, elevation, -1, false, 0, base.surface(), null, null,
-              List.of(), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE, BoardFireSmoke.NONE, kind);
+        return BoardScenes.newTile(coords, elevation, -1, false, 0, base.surface(),
+              List.of(), List.of(), BoardLiquid.NONE, null, BoardRoad.Kind.NONE, BoardFireSmoke.NONE, kind);
     }
 
-    /** A field hex's plants of both crops, one after the other; empty where none grows. */
-    static FloatArray cropPlants(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface,
-          BoardDecals.Opacity paint) {
-        var plants = new FloatArray();
-        for (var crop : BoardFields.Crop.values()) {
-            var roots = GpuBiomeVegetation.plantStalks(scene, tile, surface, paint, crop);
-            if (roots != null) { plants.addAll(roots); }
-        }
-        return plants;
-    }
-
-    static BoardScene reliefScene(int centerLevel, boolean detailed, BoardScene.Surface family) {
+    static BoardScene reliefScene(int centerLevel, BoardScene.Surface family) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
                 boolean center = x == RELIEF_CENTER.getX() && y == RELIEF_CENTER.getY();
-                tiles.add(new BoardScene.Tile(new Coords(x, y), center ? centerLevel : 0, -1, false, 0, family, null,
-                      null, List.of(), List.of(), BoardLiquid.NONE, null, center ? detailed : true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), center ? centerLevel : 0, -1, false, 0, family, List.of(), List.of(), BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());
@@ -355,14 +343,9 @@ final class BoardScenes {
                 List<BoardScene.Feature> features = building
                       ? List.of(new BoardScene.Feature("buildings/standard/building-hard",
                             0, 0, 0, 1, 3, 0, BoardScene.FeatureKind.BUILDING)) : List.of();
-                Hex hex = new Hex(0);
-                if (family == BoardScene.Surface.CONCRETE) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
-                if (building) { hex.addTerrain(new Terrain(Terrains.BUILDING, 4)); }
-                boolean detailed = BoardFeatures.detailedGround(hex, building
-                      ? Map.of(Terrains.BUILDING, features.getFirst().asset()) : Map.of());
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, land ? -1 : 2, false, 0,
-                      land ? family : BoardScene.Surface.GRASS, null, null, features, List.of(),
-                      land ? BoardLiquid.NONE : BoardLiquid.WATER, null, detailed));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), 0, land ? -1 : 2, false, 0,
+                      land ? family : BoardScene.Surface.GRASS, features, List.of(),
+                      land ? BoardLiquid.NONE : BoardLiquid.WATER, null));
             }
         }
         return new BoardScene(0, 9, 11, tiles, List.of(), List.of(), -1, "", List.of());
@@ -381,9 +364,9 @@ final class BoardScenes {
             for (int y = 0; y < 12; y++) {
                 Coords coords = new Coords(x, y);
                 boolean land = x >= 8 && y >= 6 || dock.contains(coords);
-                tiles.add(new BoardScene.Tile(coords, 0, land ? -1 : 2, false, 0,
-                      land ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, null, null,
-                      List.of(), List.of(), land ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
+                tiles.add(BoardScenes.newTile(coords, 0, land ? -1 : 2, false, 0,
+                      land ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS,
+                      List.of(), List.of(), land ? BoardLiquid.NONE : BoardLiquid.WATER, null));
             }
         }
         return new BoardScene(0, 14, 12, tiles, List.of(), List.of(), -1, "", List.of());
@@ -400,9 +383,9 @@ final class BoardScenes {
                 Coords at = new Coords(x, y);
                 Hex hex = board.getHex(at);
                 Map<Integer, String> selected = hex.containsTerrain(Terrains.BUILDING) ? models : Map.of();
-                tiles.add(new BoardScene.Tile(at, hex.getLevel(), -1, false, 0, BoardFeatures.surface(hex), null, null,
+                tiles.add(BoardScenes.newTile(at, hex.getLevel(), -1, false, 0, BoardFeatures.surface(hex),
                       BoardFeatures.capture(hex, at, selected), List.of(),
-                      BoardLiquid.NONE, null, BoardFeatures.detailedGround(hex, selected)));
+                      BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, board.getWidth(), board.getHeight(), tiles, List.of(), List.of(), -1, "", List.of());
@@ -416,9 +399,9 @@ final class BoardScenes {
             for (int y = 0; y < 7; y++) {
                 int level = y < 3 ? x / 3 + 1 : 0;
                 int depth = x % 3 == 1 ? 1 : -1;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, family, null, null, List.of(),
+                tiles.add(BoardScenes.newTile(new Coords(x, y), level, depth, false, 0, family, List.of(),
                       List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE,
-                      null, true));
+                      null));
             }
         }
         return new BoardScene(0, 9, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -433,9 +416,9 @@ final class BoardScenes {
             for (int y = 0; y < board.getHeight(); y++) {
                 var hex = board.getHex(x, y);
                 int depth = hex.containsTerrain(Terrains.WATER) ? hex.terrainLevel(Terrains.WATER) : -1;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), hex.getLevel(), depth, false, 0, family, null, null,
+                tiles.add(BoardScenes.newTile(new Coords(x, y), hex.getLevel(), depth, false, 0, family,
                       List.of(), List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE,
-                      null, true));
+                      null));
             }
         }
         return new BoardScene(0, board.getWidth(), board.getHeight(), tiles, List.of(), List.of(), -1, "", List.of());
@@ -459,9 +442,9 @@ final class BoardScenes {
                     case 'W' -> 2;
                     default -> -1;
                 };
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, family, null, null, List.of(),
+                tiles.add(BoardScenes.newTile(new Coords(x, y), level, depth, false, 0, family, List.of(),
                       List.of(),
-                      depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                      depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());
@@ -477,8 +460,8 @@ final class BoardScenes {
 
     static BoardScene.Tile detailTile(Coords coords, BoardScene.Surface family, int level, int depth, int road,
           List<BoardScene.Feature> features) {
-        return new BoardScene.Tile(coords, level, depth, false, road, family, null, null,
-              features, List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null, road == 0);
+        return BoardScenes.newTile(coords, level, depth, false, road, family,
+              features, List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null);
     }
 
     static BoardScene shores(int depth, boolean mouths) {
@@ -552,8 +535,8 @@ final class BoardScenes {
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 Coords at = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(at, at.equals(MESH_AT) ? level : 0, -1, false, 0, family, null, null,
-                      List.of(), List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(at, at.equals(MESH_AT) ? level : 0, -1, false, 0, family,
+                      List.of(), List.of(), BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -564,7 +547,6 @@ final class BoardScenes {
     }
 
     static BoardScene roadScene(boolean river, int direction, boolean firstRoad, boolean secondRoad, int elevation) {
-        var art = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 4; x++) {
             for (int y = 0; y < 4; y++) {
@@ -574,9 +556,9 @@ final class BoardScenes {
                       : second && secondRoad ? 1 << ((direction + 3) % 6) : 0;
                 boolean wet = river && (first || second);
                 // A road's exits come with its drawn road, as a captured hex has them: only a carriageway is graded.
-                tiles.add(new BoardScene.Tile(coords, !river && first ? elevation : 0, wet ? 2 : -1, false, exits,
-                      BoardScene.Surface.GRASS, null, null, List.of(), List.of(),
-                      wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, false,
+                tiles.add(BoardScenes.newTile(coords, !river && first ? elevation : 0, wet ? 2 : -1, false, exits,
+                      BoardScene.Surface.GRASS, List.of(), List.of(),
+                      wet ? BoardLiquid.WATER : BoardLiquid.NONE, null,
                       exits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED));
             }
         }
@@ -590,27 +572,15 @@ final class BoardScenes {
         return (float) Math.hypot(a.x + dx * t - p.x, a.y + dy * t - p.y);
     }
 
-    static BoardScene riverScene(Coords center, int mask) {
-        Map<Coords, Integer> levels = new HashMap<>();
-        levels.put(center, 2);
-        for (int direction = 0; direction < 6; direction++) {
-            if ((mask & (1 << direction)) != 0) {
-                levels.put(center.translated(direction), 0);
-            }
-        }
-        return riverScene(levels, false);
-    }
-
     static BoardScene riverScene(Map<Coords, Integer> levels, boolean frozen) {
-        var art = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
         List<BoardScene.Tile> tiles = new ArrayList<>();
         int width = Math.max(5, levels.keySet().stream().mapToInt(Coords::getX).max().orElseThrow() + 2);
         int height = Math.max(5, levels.keySet().stream().mapToInt(Coords::getY).max().orElseThrow() + 2);
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, levels.getOrDefault(coords, 0), levels.containsKey(coords) ? 1 : -1,
-                      frozen && levels.containsKey(coords), 0, BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(coords, levels.getOrDefault(coords, 0), levels.containsKey(coords) ? 1 : -1,
+                      frozen && levels.containsKey(coords), 0, BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());
@@ -627,9 +597,9 @@ final class BoardScenes {
             for (int y = 0; y < size; y++) {
                 Coords coords = new Coords(x, y);
                 boolean wet = depths.containsKey(coords);
-                tiles.add(new BoardScene.Tile(coords, levels.getOrDefault(coords, land), wet ? depths.get(coords) : -1,
-                      frozen && wet, 0, BoardScene.Surface.SAND, null, null, List.of(), List.of(),
-                      wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(coords, levels.getOrDefault(coords, land), wet ? depths.get(coords) : -1,
+                      frozen && wet, 0, BoardScene.Surface.SAND, List.of(), List.of(),
+                      wet ? BoardLiquid.WATER : BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, size, size, tiles, List.of(), List.of(), -1, "", List.of());
@@ -639,8 +609,8 @@ final class BoardScenes {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 2 && y == 2 ? raisedLevel : 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), x == 2 && y == 2 ? raisedLevel : 0, -1, false, 0,
+                      BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "Movement", List.of());
@@ -677,5 +647,282 @@ final class BoardScenes {
 
     static BoardScene minesScene() throws Exception {
         return BoardScenes.installedScene("Deserts/16x17 Mines 1.board");
+    }
+
+    // ---- Tiles for fixtures: a hex by its fields in capture order, the later ones at their defaults. ----
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text,
+              waterDepth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null, BoardRoad.Kind.NONE, BoardFireSmoke.NONE,
+              BoardScene.Biome.NONE, false, false, 0, false,
+              BoardSurfaceBlend.solid(surface == null ? BoardScene.Surface.GRASS : surface), false, null, Map.of(),
+              BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, null,
+              BoardRoad.Kind.NONE, BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false, 0, false,
+              BoardSurfaceBlend.solid(surface == null ? BoardScene.Surface.GRASS : surface), false, null, Map.of(),
+              BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              BoardRoad.Kind.NONE, BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false, 0, false,
+              BoardSurfaceBlend.solid(surface == null ? BoardScene.Surface.GRASS : surface), false, null, Map.of(),
+              BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false, 0, false,
+              BoardSurfaceBlend.solid(surface == null ? BoardScene.Surface.GRASS : surface), false, null, Map.of(),
+              BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, BoardScene.Biome.NONE, false, false, 0, false,
+              BoardSurfaceBlend.solid(surface == null ? BoardScene.Surface.GRASS : surface), false, null, Map.of(),
+              BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, false, false, 0, false,
+              BoardSurfaceBlend.solid(surface == null ? BoardScene.Surface.GRASS : surface), false, null, Map.of(),
+              BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, false, 0, false,
+              BoardSurfaceBlend.solid(surface == null ? BoardScene.Surface.GRASS : surface), false, null, Map.of(),
+              BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, 0, false,
+              BoardSurfaceBlend.solid(surface == null ? BoardScene.Surface.GRASS : surface), false, null, Map.of(),
+              BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, cliffTopExits, false,
+              BoardSurfaceBlend.solid(surface == null ? BoardScene.Surface.GRASS : surface), false, null, Map.of(),
+              BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits, boolean bare) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare,
+              BoardSurfaceBlend.solid(surface == null ? BoardScene.Surface.GRASS : surface), false, null, Map.of(),
+              BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, false, null, Map.of(),
+              BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover,
+          boolean ultraSublevel) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, ultraSublevel, null,
+              Map.of(), BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover,
+          boolean ultraSublevel, BoardScene.Pixels tilesetScenery) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, ultraSublevel,
+              tilesetScenery, Map.of(), BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover,
+          boolean ultraSublevel, BoardScene.Pixels tilesetScenery,
+          Map<String, megamek.common.board.HexAppearance> appearance) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, ultraSublevel,
+              tilesetScenery, appearance, BoardScene.Cover.NONE, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover,
+          boolean ultraSublevel, BoardScene.Pixels tilesetScenery,
+          Map<String, megamek.common.board.HexAppearance> appearance, BoardScene.Cover cover) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, ultraSublevel,
+              tilesetScenery, appearance, cover, false, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover,
+          boolean ultraSublevel, BoardScene.Pixels tilesetScenery,
+          Map<String, megamek.common.board.HexAppearance> appearance, BoardScene.Cover cover, boolean barren) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, ultraSublevel,
+              tilesetScenery, appearance, cover, barren, BoardRoad.Kind.NONE, 0, false, 0,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover,
+          boolean ultraSublevel, BoardScene.Pixels tilesetScenery,
+          Map<String, megamek.common.board.HexAppearance> appearance, BoardScene.Cover cover, boolean barren,
+          BoardRoad.Kind deckRoad, int deckRoadExits, boolean deckMud, int railBed) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, ultraSublevel,
+              tilesetScenery, appearance, cover, barren, deckRoad, deckRoadExits, deckMud, railBed,
+              megamek.common.board.RailRoute.Corridor.NONE, megamek.common.board.RailRoute.Corridor.NONE,
+              BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover,
+          boolean ultraSublevel, BoardScene.Pixels tilesetScenery,
+          Map<String, megamek.common.board.HexAppearance> appearance, BoardScene.Cover cover, boolean barren,
+          BoardRoad.Kind deckRoad, int deckRoadExits, boolean deckMud, int railBed,
+          megamek.common.board.RailRoute.Corridor corridor, megamek.common.board.RailRoute.Corridor deckCorridor) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, ultraSublevel,
+              tilesetScenery, appearance, cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor,
+              deckCorridor, BoardBackdrop.NONE, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover,
+          boolean ultraSublevel, BoardScene.Pixels tilesetScenery,
+          Map<String, megamek.common.board.HexAppearance> appearance, BoardScene.Cover cover, boolean barren,
+          BoardRoad.Kind deckRoad, int deckRoadExits, boolean deckMud, int railBed,
+          megamek.common.board.RailRoute.Corridor corridor, megamek.common.board.RailRoute.Corridor deckCorridor,
+          BoardBackdrop backdrop) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, ultraSublevel,
+              tilesetScenery, appearance, cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor,
+              deckCorridor, backdrop, null, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover,
+          boolean ultraSublevel, BoardScene.Pixels tilesetScenery,
+          Map<String, megamek.common.board.HexAppearance> appearance, BoardScene.Cover cover, boolean barren,
+          BoardRoad.Kind deckRoad, int deckRoadExits, boolean deckMud, int railBed,
+          megamek.common.board.RailRoute.Corridor corridor, megamek.common.board.RailRoute.Corridor deckCorridor,
+          BoardBackdrop backdrop, MinimapTerrain minimap) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, ultraSublevel,
+              tilesetScenery, appearance, cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor,
+              deckCorridor, backdrop, minimap, 0, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover,
+          boolean ultraSublevel, BoardScene.Pixels tilesetScenery,
+          Map<String, megamek.common.board.HexAppearance> appearance, BoardScene.Cover cover, boolean barren,
+          BoardRoad.Kind deckRoad, int deckRoadExits, boolean deckMud, int railBed,
+          megamek.common.board.RailRoute.Corridor corridor, megamek.common.board.RailRoute.Corridor deckCorridor,
+          BoardBackdrop backdrop, MinimapTerrain minimap, int roadCuts) {
+        return newTile(coords, elevation, waterDepth, frozen, roadExits, surface, features, text, liquid, tileset,
+              road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, ultraSublevel,
+              tilesetScenery, appearance, cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor,
+              deckCorridor, backdrop, minimap, roadCuts, megamek.common.board.RailRoute.Cuts.NONE);
+    }
+
+    static BoardScene.Tile newTile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits,
+          BoardScene.Surface surface, List<BoardScene.Feature> features, List<BoardHexText> text, BoardLiquid liquid,
+          BoardScene.Pixels tileset, BoardRoad.Kind road, BoardFireSmoke fireSmoke, BoardScene.Biome biome,
+          boolean impassable, boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover,
+          boolean ultraSublevel, BoardScene.Pixels tilesetScenery,
+          Map<String, megamek.common.board.HexAppearance> appearance, BoardScene.Cover cover, boolean barren,
+          BoardRoad.Kind deckRoad, int deckRoadExits, boolean deckMud, int railBed,
+          megamek.common.board.RailRoute.Corridor corridor, megamek.common.board.RailRoute.Corridor deckCorridor,
+          BoardBackdrop backdrop, MinimapTerrain minimap, int roadCuts, megamek.common.board.RailRoute.Cuts railCuts) {
+        return new BoardScene.Tile(coords, new BoardScene.Tile.Ground(elevation, waterDepth, frozen, roadExits,
+              surface, liquid, road, biome, cliffTopExits, bare, groundCover, ultraSublevel, appearance,
+              deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop, roadCuts, railCuts),
+              features, cover, barren, blackIce, text, tileset, tilesetScenery, fireSmoke, impassable, minimap);
     }
 }

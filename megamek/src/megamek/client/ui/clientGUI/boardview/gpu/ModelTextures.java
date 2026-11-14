@@ -4,8 +4,10 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
@@ -14,30 +16,48 @@ import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
+import com.badlogic.gdx.graphics.g3d.model.MeshPart;
+import com.badlogic.gdx.graphics.g3d.model.Node;
+import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelTexture;
 
 /** Models borrow textures from their library's cache; each cache alone owns their disposal. */
 final class ModelTextures {
     private ModelTextures() { }
 
-    /** An image as one glTF role reads it: its cache key, whether its RGB is sRGB, its pixels and its sampler. */
-    private record Role(String key, boolean color, Supplier<Pixmap> pixels, RigidGlb.Image image) { }
+    /**
+     * An image as one glTF role reads it: its cache key, whether its RGB is sRGB, whether its alpha is a paint mask
+     * ({@link GpuColorTexture#paintLevels}), its pixels and its sampler.
+     */
+    private record Role(String key, boolean color, boolean paint, Supplier<Pixmap> pixels, RigidGlb.Image image) {
+        GpuColorTexture.Cutout levels() {
+            return paint ? GpuColorTexture.paintLevels(pixels.get()) : GpuColorTexture.cutoutLevels(pixels.get());
+        }
+    }
 
     static Model create(ModelData data, Map<String, Texture> cache, BiFunction<String, Boolean, Texture> external) {
         File textures = GpuMaterialMaps.boardTextures();
         Map<String, RigidGlb.Image> images = data instanceof RigidGlb.Data glb ? glb.images : Map.of();
         var usages = new HashMap<String, Integer>();
         List<Map.Entry<String, Integer>> reads = new ArrayList<>();
+        // The albedo images whose alpha is a paint mask.
+        Set<String> painted = new HashSet<>();
         for (var material : data.materials) {
             if (material.textures == null) { continue; }
             for (var texture : material.textures) {
                 usages.putIfAbsent(texture.fileName, texture.usage);
                 reads.add(Map.entry(texture.fileName, texture.usage));
+                if (texture.usage == ModelTexture.USAGE_DIFFUSE && data instanceof RigidGlb.Data glb
+                      && glb.paintMasks.contains(material.id)) {
+                    painted.add(texture.fileName);
+                }
             }
         }
         if (data instanceof RigidGlb.Data glb) {
@@ -54,13 +74,13 @@ final class ModelTextures {
             var image = images.get(read.getKey());
             if (image != null) {
                 roles.computeIfAbsent(read.getValue() + ":" + read.getKey(),
-                      ignored -> GpuAssets.pooled(() -> role(image, read.getKey(), read.getValue(), textures)));
+                      ignored -> GpuAssets.pooled(() -> role(image, read.getKey(), read.getValue(), textures, painted)));
             }
         }
         BiFunction<String, Integer, Role> role = (key, usage) -> {
             var image = images.get(key);
             return image == null ? null : GpuAssets.joined(roles.computeIfAbsent(usage + ":" + key,
-                  ignored -> CompletableFuture.completedFuture(role(image, key, usage, textures))));
+                  ignored -> CompletableFuture.completedFuture(role(image, key, usage, textures, painted))));
         };
         // The pixels of the images not cached yet decode together on the common pool, a colour image's mip levels with
         // them (GpuColorTexture#cutoutLevels: averaged by alpha where it has transparent texels, so a distant leaf keeps
@@ -74,7 +94,7 @@ final class ModelTextures {
             return cache.computeIfAbsent(read.key(), ignored -> {
                 Texture texture = read.color() ? GpuColorTexture.cutout(() -> {
                     var started = aheadColours.remove(read.key());
-                    return started != null ? GpuAssets.joined(started) : GpuColorTexture.cutoutLevels(read.pixels().get());
+                    return started != null ? GpuAssets.joined(started) : read.levels();
                 }) : GpuColorTexture.create(() -> {
                     var started = ahead.remove(read.key());
                     return started != null ? GpuAssets.joined(started) : read.pixels().get();
@@ -90,7 +110,7 @@ final class ModelTextures {
                 var image = role.apply(read.getKey(), read.getValue());
                 if (image == null || cache.containsKey(image.key())) { continue; }
                 if (image.color()) {
-                    aheadColours.computeIfAbsent(image.key(), ignored -> GpuAssets.pooled(() -> GpuColorTexture.cutoutLevels(image.pixels().get())));
+                    aheadColours.computeIfAbsent(image.key(), ignored -> GpuAssets.pooled(image::levels));
                 } else {
                     ahead.computeIfAbsent(image.key(), ignored -> GpuAssets.pooled(image.pixels()));
                 }
@@ -103,7 +123,51 @@ final class ModelTextures {
             aheadColours.values().forEach(levels -> levels.thenAccept(untaken -> untaken.image().dispose()));
             aheadColours.clear();
         }
-        Model model = new Model(data, key -> load.apply(key, usages.getOrDefault(key, ModelTexture.USAGE_UNKNOWN)));
+        Model model = new Model(data, key -> load.apply(key, usages.getOrDefault(key, ModelTexture.USAGE_UNKNOWN))) {
+            private Map<String, MeshPart> partsById;
+            private Map<String, Material> materialsById;
+
+            @Override
+            protected void loadNodes(Iterable<ModelNode> nodes) {
+                // Generated city kits contain thousands of parts. Model.loadNode scans the entire mesh-part array
+                // for each reference; index it once while retaining the library's transforms, hierarchy and bones.
+                partsById = new HashMap<>();
+                materialsById = new HashMap<>();
+                for (var part : meshParts) { partsById.putIfAbsent(part.id, part); }
+                for (var material : materials) { materialsById.putIfAbsent(material.id, material); }
+                try { super.loadNodes(nodes); }
+                finally { partsById = null; materialsById = null; }
+            }
+
+            @Override
+            protected Node loadNode(ModelNode source) {
+                if (source.parts != null) {
+                    for (var reference : source.parts) {
+                        // Skeletal models retain Model's private bone-reference bookkeeping.
+                        if (reference.bones != null) { return super.loadNode(source); }
+                    }
+                }
+                ModelNode hierarchy = new ModelNode();
+                hierarchy.id = source.id;
+                hierarchy.translation = source.translation;
+                hierarchy.rotation = source.rotation;
+                hierarchy.scale = source.scale;
+                hierarchy.children = source.children;
+                Node node = super.loadNode(hierarchy);
+                if (source.parts != null) {
+                    for (var reference : source.parts) {
+                        var mesh = reference.meshPartId == null ? null : partsById.get(reference.meshPartId);
+                        var material = reference.materialId == null ? null : materialsById.get(reference.materialId);
+                        if (mesh == null || material == null) {
+                            throw new com.badlogic.gdx.utils.GdxRuntimeException("Invalid node: " + source.id);
+                        }
+                        NodePart part = new NodePart(mesh, material);
+                        node.parts.add(part);
+                    }
+                }
+                return node;
+            }
+        };
         // glTF permits one source image in both a color and a data role. Each role needs its own GPU storage.
         for (var source : data.materials) {
             if (source.textures == null) { continue; }
@@ -177,14 +241,15 @@ final class ModelTextures {
         return model;
     }
 
-    /** {@code image} (the model's image {@code key}) as role {@code usage} reads it; GL-free. */
-    private static Role role(RigidGlb.Image image, String key, int usage, File textures) {
-        boolean color = color(usage);
+    /** {@code image} (the model's image {@code key}) as role {@code usage} reads it, {@code painted} its paint masks; GL-free. */
+    private static Role role(RigidGlb.Image image, String key, int usage, File textures, Set<String> painted) {
+        boolean color = color(usage), paint = usage == ModelTexture.USAGE_DIFFUSE && painted.contains(key);
         var map = image.encoded() == null ? GpuMaterialMaps.modelMap(new File(image.file()), usage, textures) : null;
         Supplier<Pixmap> pixels = map != null ? map.pixels()
               : image.encoded() == null ? () -> GpuColorTexture.decode(new FileHandle(image.file()))
               : () -> GpuColorTexture.decode(image.encoded());
-        return new Role((color ? "color:" : "data:") + key + (map == null ? "" : map.suffix()), color, pixels, image);
+        return new Role((paint ? "paint:" : color ? "color:" : "data:") + key + (map == null ? "" : map.suffix()), color, paint,
+              pixels, image);
     }
 
     private static boolean color(int usage) {

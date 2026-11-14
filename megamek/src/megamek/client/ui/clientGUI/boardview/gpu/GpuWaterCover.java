@@ -3,6 +3,8 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -127,8 +129,8 @@ final class GpuWaterCover {
         return true;
     }
 
-    /** One drawn water triangle and its clipping planes, derived once per hex for every face it may cover. */
-    private record WaterTop(BoardSurface water, BoardSurface.Face top, float minX, float maxX, float minY, float maxY,
+    /** One convex patch of drawn water and its clipping planes. Sloping patches remain individual triangles. */
+    private record WaterTop(BoardSurface water, BoardSurface.Face top, List<Vector3> outline, float minX, float maxX, float minY, float maxY,
           float maxZ, float nx, float ny, float nz, float[] edges) {
         /** World units of slack for float rounding before a piece beyond a clipping plane is left unclipped. */
         private static final float MARGIN = .01f;
@@ -139,15 +141,16 @@ final class GpuWaterCover {
         }
 
         /**
-         * Whether every vertex of a piece lies beyond one of the four clipping planes by more than rounding. The
+         * Whether every vertex of a piece lies beyond one of the clipping planes by more than rounding. The
          * clips only ever cut a piece, so each crossing they create lies between two of its vertices and is beyond
          * that plane too: the clip at that plane would keep nothing, and the piece would be handed back whole.
          */
         boolean misses(List<MeshPartBuilder.VertexInfo> polygon) {
-            for (int plane = 0; plane < 4; plane++) {
-                Vector3 origin = plane == 1 ? top.b() : plane == 2 ? top.c() : top.a();
-                float planeX = plane < 3 ? edges[plane * 2] : nx, planeY = plane < 3 ? edges[plane * 2 + 1] : ny;
-                float planeZ = plane < 3 ? 0 : nz;
+            for (int plane = 0; plane <= outline.size(); plane++) {
+                boolean edge = plane < outline.size();
+                Vector3 origin = edge ? outline.get(plane) : top.a();
+                float planeX = edge ? edges[plane * 2] : nx, planeY = edge ? edges[plane * 2 + 1] : ny;
+                float planeZ = edge ? 0 : nz;
                 boolean beyond = true;
                 for (int i = 0; i < polygon.size() && beyond; i++) {
                     beyond = planeDistance(polygon.get(i).position, origin, planeX, planeY, planeZ) > MARGIN;
@@ -177,36 +180,119 @@ final class GpuWaterCover {
         return new GpuWaterCover(result);
     }
 
-    /** The planes as Vector3's cross product and normalisation compute them, without a vector per polygon. */
+    private record Edge(Vector3 from, Vector3 to) { }
+
+    /** Merge adjacent level triangles before deriving their clipping planes. The edge index lives only for this build. */
     private static void waterTops(BoardSurface water, List<WaterTop> result) {
+        var flat = new LinkedHashSet<List<Vector3>>();
+        Map<Edge, List<Vector3>> edges = new HashMap<>();
         for (BoardSurface.Face top : water.waterFaces) {
-            Vector3 a = top.a(), b = top.b(), c = top.c();
-            float abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z, acx = c.x - a.x, acy = c.y - a.y, acz = c.z - a.z;
-            float nx = aby * acz - abz * acy, ny = abz * acx - abx * acz, nz = abx * acy - aby * acx;
-            float length = nx * nx + ny * ny + nz * nz;
-            if (length != 0 && length != 1) {
-                float scale = 1f / (float) Math.sqrt(length);
-                nx *= scale;
-                ny *= scale;
-                nz *= scale;
-            }
-            if (nz <= .00001f) { continue; }
-            float[] edges = new float[6];
-            for (int edge = 0; edge < 3; edge++) {
-                Vector3 from = edge == 0 ? a : edge == 1 ? b : c, to = edge == 0 ? b : edge == 1 ? c : a;
-                float ex = to.y - from.y, ey = from.x - to.x, span = ex * ex + ey * ey;
-                if (span != 0 && span != 1) {
-                    float scale = 1f / (float) Math.sqrt(span);
-                    ex *= scale;
-                    ey *= scale;
+            if (top.a().z == top.b().z && top.a().z == top.c().z) {
+                if (turn(top.a(), top.b(), top.c()) <= 0) { continue; }
+                List<Vector3> polygon = List.of(top.a(), top.b(), top.c());
+                // Internal diagonals of a level pool do not change coverage or optics. Remove them only where
+                // joining two pieces is convex; concave banks, holes and descending water retain their boundaries.
+                boolean merged;
+                do {
+                    merged = false;
+                    var neighbours = new LinkedHashSet<List<Vector3>>();
+                    for (int i = 0; i < polygon.size(); i++) {
+                        var neighbour = edges.get(new Edge(polygon.get((i + 1) % polygon.size()), polygon.get(i)));
+                        if (neighbour != null) { neighbours.add(neighbour); }
+                    }
+                    for (var neighbour : neighbours) {
+                        var joined = join(neighbour, polygon);
+                        if (joined == null) { continue; }
+                        flat.remove(neighbour);
+                        for (int i = 0; i < neighbour.size(); i++) {
+                            edges.remove(new Edge(neighbour.get(i), neighbour.get((i + 1) % neighbour.size())));
+                        }
+                        polygon = joined;
+                        merged = true;
+                        break;
+                    }
+                } while (merged);
+                for (int i = 0; i < polygon.size(); i++) {
+                    edges.put(new Edge(polygon.get(i), polygon.get((i + 1) % polygon.size())), polygon);
                 }
-                edges[edge * 2] = ex;
-                edges[edge * 2 + 1] = ey;
-            }
-            result.add(new WaterTop(water, top, Math.min(a.x, Math.min(b.x, c.x)), Math.max(a.x, Math.max(b.x, c.x)),
-                  Math.min(a.y, Math.min(b.y, c.y)), Math.max(a.y, Math.max(b.y, c.y)), Math.max(a.z, Math.max(b.z, c.z)),
-                  nx, ny, nz, edges));
+                flat.add(polygon);
+            } else { waterTop(water, top, List.of(top.a(), top.b(), top.c()), result); }
         }
+        for (var polygon : flat) {
+            polygon = new ArrayList<>(polygon);
+            for (int i = 0; polygon.size() > 3 && i < polygon.size();) {
+                if (turn(polygon.get((i + polygon.size() - 1) % polygon.size()), polygon.get(i),
+                      polygon.get((i + 1) % polygon.size())) == 0) { polygon.remove(i); i = 0; }
+                else { i++; }
+            }
+            waterTop(water, new BoardSurface.Face(polygon.get(0), polygon.get(1), polygon.get(2), BoardSurface.Finish.TOP),
+                  polygon, result);
+        }
+    }
+
+    /** Join across an exact, oppositely wound edge, without moving any vertex or filling a concavity. */
+    private static List<Vector3> join(List<Vector3> a, List<Vector3> b) {
+        if (a.getFirst().z != b.getFirst().z) { return null; }
+        for (int i = 0; i < a.size(); i++) {
+            for (int j = 0; j < b.size(); j++) {
+                if (!a.get(i).equals(b.get((j + 1) % b.size())) || !a.get((i + 1) % a.size()).equals(b.get(j))) { continue; }
+                var joined = new ArrayList<Vector3>(a.size() + b.size() - 2);
+                for (int k = 0; k < a.size(); k++) { joined.add(a.get((i + 1 + k) % a.size())); }
+                for (int k = 0; k < b.size() - 2; k++) { joined.add(b.get((j + 2 + k) % b.size())); }
+                // A shared edge can be a chain of collinear segments. Cancel its exact out-and-back trace.
+                for (int k = 0; joined.size() >= 3 && k < joined.size();) {
+                    if (joined.get((k + joined.size() - 1) % joined.size()).equals(joined.get((k + 1) % joined.size()))) {
+                        joined.remove(k);
+                        joined.remove(k % joined.size());
+                        k = 0;
+                    } else { k++; }
+                }
+                if (joined.size() < 3) { return null; }
+                if (new java.util.HashSet<>(joined).size() != joined.size()) { return null; }
+                for (int k = 0; k < joined.size(); k++) {
+                    var p = joined.get(k); var q = joined.get((k + 1) % joined.size());
+                    var r = joined.get((k + 2) % joined.size());
+                    if (turn(p, q, r) < 0) { return null; }
+                }
+                return joined;
+            }
+        }
+        return null;
+    }
+
+    private static double turn(Vector3 p, Vector3 q, Vector3 r) {
+        return (double) (q.x - p.x) * (r.y - q.y) - (double) (q.y - p.y) * (r.x - q.x);
+    }
+
+    private static void waterTop(BoardSurface water, BoardSurface.Face top, List<Vector3> outline, List<WaterTop> result) {
+        Vector3 a = top.a(), b = top.b(), c = top.c();
+        float abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z, acx = c.x - a.x, acy = c.y - a.y, acz = c.z - a.z;
+        float nx = aby * acz - abz * acy, ny = abz * acx - abx * acz, nz = abx * acy - aby * acx;
+        float length = nx * nx + ny * ny + nz * nz;
+        if (length != 0 && length != 1) {
+            float scale = 1f / (float) Math.sqrt(length);
+            nx *= scale;
+            ny *= scale;
+            nz *= scale;
+        }
+        if (nz <= .00001f) { return; }
+        float[] edges = new float[outline.size() * 2];
+        float minX = Float.POSITIVE_INFINITY, minY = minX, maxX = Float.NEGATIVE_INFINITY, maxY = maxX;
+        for (int edge = 0; edge < outline.size(); edge++) {
+            Vector3 from = outline.get(edge), to = outline.get((edge + 1) % outline.size());
+            minX = Math.min(minX, from.x); maxX = Math.max(maxX, from.x);
+            minY = Math.min(minY, from.y); maxY = Math.max(maxY, from.y);
+            float ex = to.y - from.y, ey = from.x - to.x, span = ex * ex + ey * ey;
+            if (span != 0 && span != 1) {
+                float scale = 1f / (float) Math.sqrt(span);
+                ex *= scale;
+                ey *= scale;
+            }
+            edges[edge * 2] = ex;
+            edges[edge * 2 + 1] = ey;
+        }
+        result.add(new WaterTop(water, top, outline, minX, maxX, minY, maxY, Math.max(a.z, Math.max(b.z, c.z)),
+              nx, ny, nz, edges));
     }
 
     /** Split at the drawn water triangles, so absorption cannot escape onto an exposed bank or cliff. */
@@ -275,8 +361,8 @@ final class GpuWaterCover {
                 boolean reaches = !water.misses(polygon);
                 List<MeshPartBuilder.VertexInfo> wet = reaches ? polygon : List.of();
                 List<List<MeshPartBuilder.VertexInfo>> outside = reaches ? new ArrayList<>() : List.of();
-                for (int edge = 0; edge < 3 && wet.size() >= 3; edge++) {
-                    Vector3 corner = edge == 0 ? top.a() : edge == 1 ? top.b() : top.c();
+                for (int edge = 0; edge < water.outline().size() && wet.size() >= 3; edge++) {
+                    Vector3 corner = water.outline().get(edge);
                     wet = splitCovered(wet, corner, edges[edge * 2], edges[edge * 2 + 1], 0, outside);
                 }
                 if (wet.size() >= 3) { wet = splitCovered(wet, origin, water.nx(), water.ny(), water.nz(), outside); }

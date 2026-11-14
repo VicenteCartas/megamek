@@ -10,15 +10,16 @@ import java.util.List;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.model.Node;
+import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.GdxNativesLoader;
+import megamek.common.board.HexTile;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * A structure's pieces collapsing ({@link MeepleDebris#collapse}): a building comes down under its own weight where it
- * stood; only a strong hit pushes it over, away from the hit; a deck gives way where it fails first. The pieces are
- * boxes on flat ground; nothing is drawn.
+ * Pieces thrown past the board's edge fall away below it; boxes thrown as the caller says ({@link MeepleDebris#box})
+ * land on the floors of the hexes under them ({@link MeepleDebris.Floors}) and lie down. Nothing is drawn.
  */
 class MeepleDebrisTest {
     /** A level and a hex across its flats, in board model units, as a building stands at the board's scale. */
@@ -32,70 +33,11 @@ class MeepleDebrisTest {
     private record Block(ModelInstance instance, Node pieces, List<List<Vector3>> supports, List<Vector3> rests) { }
 
     @Test
-    void underItsOwnWeightABuildingComesDownWhereItStood() {
-        var block = block();
-        var debris = MeepleDebris.collapse(block.instance(), block.pieces(), block.supports(),
-              new MeepleDebris.Collapse(new Vector3(), STOREY, false, null, 0, List.of()), 5);
-        run(debris, .08f);
-        var early = centers(block);
-        assertEquals(block.rests().getLast().z, early.getLast().z, .5f, "The top storey still stands as the foot gives way");
-        run(debris, 4);
-        assertTrue(debris.settled(), "Every piece comes to rest");
-        var settled = centers(block);
-        var drift = new Vector3();
-        float before = 0, after = 0;
-        for (int index = 0; index < settled.size(); index++) {
-            var moved = new Vector3(settled.get(index)).sub(block.rests().get(index));
-            drift.add(moved.x, moved.y, 0);
-            assertTrue(Math.hypot(moved.x, moved.y) < HEX * .6f, "No piece flies off: " + moved);
-            before += block.rests().get(index).z;
-            after += settled.get(index).z;
-            assertTrue(lowest(block, index) > -1, "No piece sinks into the ground");
-        }
-        drift.scl(1f / settled.size());
-        assertTrue(drift.len() < 6, "With nothing pushing it, the rubble spreads about where it stood: " + drift);
-        assertTrue(after < before * .6f, "It came down: its pieces' middles lie " + after / before + " as high as they stood");
-    }
-
-    @Test
-    void onlyAStrongHitPushesItOverAwayFromTheHit() {
-        float weak = eastward(0), strong = eastward(1);
-        // A quarter of the block's width: it falls away from the hit, without flying off.
-        assertTrue(strong > 10, "An AC/20 from the west throws it east: " + strong);
-        assertTrue(strong > Math.abs(weak) + 8, "A machine gun adds nothing: " + weak + " vs " + strong);
-    }
-
-    @Test
-    void aDeckGivesWayFirstUnderItsLoad() {
-        // Six slabs in a row along x, a deck two levels up; a unit stands on its east end.
-        List<List<Vector3>> supports = new ArrayList<>();
-        List<Vector3> rests = new ArrayList<>();
-        for (int index = 0; index < 6; index++) {
-            var min = new Vector3(-36 + index * 12, -10, 34);
-            supports.add(box(min, new Vector3(min).add(12, 20, 2)));
-            rests.add(new Vector3(min).add(6, 10, 1));
-        }
-        var block = instance(supports, rests);
-        var load = new Vector3(30, 0, 36);
-        var debris = MeepleDebris.collapse(block.instance(), block.pieces(), block.supports(),
-              new MeepleDebris.Collapse(new Vector3(0, 0, 34), STOREY, true, null, 0, List.of(load)), 3);
-        run(debris, .12f);
-        var falling = centers(block);
-        float east = block.rests().getLast().z - falling.getLast().z, west = block.rests().getFirst().z - falling.getFirst().z;
-        assertTrue(east > west + 1, "The slab under the unit drops first: " + east + " vs " + west);
-        run(debris, 4);
-        for (int index = 0; index < 6; index++) {
-            assertTrue(lowest(block, index) < 6, "Every slab ends on the ground: " + lowest(block, index));
-        }
-    }
-
-    @Test
     void piecesThrownPastTheBoardsEdgeFallAwayBelowIt() {
-        // The board ends just east of the block; an AC/20 from the west throws it that way.
+        // The board ends just east of the block; a hit from the west throws its pieces that way.
         float edge = 24;
         var block = block();
-        var debris = MeepleDebris.collapse(block.instance(), block.pieces(), block.supports(),
-              new MeepleDebris.Collapse(new Vector3(), STOREY, false, new Vector3(-400, 0, 20), 1, List.of()), 5);
+        var debris = new MeepleDebris(block.instance(), block.pieces(), block.supports(), new Vector3(400, 0, 0), 5);
         run(debris, 6, (x, y, from, own) -> x > edge ? Float.NaN : 0);
         assertTrue(debris.settled(), "Every piece comes to rest or is gone");
         int gone = 0;
@@ -110,16 +52,105 @@ class MeepleDebrisTest {
         assertTrue(gone > 0, "The hit throws pieces past the edge");
     }
 
-    /** How far, on average, a hit of {@code strength} from the west carries the block's pieces east. */
-    private static float eastward(float strength) {
-        var block = block();
-        var debris = MeepleDebris.collapse(block.instance(), block.pieces(), block.supports(),
-              new MeepleDebris.Collapse(new Vector3(), STOREY, false, new Vector3(-400, 0, 20), strength, List.of()), 5);
-        run(debris, 4);
-        float sum = 0;
-        var settled = centers(block);
-        for (int index = 0; index < settled.size(); index++) { sum += settled.get(index).x - block.rests().get(index).x; }
-        return sum / settled.size();
+    @Test
+    void boxesLandOnTheFloorsOfTheHexesUnderThem() {
+        // Three by three hexes, the middle column a level up.
+        int columns = 3, rows = 3;
+        float[] heights = new float[columns * rows];
+        for (int row = 0; row < rows; row++) { heights[rows + row] = STOREY; }
+        var floors = new MeepleDebris.Floors(heights, columns, rows, HexTile.WIDTH, HexTile.HEIGHT);
+        var debris = new MeepleDebris();
+        var level = new Quaternion();
+        var half = new Vector3(6, 4, 3);
+        // Dropped over a low hex; tumbling over the high one; over the edge the two share, turned a sixth; and thrown
+        // east, past the board's edge.
+        int low = debris.box(new Vector3(42, -108, 30), half, level, new Vector3(), new Vector3(), 0);
+        int high = debris.box(new Vector3(105, -144, 50), half, level, new Vector3(), new Vector3(1, 2, .5f), 0);
+        int between = debris.box(new Vector3(73.5f, -126, 40), half, new Quaternion(Vector3.Z, 60), new Vector3(),
+              new Vector3(0, .5f, 0), .1f);
+        int thrown = debris.box(new Vector3(168, -108, 20), half, level, new Vector3(200, 0, 30), new Vector3(0, 3, 0), 0);
+        debris.advance(.05f, floors, 1);
+        float[] pose = new float[8];
+        debris.pose(between, pose, 0);
+        assertEquals(40, pose[2], 0, "A box stands until its time comes");
+        boolean hard = false;
+        for (float elapsed = 0; elapsed < 6; elapsed += FRAME) {
+            debris.advance(FRAME, floors, 1);
+            hard |= !debris.landings().isEmpty();
+        }
+        assertTrue(debris.settled(), "Every box comes to rest or is gone");
+        assertTrue(hard, "A box landing hard raises dust");
+        assertEquals(0, lowest(debris, low, half, level, floors), .5f, "A box over a low hex rests on its floor");
+        assertEquals(0, lowest(debris, high, half, level, floors), .5f, "A box over a high hex rests on its floor");
+        debris.pose(high, pose, 0);
+        assertTrue(pose[2] > STOREY, "a level up: " + pose[2]);
+        assertTrue(lowest(debris, between, half, new Quaternion(Vector3.Z, 60), floors) > -.5f, "No corner sinks into the hex under it");
+        debris.pose(thrown, pose, 0);
+        assertTrue(pose[0] > 3 * HexTile.WIDTH * .75f && pose[2] < -1, "Past the edge a box falls below the ground: " + pose[0]
+              + ", " + pose[2]);
+        assertEquals(1e-3f, pose[3], 1e-6f, "and has shrunk away");
+    }
+
+    /** A slab that comes to rest standing on its edge lies down, onto the mound of the pile it landed on. */
+    @Test
+    void aBoxAtRestLiesDownOnItsFlattestSide() {
+        var floors = new MeepleDebris.Floors(new float[4], 2, 2, HexTile.WIDTH, HexTile.HEIGHT);
+        var debris = new MeepleDebris();
+        int slab = debris.box(new Vector3(HexTile.WIDTH / 2, -HexTile.HEIGHT / 2, 9.2f), new Vector3(1, 8, 6),
+              new Quaternion(), new Vector3(), new Vector3(), 0);
+        debris.handed(slab, new Quaternion(), 3);
+        for (int frame = 0; frame < 180; frame++) { debris.advance(1 / 60f, floors, 1); }
+        assertTrue(debris.settled(), "It comes to rest");
+        float[] pose = new float[8];
+        debris.pose(slab, pose, 0);
+        assertEquals(1, Math.abs(new Vector3(1, 0, 0).mul(new Quaternion(pose[4], pose[5], pose[6], pose[7])).z), 1e-3f,
+              "Its thinnest side lies up");
+        assertEquals(4, pose[2], .01f, "Half its thickness above the mound");
+    }
+
+    @Test
+    void theFloorsAnswerForTheHexThatHoldsAPoint() {
+        // Each hex's floor is its board index: the floor under a point names the hex found there.
+        int columns = 5, rows = 4;
+        float[] heights = new float[columns * rows];
+        for (int index = 0; index < heights.length; index++) { heights[index] = index; }
+        var floors = new MeepleDebris.Floors(heights, columns, rows, HexTile.WIDTH, HexTile.HEIGHT);
+        int on = 0, off = 0;
+        for (float x = -90; x < 430; x += 3.7f) {
+            for (float y = 60; y > -380; y -= 2.9f) {
+                int hex = HexTile.at(x, y, HexTile.WIDTH, HexTile.HEIGHT, columns, rows);
+                if (hex < 0) {
+                    off++;
+                    assertTrue(floors.at(x, y) < -1e5f, "No floor past the board's edge at " + x + ", " + y);
+                } else {
+                    on++;
+                    assertEquals(hex, floors.at(x, y), 0, "The hex at " + x + ", " + y);
+                }
+            }
+        }
+        assertTrue(on > 1000 && off > 1000, "Points on the board and past each of its edges: " + on + ", " + off);
+        // The middle of hex 0203 (2, 2): a hex is 72 across its flats.
+        float x = 2 * HexTile.WIDTH * .75f + HexTile.WIDTH / 2f, y = -(2 * HexTile.HEIGHT + HexTile.HEIGHT / 2f);
+        assertEquals(2 * rows + 2, floors.under(x, y, 30), 0, "What lies within a hex has its one floor under it");
+        assertTrue(Float.isNaN(floors.under(x, y, 40)), "What reaches past its hex's edge has none");
+        assertTrue(Float.isNaN(floors.under(x, y + 30, 10)), "nor what lies near that edge");
+    }
+
+    /**
+     * How far above the floor of the hex under it the box's lowest corner lies, as it is posed: its {@code half} size
+     * along its axes, which stood turned by {@code axes}.
+     */
+    private static float lowest(MeepleDebris debris, int box, Vector3 half, Quaternion axes, MeepleDebris.Floors floors) {
+        float[] pose = new float[8];
+        debris.pose(box, pose, 0);
+        var turn = new Quaternion(pose[4], pose[5], pose[6], pose[7]).mul(axes);
+        float lowest = Float.POSITIVE_INFINITY;
+        for (int corner = 0; corner < 8; corner++) {
+            var point = turn.transform(new Vector3((corner & 1) == 0 ? half.x : -half.x, (corner & 2) == 0 ? half.y : -half.y,
+                  (corner & 4) == 0 ? half.z : -half.z)).add(pose[0], pose[1], pose[2]);
+            lowest = Math.min(lowest, point.z - floors.at(point.x, point.y));
+        }
+        return lowest;
     }
 
     private static Block block() {

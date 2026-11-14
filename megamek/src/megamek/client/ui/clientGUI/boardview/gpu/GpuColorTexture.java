@@ -67,6 +67,20 @@ final class GpuColorTexture {
      * column at 1-wide), its colours weighted by alpha in linear light.
      */
     static Cutout cutoutLevels(Pixmap image) {
+        return levels(image, false);
+    }
+
+    /**
+     * A paint-masked albedo's levels ({@link GpuModelMaterial#paintMask}: its alpha is the share a building's paint tints,
+     * not coverage), as {@link #cutoutLevels} makes them but each level's colour the plain average in linear light and its
+     * alpha the painted texels' share of that average's luminance: a distant facade keeps its windows' colour, and a tint
+     * colours it by the share it does near.
+     */
+    static Cutout paintLevels(Pixmap image) {
+        return levels(image, true);
+    }
+
+    private static Cutout levels(Pixmap image, boolean paint) {
         if (image.getFormat() == Pixmap.Format.RGB888 || opaque(image)) { return new Cutout(image, null); }
         if (image.getFormat() != Pixmap.Format.RGBA8888) {
             Pixmap expanded = new Pixmap(image.getWidth(), image.getHeight(), Pixmap.Format.RGBA8888);
@@ -120,8 +134,12 @@ final class GpuColorTexture {
                         }
                     }
                     float alpha = nextWeighted[texel * 4 + 3];
+                    if (paint) {
+                        float whole = luminance(nextPlain, texel * 3), painted = luminance(nextWeighted, texel * 4);
+                        if (whole > 1e-6f) { alpha = Math.min(1, painted / whole); }
+                    }
                     for (int c = 0; c < 3; c++) {
-                        if (alpha > 0) { nextPlain[texel * 3 + c] = Math.min(1, nextWeighted[texel * 4 + c] / alpha); }
+                        if (alpha > 0 && !paint) { nextPlain[texel * 3 + c] = Math.min(1, nextWeighted[texel * 4 + c] / alpha); }
                         level[texel * 4 + c] = (byte) encode(nextPlain[texel * 3 + c]);
                     }
                     level[texel * 4 + 3] = (byte) Math.round(alpha * 255);
@@ -134,6 +152,11 @@ final class GpuColorTexture {
             height = h;
         }
         return new Cutout(image, levels.toArray(ByteBuffer[]::new));
+    }
+
+    /** The linear luminance of the colour at {@code at} in {@code values}. */
+    private static float luminance(float[] values, int at) {
+        return .2126f * values[at] + .7152f * values[at + 1] + .0722f * values[at + 2];
     }
 
     /** Whether an RGBA8888 image has no transparent texel; other layouts answer false and take the cutout levels. */
@@ -164,9 +187,30 @@ final class GpuColorTexture {
     }
 
     /** File grayscale means opaque luminance; the caller owns the returned pixels. */
-    static Pixmap decode(FileHandle file) { return decodedImage(new Pixmap(file)); }
+    static Pixmap decode(FileHandle file) {
+        try {
+            return decode(file.readBytes());
+        } catch (com.badlogic.gdx.utils.GdxRuntimeException failure) {
+            throw new com.badlogic.gdx.utils.GdxRuntimeException("Couldn't load file: " + file, failure);
+        }
+    }
 
-    static Pixmap decode(byte[] encoded) { return decodedImage(new Pixmap(encoded, 0, encoded.length)); }
+    /**
+     * Decodes from native memory. libGDX decodes a heap array inside a JNI critical region (GetPrimitiveArrayCritical),
+     * which holds off every garbage collection for the whole decode: with the asset pool's threads decoding one map after
+     * another, the collector was held off almost without a break, and a thread that had to allocate a large array (a
+     * 16 MiB layer) was refused it, an OutOfMemoryError with the heap half empty ("Retried waiting for GCLocker too
+     * often", JDK 21's G1). From a direct buffer libGDX takes the address and holds nothing.
+     */
+    static Pixmap decode(byte[] encoded) {
+        ByteBuffer buffer = com.badlogic.gdx.utils.BufferUtils.newUnsafeByteBuffer(encoded.length);
+        try {
+            buffer.put(encoded).flip();
+            return decodedImage(new Pixmap(buffer, 0, encoded.length));
+        } finally {
+            com.badlogic.gdx.utils.BufferUtils.disposeUnsafeByteBuffer(buffer);
+        }
+    }
 
     private static Pixmap decodedImage(Pixmap pixels) {
         if (pixels.getFormat() != Pixmap.Format.Alpha) { return pixels; }

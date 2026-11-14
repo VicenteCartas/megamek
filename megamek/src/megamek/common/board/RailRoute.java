@@ -155,6 +155,81 @@ public final class RailRoute {
         return hex != null && hex.terrainLevel(Terrains.RAIL) > 0;
     }
 
+    /** Destroy the ground track, retaining its kind and connections; its level-zero terrain is the surviving bed. */
+    public static void destroyGround(Hex hex) {
+        destroyGround(hex, hex.getLevel());
+    }
+
+    private static void destroyGround(Hex hex, int originalLevel) {
+        Terrain rail = hex.getTerrain(Terrains.RAIL);
+        if (rail == null || rail.getLevel() <= 0) { return; }
+        hex.addRailRuin(new Terrain(rail), originalLevel);
+        hex.addTerrain(new Terrain(Terrains.RAIL, 0, true, rail.getExits()));
+    }
+
+    /**
+     * Before a blast clears every terrain, retain both routes without retaining a bridge body or piers. The supplied
+     * ground level precedes the same blast's cratering/water removal; bridge height is still relative to that ground.
+     */
+    public static void destroyAll(Hex hex, int originalGroundLevel) {
+        // Old boards did not store absolute heights. Capture their best available height before this blast changes it.
+        for (int layer = 0; layer < 2; layer++) {
+            boolean deck = layer == 1;
+            Terrain old = hex.getRuin(deck ? Terrains.BRIDGE_RAIL : Terrains.RAIL);
+            if (!deck && old == null && hex.terrainLevel(Terrains.RAIL) == 0) {
+                old = new Terrain(Terrains.RAIL, 1, true, hex.getTerrain(Terrains.RAIL).getExits());
+            }
+            Terrain height = deck ? hex.getRuin(Terrains.BRIDGE_ELEV) : null;
+            if (old != null && hex.getRailRuinLevel(deck) == null) {
+                hex.addRailRuin(old, originalGroundLevel + (height == null ? 0 : height.getLevel()));
+            }
+        }
+        destroyGround(hex, originalGroundLevel);
+        Terrain rail = hex.getTerrain(Terrains.BRIDGE_RAIL);
+        if (rail == null || rail.getLevel() <= 0) { return; }
+        int deckHeight = hex.containsTerrain(Terrains.BRIDGE_ELEV) ? hex.terrainLevel(Terrains.BRIDGE_ELEV) : 0;
+        hex.addRailRuin(new Terrain(rail), originalGroundLevel + deckHeight);
+        hex.removeTerrain(Terrains.BRIDGE_RAIL);
+    }
+
+    /** Surviving track edges cut by destruction, captured with a hex for rendering. */
+    public record Cuts(int ground, int deck) {
+        public static final Cuts NONE = new Cuts(0, 0);
+    }
+
+    public static Cuts cuts(Hex hex, Function<Coords, Hex> board) {
+        int ground = 0, deck = 0;
+        for (var marker : derived(hex, "")) {
+            int cuts = 0;
+            for (int d = 0; d < 6; d++) {
+                if ((drawnSides(marker, hex) & side(d)) == 0) { continue; }
+                Hex next = board.apply(hex.getCoords().translated(d));
+                if (next == null || joined(hex, marker, d, next) != null) { continue; }
+                for (int layer = 0; layer < 2; layer++) {
+                    boolean deckRuin = layer == 1;
+                    int type = deckRuin ? Terrains.BRIDGE_RAIL : Terrains.RAIL;
+                    if (next.terrainLevel(type) > 0) { continue; } // Repaired/authored track supersedes its old ruin.
+                    Terrain lost = next.getRuin(type);
+                    // Older games retained only the conventional track's level-zero bed.
+                    if (lost == null && !deckRuin && next.terrainLevel(type) == 0) { lost = next.getTerrain(type); }
+                    if (lost == null || lost.getLevel() < 0 || deckRuin && lost.getLevel() == 0
+                          || kind(marker) != (lost.getLevel() == 2 ? Kind.MAGLEV : Kind.RAIL)
+                          || (lost.getExits() & side((d + 3) % 6)) == 0) { continue; }
+                    Integer originalLevel = next.getRailRuinLevel(deckRuin);
+                    Terrain oldDeck = next.getRuin(Terrains.BRIDGE_ELEV);
+                    float lostLevel = originalLevel != null ? originalLevel
+                          : next.getLevel() + (deckRuin && oldDeck != null ? oldDeck.getLevel() : 0);
+                    if (Float.isFinite(joinScore(onDeck(marker), level(hex, marker), deckRuin, lostLevel))) {
+                        cuts |= side(d);
+                        break;
+                    }
+                }
+            }
+            if (onDeck(marker)) { deck |= cuts; } else { ground |= cuts; }
+        }
+        return ground == 0 && deck == 0 ? Cuts.NONE : new Cuts(ground, deck);
+    }
+
     /** Whether a step from {@code from} into the adjacent {@code to}, leaving by {@code direction}, follows an intact rail. */
     public static boolean along(Hex from, Hex to, int direction) {
         return intact(from) && intact(to) && from.terrainLevel(Terrains.RAIL) == to.terrainLevel(Terrains.RAIL)
@@ -204,9 +279,13 @@ public final class RailRoute {
 
     /** The shared selection rule for authoring and captured rendering; unreachable layers have infinite score. */
     public static float joinScore(BoardDecoration route, float level, BoardDecoration other, float otherLevel) {
-        if (!onDeck(route) && !onDeck(other)) { return 0; }
+        return joinScore(onDeck(route), level, onDeck(other), otherLevel);
+    }
+
+    private static float joinScore(boolean deck, float level, boolean otherDeck, float otherLevel) {
+        if (!deck && !otherDeck) { return 0; }
         float delta = Math.abs(level - otherLevel);
-        return delta > 1 ? Float.POSITIVE_INFINITY : delta + (onDeck(route) == onDeck(other) ? 0 : 2);
+        return delta > 1 ? Float.POSITIVE_INFINITY : delta + (deck == otherDeck ? 0 : 2);
     }
 
     /** The rules surface a route rides, including its bridge rather than the ground beneath that bridge. */

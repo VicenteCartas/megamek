@@ -156,8 +156,8 @@ class GpuDeploymentZoneSmokeTest {
     /** A curtain on the map's vertical skirt must win depth ties without showing through a foreground object. */
     private static void coplanarCurtain() {
         Coords coords = new Coords(0, 0);
-        var tile = new BoardScene.Tile(coords, 0, -1, false, 0,
-              BoardScene.Surface.GRASS, null, List.of(), List.of());
+        var tile = BoardScenes.newTile(coords, 0, -1, false, 0,
+              BoardScene.Surface.GRASS, List.of(), List.of());
         var wall = new BoardTactical.Wall(coords, new BoardTactical.Point(BoardGeometry.TILE_WIDTH / 4, 0),
               new BoardTactical.Point(BoardGeometry.TILE_WIDTH * 3 / 4, 0),
               .5f, 0xA6FFFF00, null, 0, BoardTactical.Playback.LIVE);
@@ -250,8 +250,8 @@ class GpuDeploymentZoneSmokeTest {
                 for (int x = 0; x < SIZE; x++) {
                     for (int y = 0; y < SIZE; y++) {
                         int level = ((x / 4 + y / 4) & 1) == 0 ? 0 : 12;
-                        tiles.add(new BoardScene.Tile(new Coords(x, y), level, -1, false, 0,
-                              BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                        tiles.add(BoardScenes.newTile(new Coords(x, y), level, -1, false, 0,
+                              BoardScene.Surface.GRASS, List.of(), List.of()));
                         var hex = BoardTacticalGraphics.onHexPlane(local, new Coords(x, y));
                         hex.fillHexBorder(0, 1);
                         hex.dispose();

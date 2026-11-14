@@ -21,6 +21,31 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardFileTest {
+    @Test void destroyedRoadConnectionsSurviveBoardClipboardAndSaveSnapshots() throws Exception {
+        Board board = Board.createEmptyBoard(1, 3);
+        for (int y = 0; y < 3; y++) { board.setHex(0, y, new Hex(0, "road:1", "")); }
+        Hex destroyed = board.getHex(0, 1);
+        destroyed.destroyRoad(board::getHex);
+        board.setHex(0, 1, destroyed);
+        Board restored = BoardFile.readNative(encode(board));
+        assertFalse(restored.getHex(0, 1).containsTerrain(Terrains.ROAD));
+        assertEquals(9, restored.getHex(0, 1).getRuin(Terrains.ROAD).getExits());
+        assertEquals(8, restored.getHex(0, 0).roadCuts(restored::getHex));
+        assertEquals(1, restored.getHex(0, 2).roadCuts(restored::getHex));
+        String xml = megamek.common.util.SerializationHelper.getSaveGameXStream().toXML(destroyed);
+        Hex saved = (Hex) megamek.common.util.SerializationHelper.getLoadSaveGameXStream().fromXML(xml);
+        for (Hex copy : List.of(destroyed.duplicate(), BoardFile.fromClipboard(BoardFile.clipboard(destroyed)), saved)) {
+            assertEquals(9, copy.getRuin(Terrains.ROAD).getExits());
+            copy.addTerrain(new Terrain(Terrains.BUILDING, 1));
+            copy.destroyStructure(4);
+            megamek.common.units.BulldozerRules.clearRubble(copy);
+            assertFalse(copy.containsTerrain(Terrains.ROAD));
+            assertEquals(9, copy.getRuin(Terrains.ROAD).getExits(), "Clearing rubble cannot heal road damage");
+            copy.removeRuins();
+            assertNull(copy.getRuin(Terrains.ROAD), "Explicit editor removal can clear destruction metadata");
+        }
+    }
+
     @Test void calculatedStructureExitsSurviveNativeAndClipboardSerialization() throws Exception {
         for (int type : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK }) {
             Board board = Board.createEmptyBoard(1, 2);

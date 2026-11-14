@@ -6,10 +6,13 @@ layout(location = 15) in vec4 a_instance1;
 // A recolourable model's placement colours (model-colour-slots.glsl).
 layout(location = 13) in vec4 a_instance2;
 #endif
-#ifdef treeDissolveFlag
-// When the tree began dissolving between detail levels: positive at the level it takes, negative at the one it leaves,
-// 0 at rest (GpuTreeInstances.Stand#detail).
-flat out float v_treeDissolve;
+// x: its run's piece record (GpuIndirectInstances#Pieces): what moves it, 0 for nothing (a standing prop); y, z, w
+// unused.
+layout(location = 12) in vec4 a_instance3;
+#ifdef levelDissolveFlag
+// When the tree or kit structure began dissolving between detail levels: positive at the level it takes, negative at
+// the one it leaves, 0 at rest (GpuTreeInstances.Stand#detail, GpuTerrain.Prop#dissolve).
+flat out float v_levelDissolve;
 #endif
 #ifdef impostorFlag
 // IMPOSTOR_FRAMES
@@ -19,32 +22,64 @@ invariant flat out vec3 v_impostorFrame;
 flat out vec4 v_impostorTree;
 #endif
 
+// This instance's placement (instance-place.glsl, read before this file).
 vec3 instanceTurn(vec3 v) {
-    return vec3(a_instance1.x * v.x - a_instance1.y * v.y, a_instance1.y * v.x + a_instance1.x * v.y, v.z);
+    return placeTurn(a_instance1, v);
 }
 
-// The horizontal, horizontal and vertical scales; a mirror image (a negative a_instance0.w) reverses its model's y axis.
-// Its batch also flips the front face, as the reflection reverses the winding (GpuInstancedMesh#mirrored).
 vec3 instanceScale() {
-    return vec3(abs(a_instance0.w), a_instance0.w, a_instance1.z);
+    return placeScale(a_instance0, a_instance1);
 }
 
-// A structure's pieces falling where the board drew them (GpuDestruction): rigid bodies thrown in closed form, the
-// collapse MeepleDebris simulated on the CPU. A debris batch (u_piece.w 1) draws one piece of a kit at every falling hex;
-// each instance names its hex's slot (a_instance1.w, from 1), whose texels in the local lights' texture hold its fall
-// (GpuDestruction#write). Every pass, colour, depth and shadow, poses alike from the same inputs.
+// A structure's pieces falling where the board drew them (GpuDestruction): rigid bodies thrown in closed form, handed
+// to box bodies on the CPU as they touch down. A run of falling pieces (its record's mode 1) draws one piece of a kit at
+// every falling hex; each instance names what moves it (a_instance1.w): its hex's slot + 1, whose texels in the local lights' texture hold
+// its fall (GpuDestruction#write), as a felled tree's and rising rubble's do; or, from FALL_ROW_OWNER on, its first pose
+// row plus FALL_ROW_OWNER, a row a fragment, negative where one row moves the whole part. A row either poses its piece,
+// landed as a body, or names the slot whose closed form still moves it (poseRow). Every pass, colour, depth and shadow,
+// poses alike from the same inputs.
 // LAVA_LIGHTS
 // SHOCKS
 uniform vec4 u_destruct;       // the falls' clock in playback seconds, gravity, a level's height, a hex's reach
 uniform ivec2 u_destructSlots; // the first slot's texel, and 1 while anything falls
 uniform vec4 u_destructBoard;  // the board's columns and rows, a hex's width and height
-// The batch's piece: its node's box centre in the model's frame, and what moves its instances (GpuInstancedMesh#piece):
-// w 1 a kit's pieces falling, 2 trees falling, 3 trees standing, 0 nothing.
-uniform vec4 u_piece;
-uniform vec4 u_pieceHalf;      // that box's half size; w: the fragments the part broke into (KitFragments), 0 whole
-// A broken part's fragments, in the order its batch's copy holds them: [2k] the box's centre and its first vertex,
-// [2k + 1] its half size. A vertex belongs to the last fragment whose first vertex it has reached.
-uniform vec4 u_fragments[2 * FALL_FRAGMENTS];
+// Pieces posed on the CPU (GpuPoses): a row a piece in a texture of its own, two texels, the piece's shift from where
+// it stood with its scale, then its turn as a quaternion, both about its instance's origin.
+#if __VERSION__ >= 420
+layout(binding = POSE_UNIT) uniform sampler2D u_poses; // RGBA32F, POSE_ROW texels a row
+// The runs' piece records (GpuIndirectInstances): three texels each, the run's piece and its half size (below), then
+// its fragment table's first texel and its first vertex in its pool, from which gl_VertexID counts.
+layout(binding = PIECE_RECORD_UNIT) uniform samplerBuffer u_pieceRecords;
+#else
+uniform sampler2D u_poses;
+uniform samplerBuffer u_pieceRecords;
+#endif
+
+// This vertex's piece (pieceBegin), from its instance's record: its node's box centre in the model's frame and what
+// moves it (w: 1 a kit's pieces falling, 2 trees falling, 3 trees standing, 4 rubble rising, 0 nothing); that box's half
+// size and the fragments the part broke into (KitFragments; 0 whole); where its fragments lie, in the order its pool's
+// copy holds them, among the pose texture's table rows (GpuPoses#table: [2k] a fragment box's centre and its first
+// vertex, [2k + 1] its half size and its turn about the vertical, in radians; a vertex belongs to the last fragment
+// whose first vertex it has reached); and its run's first vertex.
+vec4 piece = vec4(0.0), pieceHalf = vec4(0.0);
+int pieceTable = 0, pieceBase = 0;
+
+void pieceBegin() {
+    if (a_instance3.x > 0.5) {
+        int at = 3 * int(a_instance3.x + 0.5);
+        piece = texelFetch(u_pieceRecords, at);
+        pieceHalf = texelFetch(u_pieceRecords, at + 1);
+        vec4 more = texelFetch(u_pieceRecords, at + 2);
+        pieceTable = int(more.x + 0.5);
+        pieceBase = int(more.y + 0.5);
+    }
+}
+
+// A texel of the run's fragment table.
+vec4 fallTable(int texel) {
+    int at = pieceTable + texel;
+    return texelFetch(u_poses, ivec2(at % POSE_ROW, POSE_TABLE_ROW + at / POSE_ROW), 0);
+}
 
 // The fall's motion, p' = fallShift + fallScale fallTurn (p - fallPivot), set once a vertex by fallBegin: rigid but for
 // a piece shrinking away past the board's edge.
@@ -55,7 +90,7 @@ vec3 fallShift = vec3(0.0);
 float fallScale = 1.0;
 
 vec3 instancePlace(vec3 p) {
-    return instanceTurn(p * instanceScale()) + a_instance0.xyz;
+    return placePoint(a_instance0, a_instance1, p);
 }
 
 vec3 instancePosition(vec3 p) {
@@ -143,45 +178,83 @@ void treeFall(vec4 fall, vec4 site, vec4 tail) {
     fallShift = a_instance0.xyz - vec3(0.0, 0.0, (site.w - site.z) * .7 * sinking * sinking * (3.0 - 2.0 * sinking));
 }
 
-// Rubble the rules left where a structure fell (GpuDestruction#rubble): out of sight under the ground until its pieces
-// are down, then it rises into place as they settle, before they sink into it. Its slot's sink time says when.
-void riseBegin(float sinks) {
-    float rise = clamp((u_destruct.x - sinks + FALL_RISE_LEAD) / FALL_RISE, 0.0, 1.0);
+// Rubble the rules left where a structure fell (GpuDestruction#rubble): out of sight under the ground until the dust
+// stands at the structure's foot, FALL_RISE_DELAY after its hex gives way (a blast's front reaches the hex's middle
+// then), when it rises into place, before the pieces sink into it.
+void riseBegin(vec4 fall, vec4 site, vec4 tail) {
+    bool blast = (int(fall.y + 0.5) & FALL_BLAST) != 0;
+    float t = u_destruct.x - fall.x - (blast ? tail.w * length(site.xy - tail.yz) : 0.0);
+    float rise = clamp((t - FALL_RISE_DELAY) / FALL_RISE, 0.0, 1.0);
     if (rise >= 1.0) { return; }
     falling = true;
     fallTurn = mat3(1.0);
     fallPivot = vec3(0.0);
-    float depth = 2.0 * abs(u_pieceHalf.z * instanceScale().z) + .25 * u_destruct.z;
+    float depth = 2.0 * abs(pieceHalf.z * instanceScale().z) + .25 * u_destruct.z;
     fallShift = vec3(0.0, 0.0, -depth * (1.0 - rise * rise * (3.0 - 2.0 * rise)));
 }
 
-// A tree's LOD dissolve (GpuTreeInstances.Stand#detail): a falling piece's, felled tree's or rising rubble's instance
-// holds its slot instead, and none; only a standing one (or none of the falls') dissolves.
+// A tree's or kit structure's level dissolve (GpuTreeInstances.Stand#detail, GpuTerrain.Prop#dissolve): a falling
+// piece's, felled tree's or rising rubble's instance holds its slot instead, and none; only a standing one (or none of
+// the falls') dissolves.
 float instanceDissolve() {
-    return u_piece.w > 0.5 && abs(u_piece.w - 3.0) > 0.5 ? 0.0 : a_instance1.w;
+    return piece.w > 0.5 && abs(piece.w - 3.0) > 0.5 ? 0.0 : a_instance1.w;
+}
+
+// Poses this vertex's piece from its row: p' = origin + shift + scale * turn(p - origin), and returns 0. A row with a
+// negative scale poses nothing: its piece still moves in closed form, and the row's first float, returned, names its
+// fall's slot + 1 (GpuPoses#analytic).
+float poseRow(int row, vec3 origin) {
+    ivec2 at = ivec2(2 * row % POSE_ROW, 2 * row / POSE_ROW);
+    vec4 place = texelFetch(u_poses, at, 0);
+    if (place.w < 0.0) { return place.x; }
+    vec4 q = texelFetch(u_poses, at + ivec2(1, 0), 0);
+    falling = true;
+    fallTurn = mat3(1.0 - 2.0 * (q.y * q.y + q.z * q.z), 2.0 * (q.x * q.y + q.z * q.w), 2.0 * (q.x * q.z - q.y * q.w),
+          2.0 * (q.x * q.y - q.z * q.w), 1.0 - 2.0 * (q.x * q.x + q.z * q.z), 2.0 * (q.y * q.z + q.x * q.w),
+          2.0 * (q.x * q.z + q.y * q.w), 2.0 * (q.y * q.z - q.x * q.w), 1.0 - 2.0 * (q.x * q.x + q.y * q.y));
+    fallPivot = origin;
+    fallShift = origin + place.xyz;
+    fallScale = place.w;
+    return 0.0;
 }
 
 void fallBegin() {
-    if (abs(u_piece.w - 3.0) < 0.5) { swayBegin(); return; }
-    if (u_destructSlots.y == 0 || u_piece.w < 0.5 || a_instance1.w < 0.5) { return; }
-    int texel = u_destructSlots.x + (int(a_instance1.w + 0.5) - 1) * FALL_TEXELS;
-    if (u_piece.w > 3.5) { riseBegin(texelFetch(u_lavaLights, lavaTexel(texel + 2), 0).x); return; }
+    pieceBegin();
+    if (abs(piece.w - 3.0) < 0.5) { swayBegin(); return; }
+    float owner = a_instance1.w;
+    if (u_destructSlots.y == 0 || piece.w < 0.5 || abs(owner) < 0.5) { return; }
+    // A broken part's vertex moves with its fragment: the last whose first vertex it has reached (the first vertices
+    // never decrease, so a halving search finds it, in as many steps as the count has bits).
+    int fragment = 0, fragments = int(pieceHalf.w + 0.5), step = 1;
+    while (2 * step < fragments) { step *= 2; }
+    for (; fragments > 1 && step > 0; step /= 2) {
+        int probe = fragment + step;
+        if (probe < fragments && gl_VertexID - pieceBase >= int(fallTable(2 * probe).w + 0.5)) { fragment = probe; }
+    }
+    // A piece with rows moves by its row, or by the slot its row names.
+    if (abs(owner) >= float(FALL_ROW_OWNER)) {
+        owner = poseRow(int(abs(owner) + 0.5) - FALL_ROW_OWNER + (owner > 0.0 ? fragment : 0), a_instance0.xyz);
+        if (owner < 0.5) { return; }
+    }
+    int texel = u_destructSlots.x + (int(owner + 0.5) - 1) * FALL_TEXELS;
     vec4 fall = texelFetch(u_lavaLights, lavaTexel(texel), 0);     // start, flags, push away from the hit
     float clock = u_destruct.x;
-    if (clock < fall.x) { return; }
+    bool rubble = piece.w > 3.5;
+    if (!rubble && clock < fall.x) { return; }
     vec4 site = texelFetch(u_lavaLights, lavaTexel(texel + 1), 0); // the hex's middle, its floor and its top
     // When it sinks; a blast's ground zero and its front's playback seconds per world unit here (GpuDestruction#blastFrom).
     vec4 tail = texelFetch(u_lavaLights, lavaTexel(texel + 2), 0);
+    if (rubble) { riseBegin(fall, site, tail); return; }
     float sinks = tail.x;
-    if (u_piece.w > 1.5) { treeFall(fall, site, tail); return; }
-    // A broken part's vertex moves with its fragment (not 'half': a reserved word).
-    vec3 pivot = u_piece.xyz, size = u_pieceHalf.xyz;
-    int fragments = int(u_pieceHalf.w + 0.5);
+    if (piece.w > 1.5) { treeFall(fall, site, tail); return; }
+    // The piece's box, its fragment's where the part broke (not 'half': a reserved word).
+    vec3 pivot = piece.xyz, size = pieceHalf.xyz;
+    float turned = 0.0;
     if (fragments > 0) {
-        int k = 0;
-        for (int i = 1; i < fragments; i++) { k += gl_VertexID >= int(u_fragments[2 * i].w + 0.5) ? 1 : 0; }
-        pivot = u_fragments[2 * k].xyz;
-        size = u_fragments[2 * k + 1].xyz;
+        vec4 box = fallTable(2 * fragment), side = fallTable(2 * fragment + 1);
+        pivot = box.xyz;
+        size = side.xyz;
+        turned = side.w;
     }
     vec3 centre = instancePlace(pivot);
     // Raw inputs only, so that every pass's program draws the same numbers.
@@ -257,9 +330,19 @@ void fallBegin() {
     float rate = length(spin);
     float angle = rate * (flight + (1.0 - exp(-FALL_GROUND_SPIN_DRAG * slide)) / FALL_GROUND_SPIN_DRAG);
     fallTurn = rate > 1e-4 ? fallRotation(spin / rate, angle) : mat3(1.0);
+    // The box's first side as the piece stood, level (a mirror image's turn reversed); its second lies across it.
+    vec2 along = instanceTurn(vec3(cos(turned), (a_instance0.w < 0.0 ? -1.0 : 1.0) * sin(turned), 0.0)).xy;
+    // Landed, it topples onto its flattest side as it skids to rest: no slab stays standing on an edge.
+    vec3 thin = fallTurn * (extent.z <= min(extent.x, extent.y) ? vec3(0.0, 0.0, 1.0)
+          : extent.x < extent.y ? vec3(along, 0.0) : vec3(-along.y, along.x, 0.0));
+    vec3 over = cross(thin, vec3(0.0, 0.0, thin.z < 0.0 ? -1.0 : 1.0));
+    float lean = length(over);
+    if (slide > 0.0 && lean > 1e-4) {
+        fallTurn = fallRotation(over / lean, atan(lean, abs(thin.z)) * (1.0 - exp(-FALL_GROUND_SPIN_DRAG * slide))) * fallTurn;
+    }
     // The turned box's reach below its middle: the piece rests on its lowest corner.
     vec3 up = vec3(fallTurn[0].z, fallTurn[1].z, fallTurn[2].z);
-    float below = abs(dot(up.xy, a_instance1.xy)) * extent.x + abs(dot(up.xy, vec2(-a_instance1.y, a_instance1.x))) * extent.y
+    float below = abs(dot(up.xy, along)) * extent.x + abs(dot(up.xy, vec2(-along.y, along.x))) * extent.y
           + abs(up.z) * extent.z;
     // It rests on its lowest corner where it lies, not where it stood: a slab that toppled does not hover at its standing
     // half height, nor a piece thrown off the pile at the pile's height. Landed, it settles there as it skids.
@@ -271,8 +354,10 @@ void fallBegin() {
     } else {
         position.z = max(slide > 0.0 ? mix(position.z, rest, 1.0 - exp(-FALL_GROUND_DRAG * slide)) : position.z, rest);
     }
-    float sinking = clamp((clock - sinks) / FALL_SINK, 0.0, 1.0);
-    position.z -= 2.0 * length(extent) * sinking * sinking * (3.0 - 2.0 * sinking);
+    float sinking = smoothstep(0.0, 1.0, (clock - sinks) / FALL_SINK);
+    position.z -= 2.0 * length(extent) * sinking;
+    // It shrinks as it sinks: at the board's edge nothing pokes out through the board's side (FallForm agrees).
+    fallScale *= max(1e-3, 1.0 - sinking);
     falling = true;
     fallPivot = centre;
     fallShift = position;

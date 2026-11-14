@@ -202,12 +202,13 @@ class GpuUnitVisibilitySmokeTest {
                 assertEquals(0, difference(clipped, full), "Viewport edges and larger UI scale must retain the complete halo");
             }
             Coords wooded = new Coords(3, 2);
-            List<BoardScene.Tile> groveTiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
-                  0, -1, false, 0, tile.surface(), null,
+            List<BoardScene.Tile> groveTiles = scene.tiles().stream().map(tile -> BoardScenes.newTile(tile.coords(),
+                  0, -1, false, 0, tile.surface(),
                   tile.coords().equals(wooded) ? List.of(new BoardScene.Feature("vegetation/tree-broad", 0, 0, 0, 1.5f, 4, 0,
                         BoardScene.FeatureKind.TREE)) : List.of(), List.of())).toList();
             BoardScene grove = new BoardScene(0, scene.width(), scene.height(), groveTiles,
                   List.of(), List.of(), -1, "", List.of());
+            terrain.boardChanged();
             terrain.update(grove);
             // A tree of the unit's own hex rises above that hex's ground decoration, so it still counts as cover.
             ((Color) unit.userData).a = GpuUnitVisibility.ownHex(grove.tile(wooded));
@@ -223,12 +224,13 @@ class GpuUnitVisibilitySmokeTest {
             // Faded walls still cover an occupant visually, so opening the building must retain its team outline.
             Coords indoors = new Coords(3, 2);
             var building = new Hex(0, "building:2;bldg_elev:5;bldg_cf:40", "");
-            List<BoardScene.Tile> buildingTiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
-                  0, -1, false, 0, tile.surface(), null,
+            List<BoardScene.Tile> buildingTiles = scene.tiles().stream().map(tile -> BoardScenes.newTile(tile.coords(),
+                  0, -1, false, 0, tile.surface(),
                   tile.coords().equals(indoors) ? BoardFeatures.capture(building, indoors,
                         Map.of(Terrains.BUILDING, GpuBuildingTest.ASSET)) : List.of(), List.of())).toList();
             BoardScene city = new BoardScene(0, scene.width(), scene.height(), buildingTiles,
                   List.of(), List.of(), -1, "", List.of());
+            terrain.boardChanged();
             terrain.update(city);
             ((Color) unit.userData).a = GpuUnitVisibility.ownHex(city.tile(indoors));
             for (boolean top : new boolean[] { false, true }) {
@@ -261,11 +263,12 @@ class GpuUnitVisibilitySmokeTest {
             // The unit's own hex: its uneven ground, grass and scatter never count as hiding it. The soles stand a little
             // into the relief, so without that exemption the ground itself would outline them.
             Coords meadowHex = new Coords(3, 2);
-            List<BoardScene.Tile> meadowTiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), 0,
-                  -1, false, 0, BoardScene.Surface.GRASS, null, null, List.of(), List.of(),
-                  BoardLiquid.NONE, null, true)).toList();
+            List<BoardScene.Tile> meadowTiles = scene.tiles().stream().map(tile -> BoardScenes.newTile(tile.coords(), 0,
+                  -1, false, 0, BoardScene.Surface.GRASS, List.of(), List.of(),
+                  BoardLiquid.NONE, null)).toList();
             BoardScene meadow = new BoardScene(0, scene.width(), scene.height(), meadowTiles,
                   List.of(), List.of(), -1, "", List.of());
+            terrain.boardChanged();
             terrain.update(meadow);
             camera.setIsometric(true);
             camera.camera.zoom = .1f;
@@ -363,8 +366,8 @@ class GpuUnitVisibilitySmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 6; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), y >= 3 ? 4 : 1, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), y >= 3 ? 4 : 1, -1, false, 0,
+                      BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 7, 6, tiles, List.of(), List.of(), -1, "", List.of());

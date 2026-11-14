@@ -20,6 +20,31 @@ import org.junit.jupiter.api.Test;
 
 class BoardObstaclesTest {
     @Test
+    void indexedFootprintsMatchExactTriangleTestsAcrossCellEdgesAndRadii() {
+        var triangles = new ArrayList<Vector3>();
+        var random = new java.util.Random(912473);
+        var bounds = new BoundingBox().inf();
+        for (int i = 0; i < 200; i++) {
+            float x = random.nextFloat() * 100, y = random.nextFloat() * 100;
+            for (Vector3 point : List.of(new Vector3(x, y, 0), new Vector3(x + 2, y, 0), new Vector3(x, y + 2, 0))) {
+                triangles.add(point); bounds.ext(point);
+            }
+        }
+        var footprint = new BoardObstacles.Footprint(triangles, 0, 4, bounds);
+        for (float radius : new float[] { 0, .1f, 2, 15 }) {
+            for (int query = 0; query < 800; query++) {
+                var point = new Vector3(random.nextFloat() * 120 - 10, random.nextFloat() * 120 - 10, 0);
+                boolean expected = false;
+                for (int i = 0; i < triangles.size(); i += 3) {
+                    expected |= BoardObstacles.Footprint.near(triangles.get(i), triangles.get(i + 1), triangles.get(i + 2),
+                          point.x, point.y, radius);
+                }
+                assertEquals(expected, footprint.obstructs(point, radius, 1), "Radius " + radius + " at " + point);
+            }
+        }
+    }
+
+    @Test
     void nativePaintAndUnresolvedModelsRemainEditableWithoutLoadingMeshes() {
         for (String kind : List.of("prop", "decal")) {
             var object = new megamek.common.board.BoardDecoration("unknown", kind, "missing/catalog-entry", null,
@@ -99,11 +124,11 @@ class BoardObstaclesTest {
                 if (wide) {
                     var t = scene.tile(at);
                     int exits = (1 << direction) | (1 << ((direction + 3) % 6));
-                    var tile = new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(),
-                          t.surface(), t.decals(), t.decalsWithoutLimbs(),
-                          t.features(), t.text(), t.liquid(), t.tileset(), t.detailedGround(), t.road(), t.fireSmoke(),
+                    var tile = BoardScenes.newTile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(),
+                          t.surface(),
+                          t.features(), t.text(), t.liquid(), t.tileset(), t.road(), t.fireSmoke(),
                           t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(), t.groundCover(),
-                          t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), t.appearance(), t.cover(), t.barren(),
+                          t.ultraSublevel(), t.tilesetScenery(), t.appearance(), t.cover(), t.barren(),
                           t.deckRoad(), t.deckRoadExits(), t.deckMud(), t.railBed(), t.corridor(),
                           new RailRoute.Corridor(exits, exits, 0));
                     scene = BoardScenes.replace(scene, tile);
@@ -178,12 +203,17 @@ class BoardObstaclesTest {
         var feature = new BoardScene.Feature(TANK, x, y, 27, 1, 2, 0, BoardScene.FeatureKind.FUEL_TANK);
         BoardScene scene = scene(neighbor, feature, 0);
         var obstacles = new BoardObstacles(scene, scene.tile(CENTER));
+        var cache = new BoardObstacles.Cache(scene);
+        cache.run(() -> new BoardObstacles(scene, scene.tile(CENTER)));
+        var cached = cache.call(() -> new BoardObstacles(scene, scene.tile(CENTER)));
         assertFalse(obstacles.isEmpty());
         int occupied = 0, clear = 0;
         Vector3 center = BoardGeometry.center(CENTER, 0);
         for (int ix = -30; ix <= 30; ix += 3) {
             for (int iy = -30; iy <= 30; iy += 3) {
-                boolean blocked = obstacles.obstructs(new Vector3(center.x + ix, center.y + iy, 0), .1f, 1);
+                var point = new Vector3(center.x + ix, center.y + iy, 0);
+                boolean blocked = obstacles.obstructs(point, .1f, 1);
+                assertEquals(blocked, cached.obstructs(point, .1f, 1), "Shared footprints preserve adjacent clearance");
                 if (blocked) { occupied++; } else { clear++; }
             }
         }
@@ -349,9 +379,9 @@ class BoardObstaclesTest {
             for (int y = 0; y < 5; y++) {
                 Coords coords = new Coords(x, y);
                 boolean pool = coords.equals(CENTER);
-                tiles.add(new BoardScene.Tile(coords, pool ? 0 : 3, pool ? depth : -1, false, 0,
-                      BoardScene.Surface.SAND, null, null, pool ? features : List.of(), List.of(),
-                      pool ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(coords, pool ? 0 : 3, pool ? depth : -1, false, 0,
+                      BoardScene.Surface.SAND, pool ? features : List.of(), List.of(),
+                      pool ? BoardLiquid.WATER : BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());
@@ -360,36 +390,6 @@ class BoardObstaclesTest {
     private static void rectangle(List<Vector3> points, float left, float bottom, float right, float top) {
         points.addAll(List.of(new Vector3(left, bottom, 0), new Vector3(right, bottom, 0), new Vector3(right, top, 0),
               new Vector3(right, top, 0), new Vector3(left, top, 0), new Vector3(left, bottom, 0)));
-    }
-
-    @Test
-    void everyGeyserClearsGrassFromItsBasinAndKeepsSurroundingMeadow() {
-        for (String state : List.of("water-dormant", "water-erupting", "magma", "water-dormant-b", "water-erupting-b",
-              "magma-b")) {
-            var feature = new BoardScene.Feature("scenery/geysers/" + state,
-                  7, -3, 27, .8f, 0, 0, BoardScene.FeatureKind.SCENERY);
-            BoardScene scene = scene(CENTER, feature, 0, BoardScene.Surface.GRASS);
-            var tile = scene.tile(CENTER);
-            var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
-            var roots = GpuGroundCover.plant(scene, tile, surface, null);
-            assertTrue(roots.size / 4 > 1500, "The surrounding meadow must remain planted: " + state);
-            float scale = BoardGeometry.hexScale();
-            float x = BoardGeometry.centerX(CENTER) + 7 * scale, y = BoardGeometry.centerY(CENTER) - 3 * scale;
-            // Every look's solid sinter or spatter reaches at least 10.1 model units from its vent (magma-b's, the
-            // smallest); each outline follows its photograph, so grass meets it unevenly beyond.
-            float basin = 10 * .8f * scale;
-            int outside = 0;
-            for (int i = 0; i < roots.size; i += 4) {
-                float dx = roots.get(i) - x, dy = roots.get(i + 1) - y;
-                assertTrue(dx * dx + dy * dy > basin * basin, "No grass may emerge through the basin: " + state);
-                if (dx * dx + dy * dy > 30 * 30 * scale * scale) { outside++; }
-            }
-            assertTrue(outside > 500, "Grass outside the geyser footprint remains available");
-            var obstacles = new BoardObstacles(scene, tile);
-            assertTrue(obstacles.obstructs(new Vector3(x, y, 0), 0, 1));
-            assertFalse(obstacles.obstructs(new Vector3(x, y, -10 * scale), 0, scale),
-                  "The scenery footprint must not clear a separate lower ledge");
-        }
     }
 
     private static BoardScene scene(Coords structure, BoardScene.Feature feature, int elevation) {
@@ -401,9 +401,9 @@ class BoardObstaclesTest {
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, coords.equals(structure) ? elevation : 0, -1, false, 0,
-                      surface, null, null,
-                      coords.equals(structure) ? List.of(feature) : List.of(), List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(coords, coords.equals(structure) ? elevation : 0, -1, false, 0,
+                      surface,
+                      coords.equals(structure) ? List.of(feature) : List.of(), List.of(), BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());

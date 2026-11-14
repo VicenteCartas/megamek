@@ -74,7 +74,7 @@ class GpuDestructionSmokeTest {
                                 model.place(instance, renderer.camera, origin, 0, unit);
                                 assertTrue(UnitBounds.world(instance).isValid(), selection.asset());
                                 effects.update(death, library, Map.of(id + ":-1", instance));
-                                renderer.frame(List.of(instance), origin, effects, "death-" + id + (top ? "-top" : "-iso"), frame);
+                                renderer.frame(List.of(instance), origin, effects);
                             }
                         }
                         var terminal = new ModelInstance(instance);

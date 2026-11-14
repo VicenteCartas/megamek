@@ -152,15 +152,12 @@ class BoardBridgeTest {
         hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, 100));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 2));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_REPAIRED, 1));
-        assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "Bridge geometry must not force the legacy ground artwork");
         assertEquals(surface, BoardFeatures.surface(hex));
         assertFalse(BoardLiquid.capture(hex).present(), "A suspended bridge does not imply liquid beneath it");
         hex.addTerrain(new Terrain(Terrains.WATER, 2));
-        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
         assertTrue(BoardLiquid.capture(hex).present(), "Authored water beneath a bridge must remain water");
         hex.removeTerrain(Terrains.WATER);
         hex.addTerrain(new Terrain(Terrains.RUBBLE, 1));
-        assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Unmodeled ground markings still keep their artwork");
     }
 
     private static final Coords AT = new Coords(4, 4);

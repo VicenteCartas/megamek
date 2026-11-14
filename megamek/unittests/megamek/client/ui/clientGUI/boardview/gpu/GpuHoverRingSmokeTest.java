@@ -65,8 +65,8 @@ class GpuHoverRingSmokeTest {
         BoardSource source = mock(BoardSource.class);
         when(source.editorBrush(HOVER, 0)).thenReturn(BRUSH);
         var view = new GpuBattleView(source);
-        var scene = new BoardScene(0, 2, 1, BRUSH.stream().map(coords -> new BoardScene.Tile(coords, 0, -1,
-              false, 0, BoardScene.Surface.GRASS, null, List.of(), List.of())).toList(),
+        var scene = new BoardScene(0, 2, 1, BRUSH.stream().map(coords -> BoardScenes.newTile(coords, 0, -1,
+              false, 0, BoardScene.Surface.GRASS, List.of(), List.of())).toList(),
               List.of(), List.of(), -1, "", List.of());
         set(view, "scene", scene);
         set(view, "hovered", HOVER);

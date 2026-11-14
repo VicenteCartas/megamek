@@ -57,10 +57,7 @@ class BoardGroundCaptureTest {
                     if (!STRUCTURED.contains(tile.coords().getBoardNum())) { continue; }
                     structured++;
                     assertEquals(BoardScene.Surface.CONCRETE, tile.surface(), tile.coords().toString());
-                    assertTrue(tile.detailedGround(), "Native concrete at " + tile.coords());
                     assertEquals(1, tile.groundCover().concrete(), "Natural transitions stay beneath paving at " + tile.coords());
-                    assertNull(tile.decals(), "Old pavement must not cover native concrete at " + tile.coords());
-                    assertNull(tile.tilesetDecals(), "Ground transitions must not repaint Tactical View's pavement at " + tile.coords());
                     assertNotNull(tile.tileset(), "Tactical View keeps the authored pavement at " + tile.coords());
                 }
                 assertEquals(21, structured, "Exercise the shore, pier, building and ground-transition hexes");
@@ -134,8 +131,6 @@ class BoardGroundCaptureTest {
                         artwork.invalidate(coords);
                         var tile = BoardScene.captureTile(hex, artwork.capture(board, coords, board.getHex(coords)), null, new BoardScene.PixelPool(), neighbour -> null);
                         assertEquals(1, tile.groundCover().concrete(), "Native paving stays entirely concrete");
-                        assertNull(tile.decals());
-                        assertNull(tile.tilesetDecals(), "The transition belongs below pavement, not in the overlay pass");
                         var full = new Hex(0, "pavement:" + level + ":63", "grass", coords);
                         assertEquals(tilesetPixels(original, full), tile.tileset(),
                               "Concrete fills the fitted footprint without a second boundary painted into its texture");
@@ -203,9 +198,6 @@ class BoardGroundCaptureTest {
                     var image = artwork.capture(board, coords, board.getHex(coords));
                     var tile = BoardScene.captureTile(hex, image, null, new BoardScene.PixelPool(), neighbour -> null);
                     assertEquals(BoardScene.Surface.CONCRETE, tile.surface());
-                    assertTrue(tile.detailedGround());
-                    assertNull(tile.decals(), "Pavement styles are ground, not scenery: " + level + ":" + exits);
-                    assertNull(tile.tilesetDecals(), "Tactical pavement stays in its ground layer");
                     assertEquals(full, tile.tileset(), "Tactical paving reaches the outline supplied by the geometry");
                     assertEquals(exits, hex.getTerrain(Terrains.PAVEMENT).getExits());
                 }
@@ -215,18 +207,14 @@ class BoardGroundCaptureTest {
                     artwork.invalidate(coords);
                     var image = artwork.capture(board, coords, board.getHex(coords));
                     var tile = BoardScene.captureTile(hex, image, null, new BoardScene.PixelPool(), neighbour -> null);
-                    assertTrue(tile.detailedGround());
                     if (decoration.equals("fluff:50:1")) {
                         // A ground symbol is a legacy decal: the conversion turns it into a decal both views draw.
                         assertFalse(image.scenery().decals().isEmpty(), "Surface markings remain visible");
-                        assertNull(tile.decals(), "No Classic paint duplicates the decal");
                     } else if (decoration.startsWith("woods:")) {
                         // A container yard's art is its woods' look (b12), never tileset scenery or paint.
-                        assertNull(tile.decals());
                         assertTrue(image.scenery().models().isEmpty());
                         assertNull(tile.tilesetScenery());
                     } else {
-                        assertNull(tile.decals(), "Modeled scenery must not retain a painted pavement duplicate");
                         assertFalse(image.scenery().models().isEmpty(), "Keep models selected by composite tileset rules");
                         assertNull(tile.tilesetScenery(), "Its model draws it: no Classic sprite duplicates it");
                     }
@@ -251,12 +239,8 @@ class BoardGroundCaptureTest {
                     assertEquals(BoardScene.Surface.GRASS, tile.surface(), tile.coords().toString());
                     if (hex.containsTerrain(Terrains.WATER)) { water++; }
                     assertEquals(hex.containsTerrain(Terrains.WATER), tile.liquid().present());
-                    if (!tile.liquid().present()) {
-                        assertTrue(tile.detailedGround(), "Native grass at " + tile.coords());
-                    }
                     if (hex.containsTerrain(Terrains.GROUND_FLUFF)) {
                         transitions++;
-                        assertNull(tile.decals(), "No old ground transition may cover the native surface at " + tile.coords());
                         if (hex.terrainLevel(Terrains.GROUND_FLUFF) == 1 && !tile.liquid().present()) {
                             float amount = hex.getTerrain(Terrains.GROUND_FLUFF).getExits() / 6f;
                             var p = BoardGeometry.center(tile.coords(), tile.elevation());
@@ -290,21 +274,17 @@ class BoardGroundCaptureTest {
     }
 
     @Test
-    void cosmeticTransitionsUseNativeGroundWhileLegacy2DAndUnmodeledArtworkRemainAvailable() throws Exception {
+    void cosmeticTransitionsConvertToNativeGround() throws Exception {
         onEdt(() -> {
             var board = Board.createEmptyBoard(1, 1);
             var coords = new Coords(0, 0);
-            try (var artwork = new BoardArtwork(); var tileset = new HexTileset(Configuration.hexesDir())) {
-                tileset.loadFromFile("saxarba.tileset");
+            try (var artwork = new BoardArtwork()) {
                 for (int family = 1; family <= 5; family++) {
                     for (int strength = 1; strength <= 5; strength++) {
                         Hex hex = new Hex(0, "ground_fluff:" + family + ":" + strength, "grass", coords);
                         board.setHex(coords, hex);
                         artwork.invalidate(coords);
                         var pixels = artwork.capture(board, coords, board.getHex(coords));
-                        assertFalse(pixels.blankTerrains().contains(Terrains.GROUND_FLUFF),
-                              "The 3D tileset retains the original overlay definitions");
-                        assertTrue(BoardFeatures.detailedGround(hex, pixels.structureModels(), pixels.blankTerrains()));
                         assertTrue(BoardEditorTerrain.badges(hex).isEmpty(),
                               "Cosmetic blends must not fill the editor with hidden-terrain badges");
                         var tile = BoardScene.captureTile(hex, pixels, null, new BoardScene.PixelPool(), neighbour -> null);
@@ -316,27 +296,9 @@ class BoardGroundCaptureTest {
                             assertEquals(strength / 6f, tile.groundCover().mars(), .00001f);
                         }
                         assertEquals(0, tile.groundCover().sand(), "Theme gradients never introduce loose SAND");
-                        assertNull(tile.decals(), "A hidden transition must not survive in the decal pass");
-                        assertFalse(tileset.blankTerrainTypes(hex).contains(Terrains.GROUND_FLUFF),
-                              "The ordinary board keeps its authored transition artwork");
                         assertEquals(strength, hex.getTerrain(Terrains.GROUND_FLUFF).getExits());
                     }
                 }
-                Hex gravel = new Hex(0, "ground_fluff:2000", "grass", coords);
-                board.setHex(coords, gravel);
-                artwork.invalidate(coords);
-                var pixels = artwork.capture(board, coords, board.getHex(coords));
-                assertFalse(pixels.blankTerrains().contains(Terrains.GROUND_FLUFF));
-                assertFalse(BoardFeatures.detailedGround(gravel, pixels.structureModels(), pixels.blankTerrains()),
-                      "Unmodeled gravel artwork must not be discarded by a blanket fluff allow-list");
-                // A terrain without native 3D ground (BoardFeatures.detailedGround): magma draws only levels 1 and 2.
-                Hex unsupported = new Hex(0, "ground_fluff:1:3;magma:3", "grass", coords);
-                board.setHex(coords, unsupported);
-                artwork.invalidate(coords);
-                var fallback = BoardScene.captureTile(unsupported, artwork.capture(board, coords, board.getHex(coords)), null,
-                      new BoardScene.PixelPool(), neighbour -> null);
-                assertFalse(fallback.detailedGround());
-                assertNotNull(fallback.decals(), "Keep the old transition when native ground cannot replace it");
                 assertEquals(BoardSceneryLayouts.Taken.DROP, BoardSceneryLayouts.takenTokens(new Hex(0, "ground_fluff:99:4",
                       "grass")).get(Terrains.GROUND_FLUFF), "Unknown hidden artwork is dropped: no editor marker is needed");
             }

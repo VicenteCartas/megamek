@@ -18,6 +18,26 @@ import megamek.common.board.TilesetScenery;
 
 /** Authored structure footprints used by cosmetic placement; no GPU resources or game occupancy state. */
 final class BoardObstacles {
+    private static final ThreadLocal<Cache> ACTIVE = new ThreadLocal<>();
+
+    /** A terrain preparation's shared immutable footprints. Neighbour queries reuse them; no board-wide cache survives. */
+    static final class Cache {
+        private record Key(Coords at, boolean plants, boolean structures) { }
+        private final List<BoardScene.Tile> tiles;
+        private final Map<Key, List<Footprint>> footprints = new ConcurrentHashMap<>();
+
+        Cache(BoardScene scene) { tiles = scene.tiles(); }
+
+        <T> T call(java.util.function.Supplier<T> work) {
+            Cache previous = ACTIVE.get();
+            ACTIVE.set(this);
+            try { return work.get(); }
+            finally { if (previous == null) { ACTIVE.remove(); } else { ACTIVE.set(previous); } }
+        }
+
+        void run(Runnable work) { call(() -> { work.run(); return null; }); }
+    }
+
     private static final Map<File, BoardKit<Geometry>> MODELS = new ConcurrentHashMap<>();
     /** How thick an earthwork's spoil lies, in metres, where grass and plants still grow through it. */
     private static final float EARTHWORK_THIN = .2f;
@@ -52,7 +72,20 @@ final class BoardObstacles {
      * that digs its hex, BoardGroundCut) keep their world heights, and its {@code ground} is its hex's.
      */
     record Footprint(List<Vector3> triangles, float low, float high, BoundingBox bounds, boolean localHeight, float thin,
-          float ground) {
+          float ground, TriangleGrid grid) {
+        Footprint(List<Vector3> triangles, float low, float high, BoundingBox bounds, boolean localHeight, float thin,
+              float ground) {
+            this(triangles, low, high, bounds, localHeight, thin, ground, new TriangleGrid(triangles, bounds));
+        }
+
+        private boolean nearBounds(int triangle, Vector3 base, float radius) {
+            int at = triangle / 3 * 4;
+            // Conservative margin: only reject distant triangles, leaving boundary rounding to the exact test.
+            float reach = radius + .0001f;
+            return base.x + reach >= grid.bounds[at] && base.x - reach <= grid.bounds[at + 1]
+                  && base.y + reach >= grid.bounds[at + 2] && base.y - reach <= grid.bounds[at + 3];
+        }
+
         Footprint(List<Vector3> triangles, float low, float high, BoundingBox bounds, boolean localHeight) {
             this(triangles, low, high, bounds, localHeight, 0, 0);
         }
@@ -66,10 +99,15 @@ final class BoardObstacles {
             if (base.z + height < low || base.z > high || base.x + radius < bounds.min.x
                   || base.x - radius > bounds.max.x || base.y + radius < bounds.min.y
                   || base.y - radius > bounds.max.y) { return false; }
-            for (int i = 0; i < triangles.size(); i += 3) {
-                Vector3 a = triangles.get(i), b = triangles.get(i + 1), c = triangles.get(i + 2);
-                if (localHeight && base.z > Math.max(a.z, Math.max(b.z, c.z))) { continue; }
-                if (near(a, b, c, base.x, base.y, radius)) { return true; }
+            for (int x = grid.column(base.x - radius); x <= grid.column(base.x + radius); x++) {
+                for (int y = grid.row(base.y - radius); y <= grid.row(base.y + radius); y++) {
+                    for (int i : grid.cells[x * grid.size + y]) {
+                        if (!nearBounds(i, base, radius)) { continue; }
+                        Vector3 a = triangles.get(i), b = triangles.get(i + 1), c = triangles.get(i + 2);
+                        if (localHeight && base.z > Math.max(a.z, Math.max(b.z, c.z))) { continue; }
+                        if (near(a, b, c, base.x, base.y, radius)) { return true; }
+                    }
+                }
             }
             return false;
         }
@@ -93,7 +131,8 @@ final class BoardObstacles {
                 return false;
             }
             boolean dug = base.z < ground - thin;
-            for (int i = 0; i < triangles.size(); i += 3) {
+            for (int i : grid.cells[grid.column(base.x) * grid.size + grid.row(base.y)]) {
+                if (!nearBounds(i, base, 0)) { continue; }
                 Vector3 a = triangles.get(i), b = triangles.get(i + 1), c = triangles.get(i + 2);
                 float d = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
                 if (Math.abs(d) < .00001f) { continue; }
@@ -104,6 +143,41 @@ final class BoardObstacles {
             }
             return false;
         }
+    }
+
+    /** Broad phase built once per placed footprint; a root visits only the triangles near its XY position. */
+    private static final class TriangleGrid {
+        final int size;
+        final float x, y, width, height;
+        final float[] bounds;
+        final int[][] cells;
+
+        TriangleGrid(List<Vector3> triangles, BoundingBox box) {
+            size = triangles.size() < 384 ? 1 : 8;
+            x = box.min.x; y = box.min.y;
+            width = Math.max(.0001f, box.getWidth()); height = Math.max(.0001f, box.getHeight());
+            bounds = new float[triangles.size() / 3 * 4];
+            var bins = new com.badlogic.gdx.utils.IntArray[size * size];
+            for (int i = 0; i < bins.length; i++) { bins[i] = new com.badlogic.gdx.utils.IntArray(); }
+            for (int i = 0; i < triangles.size(); i += 3) {
+                var a = triangles.get(i); var b = triangles.get(i + 1); var c = triangles.get(i + 2);
+                int at = i / 3 * 4;
+                bounds[at] = Math.min(a.x, Math.min(b.x, c.x));
+                bounds[at + 1] = Math.max(a.x, Math.max(b.x, c.x));
+                bounds[at + 2] = Math.min(a.y, Math.min(b.y, c.y));
+                bounds[at + 3] = Math.max(a.y, Math.max(b.y, c.y));
+                for (int col = column(bounds[at] - .0001f); col <= column(bounds[at + 1] + .0001f); col++) {
+                    for (int row = row(bounds[at + 2] - .0001f); row <= row(bounds[at + 3] + .0001f); row++) {
+                        bins[col * size + row].add(i);
+                    }
+                }
+            }
+            cells = new int[bins.length][];
+            for (int i = 0; i < bins.length; i++) { cells[i] = bins[i].toArray(); }
+        }
+
+        int column(float value) { return Math.max(0, Math.min(size - 1, (int) ((value - x) / width * size))); }
+        int row(float value) { return Math.max(0, Math.min(size - 1, (int) ((value - y) / height * size))); }
     }
 
     BoardObstacles(BoardScene scene, BoardScene.Tile tile) { this(scene, tile, false); }
@@ -130,7 +204,9 @@ final class BoardObstacles {
         }
     }
 
-    private BoardObstacles() { plants = true; ground = null; plantHeight = plantRadius = 0; }
+    private BoardObstacles() { this(true); }
+
+    private BoardObstacles(boolean plants) { this.plants = plants; ground = null; plantHeight = plantRadius = 0; }
 
     /**
      * The solid bodies of the structures standing on {@code tile} as placed on the board (buildings, fuel tanks,
@@ -151,6 +227,19 @@ final class BoardObstacles {
     }
 
     private void add(BoardScene scene, BoardScene.Tile tile, boolean structures) {
+        Cache cache = ACTIVE.get();
+        // Authored volumes can prune triangles against this particular grass support; that result is not shared.
+        if (cache != null && cache.tiles == scene.tiles()
+              && (ground == null || tile.features().stream().noneMatch(GpuAuthoredBuilding::supports))) {
+            footprints.addAll(cache.footprints.computeIfAbsent(new Cache.Key(tile.coords(), plants, structures), key -> {
+                var built = new BoardObstacles(plants);
+                built.addUncached(scene, tile, structures);
+                return List.copyOf(built.footprints);
+            }));
+        } else { addUncached(scene, tile, structures); }
+    }
+
+    private void addUncached(BoardScene scene, BoardScene.Tile tile, boolean structures) {
         for (var captured : tile.features()) {
             if (structures && captured.kind() != BoardScene.FeatureKind.BUILDING
                   && captured.kind() != BoardScene.FeatureKind.INDUSTRIAL

@@ -13,7 +13,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.imageio.ImageIO;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -99,7 +98,7 @@ class GpuPolishSmokeTest {
             }
             var origin = BoardGeometry.center(unit.location().coords(), 0);
             model.place(instance, renderer.camera, origin, 180, unit);
-            renderer.frame(List.of(instance), origin, null, "polish-damage-" + name, 0);
+            renderer.frame(List.of(instance), origin, null);
         }
     }
 
@@ -126,7 +125,7 @@ class GpuPolishSmokeTest {
                 // It topples over its feet, its middle coming down beside them, and lies inside its hex.
                 assertTrue(Math.hypot(current.x - center.x, current.y - center.y) < BoardGeometry.height() * .4f,
                       "The fall stays inside its hex");
-                if (frame % 2 == 0) { renderer.frame(List.of(instance), origin, null, "polish-fall-" + side, frame); }
+                if (frame % 2 == 0) { renderer.frame(List.of(instance), origin, null); }
             }
         }
     }
@@ -156,8 +155,7 @@ class GpuPolishSmokeTest {
                     animator.conversion(conversion, shown);
                     var origin = BoardGeometry.center(shown.location().coords(), 0);
                     model.place(instance, renderer.camera, origin, 180, shown);
-                    renderer.frame(List.of(instance), origin, null,
-                          "polish-conversion-" + entity.getClass().getSimpleName() + "-" + UnitConversion.form(before).mode() + "-" + mode, frame);
+                    renderer.frame(List.of(instance), origin, null);
                 }
                 before = after;
             }
@@ -216,14 +214,12 @@ class GpuPolishSmokeTest {
                         model.place(a, renderer.camera, origin, 0, unit);
                         animator.aim(model, unit, attack, attack.endpoint(b, origin, new Vector3()), b);
                         effects.update(attack, library, Map.of(unit.id() + ":-1", a, target.id() + ":-1", b));
-                        renderer.frame(List.of(terrain, a, b), origin.cpy().lerp(BoardGeometry.center(target.location().coords(), 1), .5f), effects,
-                              "polish-shot-" + weapon.replace(' ', '-') + "-" + outcome, frame);
+                        renderer.frame(List.of(terrain, a, b), origin.cpy().lerp(BoardGeometry.center(target.location().coords(), 1), .5f), effects);
                         if (shot.ballistic() || "ISPPC".equals(weapon)) {
                             try {
                                 renderer.camera.zoom = .6f;
                                 renderer.viewOffset.set(130, 90, 80);
-                                renderer.frame(List.of(terrain, a, b), origin.cpy().add(0, 0, 8), effects,
-                                      "polish-shot-" + weapon + "-" + outcome + "-muzzle", frame);
+                                renderer.frame(List.of(terrain, a, b), origin.cpy().add(0, 0, 8), effects);
                             } finally { renderer.camera.zoom = 1; renderer.viewOffset.set(viewOffset); }
                             if (frame == 10) {
                                 var binding = model.equipment().stream().filter(attack::fires).findFirst().orElseThrow();
@@ -245,17 +241,16 @@ class GpuPolishSmokeTest {
                             if (frame == 32) { assertEquals(0, effects.flameParticleCount(), "Muzzle effects expire with the firing event"); }
                         }
                         if (shot.ppc()) {
-                            String clip = "ISPPC-" + outcome + "-muzzle";
-                            if (frame == 0) { ppcIdlePixels = effectPixels(clip, frame, true); }
+                            if (frame == 0) { ppcIdlePixels = renderer.effectPixels(true); }
                             if (frame == 6) {
                                 assertTrue(attack.chargingPpc());
                                 assertEquals(0, attack.recoil());
-                                ppcChargePixels = effectPixels(clip, frame, true);
+                                ppcChargePixels = renderer.effectPixels(true);
                                 assertTrue(ppcChargePixels > ppcIdlePixels + 15, "The nozzle charge must be visible before firing");
                             }
                             if (frame == 10) {
                                 assertTrue(attack.recoil() > 0);
-                                assertTrue(effectPixels(clip, frame, true) > ppcChargePixels * 2,
+                                assertTrue(renderer.effectPixels(true) > ppcChargePixels * 2,
                                       "Discharging produces a full beam, not just another muzzle glow");
                             }
                         }
@@ -264,7 +259,7 @@ class GpuPolishSmokeTest {
                             assertEquals(hits, attack.missileHits(unit.id(), mount.getEquipmentNum(), 20));
                         }
                         if ("ISMediumLaser".equals(weapon) && frame == 12) {
-                            int redPixels = effectPixels("ISMediumLaser-" + outcome, frame, false);
+                            int redPixels = renderer.effectPixels(false);
                             assertTrue(redPixels > 100, "The beam must be visible for both hits and long off-board misses: " + redPixels);
                         }
                         if (frame == 12 && hit) {
@@ -286,22 +281,6 @@ class GpuPolishSmokeTest {
                 } finally { effects.dispose(); terrain.model.dispose(); }
             }
         }
-    }
-
-    private static int effectPixels(String clip, int frame, boolean blueEffect) throws Exception {
-        var image = ImageIO.read(new File(System.getProperty("megamek.gpu.screenshots"),
-              "playback-polish-shot-" + clip + "/" + String.format("%03d.png", frame)));
-        int pixels = 0;
-        for (int y = 0; y < image.getHeight(); y++) {
-            for (int x = 0; x < image.getWidth(); x++) {
-                int color = image.getRGB(x, y);
-                int red = color >> 16 & 255, green = color >> 8 & 255, blue = color & 255;
-                boolean colored = blueEffect ? blue > 170 && blue > red * 1.15f && green > red * 1.1f
-                      : red > 180 && red > green * 1.5f && red > blue * 1.5f;
-                if (colored) { pixels++; }
-            }
-        }
-        return pixels;
     }
 
     private static void fallbacks(GpuPlaybackReview.ReviewRenderer renderer, GpuUnitModels library, MekTileset tileset) {
@@ -326,8 +305,7 @@ class GpuPolishSmokeTest {
                 var origin = BoardGeometry.center(unit.location().coords(), 0);
                 var instance = new ModelInstance(model.instance.model);
                 model.place(instance, renderer.camera, origin, 180, unit);
-                renderer.frame(List.of(instance), origin, null,
-                      "polish-fallback-" + model.rigs().getFirst().type() + "-" + weight, 0);
+                renderer.frame(List.of(instance), origin, null);
                 entity.setProne(ProneCause.VOLUNTARY);
                 var crouch = new ModelInstance(model.instance.model);
                 new UnitAnimator().apply(model, crouch, unit(entity, tileset), UnitMotion.Sample.STILL, 0, 0, true, 0);

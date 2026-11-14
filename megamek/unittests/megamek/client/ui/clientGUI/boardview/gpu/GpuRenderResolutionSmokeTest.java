@@ -340,8 +340,8 @@ class GpuRenderResolutionSmokeTest {
     /** The window path of a standalone atmosphere: a camera covering the window and no terrain, fog or weather. */
     private static final class Probe implements AutoCloseable {
         final GpuAtmosphere atmosphere = new GpuAtmosphere();
-        final BoardScene scene = new BoardScene(0, 1, 1, List.of(new BoardScene.Tile(new Coords(0, 0), 0, -1,
-              false, 0, BoardScene.Surface.GRASS, null, List.of(), List.of())),
+        final BoardScene scene = new BoardScene(0, 1, 1, List.of(BoardScenes.newTile(new Coords(0, 0), 0, -1,
+              false, 0, BoardScene.Surface.GRASS, List.of(), List.of())),
               List.of(), List.of(), -1, "", List.of());
         final OrthographicCamera camera = new OrthographicCamera();
 

@@ -80,7 +80,7 @@ final class BoardFungus {
     /** No new terrain or cover is inferred: only existing exposed walls receive these decorative props. */
     static List<Placement> cliffs(BoardScene scene, BoardScene.Tile tile, List<BoardSurface.Face> faces) {
         if (tile.ultraSublevel() || tile.surface() != BoardScene.Surface.FUNGUS
-              || tile.liquid().present() || !tile.detailedGround()) {
+              || tile.liquid().present()) {
             return List.of();
         }
         List<Placement> result = new ArrayList<>();

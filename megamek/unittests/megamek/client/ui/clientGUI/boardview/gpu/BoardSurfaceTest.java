@@ -163,10 +163,8 @@ class BoardSurfaceTest {
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 boolean wet = random.nextInt(5) < 2;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), wet ? random.nextInt(2) : random.nextInt(4),
-                      wet ? random.nextInt(3) : -1, false, 0, BoardScene.Surface.values()[random.nextInt(4)], null,
-                      null, List.of(), List.of(), wet ? BoardLiquid.WATER : BoardLiquid.NONE, null,
-                      true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), wet ? random.nextInt(2) : random.nextInt(4),
+                      wet ? random.nextInt(3) : -1, false, 0, BoardScene.Surface.values()[random.nextInt(4)], List.of(), List.of(), wet ? BoardLiquid.WATER : BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

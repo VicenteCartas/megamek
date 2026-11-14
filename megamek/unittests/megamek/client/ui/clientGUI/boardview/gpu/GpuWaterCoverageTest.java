@@ -24,6 +24,53 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuWaterCoverageTest {
     @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void levelWaterClipsAtItsOutlineWithoutFillingAnIsland(boolean island) {
+        var tile = BoardScenes.newTile(new Coords(0, 0), 0, 1, false, 0,
+              BoardScene.Surface.GRASS, List.of(), List.of(), BoardLiquid.WATER, null);
+        var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
+        var water = new BoardSurface(scene, tile);
+        water.waterFaces.clear();
+        // Many internal diagonals describe one level pool. An island must retain its dry hole.
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 8; x++) {
+                if (island && x >= 3 && x < 5 && y >= 3 && y < 5) { continue; }
+                var a = new Vector3(x, y, 1); var b = new Vector3(x + 1, y, 1);
+                var c = new Vector3(x + 1, y + 1, 1); var d = new Vector3(x, y + 1, 1);
+                water.waterFaces.add(new BoardSurface.Face(a, b, c, BoardSurface.Finish.TOP));
+                water.waterFaces.add(new BoardSurface.Face(a, c, d, BoardSurface.Finish.TOP));
+            }
+        }
+        var face = new BoardSurface.Face(new Vector3(-1, -1, 0), new Vector3(18, -1, 0),
+              new Vector3(-1, 18, 0), BoardSurface.Finish.TOP);
+        var polygons = new ArrayList<List<com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder.VertexInfo>>();
+        var cover = GpuWaterCover.coveringWaters(scene, water, Map.of(tile.coords(), water));
+        GpuWaterCover.coveredPolygons(face, cover, Integer.MAX_VALUE,
+              p -> new com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder.VertexInfo().setPos(p)
+                    .setNor(Vector3.Z).setUV(2, 3).setCol(new Color(1, 0, 0, .35f)), polygons::add);
+        float wet = 0, total = 0;
+        int wetPieces = 0;
+        for (var polygon : polygons) {
+            boolean tinted = polygon.getFirst().color.a < .25f;
+            if (tinted) { wetPieces++; }
+            for (int i = 1; i + 1 < polygon.size(); i++) {
+                var a = polygon.getFirst().position; var b = polygon.get(i).position; var c = polygon.get(i + 1).position;
+                float piece = area(a, b, c);
+                total += piece;
+                if (tinted) {
+                    wet += piece;
+                    var middle = new Vector3(a).add(b).add(c).scl(1f / 3);
+                    assertFalse(island && middle.x > 3 && middle.x < 5 && middle.y > 3 && middle.y < 5,
+                          "Joining water triangles cannot cover the dry island");
+                }
+            }
+        }
+        assertEquals(island ? 60 : 64, wet, .001f);
+        assertEquals(area(face.a(), face.b(), face.c()), total, .001f, "No terrain is lost or overlapped");
+        if (!island) { assertEquals(1, wetPieces, "Internal water diagonals must not subdivide this flat face"); }
+    }
+
+    @ParameterizedTest
     @MethodSource("riverBankCases")
     void exposedRiverBanksKeepTheWaterlineWithoutChangingTheirGeometry(BoardScene.Surface family, boolean frozen) {
         var geometry = BoardGeometry.tuning();
@@ -36,9 +83,9 @@ class GpuWaterCoverageTest {
                 for (int x = 0; x < 7; x++) {
                     for (int y = 0; y < 7; y++) {
                         boolean water = x == 3 && y > 0 && y < 6;
-                        tiles.add(new BoardScene.Tile(new Coords(x, y), 0, water ? depth : -1, frozen && water, 0,
-                              family, null, null, List.of(), List.of(),
-                              water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                        tiles.add(BoardScenes.newTile(new Coords(x, y), 0, water ? depth : -1, frozen && water, 0,
+                              family, List.of(), List.of(),
+                              water ? BoardLiquid.WATER : BoardLiquid.NONE, null));
                     }
                 }
                 var scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -181,8 +228,8 @@ class GpuWaterCoverageTest {
         var scene = raisedPool(depth);
         Coords coords = new Coords(4, 4);
         var water = new BoardSurface(scene, scene.tile(coords));
-        var landTile = new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, null, null, List.of(),
-              List.of(), BoardLiquid.NONE, null, true);
+        var landTile = BoardScenes.newTile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, List.of(),
+              List.of(), BoardLiquid.NONE, null);
         var tiles = scene.tiles().stream().map(tile -> tile.coords().equals(coords) ? landTile : tile).toList();
         var landScene = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
         var land = new BoardSurface(landScene, landTile);
@@ -280,9 +327,9 @@ class GpuWaterCoverageTest {
                 Coords coords = new Coords(x, y);
                 boolean high = x == 4 && y == 4, low = x == 4 && y == 3;
                 int level = high ? 5 : low ? -1 : x == 3 && y == 3 ? 2 : y == 4 || y == 5 ? 1 : 0;
-                tiles.add(new BoardScene.Tile(coords, level, high || low ? depth : -1, false, 0,
-                      BoardScene.Surface.GRASS, null, null, List.of(), List.of(),
-                      high || low ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(coords, level, high || low ? depth : -1, false, 0,
+                      BoardScene.Surface.GRASS, List.of(), List.of(),
+                      high || low ? BoardLiquid.WATER : BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());

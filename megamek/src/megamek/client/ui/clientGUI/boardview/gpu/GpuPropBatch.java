@@ -77,16 +77,20 @@ final class GpuPropBatch implements Disposable {
         }
     }
 
-    /** Pages merge until {@code deadline} (System.nanoTime), the frame's share for every page (GpuMeshPage.advance). */
-    void render(ModelBatch batch, Environment environment, long deadline) {
+    /** Preparation alone consumes the merge budget; submitting unrelated draws must not starve later pages. */
+    void advance(long deadline) {
         if (enabled) {
-            for (GpuMeshPage page : pages.values()) {
-                if (page.advance(deadline)) { rebuilds++; }
-                page.render(batch, environment);
-            }
+            for (GpuMeshPage page : pages.values()) { if (page.advance(deadline)) { rebuilds++; } }
+        }
+    }
+
+    void render(ModelBatch batch, Environment environment) {
+        if (enabled) {
+            for (GpuMeshPage page : pages.values()) { page.render(batch, environment); }
         }
         for (Renderable value : separate) {
             value.environment = environment;
+            value.shader = null;
             batch.render(value);
         }
     }
@@ -100,11 +104,17 @@ final class GpuPropBatch implements Disposable {
 
     private static boolean eligible(Renderable value) {
         long mask = value.material.getMask();
+        var depth = value.material.get(com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute.class,
+              com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute.Type);
+        if (depth != null && (!depth.depthMask || depth.depthRangeNear != 0 || depth.depthRangeFar != 1
+              || depth.depthFunc != GL20.GL_LESS && depth.depthFunc != GL20.GL_LEQUAL)) { return false; }
         return value.bones == null && !value.meshPart.mesh.isInstanced()
               && value.meshPart.primitiveType == GL20.GL_TRIANGLES && value.meshPart.size > 0
-              && value.meshPart.mesh.getNumIndices() > 0 && Arrays.equals(value.worldTransform.val, IDENTITY)
+              && value.meshPart.mesh.getNumIndices() > 0
+              && Arrays.equals(value.worldTransform.val, IDENTITY)
               && ((mask & ~(ColorAttribute.Diffuse | TextureAttribute.Diffuse | GpuModelMaterial.TYPE
-                    | GpuLinearColors.TYPE | GpuBuildingPaint.TYPE | BOARD_MAPS)) == 0 || GpuTerrain.batchableSculpt(value.material));
+                    | GpuLinearColors.TYPE | GpuBuildingPaint.TYPE | BOARD_MAPS)) == 0
+                    || GpuTerrain.batchableSculpt(value.material));
     }
 
     /**

@@ -33,9 +33,9 @@ class BoardIndustrialTest {
             Hex hex = new Hex(elevation);
             hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, height));
             String asset = "buildings/saxarba/misc/heavy_industrial_" + (char) ('a' + sites.getOrDefault(coords, 0));
-            return new BoardScene.Tile(coords, elevation, -1, false, 0, tile.surface(), null, null,
+            return BoardScenes.newTile(coords, elevation, -1, false, 0, tile.surface(),
                   sites.containsKey(coords) ? BoardFeatures.capture(hex, coords, Map.of(Terrains.INDUSTRIAL, asset)) : List.of(),
-                  List.of(), BoardLiquid.NONE, null, true);
+                  List.of(), BoardLiquid.NONE, null);
         });
     }
 

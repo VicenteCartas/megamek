@@ -155,6 +155,11 @@ import megamek.server.props.OrbitalBombardment;
 
 /** Client-thread presentation state shared by board renderers. Game and phase controllers own the rules and moves. */
 public final class BoardClientState implements BoardGlyphContext, AutoCloseable {
+    private volatile megamek.client.ui.clientGUI.boardview.gpu.GpuBoardState gpuBoardState =
+          new megamek.client.ui.clientGUI.boardview.gpu.GpuBoardState();
+
+    /** Presentation history belongs to this board session, across native/legacy view switches. */
+    public megamek.client.ui.clientGUI.boardview.gpu.GpuBoardState getGpuBoardState() { return gpuBoardState; }
     public final Game game;
     private final int boardId;
     private final FovHighlightingAndDarkening fieldOfView;
@@ -3083,6 +3088,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
             onClientThread(() -> {
                 if (observedBoard != null) { observedBoard.removeBoardListener(boardListener); }
                 observedBoard = event.getNewBoard();
+                gpuBoardState = new megamek.client.ui.clientGUI.boardview.gpu.GpuBoardState();
                 if (observedBoard != null) { observedBoard.addBoardListener(boardListener); }
                 clearArtwork();
                 redrawAllEntities();

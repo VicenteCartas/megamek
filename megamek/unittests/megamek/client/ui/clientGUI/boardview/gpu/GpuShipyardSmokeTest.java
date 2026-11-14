@@ -52,7 +52,6 @@ class GpuShipyardSmokeTest {
                             var walls = scene.tiles().stream().filter(tile -> tile.features().stream()
                                   .anyMatch(feature -> BoardWall.supports(feature.asset()))).toList();
                             assertTrue(walls.size() > 100, "The shipped map exercises many simultaneous wall assemblies");
-                            assertTrue(walls.stream().allMatch(BoardScene.Tile::detailedGround));
                             var wall = walls.get(walls.size() / 2);
                             var feature = wall.features().stream().filter(part -> BoardWall.supports(part.asset()))
                                   .findFirst().orElseThrow();

@@ -156,9 +156,9 @@ class BoardBedLodTest {
                 boolean land = !lake && (x == 0 || y == 0 || y == 6);
                 int level = land ? x == 0 ? 12 : 1 : lake || x < 4 ? 0 : x < 7 ? x - 3 : 8;
                 int depth = x == 2 ? 0 : x == 6 ? 8 : 1;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, land ? -1 : depth, frozen, 0,
-                      BoardScene.Surface.SAND, null, null, List.of(), List.of(),
-                      land ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), level, land ? -1 : depth, frozen, 0,
+                      BoardScene.Surface.SAND, List.of(), List.of(),
+                      land ? BoardLiquid.NONE : BoardLiquid.WATER, null));
             }
         }
         return new BoardScene(0, 10, 7, tiles, List.of(), List.of(), -1, "", List.of());

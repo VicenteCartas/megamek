@@ -351,7 +351,7 @@ class BoardConcreteMeshTest {
                 Hex hex = new Hex(elevation.applyAsInt(at));
                 if (!natural || x < 8) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
                 hex.addTerrain(new Terrain(Terrains.CLIFF_TOP, 1, true, cliffs));
-                var art = new BoardArtwork.HexImage(at, null, null, List.of(), Map.of(), null);
+                var art = new BoardArtwork.HexImage(at, List.of(), Map.of(), null);
                 tiles.add(BoardScene.captureTile(hex, art, null, new BoardScene.PixelPool(), neighbour -> null));
             }
         }
@@ -362,7 +362,7 @@ class BoardConcreteMeshTest {
     void tallConcreteCliffsRemainFlatDownToTheirFeet() {
         float m = BoardRelief.metres(1);
         for (int level : new int[] { 3, 6 }) {
-            BoardScene scene = BoardScenes.reliefScene(level, true, BoardScene.Surface.CONCRETE);
+            BoardScene scene = BoardScenes.reliefScene(level, BoardScene.Surface.CONCRETE);
             BoardSurface surface = new BoardSurface(scene, scene.tile(BoardScenes.RELIEF_CENTER));
             Vector3 center = BoardGeometry.center(BoardScenes.RELIEF_CENTER, level);
             int samples = 0;

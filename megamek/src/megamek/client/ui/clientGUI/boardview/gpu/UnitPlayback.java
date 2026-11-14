@@ -78,6 +78,15 @@ final class UnitPlayback {
     private BoardScene presentationScene;
     private boolean overlayHideMovement;
     private boolean checkpoints;
+    /**
+     * The moves that ended with other events still waiting and no checkpoint behind them, by unit, and the settled scene
+     * they ended under: while that scene still settles the board, each unit stays where its move ended (#presentLive).
+     * A walk onto a structure its weight brings down is followed by the collapse and the fall, and only then by its
+     * checkpoint (GpuBoardSource#stepsOnto): shown as the settled scene has it, the unit stood where it had started
+     * through the walk's completion hold and the collapse's wait, and seemed to walk twice.
+     */
+    private final Map<Integer, BoardScene.Movement> arrived = new HashMap<>();
+    private BoardScene arrivedUnder;
 
     UnitPlayback() {
         this(ignored -> { });
@@ -129,6 +138,7 @@ final class UnitPlayback {
             }
         }
         collectVolley();
+        collectCasualties();
         applySceneUpdates();
     }
 
@@ -233,6 +243,7 @@ final class UnitPlayback {
                     combatTerrainRelease = combatContact;
                     combatDuration = chained(detonation, chain);
                     detonationStarted = false;
+                    collectCasualties();
                 } else if (active instanceof BoardScene.Conversion change) {
                     conversion = new UnitConversion(change);
                 } else if (active instanceof BoardScene.AttachmentChange change) {
@@ -298,8 +309,15 @@ final class UnitPlayback {
                 } else if (active instanceof BoardScene.Conversion change) {
                     settleConversion(change);
                 }
+                BoardScene settled = settledScene;
                 applySceneUpdates();
-                hold = attacks.stream().anyMatch(UnitAttack::death) ? DEATH_HOLD_SECONDS
+                if (active instanceof BoardScene.Movement movement && settledScene == settled && !pending.isEmpty()) {
+                    if (arrivedUnder != settledScene) { arrived.clear(); }
+                    arrivedUnder = settledScene;
+                    arrived.put(movement.entityId(), movement);
+                }
+                // A death's own action holds on its wreck; a strike's deaths end with it.
+                hold = attack != null && attacks.stream().anyMatch(UnitAttack::death) ? DEATH_HOLD_SECONDS
                       : collapsesOn() || pending.peekFirst() instanceof BoardScene.AttachmentChange
                       || active instanceof BoardScene.AttachmentChange && pending.peekFirst() instanceof BoardScene.Movement
                       || pending.peekFirst() instanceof BoardScene.Combat next
@@ -308,6 +326,9 @@ final class UnitPlayback {
                       // A unit that died in its own movement, as a fall, dies as it lands.
                       || active instanceof BoardScene.Movement move && pending.peekFirst() instanceof BoardScene.Combat death
                             && death.result().kind() == megamek.common.ResolvedAttack.Kind.DEATH && death.entityId() == move.entityId()
+                      // A structure gives way as the unit whose weight breaks it gets onto it.
+                      || active instanceof BoardScene.Movement move && pending.peekFirst() instanceof BoardScene.TileTransition falling
+                            && falling.collapses(move.path().getLast().coords())
                       // An explosion goes off as what set it off ends, the next of a chain as the last one's falls do.
                       || pending.peekFirst() instanceof BoardScene.Detonation next
                             && next.result().kind() == megamek.common.NuclearDetonation.Kind.EXPLOSION
@@ -534,6 +555,28 @@ final class UnitPlayback {
     }
 
     /**
+     * The deaths that follow the strike, bombardment or explosion going off, behind its checkpoint, play with it: each
+     * unit dies as the blast's front reaches it, as the structures it brings down give way, not one after another once
+     * they have fallen. Those that arrive after it went off join it as they come.
+     */
+    private void collectCasualties() {
+        if (!(active instanceof BoardScene.Detonation detonation) || completed) { return; }
+        for (var iterator = pending.iterator(); iterator.hasNext() && attacks.size() < MAX_PENDING_EVENTS; ) {
+            var event = iterator.next();
+            if (event instanceof BoardScene.SceneUpdate) { continue; }
+            if (!(event instanceof BoardScene.Combat casualty)
+                  || casualty.result().kind() != megamek.common.ResolvedAttack.Kind.DEATH) { break; }
+            iterator.remove();
+            var death = new UnitAttack(casualty);
+            death.delay = (float) Math.max(combatSeconds,
+                  combatContact + arrival(detonation.result(), casualty.attacker().location().coords()));
+            death.seconds = Math.min(death.duration, (float) combatSeconds - death.delay);
+            attacks.add(death);
+            combatDuration = Math.max(combatDuration, death.delay + death.duration);
+        }
+    }
+
+    /**
      * Adjacent confirmed shots from the same pose form one volley; movement and physical actions are barriers. A death
      * that directly follows the hit that caused it joins that hit's action and plays from its landing.
      */
@@ -606,6 +649,14 @@ final class UnitPlayback {
     private boolean beforeTerrainRelease() {
         return attack == null && !(active instanceof BoardScene.Detonation) && !(active instanceof BoardScene.TileTransition)
               || combatSeconds + 1e-7 < combatTerrainRelease;
+    }
+
+    /** Resolved terrain may prepare during travel; the presentation checkpoint still releases it only at impact. */
+    BoardScene preparingTerrain() {
+        if (!(active instanceof BoardScene.Combat) && !(active instanceof BoardScene.Detonation)
+              || completed || !beforeTerrainRelease()) { return null; }
+        if (volleyScene != null) { return volleyScene; }
+        return pending.peekFirst() instanceof BoardScene.SceneUpdate update ? update.scene() : null;
     }
 
     private boolean sameVolley(BoardScene.Combat next) {
@@ -698,9 +749,14 @@ final class UnitPlayback {
      * (GpuArtilleryBlast#shockArrival); a ground zero beyond its reach, as it ends.
      */
     static double arrival(megamek.common.NuclearDetonation cause, megamek.common.NuclearDetonation next) {
+        return arrival(cause, next.coords());
+    }
+
+    /** Playback seconds from {@code cause}'s flash until its front reaches the hex; beyond its reach, as it ends. */
+    static double arrival(megamek.common.NuclearDetonation cause, megamek.common.board.Coords at) {
         float radius = GpuArtilleryBlast.nuclearRadius(cause.stats());
         var from = BoardGeometry.center(cause.coords(), 0);
-        var to = BoardGeometry.center(next.coords(), 0);
+        var to = BoardGeometry.center(at, 0);
         float distance = com.badlogic.gdx.math.Vector2.dst(from.x, from.y, to.x, to.y);
         return distance > radius ? duration(cause)
               : GpuArtilleryBlast.shockArrival(distance, radius) / GpuArtilleryBlast.SECONDS_PER_PLAYBACK;
@@ -717,6 +773,7 @@ final class UnitPlayback {
     }
 
     private UnitMotion start(BoardScene.Movement movement) {
+        arrived.remove(movement.entityId());
         var motion = motions.computeIfAbsent(movement.entityId(), ignored -> new UnitMotion(movement.path().getFirst()));
         var unit = movement.unit();
         int members = unit != null && unit.model() != null && unit.model().state() != null
@@ -789,6 +846,7 @@ final class UnitPlayback {
         paused = false;
         motions.clear();
         observed.clear();
+        arrived.clear();
         settledScene = null;
         overlayInput = null;
         overlayState = null;
@@ -917,6 +975,7 @@ final class UnitPlayback {
             presentationScene = null;
         }
         if (!busy()) {
+            arrived.clear();
             retainMotions(scene.units());
             return scene;
         }
@@ -927,8 +986,15 @@ final class UnitPlayback {
         }
         pending.forEach(event -> holdUnits(event, shown, false));
         reactions.forEach(reaction -> holdUnits(reaction.movement(), shown, true));
+        if (arrivedUnder != settledScene) { arrived.clear(); }
+        arrived.values().forEach(movement -> holdUnits(movement, shown, true));
         attacks.stream().filter(shot -> shot.pushedOff() && shot.seconds < shot.duration)
               .forEach(shot -> hold(shown, shot.event.target()));
+        if (attack == null) {
+            // A strike's casualties (#collectCasualties) stay, as they were, until their deaths have played.
+            attacks.stream().filter(shot -> shot.death() && shot.seconds < shot.duration)
+                  .forEach(shot -> holdUnits(shot.event, shown, true));
+        }
         if (attachment != null && attachment.progress() < 1) {
             // Keep the released figures until they reach the resolved endpoint, even when damage removes them.
             var change = attachment.event;

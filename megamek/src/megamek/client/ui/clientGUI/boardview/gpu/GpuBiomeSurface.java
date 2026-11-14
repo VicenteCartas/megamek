@@ -90,6 +90,9 @@ final class GpuBiomeSurface {
                 if (aqueous(tile)) { color |= (GpuWaterShader.palette(tile.liquid()) + 1) << 16; }
                 boolean ice = tile.frozen() || tile.blackIce();
                 color |= (!tile.frozen() ? tile.blackIce() ? 3 : 0 : tile.liquid().present() ? 2 : 1) << 8;
+                // B's bit 2: no cover grows on its ground (the ground map, ground-map.frag), where a building stands or
+                // stood, or the ground is scorched, airless or zero-gravity rock.
+                if (tile.slab() || tile.asMade().slab() || tile.barren() || tile.bare()) { color |= 4 << 8; }
                 anyIce |= ice;
                 next[tile.coords().getY() * w + tile.coords().getX()] = color | Math.clamp(tile.elevation() + 64, 0, 255);
             }

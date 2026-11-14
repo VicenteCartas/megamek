@@ -3,8 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.concurrent.FutureTask;
 import javax.swing.SwingUtilities;
@@ -31,10 +29,7 @@ class BoardConcreteArtworkTest {
                     board.setHex(at, hex);
                     artwork.invalidate(at);
                     var tile = BoardScene.captureTile(hex, artwork.capture(board, at, board.getHex(at)), null, new BoardScene.PixelPool(), neighbour -> null);
-                    assertNull(tile.decals(), "Native quay geometry replaces the painted wall, variant " + variant);
-                    assertNull(tile.tilesetDecals(), "Tactical View also replaces the painted wall, variant " + variant);
                     assertEquals(water.tileset(), tile.tileset(), "The seabed artwork contains no baked quay sprite");
-                    assertTrue(tile.detailedGround(), "The replaced wall does not disable native water terrain");
                     assertEquals(variant, hex.getTerrain(Terrains.FLUFF).getExits(), "Rendering preserves map data");
                 }
             }
@@ -57,7 +52,6 @@ class BoardConcreteArtworkTest {
                 board.setHex(at, pit);
                 artwork.invalidate(at);
                 var tile = BoardScene.captureTile(pit, artwork.capture(board, at, board.getHex(at)), null, new BoardScene.PixelPool(), neighbour -> null);
-                assertNull(tile.decals(), "The pit geometry replaces the painted hole in 3D");
                 assertNotEquals(ground.tileset(), tile.tileset(), "Tactical View keeps the painted hole");
             }
             return null;

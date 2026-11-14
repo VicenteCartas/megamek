@@ -329,8 +329,8 @@ class GpuNuclearImpactSmokeTest {
             assertTrue(plantsBefore > 0, "The before scene includes decorative vegetation");
             assertTrue(plants(installed) < plantsBefore, "Installed terrain removes scorched decorative vegetation");
             assertTrue(installed.tiles().stream().filter(tile -> terrain.groundDamage().scorched(scene, tile))
-                  .flatMap(tile -> tile.features().stream()).noneMatch(GpuScatter::vegetation),
-                  "No decorative plant remains in an installed scorched tile");
+                  .flatMap(tile -> tile.features().stream()).noneMatch(feature -> feature.kind() == BoardScene.FeatureKind.SCATTER),
+                  "No decorative scatter remains in an installed scorched tile");
             assertNotNull(field(fire, "shader"), "The launch linked the fire and smoke programs");
             assertTrue(GpuGlsl.compilesAfterLoading() - programsBefore <= (fireLinked ? 0 : 2),
                   "Beyond the launch's fire and smoke, impact and rebuilding must not compile new programs");
@@ -399,7 +399,8 @@ class GpuNuclearImpactSmokeTest {
     }
 
     private static long plants(BoardScene scene) {
-        return scene.tiles().stream().flatMap(tile -> tile.features().stream()).filter(GpuScatter::vegetation).count();
+        return scene.tiles().stream().flatMap(tile -> tile.features().stream())
+              .filter(feature -> feature.kind() == BoardScene.FeatureKind.SCATTER).count();
     }
 
     private static double elapsed(long start) { return (System.nanoTime() - start) / 1_000_000d; }

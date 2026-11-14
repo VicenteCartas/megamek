@@ -39,11 +39,12 @@ final class BayKit {
      * every roof module comes once per layout of the footprint's fittings, and the kit is not turned (its pieces stand
      * in all six corners, as the fittings stand in the hex's middle). With {@code varyBays} a wall may hold a bay fewer
      * or more than the nearest count, by its place ({@link #scale}). {@code largeDoor}: its large doors' look
-     * ({@link KitDoors.Style}; a plain steel door without).
+     * ({@link KitDoors.Style}; a plain steel door without). With {@code hull}, its far levels are closed outer hulls
+     * (tools/buildings/far_levels.py): past the near level it lays no roof body, which nothing shows there.
      */
     record Spec(String name, String style, String pieces, List<double[]> lone, double bandEnd, Slab roof, Slab floors,
                 Sidewalk sidewalk, Map<String, List<Run>> modules, double cornerRadius, int cornerSegments,
-                HabitatKit.Fittings fittings, boolean varyBays, KitDoors.Style largeDoor) { }
+                HabitatKit.Fittings fittings, boolean varyBays, KitDoors.Style largeDoor, boolean hull) { }
 
     /**
      * A flat surface over the piece: a board material, {@code repeat} units a repeat on the board's axes (a flat roof's
@@ -364,6 +365,8 @@ final class BayKit {
         double[] along = seamed ? axis(square, piece) : null;
         // Any other roof's deck runs along the building, as a real roof's courses follow its eaves: each run on its part.
         List<Barrel> courses = top && !seamed && !crown ? barrels(square, piece) : null;
+        // A far hull hides its roof's body.
+        boolean hidden = spec.hull() && lod > 0;
         for (var polygon : piece.polygons()) {
             for (var part : inset > 0 ? KitOutline.inset(polygon, edges, inset) : List.of(polygon)) {
                 // The authored rim has a horizontal lip at this height; keep the deck just underneath it.
@@ -384,7 +387,7 @@ final class BayKit {
                 } else {
                     flat(result, board(slab.material()) + GeneratedMesh.BUILDING_FLOOR, part, height, slab.repeat(), null);
                 }
-                if (top) { result.slab(GeneratedMesh.BUILDING_BODY, part, height - 1.2, height, false); }
+                if (top && !hidden) { result.slab(GeneratedMesh.BUILDING_BODY, part, height - 1.2, height, false); }
                 // A glass roof's underlay: the biodome's planted bed, which the sun lights through the glass.
                 if (top && slab.underlay()) { flat(result, board(BoardMultiHexBuilding.GARDEN), part, height - .3, 24, null); }
             }

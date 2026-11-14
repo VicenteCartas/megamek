@@ -70,9 +70,9 @@ class GpuRoadSmokeTest {
                     // A nearby ground edit replaces the chunk atlas while reusing its unchanged road meshes.
                     var tiles = new ArrayList<>(scene.tiles());
                     var before = scene.tile(new Coords(8, 11));
-                    tiles.set(tiles.indexOf(before), new BoardScene.Tile(before.coords(), before.elevation(), -1, false, 0,
-                          before.surface(), null, null, List.of(), List.of(),
-                          BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE, BoardFireSmoke.NONE, BoardScene.Biome.MUD));
+                    tiles.set(tiles.indexOf(before), BoardScenes.newTile(before.coords(), before.elevation(), -1, false, 0,
+                          before.surface(), List.of(), List.of(),
+                          BoardLiquid.NONE, null, BoardRoad.Kind.NONE, BoardFireSmoke.NONE, BoardScene.Biome.MUD));
                     var edited = new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles,
                           List.of(), List.of(), -1, "", List.of());
                     terrain.update(edited, camera.camera);
@@ -221,6 +221,8 @@ class GpuRoadSmokeTest {
             @Override
             public void create() {
                 var terrain = new GpuTerrain();
+                // Live edits are the editor's: a game would keep the ground as it was made.
+                terrain.setEditable(true);
                 var frame = new GpuReviewFrame(weather(0));
                 try {
                     BoardScenes.tune(.94f, true);
@@ -252,6 +254,8 @@ class GpuRoadSmokeTest {
                     frame.render(terrain, camera, edited);
                     byte[] changed = screen();
                     var fresh = new GpuTerrain();
+                    // The control is an editor too: a game keeps its ground history, and neither build has any.
+                    fresh.setEditable(true);
                     try {
                         frame.prepare(fresh, camera, edited);
                         fresh.update(edited);
@@ -454,8 +458,8 @@ class GpuRoadSmokeTest {
                     hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 1));
                 }
                 var tile = BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, 1, 0);
-                return new BoardScene.Tile(c, 0, 1, false, 0, tile.surface(), null, null,
-                      BoardFeatures.capture(hex, c, Map.of()), List.of(), BoardLiquid.WATER, null, true);
+                return BoardScenes.newTile(c, 0, 1, false, 0, tile.surface(),
+                      BoardFeatures.capture(hex, c, Map.of()), List.of(), BoardLiquid.WATER, null);
             }
             return BoardScenes.tile(c, c.getX() == 4 ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                   c.getX() == 4 ? 9 : 0, 0, BoardScene.Surface.GRASS);

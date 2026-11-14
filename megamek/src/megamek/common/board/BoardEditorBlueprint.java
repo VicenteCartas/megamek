@@ -503,6 +503,21 @@ public final class BoardEditorBlueprint {
     public Variant variant(String id) { return variants.get(id); }
     public List<Asset> assets() { return List.copyOf(assets.values()); }
     public Asset asset(String id) { return assets.get(id); }
+
+    /**
+     * The scale a brush places a plant of woods' cover at: a tree, a bush, a cactus, a dead tree, a fungus, a Mars coral.
+     * Their models are a hex wide and as tall as the cover, too large for a plant placed on its own; a scenery layout's
+     * park trees are at about this scale too (its rows give their own). Woods' own plants are not placed and keep
+     * their size. Set here once.
+     */
+    public static final double PLACED_PLANT = .4;
+    /** The model folders of the plants woods' cover grows. */
+    private static final List<String> COVER_PLANTS = List.of("vegetation/", "fungus/", "mars/");
+
+    /** The scale a brush places a new object of {@code asset} at: {@link #PLACED_PLANT} for a cover plant, else 1. */
+    public static double placedScale(String asset) {
+        return COVER_PLANTS.stream().anyMatch(asset::startsWith) ? PLACED_PLANT : 1;
+    }
     public Component component(String id) {
         return components.stream().filter(c -> c.id().equals(id)).findFirst()
               .orElseThrow(() -> new IllegalArgumentException("Unknown component " + id));

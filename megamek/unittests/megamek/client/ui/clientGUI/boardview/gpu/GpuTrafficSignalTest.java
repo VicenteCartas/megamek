@@ -28,6 +28,7 @@ import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.GdxNativesLoader;
+import java.util.List;
 import megamek.common.Configuration;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
@@ -71,11 +72,11 @@ class GpuTrafficSignalTest {
         GpuTrafficSignal.mark("scenery/road/" + asset, initial.getMaterial("Amber"));
         // Exercise the real Prop.detail/level path without allocating any GPU geometry.
         Class<?> type = Class.forName(GpuTerrain.class.getName() + "$Prop");
-        var constructor = type.getDeclaredConstructor(Coords.class, ModelInstance.class, BoundingBox.class, String.class, boolean.class);
+        var constructor = type.getDeclaredConstructor(Coords.class, ModelInstance.class, List.class, BoundingBox.class,
+              String.class, boolean.class);
         constructor.setAccessible(true);
-        Object prop = constructor.newInstance(new Coords(1, 1), initial,
+        Object prop = constructor.newInstance(new Coords(1, 1), initial, levels,
               new BoundingBox(new Vector3(), new Vector3(1, 1, 3)), null, true);
-        var models = type.getDeclaredField("levels"); models.setAccessible(true); models.set(prop, levels);
         var instance = type.getDeclaredField("instance"); instance.setAccessible(true);
         var detail = type.getDeclaredMethod("detail", float.class); detail.setAccessible(true);
         for (int level : new int[] { 1, 0, 1, 0 }) {

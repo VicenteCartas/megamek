@@ -131,8 +131,8 @@ class UnitDefensePlaybackTest {
     }
 
     static BoardScene scene(BoardScene.Unit... units) {
-        var dry = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, null, null, List.of(), List.of());
-        var wet = new BoardScene.Tile(new Coords(0, 1), 0, 1, false, 0, null, null, List.of(), List.of());
+        var dry = BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, null, List.of(), List.of());
+        var wet = BoardScenes.newTile(new Coords(0, 1), 0, 1, false, 0, null, List.of(), List.of());
         return new BoardScene(0, 1, 2, List.of(dry, wet), List.of(units), List.of(), -1, "PHYSICAL", List.of());
     }
 }

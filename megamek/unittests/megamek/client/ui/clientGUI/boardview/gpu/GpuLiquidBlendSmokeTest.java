@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -152,8 +151,8 @@ class GpuLiquidBlendSmokeTest {
             hex.setTheme(LIQUIDS[palette].theme());
         }
         if (frozen) { hex.addTerrain(new Terrain(Terrains.ICE, 1)); }
-        return new BoardScene.Tile(coords, elevation, 1, frozen, 0, base.surface(), null, null,
-              List.of(), List.of(), BoardLiquid.capture(hex), null, BoardFeatures.detailedGround(hex, Map.of()));
+        return BoardScenes.newTile(coords, elevation, 1, frozen, 0, base.surface(),
+              List.of(), List.of(), BoardLiquid.capture(hex), null);
     }
 
     /** Uses the actual production shader source and actual packed map, not a second CPU implementation. */

@@ -93,8 +93,8 @@ class UnitPolishTest {
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < 8; x++) {
             for (int y = 0; y < 8; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), x > 3 ? 2 : 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), x > 3 ? 2 : 0, -1, false, 0,
+                      BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         var scene = new BoardScene(0, 8, 8, tiles, List.of(), List.of(), -1, "", List.of());

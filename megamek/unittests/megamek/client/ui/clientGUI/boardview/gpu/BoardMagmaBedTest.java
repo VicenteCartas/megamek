@@ -98,8 +98,8 @@ class BoardMagmaBedTest {
     @Test
     void openMoltenHexUsesSixTrianglesForItsSurfaceAndCanonicalSupport() {
         BoardLiquid lava = new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0);
-        BoardScene scene = BoardScenes.scene(at -> new BoardScene.Tile(at, 0, 0, false, 0,
-              BoardScene.Surface.ROCK, null, null, List.of(), List.of(), lava, null, true));
+        BoardScene scene = BoardScenes.scene(at -> BoardScenes.newTile(at, 0, 0, false, 0,
+              BoardScene.Surface.ROCK, List.of(), List.of(), lava, null));
         for (TerrainLod lod : TerrainLod.values()) {
             BoardSurface surface = new BoardSurface(scene, scene.tile(BoardScenes.CENTER), lod);
             assertEquals(6, surface.waterFaces.size());

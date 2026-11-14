@@ -62,7 +62,10 @@ final class BoardRail {
      * lines (model px, heights from its carrier plane), each point flagged where it is set into a road. Equal layouts
      * share one mesh.
      */
-    record Layout(RailRoute.Kind kind, List<End> ends, List<List<Vector3>> paths, List<List<Boolean>> streets) {
+    record Layout(RailRoute.Kind kind, List<End> ends, List<List<Vector3>> paths, List<List<Boolean>> streets, int cuts) {
+        Layout(RailRoute.Kind kind, List<End> ends, List<List<Vector3>> paths, List<List<Boolean>> streets) {
+            this(kind, ends, paths, streets, 0);
+        }
         /** A maglev layout of these ends, its pieces laid by the default of their sides. */
         Layout(List<End> ends) { this(RailRoute.Kind.MAGLEV, ends, courses(ends, RailRoute.pieces(sides(ends))), List.of()); }
     }
@@ -192,7 +195,12 @@ final class BoardRail {
         var kind = RailRoute.kind(feature.decoration());
         int sides = drawnSides(tile, feature);
         var paths = courses(ends, RailRoute.pieces(feature.decoration(), sides), corridor(tile, feature));
-        if (kind == RailRoute.Kind.MAGLEV) { return new Layout(kind, ends, paths, List.of()); }
+        int cuts = RailRoute.onDeck(feature.decoration()) ? tile.railCuts().deck() : tile.railCuts().ground();
+        if (cuts != 0) {
+            paths = paths.stream().map(path -> cut(ends, cuts, path.getFirst()) || cut(ends, cuts, path.getLast())
+                  ? subdivide(path) : path).toList();
+        }
+        if (kind == RailRoute.Kind.MAGLEV) { return new Layout(kind, ends, paths, List.of(), cuts); }
         float scale = BoardGeometry.hexScale(), base = level(tile, feature) * BoardGeometry.level();
         float cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
         boolean onDeck = RailRoute.onDeck(feature.decoration());
@@ -210,6 +218,7 @@ final class BoardRail {
         List<List<Vector3>> draped = new ArrayList<>(paths.size());
         List<List<Boolean>> streets = new ArrayList<>(paths.size());
         for (var path : paths) {
+            boolean damaged = cut(ends, cuts, path.getFirst()) || cut(ends, cuts, path.getLast());
             var points = drape(path, carrier);
             var street = points.stream().map(p -> road != null && road.street(p.x, p.y)).toList();
             // Keep the points where the line bends, in plan or in height, and where it enters or leaves a road.
@@ -218,14 +227,73 @@ final class BoardRail {
             for (int i = 0; i < points.size(); i++) {
                 boolean inner = i > 0 && i < points.size() - 1 && street.get(i) == street.get(i - 1)
                       && street.get(i) == street.get(i + 1);
-                if (inner && between(kept.getLast(), points.get(i), points.get(i + 1))) { continue; }
+                if (!damaged && inner && between(kept.getLast(), points.get(i), points.get(i + 1))) { continue; }
                 kept.add(points.get(i));
                 keptStreet.add(street.get(i));
             }
             draped.add(List.copyOf(kept));
             streets.add(List.copyOf(keptStreet));
         }
-        return new Layout(kind, ends, List.copyOf(draped), List.copyOf(streets));
+        return new Layout(kind, ends, List.copyOf(draped), List.copyOf(streets), cuts);
+    }
+
+    /** Only damaged layouts need short segments on flat ground, so their exposed tips can curl. */
+    private static List<Vector3> subdivide(List<Vector3> path) {
+        var result = new ArrayList<Vector3>();
+        result.add(path.getFirst());
+        for (int i = 1; i < path.size(); i++) {
+            var a = path.get(i - 1); var b = path.get(i);
+            int steps = Math.max(1, (int) Math.ceil(a.dst(b) / 1.5f));
+            for (int j = 1; j <= steps; j++) { result.add(new Vector3(a).lerp(b, (float) j / steps)); }
+        }
+        return List.copyOf(result);
+    }
+
+    /** A cut is on the original shared border, including a corridor's laterally shifted track. */
+    private static boolean cut(List<End> ends, int cuts, Vector3 point) {
+        if (cuts == 0) { return false; }
+        for (var end : ends) {
+            if ((cuts & RailRoute.side(direction(end))) == 0) { continue; }
+            var edge = RailRoute.border(direction(end));
+            var shifted = RailRoute.borderOffset(direction(end), 1);
+            float nx = shifted[1], ny = -shifted[0];
+            if (Math.abs((point.x - edge[0]) * nx + (point.y - edge[1]) * ny) < .05f) { return true; }
+        }
+        return false;
+    }
+
+    /** Temporary construction data: resolve severed endpoints and their inward directions once per path. */
+    private record Damage(Vector3 first, Vector3 last, Vector3 firstInward, Vector3 lastInward) {
+        static Damage of(Layout layout, List<Vector3> path) {
+            Vector3 first = cut(layout.ends(), layout.cuts(), path.getFirst()) ? path.getFirst() : null;
+            Vector3 last = cut(layout.ends(), layout.cuts(), path.getLast()) ? path.getLast() : null;
+            return new Damage(first, last, first == null ? null : inward(first, path.get(1)),
+                  last == null ? null : inward(last, path.get(path.size() - 2)));
+        }
+
+        private static Vector3 inward(Vector3 end, Vector3 next) {
+            var direction = new Vector3(next).sub(end); direction.z = 0;
+            return direction.nor();
+        }
+
+        /** Only the last few metres before a severed border, never an authored inner terminus. */
+        float amount(Vector3 point) {
+            float distance = first == null ? Float.POSITIVE_INFINITY : point.dst(first);
+            if (last != null) { distance = Math.min(distance, point.dst(last)); }
+            float t = Math.max(0, 1 - distance / 10);
+            return t * t;
+        }
+
+        /** Curl steel upwards, outwards and back into its surviving hex. */
+        Vector3 torn(Vector3 centre, Vector3 point, float side) {
+            float bend = amount(centre);
+            if (bend == 0) { return point; }
+            boolean fromFirst = first != null && (last == null || centre.dst2(first) < centre.dst2(last));
+            var inward = fromFirst ? firstInward : lastInward;
+            float outward = (fromFirst ? side : -side) < 0 ? -2.2f : 3.1f;
+            return point.mulAdd(inward, 4 * bend * bend)
+                  .add(-inward.y * outward * bend, inward.x * outward * bend, (side < 0 ? 3.4f : 4.6f) * bend);
+        }
     }
 
     /** The drawn road a rail of the tile is set into: its ground's road, or on its deck the deck's road. */
@@ -432,11 +500,12 @@ final class BoardRail {
         builder.begin(new VertexAttributes(attributes), GL20.GL_TRIANGLES);
         for (int index = 0; index < layout.paths().size(); index++) {
             var path = layout.paths().get(index);
+            var damage = Damage.of(layout, path);
             if (layout.kind() == RailRoute.Kind.MAGLEV) {
-                beam(builder, layout, path, 2, 0, 2.4f, new Color(.59f, .58f, .53f, 1));
-                beam(builder, layout, path, .7f, 2.4f, 4, new Color(.38f, .43f, .46f, 1));
+                beam(builder, layout, path, damage, 2, 0, 2.4f, new Color(.59f, .58f, .53f, 1));
+                beam(builder, layout, path, damage, .7f, 2.4f, 4, new Color(.38f, .43f, .46f, 1));
             } else {
-                track(builder, path, layout.streets().get(index));
+                track(builder, path, layout.streets().get(index), damage);
             }
         }
         String id = layout.kind() == RailRoute.Kind.MAGLEV ? "maglev" : "rail";
@@ -479,16 +548,22 @@ final class BoardRail {
         return BoardBridge.shape(BoardScene.Surface.CONCRETE, level, faces);
     }
 
-    private static void beam(MeshBuilder mesh, Layout layout, List<Vector3> path, float halfWidth, float low, float high, Color color) {
-        mesh.setColor(color);
+    private static void beam(MeshBuilder mesh, Layout layout, List<Vector3> path, Damage damage,
+          float halfWidth, float low, float high, Color color) {
+        var drawn = high > 2.4f && (damage.first() != null || damage.last() != null)
+              ? path.stream().map(p -> damage.torn(p, new Vector3(p), 1)).toList() : path;
         Vector3[] previous = null;
         Vector3[] previousNormals = null;
+        Color previousColor = null;
         for (int i = 0; i < path.size(); i++) {
-            Vector3 p = path.get(i);
-            Vector3 tangent = new Vector3(path.get(Math.min(i + 1, path.size() - 1)))
-                  .sub(path.get(Math.max(0, i - 1)));
+            Vector3 p = drawn.get(i);
+            float burn = damage.amount(path.get(i));
+            Color shade = scorched(color, burn, .8f);
+            mesh.setColor(shade);
+            Vector3 tangent = new Vector3(drawn.get(Math.min(i + 1, path.size() - 1)))
+                  .sub(drawn.get(Math.max(0, i - 1)));
             // Endpoint sections stay square to the shared edge; their corners then match exactly on both sides.
-            if (i == 0 || i == path.size() - 1) {
+            if (burn == 0 && (i == 0 || i == path.size() - 1)) {
                 for (var end : layout.ends()) {
                     if (p.x == end.x() && p.y == end.y()) {
                         tangent.set(p.x, p.y, end.slope() * horizontalLength(p));
@@ -508,17 +583,19 @@ final class BoardRail {
                   new Vector3(p).add(side).add(0, 0, high), new Vector3(p).sub(side).add(0, 0, high) };
             if (previous == null) { quad(mesh, ring[3], ring[2], ring[1], ring[0]); }
             else {
+                mesh.setColor(null);
                 for (int edge = 0; edge < 4; edge++) {
                     int next = (edge + 1) % 4;
                     // Smooth along the rail while retaining the rectangular profile's sharp edges.
-                    mesh.rect(vertex(previous[edge], previousNormals[edge]),
-                          vertex(previous[next], previousNormals[edge]),
-                          vertex(ring[next], normals[edge]), vertex(ring[edge], normals[edge]));
+                    mesh.rect(vertex(previous[edge], previousNormals[edge], previousColor),
+                          vertex(previous[next], previousNormals[edge], previousColor),
+                          vertex(ring[next], normals[edge], shade), vertex(ring[edge], normals[edge], shade));
                 }
             }
-            if (i == path.size() - 1) { quad(mesh, ring[0], ring[1], ring[2], ring[3]); }
+            if (i == path.size() - 1) { mesh.setColor(shade); quad(mesh, ring[0], ring[1], ring[2], ring[3]); }
             previous = ring;
             previousNormals = normals;
+            previousColor = shade;
         }
     }
 
@@ -527,7 +604,7 @@ final class BoardRail {
      * panels and flange grooves sit below the exposed heads at {@link #STREET_TOP}. Sleepers fit whole pitches between
      * the line's ends, as road dashes fit between borders ({@link BoardRoad#fit}), so they continue evenly across every border.
      */
-    private static void track(MeshBuilder mesh, List<Vector3> path, List<Boolean> street) {
+    private static void track(MeshBuilder mesh, List<Vector3> path, List<Boolean> street, Damage damage) {
         int count = path.size();
         Vector3[] across = new Vector3[count];
         float[] along = new float[count];
@@ -541,9 +618,11 @@ final class BoardRail {
               { BALLAST_FOOT, BALLAST_SINK } };
         for (int i = 1; i < count; i++) {
             if (street.get(i - 1) || street.get(i)) { continue; }
+            Color from = scorched(BALLAST, damage.amount(path.get(i - 1)), .85f);
+            Color to = scorched(BALLAST, damage.amount(path.get(i)), .85f);
             for (int strip = 0; strip < 3; strip++) {
                 quad(mesh, at(path, across, i - 1, bed[strip]), at(path, across, i, bed[strip]),
-                      at(path, across, i, bed[strip + 1]), at(path, across, i - 1, bed[strip + 1]));
+                      at(path, across, i, bed[strip + 1]), at(path, across, i - 1, bed[strip + 1]), from, to);
             }
         }
         // A level crossing keeps the road carrier and inserts dark panels along the actual track. The lower
@@ -566,11 +645,27 @@ final class BoardRail {
                       { offset - RAIL_HALF, topA, topB }, { offset + RAIL_HALF, topA, topB },
                       { offset + RAIL_HALF, topA - RAIL_HEIGHT, topB - RAIL_HEIGHT } };
                 for (int face = 0; face < 3; face++) {
-                    mesh.setColor(face == 1 ? RAIL_HEAD : RAIL_SIDE);
+                    Color base = face == 1 ? RAIL_HEAD : RAIL_SIDE;
+                    Color from = scorched(base, damage.amount(path.get(i - 1)), .75f);
+                    Color to = scorched(base, damage.amount(path.get(i)), .75f);
                     float[] a = rail[face], b = rail[face + 1];
-                    quad(mesh, at(path, across, i - 1, a[0], a[1]), at(path, across, i, a[0], a[2]),
-                          at(path, across, i, b[0], b[2]), at(path, across, i - 1, b[0], b[1]));
+                    quad(mesh, damage.torn(path.get(i - 1), at(path, across, i - 1, a[0], a[1]), offset),
+                          damage.torn(path.get(i), at(path, across, i, a[0], a[2]), offset),
+                          damage.torn(path.get(i), at(path, across, i, b[0], b[2]), offset),
+                          damage.torn(path.get(i - 1), at(path, across, i - 1, b[0], b[1]), offset), from, to);
                 }
+            }
+            for (int i : new int[] { 0, count - 1 }) {
+                if (i == 0 ? damage.first() == null : damage.last() == null) { continue; }
+                float top = street.get(i) ? STREET_TOP : RailRoute.RAIL_TOP;
+                Vector3[] corners = new Vector3[4];
+                for (int j = 0; j < 4; j++) {
+                    corners[j] = damage.torn(path.get(i), at(path, across, i,
+                          offset + (j < 2 ? -RAIL_HALF : RAIL_HALF), top - (j == 0 || j == 3 ? RAIL_HEIGHT : 0)), offset);
+                }
+                mesh.setColor(.12f, .1f, .09f, 1);
+                if (i == 0) { quad(mesh, corners[0], corners[1], corners[2], corners[3]); }
+                else { quad(mesh, corners[3], corners[2], corners[1], corners[0]); }
             }
         }
         mesh.setColor(SLEEPER);
@@ -582,6 +677,7 @@ final class BoardRail {
             float t = (position - along[segment - 1]) / Math.max(1e-6f, along[segment] - along[segment - 1]);
             if (street.get(segment - 1) || street.get(segment)) { continue; }
             Vector3 centre = new Vector3(path.get(segment - 1)).lerp(path.get(segment), t);
+            if (damage.amount(centre) > .15f) { continue; }
             Vector3 side = new Vector3(across[segment - 1]).lerp(across[segment], t).nor();
             sleeper(mesh, centre, side);
         }
@@ -620,8 +716,20 @@ final class BoardRail {
         return at(path, across, i, profile[0], profile[1]);
     }
 
-    private static MeshPartBuilder.VertexInfo vertex(Vector3 point, Vector3 normal) {
-        return new MeshPartBuilder.VertexInfo().setPos(point).setNor(normal).setCol(Color.WHITE);
+    private static Color scorched(Color color, float damage, float strength) {
+        float shade = 1 - strength * damage;
+        return new Color(color).mul(shade, shade, shade, 1);
+    }
+
+    private static MeshPartBuilder.VertexInfo vertex(Vector3 point, Vector3 normal, Color color) {
+        return new MeshPartBuilder.VertexInfo().setPos(point).setNor(normal).setCol(color);
+    }
+
+    /** Endpoint colours interpolate across each face and agree at shared rings, so the scorch has no segment bands. */
+    private static void quad(MeshBuilder mesh, Vector3 a, Vector3 b, Vector3 c, Vector3 d, Color from, Color to) {
+        Vector3 normal = new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).nor();
+        mesh.setColor(null);
+        mesh.rect(vertex(a, normal, from), vertex(b, normal, to), vertex(c, normal, to), vertex(d, normal, from));
     }
 
     private static void quad(MeshBuilder mesh, Vector3 a, Vector3 b, Vector3 c, Vector3 d) {

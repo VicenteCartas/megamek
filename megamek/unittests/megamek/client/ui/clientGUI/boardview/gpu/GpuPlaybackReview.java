@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -13,11 +12,9 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
-import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
@@ -50,7 +47,7 @@ final class GpuPlaybackReview {
         var model = library.get(selection, atlas.getId());
         var unit = unit(atlas, selection);
         try (var renderer = new ReviewRenderer()) {
-            movementFrames(renderer, model, unit, "atlas-walk", false);
+            movementFrames(renderer, model, unit, false);
             postureFrames(renderer, library, tileset, atlas);
             attacks(renderer, library, model, unit);
             var members = new ArrayList<Entity>();
@@ -86,7 +83,7 @@ final class GpuPlaybackReview {
             var selected = UnitModelSelection.capture(infantry, -1, false, tileset);
             var transport = library.get(selected, infantry.getId());
             measureVehicles(transport, unit(infantry, selected));
-            movementFrames(renderer, transport, unit(infantry, selected), "infantry-transports", true);
+            movementFrames(renderer, transport, unit(infantry, selected), true);
             GpuInfantryPlaybackReview.verify(library, tileset);
             withFamilyScale(UnitFamilyScale.INFANTRY, () -> {
                 measureVehicles(transport, unit(infantry, selected));
@@ -137,7 +134,7 @@ final class GpuPlaybackReview {
                     motion.advance(frame == 0 ? 0 : UnitMotion.POSTURE_SECONDS / 8, 1);
                     animator.apply(model, instance, unit, motion.sample(), 0, 0, false, 0);
                     model.place(instance, renderer.camera, motion.position(), 0, unit);
-                    renderer.frame(List.of(instance), motion.position(), null, "posture-" + cause.name().toLowerCase(java.util.Locale.ROOT), frame);
+                    renderer.frame(List.of(instance), motion.position(), null);
                 }
                 assertEquals(cause, motion.sample().proneCause());
                 assertFalse(motion.isMoving());
@@ -181,7 +178,7 @@ final class GpuPlaybackReview {
                     mixedLanding |= sample.progress() > .5f;
                 }
                 renderer.frame(List.of(instance), new Vector3(motion.position().x, motion.position().y, 0),
-                      null, jets, "battle-armor-staggered-jump", frame);
+                      null, jets);
             }
             assertTrue(mixedTakeoff && mixedLanding, "The native reel must include staggered departures and arrivals");
             assertEquals(0, jets.emitterCount());
@@ -349,9 +346,9 @@ final class GpuPlaybackReview {
                     assertTrue(knee.y < projected.y, mode + " frame " + frame + ": reverse knee crossed its leg axis");
                 }
                 renderer.viewOffset.set(originalView);
-                renderer.frame(List.of(instance), motion.position(), null, jets, name + "-" + mode.name(), frame);
+                renderer.frame(List.of(instance), motion.position(), null, jets);
                 renderer.viewOffset.set(180, 0, 43);
-                renderer.frame(List.of(instance), motion.position(), null, jets, name + "-" + mode.name() + "-side", frame);
+                renderer.frame(List.of(instance), motion.position(), null, jets);
             }
         } finally {
             renderer.viewOffset.set(originalView);
@@ -359,7 +356,7 @@ final class GpuPlaybackReview {
         }
     }
 
-    private static void movementFrames(ReviewRenderer renderer, GpuUnitModel model, BoardScene.Unit unit, String name, boolean transports) {
+    private static void movementFrames(ReviewRenderer renderer, GpuUnitModel model, BoardScene.Unit unit, boolean transports) {
         var corner = unit.location().coords().translated(4, 2);
         var start = new BoardScene.Waypoint(corner.translated(3, 3), 0, 0);
         var motion = new UnitMotion(start);
@@ -373,7 +370,7 @@ final class GpuPlaybackReview {
             motion.advance(frame == 0 ? 0 : 1.0 / 24, UnitMotion.Speed.NORMAL.rate);
             animator.apply(model, instance, unit, motion.sample(), frame / 48f, 1f / 48, false, 0);
             model.place(instance, renderer.camera, motion.position(), transports ? 0 : motion.facing(), unit);
-            renderer.frame(List.of(instance), motion.position(), null, name, frame);
+            renderer.frame(List.of(instance), motion.position(), null);
         }
     }
 
@@ -405,8 +402,7 @@ final class GpuPlaybackReview {
                     model.place(attacker, renderer.camera, origin, 0, unit);
                     animator.aim(model, unit, attack, UnitAttack.center(target, victim.location(), new Vector3()), target);
                     effects.update(attack, library, Map.of(unit.id() + ":-1", attacker, victim.id() + ":-1", target));
-                    renderer.frame(List.of(attacker, target), origin.cpy().add(0, BoardGeometry.HEIGHT * .4f, 0), effects,
-                          "attack-" + kind.name().toLowerCase(java.util.Locale.ROOT), frame);
+                    renderer.frame(List.of(attacker, target), origin.cpy().add(0, BoardGeometry.HEIGHT * .4f, 0), effects);
                 }
                 if (kind == ResolvedAttack.Kind.SHOT) {
                     attack.seconds = UnitAttack.ANTICIPATION_SECONDS;
@@ -456,11 +452,11 @@ final class GpuPlaybackReview {
             light.add(new DirectionalLight().set(.8f, .8f, .8f, -.3f, -.5f, -1));
         }
 
-        void frame(List<ModelInstance> models, Vector3 origin, GpuAttackEffects effects, String name, int frame) {
-            frame(models, origin, effects, null, name, frame);
+        void frame(List<ModelInstance> models, Vector3 origin, GpuAttackEffects effects) {
+            frame(models, origin, effects, null);
         }
 
-        void frame(List<ModelInstance> models, Vector3 origin, GpuAttackEffects effects, GpuJumpJets jets, String name, int frame) {
+        void frame(List<ModelInstance> models, Vector3 origin, GpuAttackEffects effects, GpuJumpJets jets) {
             begin();
             camera.position.set(origin);
             if (topView) { camera.position.add(0, 0, 260); }
@@ -490,13 +486,26 @@ final class GpuPlaybackReview {
             if (effects != null) { effects.render(camera); }
             if (jets != null) { jets.render(camera); }
             output.display();
-            File output = new File(System.getProperty("megamek.gpu.screenshots"), "playback-" + name);
-            assertTrue(output.isDirectory() || output.mkdirs());
-            var pixels = Pixmap.createFromFrameBuffer(0, 0, 640, 480);
-            PixmapIO.writePNG(new FileHandle(new File(output, String.format("%03d.png", frame))), pixels, -1, true);
-            pixels.dispose();
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-            this.output.pixels().end();
+            output.pixels().end();
+        }
+
+        /** How many pixels of the frame last drawn show an effect's light: a PPC's blue, or a laser's red. */
+        int effectPixels(boolean blue) {
+            output.pixels().begin();
+            var pixels = Pixmap.createFromFrameBuffer(0, 0, 640, 480);
+            output.pixels().end();
+            int count = 0;
+            for (int y = 0; y < pixels.getHeight(); y++) {
+                for (int x = 0; x < pixels.getWidth(); x++) {
+                    int color = pixels.getPixel(x, y);
+                    int red = color >>> 24, green = color >> 16 & 255, blueLevel = color >> 8 & 255;
+                    if (blue ? blueLevel > 170 && blueLevel > red * 1.15f && green > red * 1.1f
+                          : red > 180 && red > green * 1.5f && red > blueLevel * 1.5f) { count++; }
+                }
+            }
+            pixels.dispose();
+            return count;
         }
 
         void begin() {

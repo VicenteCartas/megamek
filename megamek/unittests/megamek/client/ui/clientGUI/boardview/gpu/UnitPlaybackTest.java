@@ -24,17 +24,42 @@ import org.junit.jupiter.api.Test;
 
 class UnitPlaybackTest {
     @Test
+    void terrainPreparationStaysHiddenWhilePausedAndEndsOnSkipOrClear() {
+        var attacker = UnitPlaybackFixture.unit(1, 0);
+        var victim = UnitPlaybackFixture.unit(2, 5);
+        var before = UnitPlaybackFixture.scene(attacker, victim);
+        var after = before.withTiles(List.of(BoardScenes.tile(new Coords(0, 0), BoardScene.Biome.NONE, -1)));
+        for (boolean skip : List.of(false, true)) {
+            var playback = new UnitPlayback();
+            playback.accept(List.of(new BoardScene.SceneUpdate(before),
+                  UnitPlaybackFixture.attack(attacker, victim, ResolvedAttack.Kind.SHOT, true),
+                  new BoardScene.SceneUpdate(after)), after, ignored -> false);
+            playback.advance(0, UnitMotion.Speed.NORMAL);
+            assertSame(after, playback.preparingTerrain());
+            assertEquals(before.tiles(), playback.present(after).tiles());
+            playback.togglePaused();
+            playback.advance(100, UnitMotion.Speed.NORMAL);
+            assertSame(after, playback.preparingTerrain());
+            assertEquals(before.tiles(), playback.present(after).tiles());
+            if (skip) { playback.finish(); } else { playback.clear(); }
+            assertNull(playback.preparingTerrain());
+            if (skip) { assertEquals(after.tiles(), playback.present(after).tiles()); }
+        }
+    }
+
+    @Test
     void scheduledStrikeReleasesItsFinalTerrainAtFlashBeforeFollowingCasualties() {
         var victim = UnitPlaybackFixture.unit(2, 0);
         var before = UnitPlaybackFixture.scene(victim);
-        var after = new BoardScene(0, 1, 1, List.of(new BoardScene.Tile(new Coords(0, 0), -3, -1,
-              false, 0, null, null, List.of(), List.of())), List.of(), List.of(), -1, "FIRING", List.of());
+        var after = new BoardScene(0, 1, 1, List.of(BoardScenes.newTile(new Coords(0, 0), -3, -1,
+              false, 0, null, List.of(), List.of())), List.of(), List.of(), -1, "FIRING", List.of());
         var strike = new megamek.common.NuclearDetonation(UUID.randomUUID(), 0, new Coords(0, 0), 0, 10000, 109, 184, 3);
         var playback = new UnitPlayback();
         playback.accept(List.of(new BoardScene.SceneUpdate(before), new BoardScene.Detonation(strike),
               new BoardScene.SceneUpdate(after), UnitPlaybackFixture.attack(victim, victim, ResolvedAttack.Kind.DEATH, true)), after, ignored -> false);
         playback.advance(0, UnitMotion.Speed.NORMAL);
         assertNull(playback.attack(), "A scheduled strike has no invented attacker");
+        assertSame(after, playback.preparingTerrain(), "Resolved terrain can prepare before the flash");
         assertEquals(0, playback.present(after).tiles().getFirst().elevation());
         assertTrue(playback.takeDetonations().isEmpty());
         playback.advance((UnitPlayback.DETONATION_CONTACT_SECONDS - .001) / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
@@ -42,6 +67,7 @@ class UnitPlaybackTest {
         playback.advance(.001 / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
         assertEquals(List.of(strike), playback.takeDetonations().stream().map(BoardScene.Detonation::result).toList());
         assertEquals(-3, playback.present(after).tiles().getFirst().elevation());
+        assertNull(playback.preparingTerrain(), "At impact the checkpoint becomes ordinary visible terrain");
         assertTrue(playback.present(after).units().contains(victim), "The queued casualty retains its observed model");
         playback.advance(.1, UnitMotion.Speed.NORMAL);
         assertTrue(playback.takeDetonations().isEmpty(), "The flash edge is delivered once");
@@ -105,6 +131,42 @@ class UnitPlaybackTest {
     private static BoardScene.Detonation detonation(megamek.common.NuclearDetonation result,
           megamek.common.NuclearDetonation cause) {
         return new BoardScene.Detonation(result, List.of(), List.of(), cause);
+    }
+
+    /**
+     * The units a strike destroys die with it, each as its front reaches the unit, while what it brings down falls: not
+     * one after another once it has played. Each stays shown, as it was, until its death has played.
+     */
+    @Test
+    void aStrikesCasualtiesDieAsItsFrontReachesThem() {
+        var strike = megamek.common.NuclearDetonation.explosion(UUID.randomUUID(), 0, new Coords(0, 6), 0, 80, 8);
+        var near = UnitPlaybackFixture.unit(1, 7);
+        var far = UnitPlaybackFixture.unit(2, 10);
+        var after = UnitPlaybackFixture.scene();
+        var playback = new UnitPlayback();
+        playback.accept(List.of(new BoardScene.SceneUpdate(UnitPlaybackFixture.scene(near, far)), detonation(strike, null),
+              new BoardScene.SceneUpdate(after), UnitPlaybackFixture.attack(near, near, ResolvedAttack.Kind.DEATH, true),
+              UnitPlaybackFixture.attack(far, far, ResolvedAttack.Kind.DEATH, true)), after, ignored -> false);
+        double step = 1 / 480.0, clock = 0, flash = -1;
+        java.util.Map<Integer, Double> died = new java.util.HashMap<>();
+        while (playback.busy() && clock < 20) {
+            playback.advance(step / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
+            clock += step;
+            if (flash < 0 && !playback.takeDetonations().isEmpty()) { flash = clock; }
+            for (var attack : playback.attacks()) {
+                if (!attack.death()) { continue; }
+                if (attack.seconds >= 0) { died.putIfAbsent(attack.event.entityId(), clock); }
+                if (attack.seconds < attack.duration) {
+                    assertTrue(playback.present(after).units().stream().anyMatch(unit -> unit.id() == attack.event.entityId()),
+                          "Unit " + attack.event.entityId() + " shows until its death has played");
+                }
+            }
+        }
+        assertFalse(playback.busy());
+        assertEquals(UnitPlayback.arrival(strike, near.location().coords()), died.get(1) - flash, 2 * step);
+        assertEquals(UnitPlayback.arrival(strike, far.location().coords()), died.get(2) - flash, 2 * step);
+        assertTrue(died.get(2) - flash < UnitPlayback.duration(strike), "While the strike still plays");
+        assertTrue(playback.present(after).units().isEmpty());
     }
 
     @Test
@@ -375,8 +437,8 @@ class UnitPlaybackTest {
         // death from above took the next hex in its order, off the board; a charge shoves only along its facing.
         var attacker = UnitPlaybackFixture.unit(1, 2);
         var target = UnitPlaybackFixture.unit(2, 1);
-        var tiles = List.of(new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, null, null, List.of(), List.of()),
-              new BoardScene.Tile(new Coords(0, 1), 0, -1, false, 0, null, null, List.of(), List.of()));
+        var tiles = List.of(BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, null, List.of(), List.of()),
+              BoardScenes.newTile(new Coords(0, 1), 0, -1, false, 0, null, List.of(), List.of()));
         var before = new BoardScene(0, 1, 2, tiles, List.of(attacker, target), List.of(), -1, "PHYSICAL", List.of());
         var after = before.withUnits(List.of(attacker));
         var speed = UnitMotion.Speed.NORMAL;

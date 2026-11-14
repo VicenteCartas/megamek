@@ -78,10 +78,6 @@ final class GpuBoardOverlay implements Disposable {
     private static final Color GHOST = new Color(.25f, .72f, .95f, 1);
     private static final Color GHOST_GLOW = new Color(.15f, .43f, .57f, 1);
     private static final float GHOST_OPACITY = .75f;
-    /** A destroyed unit's ghost ({@link #renderGhosts}): pale and fainter, not the plan's cyan. */
-    private static final Color DEAD = new Color(.78f, .8f, .84f, 1);
-    private static final Color DEAD_GLOW = new Color(.25f, .26f, .28f, 1);
-    private static final float DEAD_OPACITY = .3f;
     /** The marks the board hides show at this opacity (occluded selection outlines). */
     private static final float HIDDEN_OPACITY = .5f;
     // overlay.js:20-31 and 56-57: the bands of a contact, a wreck, another target and the hovered unit.
@@ -109,7 +105,7 @@ final class GpuBoardOverlay implements Disposable {
           (camera, renderables) -> { });
     /** Draws the marks every frame, GpuBattleView draws its selection bands. */
     private final ShapeRenderer shapes;
-    private final BoardSurface.Cache surfaces = new BoardSurface.Cache();
+    private final BoardSurface.Cache surfaces;
     /** Light for the 3D ghost: enough ambient to keep it bright, one light from above to show its shape. */
     private final Environment ghostLight = new Environment();
     private final GpuLinearOverlay ghostBlend = new GpuLinearOverlay();
@@ -174,6 +170,12 @@ final class GpuBoardOverlay implements Disposable {
 
     /** The marks draw with the view's shape program, which their renderer does not own. */
     GpuBoardOverlay(ShaderProgram program) {
+        this(program, new BoardSurface.Cache());
+    }
+
+    /** The live view shares its installed ground with units and overlays; standalone previews may supply their own. */
+    GpuBoardOverlay(ShaderProgram program, BoardSurface.Cache surfaces) {
+        this.surfaces = surfaces;
         shapes = new ShapeRenderer(5000, program);
         ghostLight.set(new ColorAttribute(ColorAttribute.AmbientLight, .6f, .6f, .6f, 1));
         ghostLight.add(new DirectionalLight().set(.5f, .5f, .5f, -.4f, .3f, -1));
@@ -183,6 +185,9 @@ final class GpuBoardOverlay implements Disposable {
     void columns(boolean value) {
         if (columns != value) { columns = value; surfaces.columns(value); revision = -1; }
     }
+
+    /** Draped marks follow the installed geometry when a crater or a detail level finishes preparing. */
+    void terrainChanged() { revision = -1; }
 
     /**
      * Shows the frame's overlay. The marks are worked out again only when what they show changed: the scene's units,
@@ -539,27 +544,6 @@ final class GpuBoardOverlay implements Disposable {
         try {
             ghostBatch.begin(camera);
             ghostBatch.render(ghost, ghostLight);
-            ghostBatch.end();
-        } finally { ghostBlend.end(); }
-    }
-
-    /**
-     * Destroyed units in the playback of what they still fired or took (GpuBattleView#ghost): pale copies of the
-     * instances the view placed for them, each at its share of {@link #DEAD_OPACITY}, drawn as the route's ghost is.
-     */
-    void renderGhosts(Camera camera, Map<ModelInstance, Float> shown) {
-        if (shown.isEmpty()) { return; }
-        ghostBlend.begin();
-        try {
-            ghostBatch.begin(camera);
-            shown.forEach((source, opacity) -> {
-                var ghost = new ModelInstance(source);
-                for (Material material : ghost.materials) {
-                    ghostly(material, DEAD, DEAD_GLOW);
-                    ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity = DEAD_OPACITY * opacity;
-                }
-                ghostBatch.render(ghost, ghostLight);
-            });
             ghostBatch.end();
         } finally { ghostBlend.end(); }
     }
@@ -1092,7 +1076,7 @@ final class GpuBoardOverlay implements Disposable {
         float ground = tile.frozen() ? BoardGeometry.surfaceZ(tile)
               : BoardGeometry.contains(tile.coords(), point.x, point.y)
               ? UnitLandingSupports.surface(scene, point.x, point.y, surfaces)
-              : surfaces.get(scene, tile).height(point.x, point.y);
+              : surfaces.height(scene, tile, point.x, point.y);
         if (tile.liquid().present()) {
             ground = Math.max(ground, BoardGeometry.waterZ(tile));
         }
@@ -1139,7 +1123,6 @@ final class GpuBoardOverlay implements Disposable {
         ghost = null;
         ghostSource = null;
         pulse.dispose();
-        surfaces.clear();
         batch.dispose();
         ghostBatch.dispose();
         ghostBlend.dispose();

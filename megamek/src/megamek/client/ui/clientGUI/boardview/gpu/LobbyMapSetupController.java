@@ -162,6 +162,11 @@ final class LobbyMapSetupController {
         });
     }
 
+    /** EDT: the board the inspection shows, or null before the first one. */
+    @Nullable Board inspectedBoard() {
+        return inspectionGame == null ? null : inspectionGame.getBoard();
+    }
+
     private void inspectionConditions() {
         inspectionGame.setPlanetaryConditions(new PlanetaryConditions(game.get().getPlanetaryConditions()));
         // LOS comparisons temporarily change rules: the inspection must own those options, too.

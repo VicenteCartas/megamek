@@ -260,9 +260,9 @@ class GpuGroundWeatherSmokeTest {
         camera.setIsometric(false);
         atmosphere.setOptions(new GpuAtmosphere.Options(0, false, 0.5f, 1, 0, 0, 0));
         BoardScene base = scene(0, -1);
-        var tiles = base.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
+        var tiles = base.tiles().stream().map(tile -> BoardScenes.newTile(tile.coords(),
               tile.coords().getX() >= 3 && tile.coords().getX() <= 5 ? 8 : 0, -1, false, 0,
-              tile.surface(), null, List.of(), List.of())).toList();
+              tile.surface(), List.of(), List.of())).toList();
         BoardScene ridge = new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());
         terrain.update(ridge);
         camera.fit(ridge);
@@ -315,7 +315,7 @@ class GpuGroundWeatherSmokeTest {
         var tiles = scene(0, -1).tiles().stream().map(tile -> {
             Coords at = tile.coords();
             boolean basin = at.getX() >= 3 && at.getX() <= 5 && at.getY() >= 3 && at.getY() <= 5;
-            return new BoardScene.Tile(at, basin ? -4 : 0, -1, false, 0, tile.surface(), null, List.of(), List.of());
+            return BoardScenes.newTile(at, basin ? -4 : 0, -1, false, 0, tile.surface(), List.of(), List.of());
         }).toList();
         var basin = new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());
         terrain.update(basin);
@@ -338,9 +338,9 @@ class GpuGroundWeatherSmokeTest {
                 try {
                     // Hold terrain and camera fixed while moving the weather snapshot across the 24/32 border cutoff.
                     for (int negativeBorder : new int[] { 9, 8, 7 }) {
-                        var weatherTiles = tiles.stream().map(tile -> new BoardScene.Tile(tile.coords(),
+                        var weatherTiles = tiles.stream().map(tile -> BoardScenes.newTile(tile.coords(),
                               tile.coords().getY() == 0 && tile.coords().getX() < negativeBorder ? -4 : tile.elevation(),
-                              -1, false, 0, tile.surface(), null, List.of(), List.of())).toList();
+                              -1, false, 0, tile.surface(), List.of(), List.of())).toList();
                         var weather = new BoardScene(0, 9, 9, weatherTiles, List.of(), List.of(), -1, "", List.of());
                         Pixmap dusty = frame(atmosphere, terrain, camera, weather, settings, 0);
                         try {
@@ -368,8 +368,8 @@ class GpuGroundWeatherSmokeTest {
         var wind = new BoardAtmosphere.Effects(0, 0, 0, 0, 0, 0.7f, 90);
         for (String texture : List.of("hq_boring/sand_0.png", "desert/beige_plains_0.gif")) {
             var pixels = new BoardScene.Pixels(ImageIO.read(new File("data/images/hexes", texture)));
-            var tiles = original.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), 0, -1, false, 0,
-                  BoardScene.Surface.SAND, null, List.of(), List.of())).toList();
+            var tiles = original.tiles().stream().map(tile -> BoardScenes.newTile(tile.coords(), 0, -1, false, 0,
+                  BoardScene.Surface.SAND, List.of(), List.of())).toList();
             BoardScene desert = new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());
             terrain.update(desert);
             for (boolean tilted : new boolean[] { false, true }) {
@@ -495,8 +495,8 @@ class GpuGroundWeatherSmokeTest {
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < 9; x++) {
             for (int y = 0; y < 9; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, waterDepth, false, 0,
-                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), level, waterDepth, false, 0,
+                      BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());

@@ -966,9 +966,9 @@ class GpuBridgeSmokeTest {
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
         return BoardScenes.scene(coords -> {
             if (coords.equals(CENTER)) {
-                return new BoardScene.Tile(coords, -2, 1, false, 0, BoardScene.Surface.GRASS, null, null,
+                return BoardScenes.newTile(coords, -2, 1, false, 0, BoardScene.Surface.GRASS,
                       BoardFeatures.capture(bridge, coords, Map.of()), List.of(),
-                      BoardLiquid.WATER, null, true, BoardRoad.Kind.NONE);
+                      BoardLiquid.WATER, null, BoardRoad.Kind.NONE);
             }
             int road = 0;
             for (int d = 0; d < 6; d++) {

@@ -42,7 +42,6 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 
 import megamek.client.ui.util.ImageCache;
 import megamek.common.Configuration;
@@ -74,7 +73,6 @@ public class HexTileset implements BoardListener, AutoCloseable {
     /** The image height of a hex image. */
     public static final int HEX_H = HexTile.HEIGHT;
 
-    private final Map<Image, Boolean> blankImages = new IdentityHashMap<>();
     private final File imageRoot;
     /** Which entries and files each hex selects; shared with the 3D board for its own tileset. */
     private final TilesetMatcher matcher;
@@ -85,8 +83,7 @@ public class HexTileset implements BoardListener, AutoCloseable {
     private IGame observedGame;
     private GameListener gameListener;
     private final Set<Board> observedBoards = new java.util.HashSet<>();
-    private record ImageSource(String filename, Hex terrain) { }
-    private final Map<Image, ImageSource> imageSources = new IdentityHashMap<>();
+    private final Map<Image, String> imageSources = new IdentityHashMap<>();
     private ImageCache<Hex, Image> basesCache = new ImageCache<>();
     private ImageCache<Hex, List<Image>> superimposedCache = new ImageCache<>();
     private ImageCache<Hex, List<Image>> orthographicCache = new ImageCache<>();
@@ -215,7 +212,7 @@ public class HexTileset implements BoardListener, AutoCloseable {
             File imgFile = new MegaMekFile(imageRoot, filename).getFile();
             Image image = ImageUtil.loadImageFromFile(imgFile.toString());
             images.add(image);
-            imageSources.put(image, new ImageSource(filename, entry.hex()));
+            imageSources.put(image, filename);
         }
         return images;
     }
@@ -256,32 +253,6 @@ public class HexTileset implements BoardListener, AutoCloseable {
         return o;
     }
 
-    /** Terrain consumed by an actually transparent selected overlay, never an assumed fluff number. */
-    public synchronized Set<Integer> blankTerrainTypes(Hex hex) {
-        Set<Integer> blank = new TreeSet<>(), visible = new TreeSet<>();
-        List<Image> layers = new ArrayList<>(getSupers(hex));
-        layers.addAll(getOrthographic(hex));
-        layers.add(getBase(hex));
-        for (Image layer : layers) {
-            ImageSource source = imageSources.get(layer);
-            if (source == null) { continue; }
-            boolean empty = blankImages.computeIfAbsent(layer, image -> {
-                var pixels = ImageUtil.convertToBufferedImage(image);
-                for (int y = 0; y < pixels.getHeight(); y++) {
-                    for (int x = 0; x < pixels.getWidth(); x++) {
-                        if ((pixels.getRGB(x, y) >>> 24) != 0) { return false; }
-                    }
-                }
-                return true;
-            });
-            for (int type : source.terrain().getTerrainTypes()) {
-                if (hex.containsTerrain(type)) { (empty ? blank : visible).add(type); }
-            }
-        }
-        blank.removeAll(visible);
-        return Set.copyOf(blank);
-    }
-
     /** Reads the tileset file {@code filename} and its includes ({@link TilesetMatcher#load}). */
     public void loadFromFile(String filename) throws IOException {
         matcher.load(filename);
@@ -292,14 +263,7 @@ public class HexTileset implements BoardListener, AutoCloseable {
     }
 
     public synchronized String imageSource(Image image) {
-        ImageSource source = imageSources.get(image);
-        return source == null ? "" : source.filename();
-    }
-
-    /** Terrain described by the selected artwork, so coexisting structures retain their own model and height. */
-    public synchronized boolean imageHasTerrain(Image image, int terrain) {
-        ImageSource source = imageSources.get(image);
-        return source != null && source.terrain().containsTerrain(terrain);
+        return imageSources.getOrDefault(image, "");
     }
 
     @Override

@@ -165,8 +165,8 @@ class GpuForestBenchmarkSmokeTest {
                     }
                     features = BoardFeatures.capture(hex, coords, Map.of());
                 }
-                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, null, null, features,
-                      List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(coords, 0, -1, false, 0, family, features,
+                      List.of(), BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, SIZE, SIZE, tiles, List.of(), List.of(), -1, "", List.of());

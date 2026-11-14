@@ -229,8 +229,8 @@ class BoardFlowTest {
             for (int y = 0; y < height; y++) {
                 Coords coords = new Coords(x, y);
                 boolean wet = water.containsKey(coords);
-                tiles.add(new BoardScene.Tile(coords, water.getOrDefault(coords, 0), wet ? 1 : -1, frozen.contains(coords),
-                      0, BoardScene.Surface.ROCK, null, null, List.of(), List.of(),
+                tiles.add(BoardScenes.newTile(coords, water.getOrDefault(coords, 0), wet ? 1 : -1, frozen.contains(coords),
+                      0, BoardScene.Surface.ROCK, List.of(), List.of(),
                       wet ? types.getOrDefault(coords, BoardLiquid.WATER) : BoardLiquid.NONE));
             }
         }

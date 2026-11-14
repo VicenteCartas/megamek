@@ -49,8 +49,7 @@ class GpuRoofHoverSmokeTest {
             var features = coords.distance(CENTER) <= 1
                   ? List.of(new BoardScene.Feature(asset, 0, 0, 0, 1, coords.equals(CENTER) ? 5 : 4, 0,
                         BoardScene.FeatureKind.BUILDING)) : List.<BoardScene.Feature>of();
-            return new BoardScene.Tile(coords, 0, -1, false, 0, ground.surface(), null,
-                  null, features, List.of(), BoardLiquid.NONE, null, true);
+            return BoardScenes.newTile(coords, 0, -1, false, 0, ground.surface(), features, List.of(), BoardLiquid.NONE, null);
         });
         var terrain = new GpuTerrain();
         var view = new GpuBattleView(mock(BoardSource.class));

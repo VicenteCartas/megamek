@@ -665,7 +665,9 @@ void main() {
     materialUV += roadParallax(m, uv, roadGradient, face, dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
 #endif
     vec3 tint = roadColor.rgb;
-    if (m.mapped && (m.transition > .5 || m.transition < -1.5)) { tint = vec3(1.0); }
+    // Landing masks carry ordinary colour, including persistent soot at damaged ends; other special masks carry data.
+    bool landing = m.transition < -2.5 && m.transition > -4.5;
+    if (m.mapped && !landing && (m.transition > .5 || m.transition < -1.5)) { tint = vec3(1.0); }
 #ifdef roadMaskFlag
     // Ordinary masks repeat one authored tint at every texel, including transparent borders, so filtering cannot
     // change it. Their shared atlas also holds join coordinates and wheel directions, which must remain data.

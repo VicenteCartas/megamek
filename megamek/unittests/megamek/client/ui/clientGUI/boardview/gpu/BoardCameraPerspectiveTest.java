@@ -129,8 +129,8 @@ class BoardCameraPerspectiveTest {
                 var features = List.of(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, 4),
                       new BoardScene.Feature(object.asset(), 0, 0, 0, 2, 1, 0,
                             BoardScene.FeatureKind.PROP, 0, false, object));
-                var tile = new BoardScene.Tile(new Coords(0, 0), 5, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, features, List.of());
+                var tile = BoardScenes.newTile(new Coords(0, 0), 5, -1, false, 0,
+                      BoardScene.Surface.GRASS, features, List.of());
                 var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
                 camera.fit(scene);
                 float top = placement.mode().equals("absolute") ? 82 : 5 + 4 + 60 + 2;
@@ -351,8 +351,8 @@ class BoardCameraPerspectiveTest {
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 int elevation = base + (x == width / 2 && y == height / 2 ? raisedLevel : 0);
-                tiles.add(new BoardScene.Tile(new Coords(x, y), elevation, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), elevation, -1, false, 0,
+                      BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());

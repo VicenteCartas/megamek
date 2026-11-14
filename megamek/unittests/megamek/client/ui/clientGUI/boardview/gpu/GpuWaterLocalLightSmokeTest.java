@@ -222,8 +222,8 @@ class GpuWaterLocalLightSmokeTest {
                 boolean water = x >= 3 && x <= 7 && y >= 2 && y <= 6;
                 var liquid = water ? BoardLiquid.WATER
                       : lava.contains(at) ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.NONE;
-                tiles.add(new BoardScene.Tile(at, 0, water ? 2 : -1, false, 0, BoardScene.Surface.GRASS, null, null,
-                      List.of(), List.of(), liquid, null, true, BoardRoad.Kind.NONE,
+                tiles.add(BoardScenes.newTile(at, 0, water ? 2 : -1, false, 0, BoardScene.Surface.GRASS,
+                      List.of(), List.of(), liquid, null, BoardRoad.Kind.NONE,
                       fire.containsKey(at) ? new BoardFireSmoke(fire.get(at), 0) : BoardFireSmoke.NONE));
             }
         }

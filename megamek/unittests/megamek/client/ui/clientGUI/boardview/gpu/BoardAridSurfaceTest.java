@@ -32,7 +32,6 @@ class BoardAridSurfaceTest {
         var scene = BoardScenes.capture(board);
         var tile = scene.tile(at);
         boolean sand = hex.containsTerrain(Terrains.SAND);
-        assertTrue(tile.detailedGround(), "Native ground must replace old tile artwork for " + terrains);
         assertEquals(geology, tile.surface());
         assertTrue(sand ? tile.groundCover().sand() > .9f : tile.groundCover().sand() == 0);
         assertTrue(tile.groundCover().weight(geology) > 0, "The sand palette must retain its local substrate");
@@ -79,27 +78,4 @@ class BoardAridSurfaceTest {
         }
     }
 
-    @Test
-    void grassGrowsOnlyInExposedTurfPatchesAcrossSandyHexes() throws Exception {
-        var board = Board.createEmptyBoard(5, 5);
-        for (int x = 0; x < 5; x++) for (int y = 0; y < 5; y++) {
-            board.setHex(new Coords(x, y), new Hex(0, "sand:1", "grass"));
-        }
-        var scene = BoardScenes.capture(board);
-        int roots = 0;
-        float metre = BoardRelief.metres(1);
-        for (var at : List.of(new Coords(2, 2), new Coords(2, 3), new Coords(3, 2))) {
-            var tile = scene.tile(at);
-            var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-            var planted = GpuGroundCover.plant(scene, tile, surface, null);
-            assertEquals(planted, GpuGroundCover.plant(scene, tile, surface, null), "Rebuilding must not move the tufts");
-            for (int i = 0; i < planted.size; i += 4) {
-                float x = planted.items[i], y = planted.items[i + 1];
-                assertTrue(BoardSurfaceBlend.sandExposure(x / metre, y / metre) > .5f,
-                      "Every root needs an exposed turf window, not merely a SAND hex with grass underneath");
-                roots++;
-            }
-        }
-        assertTrue(roots > 100 && roots < 3000, "Sparse living patches without turning sand into a meadow: " + roots);
-    }
 }

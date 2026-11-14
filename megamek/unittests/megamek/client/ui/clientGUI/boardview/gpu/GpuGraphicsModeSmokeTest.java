@@ -109,7 +109,7 @@ class GpuGraphicsModeSmokeTest {
         assertFalse(terrain.columns());
         List<?> enhanced = (List<?>) get(terrain, "chunks");
         assertTrue(enhanced.stream().noneMatch(classic::contains), "The Classic chunks are retired");
-        assertTrue(enhanced.stream().anyMatch(chunk -> get(chunk, "waterField") != null), "The river has its field");
+        assertTrue(enhanced.stream().anyMatch(chunk -> get(get(chunk, "ground"), "waterField") != null), "The river has its field");
         assertTrue(enhanced.stream().anyMatch(chunk -> !((Map<?, ?>) get(get(chunk, "stand"), "trees")).isEmpty()),
               "The woods have their trees");
         assertTrue(enhanced.stream().anyMatch(chunk -> materials(chunk).stream().anyMatch(GpuTerrain::sculpted)),
@@ -186,10 +186,11 @@ class GpuGraphicsModeSmokeTest {
      */
     private static void verifyClassic(GpuTerrain terrain, BoardScene scene) throws Exception {
         for (Object chunk : (List<?>) get(terrain, "chunks")) {
-            assertNull(get(chunk, "waterField"));
-            assertNull(get(chunk, "lavaField"));
-            for (String layer : List.of("scatter", "surfaceDecals")) {
-                assertTrue(((List<?>) get(chunk, layer)).isEmpty(), "No " + layer + " layer");
+            assertNull(get(get(chunk, "ground"), "waterField"));
+            assertNull(get(get(chunk, "ground"), "lavaField"));
+            for (String layer : List.of("scatter")) {
+                Object owner = layer.equals("scatter") ? chunk : get(chunk, "ground");
+                assertTrue(((List<?>) get(owner, layer)).isEmpty(), "No " + layer + " layer");
             }
             assertTrue(((Map<?, ?>) get(get(chunk, "stand"), "trees")).isEmpty(), "No tree");
             assertTrue(((Map<?, ?>) get(get(chunk, "scatterStand"), "trees")).isEmpty(), "No scattered plant");
@@ -312,7 +313,7 @@ class GpuGraphicsModeSmokeTest {
     private static List<Material> materials(Object chunk) {
         List<Material> result = new ArrayList<>();
         for (String layer : List.of("opaque", "water")) {
-            for (Object instance : (List<?>) get(chunk, layer)) {
+            for (Object instance : (List<?>) get(get(chunk, "ground"), layer)) {
                 for (Material material : ((ModelInstance) instance).materials) { result.add(material); }
             }
         }

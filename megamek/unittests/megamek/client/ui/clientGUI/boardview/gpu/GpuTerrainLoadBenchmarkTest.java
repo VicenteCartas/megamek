@@ -130,7 +130,7 @@ class GpuTerrainLoadBenchmarkTest {
                 for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
                     if (hex.containsTerrain(terrain)) { models.put(terrain, "buildings/standard/building-hard"); }
                 }
-                var artwork = new BoardArtwork.HexImage(coords, null, null, List.of(), models, null);
+                var artwork = new BoardArtwork.HexImage(coords, List.of(), models, null);
                 tiles.add(BoardScene.captureTile(hex, artwork, null, pool, board::getHex));
             }
         }
@@ -275,11 +275,7 @@ class GpuTerrainLoadBenchmarkTest {
             }
             var plants = prepared.plants().get(coords);
             if (plants != null) {
-                floats(out, plants.wheat());
-                floats(out, plants.maize());
                 floats(out, plants.reeds());
-                floats(out, plants.grass());
-                floats(out, plants.rim());
             }
             var roads = prepared.roads().get(coords);
             if (roads != null) {

@@ -91,57 +91,6 @@ final class BoardFeatures {
               && hex.terrainLevel(Terrains.FLUFF) == 12;
     }
 
-    /** Use the terrain material where every marking is either base ground or represented by a captured model. */
-    static boolean detailedGround(Hex hex, Map<Integer, String> structureModels) {
-        return detailedGround(hex, structureModels, Set.of());
-    }
-
-    static boolean detailedGround(Hex hex, Map<Integer, String> structureModels, Set<Integer> blankTerrains) {
-        return detailedGround(hex, structureModels, blankTerrains, TilesetScenery.Scenery.EMPTY);
-    }
-
-    static boolean detailedGround(Hex hex, Map<Integer, String> structureModels, Set<Integer> blankTerrains,
-          TilesetScenery.Scenery scenery) {
-        for (int terrain : hex.getTerrainTypes()) {
-            if (scenery.terrains().contains(terrain)) { continue; }
-            if (blankTerrains.contains(terrain) && switch (terrain) {
-                case Terrains.FLUFF, Terrains.GROUND_FLUFF, Terrains.ROAD_FLUFF, Terrains.WATER_FLUFF -> true;
-                default -> false;
-            }) { continue; }
-            boolean base = switch (terrain) {
-                // Old boards can retain "none" (type 0), whose tileset image is empty.
-                case 0 -> true;
-                case Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.SAND, Terrains.TUNDRA,
-                      Terrains.PAVEMENT, Terrains.SNOW, Terrains.WATER, Terrains.HAZARDOUS_LIQUID, Terrains.RAPIDS, Terrains.ROUGH,
-                      Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
-                      Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.METAL_CONTENT,
-                      Terrains.DEPLOYMENT_ZONE, Terrains.IMPASSABLE, Terrains.ULTRA_SUBLEVEL, Terrains.FIRE, Terrains.SMOKE,
-                      Terrains.SCREEN, Terrains.SPACE, Terrains.SKY,
-                      Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED, Terrains.BRIDGE_MUD,
-                      Terrains.BRIDGE_ROAD, Terrains.BRIDGE_RAIL, Terrains.RAIL,
-                      Terrains.FIELDS, Terrains.SWAMP, Terrains.MUD, Terrains.ICE, Terrains.BLACK_ICE, Terrains.BLDG_BASE_COLLAPSED,
-                      Terrains.ARMS, Terrains.LEGS, Terrains.WATER_FLUFF -> true;
-                case Terrains.MAGMA -> hex.terrainLevel(Terrains.MAGMA) == 1 || hex.terrainLevel(Terrains.MAGMA) == 2;
-                case Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV, Terrains.BLDG_CLASS,
-                      Terrains.BLDG_ARMOR, Terrains.BLDG_BASEMENT_TYPE, Terrains.BLDG_FLUFF ->
-                      structureModels.containsKey(Terrains.BUILDING);
-                case Terrains.FUEL_TANK, Terrains.FUEL_TANK_CF, Terrains.FUEL_TANK_ELEV, Terrains.FUEL_TANK_MAGN ->
-                      structureModels.containsKey(Terrains.FUEL_TANK);
-                case Terrains.INDUSTRIAL -> structureModels.containsKey(Terrains.INDUSTRIAL);
-                // A road through water lies on its bed (BoardRoad#groundShown).
-                case Terrains.ROAD -> BoardRoad.capture(hex) != BoardRoad.Kind.NONE;
-                // Fluff 1 selects the standard road bend, already represented by the captured road exits.
-                case Terrains.ROAD_FLUFF -> hex.terrainLevel(Terrains.ROAD_FLUFF) == 1
-                      && BoardRoad.capture(hex) != BoardRoad.Kind.NONE;
-                case Terrains.FLUFF -> orchard(hex) || HexTile.roughVariant(hex) != 0;
-                case Terrains.GROUND_FLUFF -> BoardSurfaceBlend.hasTransition(hex);
-                default -> false;
-            };
-            if (!base) { return false; }
-        }
-        return true;
-    }
-
     static BoardScene.Surface surface(Hex hex) {
         String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
         if (hex.containsTerrain(Terrains.MAGMA)) { return BoardScene.Surface.ROCK; }
@@ -188,40 +137,35 @@ final class BoardFeatures {
     }
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels) {
-        return capture(hex, coords, structureModels, Set.of());
-    }
-
-    static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
-          Set<Integer> blankTerrains) {
-        return capture(hex, coords, structureModels, blankTerrains, neighbor -> null);
+        return capture(hex, coords, structureModels, neighbor -> null);
     }
 
     /** The board supplies the neighbouring roads, whose course through this hex scenery keeps clear of. */
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
-          Set<Integer> blankTerrains, Function<Coords, Hex> board) {
-        return capture(hex, coords, structureModels, blankTerrains, board, TilesetScenery.Scenery.EMPTY);
+          Function<Coords, Hex> board) {
+        return capture(hex, coords, structureModels, board, TilesetScenery.Scenery.EMPTY);
     }
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
-          Set<Integer> blankTerrains, Function<Coords, Hex> board, TilesetScenery.Scenery scenery) {
-        return capture(hex, coords, structureModels, blankTerrains, board, scenery, BoardTreeDistribution.NATURAL);
+          Function<Coords, Hex> board, TilesetScenery.Scenery scenery) {
+        return capture(hex, coords, structureModels, board, scenery, BoardTreeDistribution.NATURAL);
     }
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
-          Set<Integer> blankTerrains, Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
+          Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
           boolean natural) {
-        return capture(hex, coords, structureModels, blankTerrains, board, scenery, natural, null);
+        return capture(hex, coords, structureModels, board, scenery, natural, null);
     }
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
-          Set<Integer> blankTerrains, Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
+          Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
           boolean natural, Set<String> buildingReferences) {
-        return capture(hex, coords, structureModels, blankTerrains, board, scenery, natural, buildingReferences, null);
+        return capture(hex, coords, structureModels, board, scenery, natural, buildingReferences, null);
     }
 
     /** {@code searched}: the hex's woods if its capture ran their search ahead (BoardTiles), else null to search here. */
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
-          Set<Integer> blankTerrains, Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
+          Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
           boolean natural, Set<String> buildingReferences, List<BoardScene.Feature> searched) {
         if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) {
             // A chasm keeps its placed objects and a bridge across it, whose deck stands on the hex's own level.
@@ -1173,7 +1117,7 @@ final class BoardFeatures {
         features.add(new BoardScene.Feature(TRENCH, 0, 0, 60 * Math.floorMod(tile.coords().hashCode(), 6), 1, 1, 0,
               BoardScene.FeatureKind.SCENERY, 0, true, null, megamek.common.board.BoardDecoration.Stretch.NONE,
               megamek.common.board.BoardDecoration.Colours.NONE, holes));
-        return tile.withFeatures(features);
+        return tile.withStanding(features);
     }
 
     /** The timber a saw clearing leaves ({@link #withSawClearing}), modelled at real size. */
@@ -1226,7 +1170,7 @@ final class BoardFeatures {
                   (float) Math.toDegrees(heading) + 90 + (random.nextFloat() - .5f) * 2, size, 0,
                   top ? diameter * .866f / BoardGeometry.MODEL_LEVEL_HEIGHT : 0, BoardScene.FeatureKind.ROUGH));
         }
-        return tile.withFeatures(features);
+        return tile.withStanding(features);
     }
 
     /**
@@ -1252,7 +1196,7 @@ final class BoardFeatures {
         // Larger than life, as the units are; far enough out that its inner end stays clear of the unit.
         features.add(new BoardScene.Feature(CARGO, (float) Math.cos(bearing) * 19, (float) Math.sin(bearing) * 19,
               60 * side + 15, 1.6f, 1, 0, BoardScene.FeatureKind.SCENERY, 0, true));
-        return tile.withFeatures(features);
+        return tile.withStanding(features);
     }
 
     /** What {@code feature} has stencilled on it ({@link RigidGlb#label}): a cargo crate's number, two digits its hex picks. */

@@ -580,7 +580,10 @@ class GpuCoverBenchmarkSmokeTest {
          */
         int[] coverage(BoardCamera camera) throws Exception {
             Set<Object> drawn = Collections.newSetFromMap(new IdentityHashMap<>());
-            for (Object batch : batches(renderer())) { drawn.addAll((List<?>) GpuTestSupport.field(batch, "current")); }
+            // Blades place themselves: they stand in the frame that shows them. Only the reeds' roots are installed.
+            if (kind == Kind.MARSH) {
+                for (Object batch : batches(renderer())) { drawn.addAll((List<?>) GpuTestSupport.field(batch, "current")); }
+            }
             int complete = 0, visible = 0;
             for (var tile : hexes) {
                 Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
@@ -591,18 +594,10 @@ class GpuCoverBenchmarkSmokeTest {
                     continue;
                 }
                 visible++;
-                if (kind == Kind.WOODS) { complete++; continue; }
+                if (kind != Kind.MARSH) { complete++; continue; }
                 var planted = terrain.planted(tile.coords());
                 if (planted == null) { continue; }
-                boolean shown = switch (kind) {
-                    case FIELDS -> (planted.wheat() != null || planted.maize() != null)
-                          && (planted.wheat() == null || drawn.contains(planted.wheat()))
-                          && (planted.maize() == null || drawn.contains(planted.maize()));
-                    case GRASS -> planted.grass() != null && (planted.grass().size == 0 || drawn.contains(planted.grass()));
-                    case MARSH -> planted.reeds() != null && (planted.reeds().size == 0 || drawn.contains(planted.reeds()));
-                    case WOODS -> true;
-                };
-                if (shown) { complete++; }
+                if (planted.reeds() != null && (planted.reeds().size == 0 || drawn.contains(planted.reeds()))) { complete++; }
             }
             return new int[] { complete, visible };
         }
@@ -611,7 +606,7 @@ class GpuCoverBenchmarkSmokeTest {
         private Object renderer() { return kind == Kind.MARSH ? plants : grass; }
 
         long uploads() {
-            return kind == Kind.MARSH ? plants.uploads() : kind == Kind.WOODS ? terrain.treeInstanceUploads() : grass.uploads();
+            return kind == Kind.MARSH ? plants.uploads() : kind == Kind.WOODS ? terrain.treeInstanceUploads() : grass.redraws();
         }
 
         void hide() throws Exception {
@@ -624,9 +619,12 @@ class GpuCoverBenchmarkSmokeTest {
             }
             else if (kind == Kind.WOODS) {
                 for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
-                    Map<?, ?> stand = (Map<?, ?>) GpuTestSupport.field(GpuTestSupport.field(chunk, "stand"), "trees");
-                    trees.add(new java.util.LinkedHashMap<>(stand));
-                    stand.clear();
+                    GpuTreeInstances.Stand stand = GpuTestSupport.field(chunk, "stand");
+                    trees.add(new java.util.LinkedHashMap<>(stand.trees));
+                    stand.trees.clear();
+                    // Its lists are written for its revisions (GpuTreeInstances#list): emptied here, it has changed.
+                    stand.contents++;
+                    stand.runs++;
                 }
             }
             else { ((Set<?>) GpuTestSupport.field(plants, "marshes")).clear(); set(plants, "view", null); }
@@ -641,9 +639,12 @@ class GpuCoverBenchmarkSmokeTest {
             else if (kind == Kind.WOODS) {
                 List<?> chunks = (List<?>) GpuTestSupport.field(terrain, "chunks");
                 for (int index = 0; index < chunks.size(); index++) {
-                    @SuppressWarnings("unchecked")
-                    Map<Object, Object> stand = (Map<Object, Object>) GpuTestSupport.field(GpuTestSupport.field(chunks.get(index), "stand"), "trees");
-                    stand.putAll(trees.get(index));
+                    GpuTreeInstances.Stand stand = GpuTestSupport.field(chunks.get(index), "stand");
+                    for (var species : trees.get(index).entrySet()) {
+                        stand.trees.put((String) species.getKey(), (com.badlogic.gdx.utils.FloatArray) species.getValue());
+                    }
+                    stand.contents++;
+                    stand.runs++;
                 }
                 trees.clear();
             }

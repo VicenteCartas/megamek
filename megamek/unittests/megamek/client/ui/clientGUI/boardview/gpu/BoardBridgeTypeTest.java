@@ -184,8 +184,8 @@ class BoardBridgeTypeTest {
         bridge.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, exits));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, deck));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
-        var t = new BoardScene.Tile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS, null, null,
-              BoardFeatures.capture(bridge, at, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true,
+        var t = BoardScenes.newTile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS,
+              BoardFeatures.capture(bridge, at, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null,
               BoardRoad.Kind.NONE);
         return type == null ? t : BridgeScenes.appearance(t, Map.of("bridge", type));
     }
@@ -266,20 +266,4 @@ class BoardBridgeTypeTest {
         return BoardTacticalGeometry.Surface.of(new BoardSurface(scene, scene.tile(at)), scene, BoardGeometry.floor(scene));
     }
 
-    @Test
-    void noBladeGrowsThroughALowDeck() {
-        float half = BoardBridge.PASSAGE_HALF_WIDTH * BoardGeometry.hexScale();
-        for (int level : new int[] { 0, 2 }) {
-            var scene = BoardScenes.scene(at -> at.equals(AT) ? deck(at, 9, false, level, HexAppearance.BUILT_BRIDGE)
-                  : BoardScenes.tile(at, BoardScene.Surface.GRASS, 0, -1, 0));
-            FloatArray roots = GpuGroundCover.plant(scene, scene.tile(AT), support(scene, AT), null);
-            int under = 0;
-            for (int i = 0; i < roots.size; i += 4) {
-                if (Math.abs(roots.get(i) - BoardGeometry.centerX(AT)) < half) { under++; }
-            }
-            System.out.printf("COVER deck %d levels up: %d of %d blades under the deck%n", level, under, roots.size / 4);
-            if (level == 0) { assertEquals(0, under, "No blade through a ground-level deck"); }
-            else { assertTrue(under > 50, "Grass grows beneath a raised deck: " + under); }
-        }
-    }
 }

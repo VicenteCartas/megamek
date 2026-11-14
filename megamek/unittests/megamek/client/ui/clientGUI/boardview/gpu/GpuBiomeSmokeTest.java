@@ -80,13 +80,8 @@ class GpuBiomeSmokeTest {
                                         drawn |= (int) GpuTestSupport.field(batch, "lod") == lod && !((List<?>) GpuTestSupport.field(batch, "current")).isEmpty();
                                     }
                                 } else {
-                                    for (Object chunk : ((Map<?, ?>) GpuTestSupport.field(cover, "chunks")).values()) {
-                                        for (String layer : List.of("wheat", "maize")) {
-                                            for (Object batch : (Object[]) GpuTestSupport.field(GpuTestSupport.field(chunk, layer), "batches")) {
-                                                drawn |= !((List<?>) GpuTestSupport.field(batch, "current")).isEmpty();
-                                            }
-                                        }
-                                    }
+                                    // A field's plants place themselves: they are among this frame's draws.
+                                    drawn = !cover.visible().isEmpty();
                                 }
                                 assertTrue(drawn, kind + " LOD" + lod + " must submit its tier");
                             }
@@ -107,9 +102,9 @@ class GpuBiomeSmokeTest {
                             assertTrue(triangles < previousTriangles || !reeds,
                                   kind + " LOD" + lod + ": " + triangles + " triangles after " + previousTriangles);
                             previousTriangles = triangles;
-                            long uploads = plants.uploads() + cover.uploads();
+                            long uploads = plants.uploads() + cover.redraws();
                             for (int i = 0; i < 3; i++) { frame.render(terrain, camera, scene); }
-                            assertEquals(uploads, plants.uploads() + cover.uploads(),
+                            assertEquals(uploads, plants.uploads() + cover.redraws(),
                                   "Stationary views must not upload plant instances again");
                             metrics.append(kind).append(" LOD").append(lod).append(": ").append(draws).append(" draws, ")
                                   .append(roots).append(" instances, ").append(triangles).append(" triangles\n");
@@ -341,12 +336,11 @@ class GpuBiomeSmokeTest {
             for (int y = 0; y < board.getHeight(); y++) {
                 var coords = new Coords(x, y);
                 var hex = board.getHex(coords);
-                tiles.add(new BoardScene.Tile(coords, hex.getLevel(), hex.containsTerrain(Terrains.WATER)
+                tiles.add(BoardScenes.newTile(coords, hex.getLevel(), hex.containsTerrain(Terrains.WATER)
                       ? hex.terrainLevel(Terrains.WATER) : -1, hex.containsTerrain(Terrains.ICE),
                       hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() : 0,
-                      BoardFeatures.surface(hex), null, null,
-                      BoardFeatures.capture(hex, coords, Map.of()), List.of(), BoardLiquid.capture(hex), null,
-                      BoardFeatures.detailedGround(hex, Map.of()), BoardRoad.capture(hex), BoardFireSmoke.NONE, BoardFeatures.biome(hex)));
+                      BoardFeatures.surface(hex),
+                      BoardFeatures.capture(hex, coords, Map.of()), List.of(), BoardLiquid.capture(hex), null, BoardRoad.capture(hex), BoardFireSmoke.NONE, BoardFeatures.biome(hex)));
             }
         }
         return new BoardScene(2, board.getWidth(), board.getHeight(), tiles, List.of(), List.of(), -1, "", List.of());
@@ -354,17 +348,13 @@ class GpuBiomeSmokeTest {
 
     /** Every batch of a plant renderer: per-chunk batches in board order, then any board-wide distant tiers. */
     static List<Object> batches(Object renderer) throws Exception {
+        // The ground cover's blades place themselves: it holds no batch of roots.
+        if (renderer instanceof GpuGroundCover) { return new ArrayList<>(); }
         var chunks = new TreeMap<Coords, Object>(Comparator.comparingInt(Coords::getX).thenComparingInt(Coords::getY));
         chunks.putAll((Map<Coords, ?>) GpuTestSupport.field(renderer, "chunks"));
         var result = new ArrayList<Object>();
         for (Object chunk : chunks.values()) {
-            if (renderer instanceof GpuBiomeVegetation) { result.addAll(List.of((Object[]) GpuTestSupport.field(chunk, "batches"))); }
-            // The grass engine's chunks hold a layer per kind of blade: grass, then the crops' plants.
-            else {
-                for (String layer : List.of("grass", "wheat", "maize")) {
-                    result.addAll(List.of((Object[]) GpuTestSupport.field(GpuTestSupport.field(chunk, layer), "batches")));
-                }
-            }
+            result.addAll(List.of((Object[]) GpuTestSupport.field(chunk, "batches")));
         }
         if (renderer instanceof GpuBiomeVegetation) { result.add(GpuTestSupport.field(renderer, "distantReeds")); }
         return result;

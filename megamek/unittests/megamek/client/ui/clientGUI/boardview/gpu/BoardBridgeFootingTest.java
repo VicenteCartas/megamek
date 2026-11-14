@@ -407,9 +407,9 @@ class BoardBridgeFootingTest {
             Coords bridge = new Coords(3, 4), road = new Coords(4, 5);
             BoardScene plain = BoardRiverTest.commCenterRiverScene();
             var hex = new Hex(0, "water:1;bridge:4:36;bridge_cf:120;bridge_elev:1", "");
-            var bridgeTile = new BoardScene.Tile(bridge, 0, 1, false, 0, BoardScene.Surface.GRASS, null, null,
+            var bridgeTile = BoardScenes.newTile(bridge, 0, 1, false, 0, BoardScene.Surface.GRASS,
                   BoardFeatures.capture(hex, bridge, Map.of()), List.of(),
-                  BoardLiquid.WATER, null, true);
+                  BoardLiquid.WATER, null);
             var bare = BoardScenes.replace(plain, bridgeTile);
             var scene = BoardScenes.replace(bare, withRoad(bare.tile(road), 36));
             var natural = BridgeScenes.typed(scene, HexAppearance.NATURAL_BRIDGE);
@@ -762,28 +762,23 @@ class BoardBridgeFootingTest {
 
     /** The tile as an ultra sublevel, a chasm. */
     private static BoardScene.Tile chasm(BoardScene.Tile t) {
-        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
-              t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
-              t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
-              t.groundCover(), true, t.tilesetDecals(), t.tilesetScenery(), t.appearance());
+        return BoardScenes.newTile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.features(), t.text(), t.liquid(), t.tileset(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
+              t.groundCover(), true, t.tilesetScenery(), t.appearance());
     }
 
     /** The tile with these features added. */
     private static BoardScene.Tile withFeatures(BoardScene.Tile t, List<BoardScene.Feature> added) {
         var features = new java.util.ArrayList<>(t.features());
         features.addAll(added);
-        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
-              t.decals(), t.decalsWithoutLimbs(), List.copyOf(features), t.text(), t.liquid(),
-              t.tileset(), t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(),
-              t.cliffTopExits(), t.bare(), t.groundCover(), t.ultraSublevel(), t.tilesetDecals(),
+        return BoardScenes.newTile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), List.copyOf(features), t.text(), t.liquid(),
+              t.tileset(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(),
+              t.cliffTopExits(), t.bare(), t.groundCover(), t.ultraSublevel(),
               t.tilesetScenery(), t.appearance());
     }
 
     private static BoardScene.Tile withRoad(BoardScene.Tile t, int exits) {
-        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), exits, t.surface(),
-              t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
-              t.detailedGround(), BoardRoad.Kind.PAVED, t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(),
-              t.bare(), t.groundCover(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), t.appearance());
+        return BoardScenes.newTile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), exits, t.surface(), t.features(), t.text(), t.liquid(), t.tileset(), BoardRoad.Kind.PAVED, t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(),
+              t.bare(), t.groundCover(), t.ultraSublevel(), t.tilesetScenery(), t.appearance());
     }
 
     /** How many of the hex's edges have pier facets beside their midpoint. */

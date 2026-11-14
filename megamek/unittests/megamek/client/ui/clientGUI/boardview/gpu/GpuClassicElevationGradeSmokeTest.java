@@ -106,8 +106,7 @@ class GpuClassicElevationGradeSmokeTest {
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < 3; x++) {
             for (int y = 0; y < 3; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, -1, false, 0, BoardScene.Surface.DIRT, null,
-                      null, List.of(), List.of(), BoardLiquid.NONE, art));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), level, -1, false, 0, BoardScene.Surface.DIRT, List.of(), List.of(), BoardLiquid.NONE, art));
             }
         }
         return new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());

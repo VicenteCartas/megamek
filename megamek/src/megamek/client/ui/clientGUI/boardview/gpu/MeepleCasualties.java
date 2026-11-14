@@ -9,7 +9,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Supplier;
 
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
@@ -52,6 +51,8 @@ final class MeepleCasualties implements Disposable {
         final UnitFootprint.Pose pose;
         private final List<Soldier> soldiers = new ArrayList<>();
         private final List<Debris> debris = new ArrayList<>();
+        /** What still waits for its cut (#shatter), drawn as it last stood meanwhile. */
+        private final List<Pending> pending = new ArrayList<>();
         private final List<Blast> blasts = new ArrayList<>();
         private boolean carbonized;
         private float seconds;
@@ -80,7 +81,10 @@ final class MeepleCasualties implements Disposable {
         }
 
         @Override
-        public void dispose() { debris.forEach(pieces -> pieces.model().dispose()); }
+        public void dispose() {
+            debris.forEach(pieces -> pieces.model().dispose());
+            pending.forEach(waiting -> waiting.cut().cancel(false));
+        }
     }
 
     /**
@@ -92,6 +96,12 @@ final class MeepleCasualties implements Disposable {
 
     /** Thrown pieces and the model that owns their meshes. */
     private record Debris(Model model, MeepleDebris pieces) { }
+
+    /**
+     * A node to break whose cut is still being made on the cutter threads: {@code shown}, the casualty's node that draws
+     * it as it last stood meanwhile, and how it is thrown once the cut is in.
+     */
+    private record Pending(Node shown, Node drawn, int seed, Vector3 hit, CompletableFuture<MeepleShatter.Cut> cut) { }
 
     private record Blast(Vector3 center, float radius, int seed) { }
 
@@ -115,8 +125,8 @@ final class MeepleCasualties implements Disposable {
     }
 
     /**
-     * Cuts the meeple of a unit whose {@code death} is coming, once, on another thread: its explosion then only makes
-     * the meshes, rather than stall the frame of the killing blow.
+     * Cuts the meeple of a unit whose {@code death} is coming, once, on the cutters' threads (KitFragments#later), as the
+     * structures' cuts are made: its explosion then only makes the meshes, and no frame ever cuts.
      *
      * @param standing the meeple as the view draws it
      */
@@ -126,14 +136,14 @@ final class MeepleCasualties implements Disposable {
         Node meeple = standing.getNode(MeepleVisual.ROOT);
         if (meeple != null) {
             int count = UnitAnimator.troops(unit) ? infantryCuts(death.cause) : TOKEN_CUTS;
-            if (count > 0) { cuts.put(meeple.id, GpuAssets.pooled(cutter(standing, meeple, count, unit.id()))); }
+            if (count > 0) { cuts.put(meeple.id, cutLater(standing, meeple, count, unit.id())); }
         } else if (standing.visual() != null && standing.visual().infantry()) {
             for (var rig : standing.visual().rigs()) {
                 int count = rig.vehicle() ? VEHICLE_CUTS : rig.meeple() ? infantryCuts(death.cause) : 0;
                 Node figure = standing.getNode(rig.container());
                 Node drawn = figure == null || count == 0 ? null : drawn(figure);
                 if (drawn != null) {
-                    cuts.put(figure.id, GpuAssets.pooled(cutter(standing, drawn, count, unit.id() * 31 + figure.id.hashCode())));
+                    cuts.put(figure.id, cutLater(standing, drawn, count, unit.id() * 31 + figure.id.hashCode()));
                 }
             }
         }
@@ -158,7 +168,7 @@ final class MeepleCasualties implements Disposable {
                 int count = UnitAnimator.troops(unit) ? infantryCuts(cause) : TOKEN_CUTS;
                 if (count > 0) {
                     standing.nodes.clear();
-                    shatter(casualty, meeple, count, unit.id(), hit, cuts == null ? null : cuts.get(meeple.id));
+                    shatter(casualty, meeple, meeple, count, unit.id(), hit, cuts == null ? null : cuts.get(meeple.id));
                 } else if (cause != null && cause.burnsInfantry()) {
                     damage.carbonize(meeple, unit.id());
                     casualty.carbonized = true;
@@ -222,7 +232,7 @@ final class MeepleCasualties implements Disposable {
                     casualty.blasts.add(new Blast(bounds.getCenter(new Vector3()),
                           bounds.getDimensions(new Vector3()).len() * .4f, seed));
                 }
-                shatter(casualty, drawn, cuts, seed, hit, prepared == null ? null : prepared.get(node.id));
+                shatter(casualty, node, drawn, cuts, seed, hit, prepared == null ? null : prepared.get(node.id));
             } else if (rig.meeple() && !vehicle && cause != null && cause.burnsInfantry()) {
                 previous.nodes.add(node);
                 damage.carbonize(node, casualty.unit.id());
@@ -251,29 +261,47 @@ final class MeepleCasualties implements Disposable {
     }
 
     /**
-     * Breaks {@code drawn}, a node of the casualty's instance, into pieces in its place and throws them: those of its
-     * {@code prepared} cut if it is ready, else cut now.
+     * Breaks {@code drawn}, a node of the casualty's instance under {@code shown}, into pieces in its place and throws
+     * them, with its {@code prepared} cut, or one started now on the cutters' threads where none was: a cut not in yet
+     * leaves {@code shown} standing as it last stood until it is (#advance). Nothing is ever cut on this thread.
      */
-    private static void shatter(Casualty casualty, Node drawn, int cuts, int seed, Vector3 hit,
+    private static void shatter(Casualty casualty, Node shown, Node drawn, int cuts, int seed, Vector3 hit,
           CompletableFuture<MeepleShatter.Cut> prepared) {
-        var cut = prepared == null ? null : prepared.getNow(null);
-        Model model = cut == null ? null : MeepleShatter.model(drawn.id, drawn, cut);
-        if (model == null) {
-            cut = cutter(casualty.instance, drawn, cuts, seed).get();
-            model = MeepleShatter.model(drawn.id, drawn, cut);
+        var pending = new Pending(shown, drawn, seed, hit,
+              prepared != null ? prepared : cutLater(casualty.instance, drawn, cuts, seed));
+        if (!pending.cut().isDone()) {
+            casualty.instance.nodes.add(shown);
+            casualty.pending.add(pending);
+            return;
         }
-        Node pieces = model.nodes.first().copy();
-        pieces.isAnimated = true;
-        pieces.localTransform.set(drawn.globalTransform);
-        casualty.instance.nodes.add(pieces);
-        casualty.debris.add(new Debris(model, new MeepleDebris(casualty.instance, pieces, cut.supports(), hit, seed)));
+        shatter(casualty, pending);
     }
 
-    /** Cuts in the mesh's own coordinates, where its camouflage was projected, about the board's up there. */
-    private static Supplier<MeepleShatter.Cut> cutter(ModelInstance instance, Node drawn, int cuts, int seed) {
+    /** Throws the pieces of a cut that is in; one that failed, or no longer fits its node, leaves the node to fade. */
+    private static void shatter(Casualty casualty, Pending pending) {
+        var cut = pending.cut().isCompletedExceptionally() || pending.cut().isCancelled() ? null : pending.cut().join();
+        Model model = cut == null ? null : MeepleShatter.model(pending.drawn().id, pending.drawn(), cut);
+        if (model == null) {
+            if (!casualty.instance.nodes.contains(pending.shown(), true)) { casualty.instance.nodes.add(pending.shown()); }
+            return;
+        }
+        casualty.instance.nodes.removeValue(pending.shown(), true);
+        Node pieces = model.nodes.first().copy();
+        pieces.isAnimated = true;
+        pieces.localTransform.set(pending.drawn().globalTransform);
+        casualty.instance.nodes.add(pieces);
+        casualty.debris.add(new Debris(model, new MeepleDebris(casualty.instance, pieces, cut.supports(), pending.hit(),
+              pending.seed())));
+    }
+
+    /**
+     * Cuts in the mesh's own coordinates, where its camouflage was projected, about the board's up there: read here, on
+     * the thread that owns the meshes, cut on the cutters' threads (KitFragments#later).
+     */
+    private static CompletableFuture<MeepleShatter.Cut> cutLater(ModelInstance instance, Node drawn, int cuts, int seed) {
         var frame = new Matrix4(instance.transform).mul(drawn.globalTransform);
         var up = new Vector3(Vector3.Z).rot(new Matrix4(frame).inv());
-        return MeepleShatter.cutter(drawn, up, cuts, seed);
+        return KitFragments.later(MeepleShatter.cutter(drawn, up, cuts, seed), "A unit's meeple fades whole: its cut failed");
     }
 
     /** The first node of the subtree that draws anything: a meeple vehicle's single mesh. */
@@ -315,8 +343,14 @@ final class MeepleCasualties implements Disposable {
             float previous = casualty.seconds;
             float time = casualty.seconds += seconds;
             float fade = Math.max(casualty.soldiers.isEmpty() ? 0 : FALL_SECONDS + LIE_SECONDS,
-                  casualty.debris.isEmpty() ? 0 : DEBRIS_SECONDS);
+                  casualty.debris.isEmpty() && casualty.pending.isEmpty() ? 0 : DEBRIS_SECONDS);
             if (casualty.carbonized) { fade = Math.max(fade, BURN_HOLD_SECONDS); }
+            // Cuts that came in since the last frame break their nodes now.
+            casualty.pending.removeIf(pending -> {
+                if (!pending.cut().isDone()) { return false; }
+                shatter(casualty, pending);
+                return true;
+            });
             casualty.debris.forEach(debris -> debris.pieces().advance(seconds, ground, gravity));
             if (time >= fade + UnitAttack.FADE_SECONDS) {
                 casualty.dispose();

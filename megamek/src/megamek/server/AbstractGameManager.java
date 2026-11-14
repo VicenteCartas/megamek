@@ -251,6 +251,11 @@ public abstract class AbstractGameManager implements IGameManager {
         saveHandler.sendSaveGame(connId, sFile, sLocalPath);
     }
 
+    @Override
+    public void shutdown() {
+        saveHandler.close();
+    }
+
     public void sendChat(String origin, String message) {
         Server.getServerInstance().sendChat(origin, message);
     }

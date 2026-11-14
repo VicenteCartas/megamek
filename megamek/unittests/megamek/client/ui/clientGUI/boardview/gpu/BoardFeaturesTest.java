@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -58,61 +57,30 @@ class BoardFeaturesTest {
 
     @ParameterizedTest
     @EnumSource(value = BoardScene.Surface.class, mode = EnumSource.Mode.EXCLUDE, names = "SAND")
-    void modeledStructuresKeepTheirGroundWithoutErasingOtherTerrainMarkings(BoardScene.Surface surface) {
+    void structureTerrainPreservesTheGroundMaterial(BoardScene.Surface surface) {
         Hex hex = new Hex(0);
         hex.setTheme(surface.name().toLowerCase(Locale.ROOT));
         if (surface == BoardScene.Surface.CONCRETE) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
         assertEquals(surface, BoardFeatures.surface(hex));
-        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
         for (int terrain : new int[] { Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV,
               Terrains.BLDG_CLASS, Terrains.BLDG_ARMOR, Terrains.BLDG_BASEMENT_TYPE, Terrains.BLDG_FLUFF,
               Terrains.FUEL_TANK, Terrains.FUEL_TANK_CF, Terrains.FUEL_TANK_ELEV, Terrains.FUEL_TANK_MAGN,
               Terrains.INDUSTRIAL }) {
             hex.addTerrain(new Terrain(terrain, 1));
         }
-        var models = new HashMap<>(Map.of(Terrains.BUILDING, "building",
-              Terrains.FUEL_TANK, "tank", Terrains.INDUSTRIAL, "industrial"));
-        for (int type : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
-            String model = models.remove(type);
-            assertFalse(BoardFeatures.detailedGround(hex, models), "Every structure needs a replacement model: " + type);
-            models.put(type, model);
-        }
-        assertTrue(BoardFeatures.detailedGround(hex, models), "Models must retain the native " + surface + " ground");
         assertEquals(surface, BoardFeatures.surface(hex));
-        for (int terrain : new int[] { Terrains.ROAD_FLUFF, Terrains.RUBBLE,
-              Terrains.FORTIFIED, Terrains.GROUND_FLUFF, Terrains.FLUFF }) {
-            hex.addTerrain(new Terrain(terrain, 1));
-            assertFalse(BoardFeatures.detailedGround(hex, models), "Keep separate terrain markings: " + terrain);
-            hex.removeTerrain(terrain);
-        }
     }
 
     @Test
     void fieldTerrainNeverAddsALegacyModelEvenWithUnrepresentedTerrain() {
         var at = new Coords(0, 0);
         var hex = new Hex(0, "planted_fields:1;fortified:1", "");
-        assertFalse(BoardFeatures.detailedGround(hex, Map.of()));
         assertTrue(BoardFeatures.capture(hex, at, Map.of()).stream()
               .noneMatch(feature -> feature.asset().equals("vegetation/field")));
         var represented = new TilesetScenery.Scenery(List.of(), Set.of(Terrains.FORTIFIED), 0);
-        assertTrue(BoardFeatures.detailedGround(hex, Map.of(), Set.of(), represented));
-        assertTrue(BoardFeatures.capture(hex, at, Map.of(), Set.of(), coords -> null, represented).stream()
+        assertTrue(BoardFeatures.capture(hex, at, Map.of(), coords -> null, represented).stream()
               .noneMatch(feature -> feature.asset().equals("vegetation/field")),
               "Converted scenery must not add the legacy field prop over instanced crops");
-    }
-
-    @Test
-    void cityParkEmptyTerrainMarkerKeepsEnhancedGroundBeneathItsBuilding() {
-        // City Park 0916 retains an old "none" token beside its actual building terrain.
-        Hex hex = new Hex(1, "none:2:4;bldg_elev:3:4;building:4:4;bldg_cf:105:4", "");
-        var models = Map.of(Terrains.BUILDING, "buildings/standard/building-hard");
-        assertTrue(BoardFeatures.detailedGround(hex, models),
-              "An empty legacy marker must not replace enhanced grass with tileset artwork");
-        assertFalse(BoardFeatures.detailedGround(hex, Map.of()),
-              "Ignoring the empty marker must still require a model for the building");
-        hex.addTerrain(new Terrain(Terrains.RUBBLE, 1));
-        assertFalse(BoardFeatures.detailedGround(hex, models),
-              "Real unmodeled terrain must still retain its artwork");
     }
 
     @Test
@@ -120,11 +88,9 @@ class BoardFeaturesTest {
         Hex hex = new Hex(-2);
         hex.setTheme("volcano");
         hex.addTerrain(new Terrain(Terrains.WATER_FLUFF, 1));
-        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
         assertEquals(BoardScene.Surface.VOLCANO, BoardFeatures.surface(hex));
         assertFalse(BoardLiquid.capture(hex).present());
         hex.addTerrain(new Terrain(Terrains.WATER, 2));
-        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
         assertTrue(BoardLiquid.capture(hex).present());
     }
 
@@ -157,7 +123,6 @@ class BoardFeaturesTest {
         Coords coords = new Coords(2, 3);
         hex.addTerrain(new Terrain(Terrains.ARMS, 2));
         hex.addTerrain(new Terrain(Terrains.LEGS, 1));
-        assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "A dropped limb must not replace the grass ground");
         var before = BoardFeatures.capture(hex, coords, Map.of()).stream()
               .filter(feature -> feature.kind() == BoardScene.FeatureKind.LIMB).toList();
         assertEquals(3, before.size());
@@ -341,8 +306,8 @@ class BoardFeaturesTest {
                 for (int x = 0; x < 5; x++) {
                     for (int y = 0; y < 5; y++) {
                         Coords coords = new Coords(x, y);
-                        tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, null, null,
-                              coords.equals(BoardScenes.RELIEF_CENTER) ? trees : List.of(), List.of(), BoardLiquid.NONE, null, true));
+                        tiles.add(BoardScenes.newTile(coords, 0, -1, false, 0, family,
+                              coords.equals(BoardScenes.RELIEF_CENTER) ? trees : List.of(), List.of(), BoardLiquid.NONE, null));
                     }
                 }
                 BoardScene scene = new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());

@@ -287,10 +287,11 @@ final class GpuTerrainLayer {
         }
 
         void upload(Buffer buffer, List<ModelInstance> destination) {
-            upload(buffer, destination, null, 0);
+            upload(buffer, destination, null, null);
         }
 
-        void upload(Buffer buffer, List<ModelInstance> destination, Map<Coords, TileMesh> tiles, int layer) {
+        void upload(Buffer buffer, List<ModelInstance> destination, Map<Coords, TileMesh> tiles,
+              GpuTerrain.Layer layer) {
             ModelBuilder model = new ModelBuilder();
             model.begin();
             var mesh = buffer.builder.end();

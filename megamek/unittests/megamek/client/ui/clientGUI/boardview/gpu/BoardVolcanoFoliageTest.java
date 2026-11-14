@@ -100,8 +100,11 @@ class BoardVolcanoFoliageTest {
                 }
                 assertTrue(triangles > 0 && triangles <= budgets[lod] && triangles < previous, name + " LOD " + lod);
                 previous = triangles;
-                assertEquals(0, low, .001f, name + " roots touch the ground");
-                assertEquals(shrub ? 18 : 30, high, .001f, name + " keeps its height");
+                // The impostor's quad lies flat about the crown's middle until the game turns it toward the camera.
+                if (lod < 3) {
+                    assertEquals(0, low, .001f, name + " roots touch the ground");
+                    assertEquals(shrub ? 18 : 30, high, .001f, name + " keeps its height");
+                }
                 if (shrub && lod == 0) {
                     assertTrue(right - left > high, "Low thickets have their own spreading proportions");
                 }

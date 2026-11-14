@@ -154,9 +154,9 @@ class GpuRapidsFoamSmokeTest {
                 int depth = hex.containsTerrain(Terrains.WATER) ? hex.terrainLevel(Terrains.WATER) : -1;
                 BoardLiquid liquid = BoardLiquid.capture(hex);
                 if (liquid.rapids() > 0) { liquid = new BoardLiquid(liquid.kind(), liquid.theme(), severity); }
-                tiles.add(new BoardScene.Tile(new Coords(x, y), hex.getLevel(), depth, false, 0,
-                      BoardFeatures.surface(hex), null, null, List.of(), List.of(), liquid,
-                      null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), hex.getLevel(), depth, false, 0,
+                      BoardFeatures.surface(hex), List.of(), List.of(), liquid,
+                      null));
             }
         }
         return new BoardScene(0, board.getWidth(), board.getHeight(), tiles, List.of(), List.of(), -1, "", List.of());

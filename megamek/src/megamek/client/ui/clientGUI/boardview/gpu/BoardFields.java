@@ -9,7 +9,8 @@ import java.util.ArrayList;
  * x axis, rising or falling per strip: every parcel edge runs along one of the board's road directions. Strip widths
  * and cut spacings are jittered, so parcels range from about one to four hexes across. A parcel's look depends only on
  * where it is; the FIELD hexes decide only where planted ground lies. Neighbouring parcels meet at a grass headland.
- * Visual only; the game's field terrain is unchanged. terrain-biome.glsl mirrors this layout.
+ * Visual only; the game's field terrain is unchanged. The shaders draw the layout (terrain-crops.glsl); this mirror of
+ * it says which crops a piece of ground can grow.
  */
 final class BoardFields {
     /** The crop a field grows: every planted field stands full. */
@@ -29,19 +30,9 @@ final class BoardFields {
         return (long) strip << 32 | cut(strip, x * cutNormalX(strip) + y * CUT_NORMAL_Y) & 0xffffffffL;
     }
 
-    /** Metres from (x, y) to the nearest edge of this parcel, or -1 where another parcel lies. */
-    static float inside(long parcel, float x, float y) {
-        int strip = strip(x);
-        float c = x * cutNormalX(strip) + y * CUT_NORMAL_Y;
-        int cut = cut(strip, c);
-        if (strip != (int) (parcel >> 32) || cut != (int) parcel) { return -1; }
-        return Math.min(Math.min(x - stripEdge(strip), stripEdge(strip + 1) - x),
-              Math.min(c - cutEdge(strip, cut), cutEdge(strip, cut + 1) - c));
-    }
-
     /**
      * Every parcel that may reach the polygon with these corners (metres): the cuts between the polygon's lowest and
-     * highest cut coordinate in each strip it spans. A superset; a parcel that misses it plants nothing there.
+     * highest cut coordinate in each strip it spans. A superset; a parcel that misses it grows nothing there.
      */
     static long[] parcels(float[] xs, float[] ys) {
         float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
@@ -74,16 +65,6 @@ final class BoardFields {
     }
 
     static Crop crop(int code) { return Crop.values()[code & 1]; }
-
-    /** The unit vector across the rows of a field with this code. */
-    static float acrossX(int code) { return (float) Math.cos(angle(code)); }
-
-    static float acrossY(int code) { return (float) Math.sin(angle(code)); }
-
-    private static float angle(int code) { return (code >> 1) * (float) Math.PI / 3; }
-
-    /** The row number, in {@link BoardBiome#ROW_METRES}, of the point (x, y) in metres. */
-    static float row(int code, float x, float y) { return (x * acrossX(code) + y * acrossY(code)) / BoardBiome.ROW_METRES; }
 
     private static float stripEdge(int strip) {
         return STRIP_METRES * (strip + JITTER * (BoardRelief.hash(strip * 7 + 3, 41) - .5f));

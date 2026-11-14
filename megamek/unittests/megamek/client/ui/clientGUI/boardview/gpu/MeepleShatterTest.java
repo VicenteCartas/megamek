@@ -190,7 +190,7 @@ class MeepleShatterTest {
 
     private Model pieces(List<MeepleShatter.Source> sources, Vector3 origin, MeepleShatter.Planes planes,
           MeepleShatter.Caps caps) {
-        var cut = MeepleShatter.cutter(sources, origin, Vector3.Z, planes, 11, caps).get();
+        var cut = MeepleShatter.cutter(sources, origin, Vector3.Z, planes, 11, caps, true).get();
         var model = MeepleShatter.model("rubble", cut);
         meshes.addAll(List.of(model.meshes.toArray(Mesh.class)));
         assertEquals(cut.pieces(), model.nodes.first().getChildCount());

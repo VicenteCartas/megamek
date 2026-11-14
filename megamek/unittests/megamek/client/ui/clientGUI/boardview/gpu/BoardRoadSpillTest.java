@@ -28,9 +28,9 @@ class BoardRoadSpillTest {
             }
             boolean wet = c.equals(AT.translated(2));
             int level = c.equals(AT.translated(1)) ? 1 : 0;
-            return new BoardScene.Tile(c, level, wet ? 1 : -1, false, 9, BoardScene.Surface.GRASS, null, null,
+            return BoardScenes.newTile(c, level, wet ? 1 : -1, false, 9, BoardScene.Surface.GRASS,
                   List.of(), List.of(), wet ? BoardLiquid.WATER : BoardLiquid.NONE,
-                  null, !c.equals(AT.translated(3)), BoardRoad.Kind.PAVED);
+                  null, BoardRoad.Kind.PAVED);
         });
         var roads = BoardRoad.nearby(scene, scene.tile(AT));
         assertEquals(List.of(AT, AT.translated(0), AT.translated(3), AT.translated(5)),
@@ -59,24 +59,11 @@ class BoardRoadSpillTest {
     }
 
     @Test
-    void grassAndScatteredRocksStayClearOfTheRingInIntermediateHexes() {
+    void scatteredRocksStayClearOfTheRingInIntermediateHexes() {
         var scene = triangle(BoardScene.Surface.GRASS);
-        var dry = BoardScenes.scene(c -> BoardScenes.tile(c, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS));
         List<BoardRoad> allRoads = scene.tiles().stream().filter(BoardRoad::rendered).map(tile -> BoardRoad.of(scene, tile)).toList();
-        int removed = 0, kept = 0, stones = 0;
+        int stones = 0;
         for (Coords at : intermediate(scene)) {
-            var surface = new BoardSurface(dry, dry.tile(at));
-            var support = BoardTacticalGeometry.Surface.of(surface, dry, BoardGeometry.floor(dry));
-            var before = roots(GpuGroundCover.plant(dry, dry.tile(at), support, null));
-            var after = roots(GpuGroundCover.plant(scene, scene.tile(at), support, null));
-            assertTrue(before.containsAll(after), "Clearing a neighboring road keeps every surviving root's position and rank");
-            for (var root : before) {
-                float distance = BoardRoad.distance(allRoads, root.get(0), root.get(1));
-                assertEquals(distance >= BoardRoad.SHOULDER + 1, after.contains(root),
-                      "Grass follows the world-space road and shoulder even without ROAD terrain on its own hex");
-            }
-            removed += before.size() - after.size();
-            kept += after.size();
             for (var face : new BoardSurface(scene, scene.tile(at)).faces) {
                 if (face.finish() != BoardSurface.Finish.OUTCROP) { continue; }
                 for (var point : List.of(face.a(), face.b(), face.c())) {
@@ -86,8 +73,7 @@ class BoardRoadSpillTest {
                 }
             }
         }
-        assertTrue(removed > 0, "The shared ring must reach intermediate hexes in this fixture");
-        assertTrue(kept > 1000 && stones > 0, "The surrounding meadow and scattered cover remain populated");
+        assertTrue(stones > 0, "The scattered cover remains populated");
     }
 
     private static BoardScene triangle(BoardScene.Surface surface) {

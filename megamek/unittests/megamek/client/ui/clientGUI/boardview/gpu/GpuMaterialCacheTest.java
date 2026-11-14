@@ -99,9 +99,10 @@ class GpuMaterialCacheTest {
         var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
         float floor = BoardGeometry.floor(scene);
         var before = new GpuMaterialCache.Charts(scene, 0, 0, floor);
-        assertTrue(before.sameLayout(new GpuMaterialCache.Charts(scene, 0, 0, floor)));
+        assertTrue(before.sameLayout(new GpuMaterialCache.Charts(scene, 0, 0, floor), new Coords(0, 0)));
         var after = new GpuMaterialCache.Charts(scene, 0, 0, floor - BoardGeometry.level());
-        assertFalse(before.sameLayout(after), "Reused wall meshes must not keep chart coordinates for the old floor");
+        assertFalse(before.sameLayout(after, new Coords(0, 0)), "Reused wall meshes must not keep chart coordinates for the old floor");
+        assertTrue(before.sameLayout(after, new Coords(4, 4)), "Interior ground without wall slots remains reusable");
         var at = new Coords(0, 4);
         var surface = new BoardSurface(scene, scene.tile(at));
         for (var face : surface.walls(scene, floor - BoardGeometry.level())) {

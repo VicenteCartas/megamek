@@ -1408,6 +1408,13 @@ public class Client extends AbstractClient {
                     game.setFlares(flareVector);
                     break;
                 case SEND_SAVEGAME:
+                    if (packet.getObject(1) == null) {
+                        // The asynchronous server save failed; do not overwrite a previous local save or keep
+                        // waiting for a file when closing the client.
+                        setAwaitingSave(false);
+                        fireSaveCompleted(null);
+                        break;
+                    }
                     String sFinalFile = packet.getStringValue(0);
                     String sLocalPath = packet.getStringValue(2);
                     String localFile = sLocalPath + File.separator + sFinalFile;

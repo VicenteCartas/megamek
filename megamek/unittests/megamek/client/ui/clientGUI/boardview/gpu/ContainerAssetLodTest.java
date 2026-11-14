@@ -45,7 +45,10 @@ class ContainerAssetLodTest {
                 }
                 previous = triangles;
                 assertEquals(first.colourSlots, data.colourSlots, "Paint presets survive distance changes: " + name);
-                assertTrue(data.alphaTests.isEmpty(), "The far atlas's paint mask is not transparency: " + name);
+                // Photographic vehicles cut their railings and ladders out of their picture; a paint mask stays opaque.
+                for (String mask : data.paintMasks) {
+                    assertFalse(data.alphaTests.containsKey(mask), "The far atlas's paint mask is not transparency: " + name);
+                }
                 var box = bounds(data);
                 assertTrue(box.min.dst(placement.min) < .5f && box.max.dst(placement.max) < .5f,
                       "LOD bounds keep the same placement and silhouette: " + name);

@@ -188,7 +188,7 @@ final class GpuHexText implements Disposable {
     }
 
     /**
-     * {@code fallen}: whether a hex's structure lies as pieces (GpuTerrain#fallTaken), {@code falls} counting the
+     * {@code fallen}: whether a hex's structure lies as pieces (GpuTerrain#fallShown), {@code falls} counting the
      * changes of that. Such a hex takes its labels from {@code coming}, the tiles the played events lead to (the
      * scene's own, listed alike, once they have played): its labels change once, as it gives way, to what they will be,
      * not again at each scene the playback shows on the way (user, 2026-11-10). While it still has a roof label there,

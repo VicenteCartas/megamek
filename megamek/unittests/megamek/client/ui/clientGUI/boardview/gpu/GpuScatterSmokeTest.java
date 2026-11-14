@@ -53,18 +53,18 @@ class GpuScatterSmokeTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create(new Board(16, 16, hexes))) {
             SwingUtilities.invokeAndWait(fixture.source::refresh);
             BoardScene captured = fixture.source.takeFrame().scene();
-            // Isolate the baked scatter layer from the separate living grass and sculpted-ground systems.
-            var tiles = captured.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
+            // Populate every tile so the comparison isolates placed scatter from generated field dressing.
+            var rock = new BoardScene.Feature("scatter-rock", 12, 16, 0, 1, .2f, 0, BoardScene.FeatureKind.SCATTER);
+            var tiles = captured.tiles().stream().map(tile -> BoardScenes.newTile(tile.coords(), tile.elevation(),
                   tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(),
-                  tile.decals(), tile.decalsWithoutLimbs(), tile.features(), tile.text(), tile.liquid(),
-                  tile.tileset(), false)).toList();
+                  tile.features().isEmpty() ? List.of(rock) : tile.features(), tile.text(), tile.liquid(),
+                  tile.tileset())).toList();
             BoardScene scene = new BoardScene(0, 16, 16, tiles, List.of(), List.of(), -1, "", List.of(),
                   new BoardScene.Light(-24, -30));
             BoardScene bare = new BoardScene(0, 16, 16,
-                  scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
-                  tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.decals(),
-                  tile.decalsWithoutLimbs(), List.of(),
-                  tile.text())).toList(), List.of(), List.of(), -1, "", List.of(), scene.light());
+                  scene.tiles().stream().map(tile -> BoardScenes.newTile(tile.coords(), tile.elevation(),
+                  tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), List.of(),
+                  tile.text())).toList(), List.of(), List.of(), -1, "", List.of(), scene.light()).withGround(scene.ground());
             var configuration = GpuBoardWindow.configuration(false);
             configuration.setWindowedMode(1440, 1000);
             new Lwjgl3Application(new ApplicationAdapter() {
@@ -76,7 +76,11 @@ class GpuScatterSmokeTest {
                     GL20 rawGl20 = Gdx.gl20;
                     GLProfiler profiler = new GLProfiler(Gdx.graphics);
                     try {
+                        terrain.setGrass(false);
+                        plain.setGrass(false);
                         terrain.update(scene);
+                        // Removing objects keeps their original ground and cannot seed new field vegetation.
+                        plain.update(scene);
                         plain.update(bare);
                         var materials = scatterMaterials(terrain);
                         assertTrue(!materials.isEmpty(), "The scatter layer must carry its atlas");
@@ -89,7 +93,7 @@ class GpuScatterSmokeTest {
                               "Clusters stay bounded regardless of the density multiplier");
                         int triangles = scene.tiles().stream().mapToInt(tile -> tile.features().stream()
                               .mapToInt(feature -> switch (feature.asset()) {
-                                  case "scatter-grass", "scatter-dry-grass" -> 6;
+                                  case "scatter-dry-grass" -> 6;
                                   case "scatter-plant" -> BoardScatter.plant(tile.surface()).polygons().size();
                                   default -> {
                                       int count = GpuScatter.rock(tile, feature).polygons().stream()
@@ -182,6 +186,7 @@ class GpuScatterSmokeTest {
                               + " triangles, " + scatterDraws + " additional color draws on 256 hexes; 0 at overview cull.");
                         if (Boolean.getBoolean("megamek.gpu.scatterBenchmark")) { benchmark(terrain, camera); }
                         // Inspect the texture next to the actual sculpted ground as well as the isolated fixture.
+                        terrain.setGrass(true);
                         terrain.update(captured);
                         var close = captured.tiles().stream().filter(tile -> tile.surface() == BoardScene.Surface.GRASS
                               && tile.coords().getY() > 2 && tile.coords().getY() < 13
@@ -321,10 +326,10 @@ class GpuScatterSmokeTest {
      * other unpaved ground keeps its whole ramp in its own hex.
      */
     private static BoardScene approach(List<BoardScene.Feature> details) {
-        var apron = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.CONCRETE, null, details,
+        var apron = BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.CONCRETE, details,
               List.of());
-        var road = new BoardScene.Tile(new Coords(0, 1), 1, -1, false, 1, BoardScene.Surface.GRASS, null, null,
-              List.of(), List.of(), BoardLiquid.NONE, null, false, BoardRoad.Kind.PAVED);
+        var road = BoardScenes.newTile(new Coords(0, 1), 1, -1, false, 1, BoardScene.Surface.GRASS,
+              List.of(), List.of(), BoardLiquid.NONE, null, BoardRoad.Kind.PAVED);
         return new BoardScene(0, 1, 2, List.of(apron, road), List.of(), List.of(), -1, "", List.of());
     }
 

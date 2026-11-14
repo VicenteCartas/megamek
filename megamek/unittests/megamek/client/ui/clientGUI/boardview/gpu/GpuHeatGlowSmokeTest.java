@@ -305,7 +305,7 @@ class GpuHeatGlowSmokeTest {
     }
 
     private static BoardScene scene(boolean molten) {
-        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS, null, null,
+        var tile = BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS,
               List.of(), List.of(),
               molten ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.NONE);
         return new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());

@@ -298,7 +298,8 @@ class GpuPropBatchSmokeTest {
             Set<Source> shown = new HashSet<>(visible);
             for (Source source : sources) { aggregate.add(source, source.page(), shown.contains(source)); }
             // No wall clock: a settled page merges within the frame.
-            aggregate.render(batch, environment, Long.MAX_VALUE);
+            aggregate.advance(Long.MAX_VALUE);
+            aggregate.render(batch, environment);
         }
         batch.end();
     }

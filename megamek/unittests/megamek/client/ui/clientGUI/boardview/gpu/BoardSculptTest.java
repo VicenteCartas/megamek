@@ -23,6 +23,22 @@ import org.junit.jupiter.params.provider.ValueSource;
  * transitions off and on.
  */
 class BoardSculptTest {
+    @Test
+    void heightSamplingPrefersExactSupportAndRecoversOnlyRoundingGaps() {
+        float slack = .001f * BoardGeometry.hexScale();
+        var low = new BoardSurface.Face(new Vector3(0, 0, 2), new Vector3(10, 0, 2), new Vector3(0, 10, 2),
+              BoardSurface.Finish.TOP);
+        var high = new BoardSurface.Face(new Vector3(0, -slack / 2, 8), new Vector3(10, -slack / 2, 8),
+              new Vector3(0, -10, 8), BoardSurface.Finish.TOP);
+        assertEquals(2, BoardSurface.sampleHeight(List.of(high, low), 1, 0, -1));
+        assertEquals(2, BoardSurface.sampleHeight(List.of(low, high), 1, 0, -1));
+        assertEquals(2, BoardSurface.sampleHeight(List.of(low), 1, -slack / 2, -1), .0001f);
+        assertEquals(-1, BoardSurface.sampleHeight(List.of(low), 1, -slack * 2, -1));
+        var overlap = new BoardSurface.Face(low.a().cpy().add(0, 0, 3), low.b().cpy().add(0, 0, 3),
+              low.c().cpy().add(0, 0, 3), BoardSurface.Finish.TOP);
+        assertEquals(5, BoardSurface.sampleHeight(List.of(low, overlap), 1, 1, -1));
+    }
+
     /** Plateaus, an isolated spire, a ridge, three-level junctions, a sunken basin; no water or roads. */
     private static final String[] DRY = {
           "00000000000",
@@ -44,9 +60,9 @@ class BoardSculptTest {
             for (int y = 0; y < height; y++) {
                 char cell = layout[y].charAt(x);
                 int level = cell == 'a' ? -1 : cell == 'b' ? -2 : cell - '0';
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, -1, false, 0,
-                      (x + y) % 4 == 0 ? BoardScene.Surface.GRASS : family, null, null,
-                      List.of(), List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), level, -1, false, 0,
+                      (x + y) % 4 == 0 ? BoardScene.Surface.GRASS : family,
+                      List.of(), List.of(), BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());
@@ -136,8 +152,7 @@ class BoardSculptTest {
             for (int y = 0; y < size; y++) {
                 char cell = x < DRY[0].length() && y < DRY.length ? DRY[y].charAt(x) : '0';
                 int level = cell == 'a' ? -1 : cell == 'b' ? -2 : cell - '0';
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, -1, false, 0, BoardScene.Surface.SAND, null,
-                      null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), level, -1, false, 0, BoardScene.Surface.SAND, List.of(), List.of(), BoardLiquid.NONE, null));
             }
         }
         BoardScene scene = new BoardScene(0, size, size, tiles, List.of(), List.of(), -1, "", List.of());

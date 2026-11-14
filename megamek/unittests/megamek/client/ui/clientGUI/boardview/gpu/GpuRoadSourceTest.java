@@ -396,7 +396,6 @@ class GpuRoadSourceTest {
               .toList();
         assertEquals(4, bridges.size());
         for (var tile : bridges) {
-            assertTrue(tile.detailedGround(), "Native ground beneath bridge " + tile.coords().getBoardNum());
             assertEquals(BoardScene.Surface.VOLCANO, tile.surface());
             assertFalse(tile.liquid().present());
             assertEquals(-2, tile.elevation());

@@ -117,27 +117,13 @@ class GpuMultiHexBuildingSmokeTest {
                         GpuReviewFrame.save(new File(output, String.format(Locale.ROOT, "%s-h%s.png", view.name(), hour)));
                         camera.orbit(-view.orbit(), -view.tilt());
                     }
-                    // Inspect the physical materials separately from projected legacy paint. Missing legacy art in
-                    // headless test installations otherwise covers the roof with a placeholder and hides its UVs.
-                    BoardScene materials = materials(scene);
-                    terrain.update(materials);
-                    for (View view : views) {
-                        if (!view.name().startsWith("junction") && !view.name().equals("ring-roof")
-                              && !view.name().startsWith("corner-") && !view.name().startsWith("review-")) { continue; }
-                        camera.setIsometric(view.isometric()); camera.orbit(view.orbit(), view.tilt());
-                        camera.camera.zoom = view.zoom();
-                        camera.center(BoardGeometry.center(view.at(), materials.tile(view.at()).elevation()));
-                        frame.render(terrain, camera, materials);
-                        GpuReviewFrame.save(new File(output, view.name() + "-materials.png"));
-                        camera.orbit(-view.orbit(), -view.tilt());
-                    }
                     frame.configure(new BoardAtmosphere.Settings(22, 0, 0,
                           BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                     for (View lamps : views) {
                         if (!List.of("corner-pillars", "review-low-front", "review-east", "review-back").contains(lamps.name())) { continue; }
                         camera.setIsometric(true); camera.orbit(lamps.orbit(), lamps.tilt()); camera.camera.zoom = lamps.zoom();
-                        camera.center(BoardGeometry.center(lamps.at(), materials.tile(lamps.at()).elevation()));
-                        frame.render(terrain, camera, materials);
+                        camera.center(BoardGeometry.center(lamps.at(), scene.tile(lamps.at()).elevation()));
+                        frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, lamps.name() + "-night.png"));
                         camera.orbit(-lamps.orbit(), -lamps.tilt());
                     }
@@ -171,15 +157,4 @@ class GpuMultiHexBuildingSmokeTest {
         }
     }
 
-    private static BoardScene materials(BoardScene scene) {
-        var tiles = scene.tiles().stream().map(t -> new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(),
-              t.roadExits(), t.surface(), null, null, t.features(), t.text(), t.liquid(), t.tileset(), t.detailedGround(),
-              t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(), t.groundCover(),
-              t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), t.appearance(), t.cover(), t.barren(), t.deckRoad(),
-              t.deckRoadExits(), t.deckMud(), t.railBed(), t.corridor(), t.deckCorridor(), t.backdrop(), t.minimap())).toList();
-        return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, scene.units(), scene.plannedPath(),
-              scene.selectedId(), scene.phase(), scene.commands(), scene.light(), scene.firingLines(), scene.rangeBorders(),
-              scene.markers(), scene.tactical(), scene.rangeLabels(), scene.fieldOfView(), scene.electronicWarfare(),
-              scene.designations(), scene.starShells());
-    }
 }

@@ -62,6 +62,7 @@ class GpuTerrainSubmissionSmokeTest {
                       new Material(ColorAttribute.createDiffuse(Color.RED)),
                       VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal);
                 try {
+                    terrain.setEditable(true);
                     BoardScene scene = scene();
                     terrain.update(scene);
                     terrain.setWind(BoardAtmosphere.Effects.NONE);
@@ -78,7 +79,15 @@ class GpuTerrainSubmissionSmokeTest {
                     Field sorter = ModelBatch.class.getDeclaredField("sorter");
                     sorter.setAccessible(true);
                     RenderableSorter original = batch.getRenderableSorter();
-                    RenderableSorter reference = new GpuOpaqueSorter(), grouped = original;
+                    var depth = (GpuTerrainBatch) ((ModelBatch) GpuTestSupport.field(terrain, "depthBatch")).getRenderableSorter();
+                    RenderableSorter reference = (camera, parts) -> {
+                        // Keep the renderer's family-program ordering; only disable material-state reuse.
+                        var grouping = (GpuTerrainBatch) original;
+                        grouping.setEnabled(false);
+                        try { grouping.sort(camera, parts); }
+                        finally { grouping.setEnabled(true); }
+                    };
+                    RenderableSorter grouped = original;
                     try {
                         for (float opacity : new float[] { 1, .4f }) {
                             // Set occupancy and water once; neither animation time nor opacity advances during comparisons.
@@ -95,11 +104,13 @@ class GpuTerrainSubmissionSmokeTest {
                                     // Warm both submission orders so shader creation, grass and tree caches are settled.
                                     for (RenderableSorter order : List.of(reference, grouped)) {
                                         sorter.set(batch, order);
+                                        depth.setEnabled(order == grouped);
                                         for (int warmup = 0; warmup < 30; warmup++) {
                                             draw(terrain, camera, units, occupants, target);
                                         }
                                     }
                                     sorter.set(batch, reference);
+                                    depth.setEnabled(false);
                                     byte[] before = pixels(terrain, camera, units, occupants, target);
                                     // Some procedural cliff fragments vary even with an unchanged reference draw.
                                     // Use only repeated reference draws, before and after batching, to identify them.
@@ -108,8 +119,10 @@ class GpuTerrainSubmissionSmokeTest {
                                         referenceNoise(before, pixels(terrain, camera, units, occupants, target), unstable);
                                     }
                                     sorter.set(batch, grouped);
+                                    depth.setEnabled(true);
                                     byte[] after = pixels(terrain, camera, units, occupants, target);
                                     sorter.set(batch, reference);
+                                    depth.setEnabled(false);
                                     byte[] restored = pixels(terrain, camera, units, occupants, target);
                                     referenceNoise(before, restored, unstable);
                                     for (int repeat = 0; repeat < 32; repeat++) {
@@ -121,12 +134,13 @@ class GpuTerrainSubmissionSmokeTest {
                                     Difference groupedDifference = difference(before, after, unstable);
                                     System.out.printf("Terrain submission %s: grouped %s; unstable=%d; total pixels=%d%n",
                                           name, groupedDifference, unstableCount, before.length / 4);
-                                    if (!groupedDifference.acceptable()) {
+                                    boolean acceptable = groupedDifference.acceptable();
+                                    if (!acceptable) {
                                         save(before, name + "-reference.png");
                                         save(after, name + "-grouped.png");
                                         save(restored, name + "-reference-restored.png");
                                     }
-                                    assertTrue(groupedDifference.acceptable(),
+                                    assertTrue(acceptable,
                                           "Shader grouping must preserve pixels: " + name + " " + groupedDifference);
                                 }
                             }
@@ -134,6 +148,7 @@ class GpuTerrainSubmissionSmokeTest {
                     } finally {
                         FrameBuffer.unbind();
                         sorter.set(batch, original);
+                        depth.setEnabled(true);
                     }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
@@ -180,9 +195,6 @@ class GpuTerrainSubmissionSmokeTest {
         pixels.drawPixel(0, 0, 0xFFFFFFFF);
         var next = GpuColorTexture.create(pixels, false);
         pixels.dispose();
-        var instances = new GpuTreeInstances((name, level) -> {
-            throw new AssertionError("This probe instances its supplied prop mesh");
-        });
         try {
             Field field = GpuTerrain.class.getDeclaredField("batch");
             field.setAccessible(true);
@@ -207,15 +219,16 @@ class GpuTerrainSubmissionSmokeTest {
                 float expected = factor * linearSample * GpuSceneRadiance.SCALE;
                 checkTerrainFactorDraw(batch, camera, target, part, factor, expected, "plain prop; linear=" + linear);
 
-                instances.begin(GpuTreeInstances.Pass.COLOUR);
-                instances.add(part);
-                var gathered = new Array<Renderable>();
-                instances.getRenderables(gathered, null);
+                // Instanced through the terrain's GPU-driven path, as its colour pass draws placed props.
+                var indirect = GpuTestSupport.indirect(terrain);
+                var one = new Array<Renderable>();
+                one.add(part);
+                var list = indirect.list(null, one, 0, one, null, null);
+                var gathered = GpuTestSupport.draws(indirect, GpuIndirectInstances.Pass.COLOUR, list, camera, environment);
                 assertEquals(1, gathered.size);
-                Renderable instanced = gathered.first();
-                instanced.environment = environment;
-                var shader = checkTerrainFactorDraw(batch, camera, target, instanced, factor, expected,
+                var shader = checkTerrainFactorDraw(batch, camera, target, gathered.first(), factor, expected,
                       "instanced prop; linear=" + linear);
+                GpuIndirectInstances.release(list);
                 assertTrue(shader.program.hasAttribute("a_instance0"), "Exercise the actual instanced prop program");
 
                 part.material = part.material.copy();
@@ -241,7 +254,6 @@ class GpuTerrainSubmissionSmokeTest {
             }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
-            instances.dispose();
             raw.dispose();
             color.dispose();
             next.dispose();
@@ -293,9 +305,8 @@ class GpuTerrainSubmissionSmokeTest {
                   : coords.equals(new Coords(2, 4))
                         ? List.of(new BoardScene.Feature("vegetation/tree", 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE))
                         : List.of();
-            tiles.add(new BoardScene.Tile(coords, tile.elevation(), tile.waterDepth(), false, 0,
-                  BoardScene.Surface.values()[coords.getX() % BoardScene.Surface.values().length],
-                  tile.water() ? null : marking, null, features, List.of(), tile.liquid(), null, true));
+            tiles.add(BoardScenes.newTile(coords, tile.elevation(), tile.waterDepth(), false, 0,
+                  BoardScene.Surface.values()[coords.getX() % BoardScene.Surface.values().length], features, List.of(), tile.liquid(), null));
         }
         return new BoardScene(0, relief.width(), relief.height(), tiles, List.of(), List.of(), -1, "", List.of(),
               new BoardScene.Light(-24, -30));

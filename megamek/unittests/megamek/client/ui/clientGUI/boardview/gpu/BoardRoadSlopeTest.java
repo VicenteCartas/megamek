@@ -75,25 +75,6 @@ class BoardRoadSlopeTest {
         }
     }
 
-    @Test
-    void bridgeRampFillDoesNotGrowGrass() {
-        var at = BoardScenes.CENTER;
-        var scene = BoardScenes.scene(c -> c.equals(at.translated(0))
-              ? BridgeScenes.bridge(c, 0, 1, 9)
-              : BoardScenes.tile(c, c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
-                    c.equals(at) ? 9 : 0, 0, BoardScene.Surface.GRASS));
-        var tile = scene.tile(at);
-        for (var lod : List.of(TerrainLod.FULL, TerrainLod.MEDIUM)) {
-            var surface = new BoardSurface(scene, tile, lod);
-            var support = BoardTacticalGeometry.Surface.of(surface, scene, BoardGeometry.floor(scene));
-            var roots = GpuGroundCover.plant(scene, tile, support, null);
-            assertTrue(roots.size > 0, "Grass remains on the untouched ground beside the approach");
-            for (int i = 0; i < roots.size; i += 4) {
-                assertTrue(roots.get(i + 2) < .001f, "Grass must not grow from the raised concrete fill: " + lod);
-            }
-        }
-    }
-
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2, 3, 4, 5 })
     void raisedBridgeApproachesKeepTheirTerrainClosed(int direction) {
@@ -104,9 +85,9 @@ class BoardRoadSlopeTest {
             var scene = BoardScenes.scene(c -> {
                 if (c.equals(bridge)) {
                     var span = BridgeScenes.bridge(c, 0, 1, exits);
-                    return new BoardScene.Tile(c, 0, depth, false, 0, BoardScene.Surface.GRASS, null, null,
+                    return BoardScenes.newTile(c, 0, depth, false, 0, BoardScene.Surface.GRASS,
                           span.features(), List.of(),
-                          depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE);
+                          depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null, BoardRoad.Kind.NONE);
                 }
                 return BoardScenes.tile(c, c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                       c.equals(at) ? exits : 0, 0, BoardScene.Surface.GRASS);
@@ -575,7 +556,11 @@ class BoardRoadSlopeTest {
         assertTrue(gaps.isEmpty(), lod + " open terrain boundaries near " + at + ": " + gaps);
     }
 
-    /** Distance from a point to a face along its normal, or infinity where the point lies outside the face. */
+    /**
+     * Distance from a point to a face: along its normal over the face, else to its nearest edge. Measured in world units
+     * whatever the face's shape, so a point on a sliver's edge lies on it (a tolerance in the face's own barycentric
+     * units would shrink with the sliver's width).
+     */
     private static float onFace(Vector3 p, BoardSurface.Face face) {
         var ab = new Vector3(face.b()).sub(face.a());
         var ac = new Vector3(face.c()).sub(face.a());
@@ -587,7 +572,15 @@ class BoardRoadSlopeTest {
         float d00 = ab.dot(ab), d01 = ab.dot(ac), d11 = ac.dot(ac), d20 = aq.dot(ab), d21 = aq.dot(ac);
         float den = d00 * d11 - d01 * d01;
         float v = (d11 * d20 - d01 * d21) / den, w = (d00 * d21 - d01 * d20) / den;
-        return v >= -1e-4f && w >= -1e-4f && v + w <= 1 + 1e-4f ? Math.abs(distance) : Float.POSITIVE_INFINITY;
+        if (v >= 0 && w >= 0 && v + w <= 1) { return Math.abs(distance); }
+        return Math.min(segmentDistance(p, face.a(), face.b()),
+              Math.min(segmentDistance(p, face.b(), face.c()), segmentDistance(p, face.c(), face.a())));
+    }
+
+    private static float segmentDistance(Vector3 p, Vector3 a, Vector3 b) {
+        var delta = new Vector3(b).sub(a);
+        float u = Math.clamp(new Vector3(p).sub(a).dot(delta) / delta.len2(), 0, 1);
+        return p.dst(new Vector3(a).mulAdd(delta, u));
     }
 
     /** The road's height over a point inside its plan, a little away from its edge; NaN elsewhere. */
@@ -722,7 +715,11 @@ class BoardRoadSlopeTest {
                     assertEquals((hub.z + road.height(gate.x, gate.y)) / 2, road.height(halfway.x, halfway.y), .01f,
                           "The road retains the bridge's planar grade through the shared edge");
                 }
-                assertEquals(0, belowBridge.height(gate.x, gate.y), 0.01f,
+                // Dry ground under the deck keeps its level up to the edge. Water beside higher land keeps its outline
+                // in from the edge, where the land's slope meets it: the deck's approach leaves that shore as it was.
+                var unconnected = bridgeScene(direction, (direction + 3) % 6, 1, water, roadElevation, 0, water, false);
+                assertEquals(water ? new BoardSurface(unconnected, unconnected.tile(neighbor)).height(gate.x, gate.y) : 0,
+                      belowBridge.height(gate.x, gate.y), 0.01f,
                       "The bridge approach must not deform the ground beneath the deck");
                 Vector3 bridgeCenter = BoardGeometry.center(neighbor, 0);
                 assertEquals(BoardGeometry.groundZ(scene.tile(neighbor)),
@@ -764,9 +761,9 @@ class BoardRoadSlopeTest {
             BoardScene scene = bridgeScene(direction, (direction + 3) % 6, 1, false, 0, 0, true);
             List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
             BoardScene.Tile tile = scene.tile(BoardScenes.FIRST);
-            tiles.set(BoardScenes.FIRST.getX() * scene.height() + BoardScenes.FIRST.getY(), new BoardScene.Tile(BoardScenes.FIRST, 0, -1, false,
-                  exits, tile.surface(), null, null, List.of(), List.of(), BoardLiquid.NONE,
-                  null, false, exits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED));
+            tiles.set(BoardScenes.FIRST.getX() * scene.height() + BoardScenes.FIRST.getY(), BoardScenes.newTile(BoardScenes.FIRST, 0, -1, false,
+                  exits, tile.surface(), List.of(), List.of(), BoardLiquid.NONE,
+                  null, exits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED));
             scene = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
             Vector3 gate = BoardGeometry.center(BoardScenes.FIRST, 0)
                   .lerp(BoardGeometry.center(BoardScenes.FIRST.translated(direction), 0), 0.5f);
@@ -828,17 +825,23 @@ class BoardRoadSlopeTest {
 
     private static BoardScene bridgeScene(int direction, int bridgeDirection, int bridgeHeight, boolean roadUnderBridge,
           int roadElevation, int bridgeElevation, boolean water) {
-        BoardScene scene = BoardScenes.roadScene(false, direction, true, roadUnderBridge, roadElevation);
+        return bridgeScene(direction, bridgeDirection, bridgeHeight, roadUnderBridge, roadElevation, bridgeElevation, water,
+              true);
+    }
+
+    /** {@code approach}: whether the first hex's road runs to the bridge. */
+    private static BoardScene bridgeScene(int direction, int bridgeDirection, int bridgeHeight, boolean roadUnderBridge,
+          int roadElevation, int bridgeElevation, boolean water, boolean approach) {
+        BoardScene scene = BoardScenes.roadScene(false, direction, approach, roadUnderBridge, roadElevation);
         Coords coords = BoardScenes.FIRST.translated(direction);
         Hex hex = new Hex(bridgeElevation);
         hex.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, 1 << bridgeDirection));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, bridgeHeight));
         BoardScene.Tile tile = scene.tile(coords);
         List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
-        tiles.set(coords.getX() * scene.height() + coords.getY(), new BoardScene.Tile(coords, hex.getLevel(),
-              water ? 1 : -1, false, tile.roadExits(), tile.surface(), null, null,
-              BoardFeatures.capture(hex, coords, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null,
-              false, tile.road()));
+        tiles.set(coords.getX() * scene.height() + coords.getY(), BoardScenes.newTile(coords, hex.getLevel(),
+              water ? 1 : -1, false, tile.roadExits(), tile.surface(),
+              BoardFeatures.capture(hex, coords, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, tile.road()));
         return new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
     }
 

@@ -40,7 +40,6 @@ class BoardImpassableTest {
                 assertTrue(restricted.impassable(), "Presence is authoritative, even for impassable:0");
                 assertFalse(plain.impassable(), "The previously published snapshot remains immutable");
                 assertTrue(plain.sameGeometry(restricted), "The restriction adds no physical obstacle or material: " + type);
-                assertEquals(plain.detailedGround(), restricted.detailedGround());
                 hex.removeTerrain(Terrains.IMPASSABLE);
                 assertTrue(restricted.impassable());
                 assertFalse(capture(hex, coords).impassable());
@@ -75,7 +74,6 @@ class BoardImpassableTest {
                         preview.refresh();
                         var marked = fixture.source.takeFrame().scene().tile(coords);
                         assertTrue(marked.impassable());
-                        assertEquals(plain.decals(), marked.decals(), "The legacy symbol must not duplicate the native marking");
                         assertTrue(plain.sameGeometry(marked));
                         assertTrue(preview.takeFrame().scene().tile(coords).impassable());
                         assertTrue(preview.takeFrame().tooltip().contains("Impassable"));
@@ -190,7 +188,7 @@ class BoardImpassableTest {
     }
 
     private static BoardScene.Tile capture(Hex hex, Coords coords) {
-        var artwork = new BoardArtwork.HexImage(coords, null, null, List.of(), Map.of(), null);
+        var artwork = new BoardArtwork.HexImage(coords, List.of(), Map.of(), null);
         return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool(), neighbour -> null);
     }
 }

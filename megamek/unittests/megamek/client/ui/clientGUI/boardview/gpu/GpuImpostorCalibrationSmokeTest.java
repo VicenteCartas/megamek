@@ -345,8 +345,8 @@ class GpuImpostorCalibrationSmokeTest {
                 List<BoardScene.Feature> features = x % SPACING == 1 && y % SPACING == 1 && index < plants.size()
                       ? List.of(new BoardScene.Feature(plants.get(index).name, 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE))
                       : List.of();
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null, null, features,
-                      List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, features,
+                      List.of(), BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, columns, rows, tiles, List.of(), List.of(), -1, "", List.of());

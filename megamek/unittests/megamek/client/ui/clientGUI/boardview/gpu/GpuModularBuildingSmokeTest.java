@@ -79,6 +79,13 @@ class GpuModularBuildingSmokeTest {
             ConnectedKit.parts(data).forEach(piece ->
                   bounds.put(piece.node(), model.getNode(piece.node()).calculateBoundingBox(new BoundingBox())));
             authoredBounds.add(bounds);
+            var triangles = GpuTerrain.nodeTriangles(model.nodes,
+                  part -> !part.material.id.endsWith(GeneratedMesh.BUILDING_FLOOR));
+            for (var node : model.nodes) {
+                assertEquals(GpuTerrain.triangles(List.of(node),
+                            part -> !part.material.id.endsWith(GeneratedMesh.BUILDING_FLOOR)), triangles.get(node.id),
+                      "Sharing mesh reads must preserve each module's transformed picking geometry");
+            }
             return model;
         });
         int[] alone = new int[6];
@@ -179,9 +186,9 @@ class GpuModularBuildingSmokeTest {
             if (type != Terrains.INDUSTRIAL) {
                 hex.addTerrain(new Terrain(type == Terrains.BUILDING ? Terrains.BLDG_ELEV : Terrains.FUEL_TANK_ELEV, levels));
             }
-            return new BoardScene.Tile(coords, 0, -1, false, 0, tile.surface(), null, null,
+            return BoardScenes.newTile(coords, 0, -1, false, 0, tile.surface(),
                   levels == 0 ? List.of() : BoardFeatures.capture(hex, coords, Map.of(type, asset)),
-                  List.of(), BoardLiquid.NONE, null, true);
+                  List.of(), BoardLiquid.NONE, null);
         });
     }
 

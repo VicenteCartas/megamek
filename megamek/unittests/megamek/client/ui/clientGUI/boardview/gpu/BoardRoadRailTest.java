@@ -179,7 +179,7 @@ class BoardRoadRailTest {
             for (int y = 0; y < 5; y++) {
                 var at = new Coords(x, y);
                 var original = new Coords(center.getX() + x - 2, center.getY() + y - 2);
-                var artwork = new BoardArtwork.HexImage(at, null, null, List.of(), Map.of(), null);
+                var artwork = new BoardArtwork.HexImage(at, List.of(), Map.of(), null);
                 var hex = fixture.getHex(original);
                 tiles.add(BoardScene.captureTile(hex == null ? new Hex(0) : hex, artwork, null, pixels,
                       neighbor -> fixture.getHex(new Coords(center.getX() + neighbor.getX() - 2,

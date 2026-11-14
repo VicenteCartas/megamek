@@ -573,7 +573,11 @@ class GpuBoardOverlaySmokeTest {
                 GpuHudState state = state(moving);
                 GpuBoardSource.Frame frame = frame(scene, moving, panels);
                 Set<Integer> before = liveBuffers();
-                GpuBoardOverlay overlay = new GpuBoardOverlay();
+                var surfaces = new BoardSurface.Cache();
+                var terrain = (GpuTerrain) GpuTestSupport.field(board, "terrain");
+                int[] sampled = { 0 };
+                surfaces.installed(at -> { sampled[0]++; return terrain.tacticalSurface(at); });
+                GpuBoardOverlay overlay = new GpuBoardOverlay(null, surfaces);
                 overlay.update(frame, view(false, null, Entity.NONE), preferences(), state);
                 overlay.update(frame, view(false, null, Entity.NONE), preferences(), state);
                 assertEquals(1, overlay.builds(), "The same snapshots and view state build once");
@@ -605,6 +609,14 @@ class GpuBoardOverlaySmokeTest {
                     overlay.render(board.camera.camera);
                 }
                 assertEquals(23, overlay.builds());
+                assertTrue(sampled[0] > 0, "Draped marks must sample the installed terrain");
+                assertTrue(((Map<?, ?>) GpuTestSupport.field(surfaces, "surfaces")).isEmpty(),
+                      "An overlay must not resculpt ground that the renderer already prepared");
+                overlay.terrainChanged();
+                overlay.update(frame, view(false, null, Entity.NONE), preferences(), state);
+                assertEquals(24, overlay.builds(), "A finished crater or LOD change must redrape unchanged orders");
+                overlay.renderMarks(board.camera.camera, board.poses::get);
+                overlay.render(board.camera.camera);
                 Set<Integer> later = liveBuffers();
                 later.removeAll(before);
                 System.out.println("Overlay buffers after the first build " + first.size() + ", after 20 more "

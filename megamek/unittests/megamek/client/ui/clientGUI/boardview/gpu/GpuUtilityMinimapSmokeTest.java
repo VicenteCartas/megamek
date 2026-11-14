@@ -502,8 +502,7 @@ class GpuUtilityMinimapSmokeTest {
     /** The scene with one hex turned into open liquid of depth 1, as the source captures a water hex. */
     private static BoardScene withLiquid(BoardScene scene, Coords coords, BoardLiquid liquid) {
         List<BoardScene.Tile> tiles = scene.tiles().stream().map(tile -> !tile.coords().equals(coords) ? tile
-              : new BoardScene.Tile(tile.coords(), tile.elevation(), 1, false, tile.roadExits(), tile.surface(),
-                    tile.decals(), tile.decalsWithoutLimbs(),
+              : BoardScenes.newTile(tile.coords(), tile.elevation(), 1, false, tile.roadExits(), tile.surface(),
                     tile.features(), tile.text(), liquid, tile.tileset())).toList();
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, scene.units(),
               scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light(),

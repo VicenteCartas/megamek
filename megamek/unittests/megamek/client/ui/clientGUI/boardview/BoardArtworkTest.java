@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -17,7 +16,9 @@ import javax.swing.SwingUtilities;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,11 +27,10 @@ import org.junit.jupiter.api.io.TempDir;
 class BoardArtworkTest {
     private static final Map<Integer, String> STRUCTURES = Map.of(
           Terrains.BUILDING, "buildings/test/building",
-          Terrains.FUEL_TANK, "buildings/test/tank",
+          Terrains.FUEL_TANK, "buildings/fuel_tanks/fuel_tank_light",
           Terrains.INDUSTRIAL, "buildings/test/industrial");
     /**
-     * Each structure's art marks its own pixel, so the tileset image shows whose art it holds. An entry may name art
-     * at its model's key, which draws where no model stands (the shipped tileset names the bare key).
+     * Each retired structure sprite marks its own pixel, so capture can detect obsolete art leaking into the ground.
      */
     private static final Map<String, Integer> MARKS = Map.of("models/board/classic/buildings/test/building.png",
           10, "models/board/classic/buildings/test/tank.png", 20,
@@ -41,6 +41,7 @@ class BoardArtworkTest {
 
     @BeforeEach
     void tileset() throws Exception {
+        BoardEditorBlueprint.get();
         Path tileset = Files.createDirectories(directory.resolve("models/board/classic/tileset"));
         Files.writeString(tileset.resolve("classic.tileset"), """
               super * "building:1" "" "buildings/test/building.png"
@@ -62,41 +63,46 @@ class BoardArtworkTest {
     }
 
     @Test
-    void customKitsWithoutBoardModelsAreSelectedForEveryStructureType() throws Exception {
-        for (String name : List.of("building", "tank", "industrial")) {
-            model("models/buildings/test/" + name + ".glb");
+    void aNativeBuildingDesignAndTankWeightSelectTheirKits() throws Exception {
+        for (int type : List.of(Terrains.BUILDING, Terrains.FUEL_TANK)) {
+            model("models/" + STRUCTURES.get(type) + ".glb");
         }
-        assertEquals(STRUCTURES, capture().structureModels());
+        assertEquals(Map.of(Terrains.BUILDING, STRUCTURES.get(Terrains.BUILDING),
+              Terrains.FUEL_TANK, STRUCTURES.get(Terrains.FUEL_TANK)), capture(designs()).structureModels());
     }
 
     @Test
-    void boardGlbModelsKeepEachStructuresOwnTilesetProvenance() throws Exception {
+    void retiredBoardModelsCannotBeSelectedByTilesetArtwork() throws Exception {
         for (String asset : STRUCTURES.values()) { model("models/board/" + asset + ".glb"); }
-        assertEquals(STRUCTURES, capture().structureModels());
+        assertEquals(Map.of(), capture(Map.of()).structureModels());
     }
 
     @Test
-    void customKitsAndBoardFallbacksCanCoexistInOneHex() throws Exception {
+    void nativeKitsAndGeneratedIndustrialTerrainCoexist() throws Exception {
         model("models/buildings/test/building.glb");
-        model("models/buildings/test/tank.glb");
-        model("models/board/" + STRUCTURES.get(Terrains.INDUSTRIAL) + ".glb");
-        assertEquals(STRUCTURES, capture().structureModels());
+        model("models/" + STRUCTURES.get(Terrains.FUEL_TANK) + ".glb");
+        Path tileset = directory.resolve("models/board/classic/tileset/classic.tileset");
+        String industrial = "buildings/misc/heavy_industrial_a";
+        Files.writeString(tileset, Files.readString(tileset).replace("buildings/test/industrial.png", industrial));
+        assertEquals(Map.of(Terrains.BUILDING, STRUCTURES.get(Terrains.BUILDING),
+              Terrains.FUEL_TANK, STRUCTURES.get(Terrains.FUEL_TANK), Terrains.INDUSTRIAL, industrial),
+              capture(designs()).structureModels());
     }
 
     @Test
     void obsoleteG3djFilesDoNotAdvertiseModelsThatTheRendererCannotLoad() throws Exception {
         for (String asset : STRUCTURES.values()) { model("models/board/" + asset + ".g3dj"); }
-        assertEquals(Map.of(), capture().structureModels());
+        assertEquals(Map.of(), capture(Map.of()).structureModels());
     }
 
     @Test
-    void tacticalArtLeavesOutTheStructuresStandingAsModels() throws Exception {
-        model("models/board/" + STRUCTURES.get(Terrains.BUILDING) + ".glb");
-        model("models/buildings/test/tank.glb");
-        BufferedImage art = capture().tileset();
+    void classicGroundNeverFallsBackToRetiredStructureSprites() throws Exception {
+        model("models/buildings/test/building.glb");
+        model("models/" + STRUCTURES.get(Terrains.FUEL_TANK) + ".glb");
+        BufferedImage art = capture(designs()).tileset();
         assertEquals(0, art.getRGB(10, 10) >>> 24, "The building's model replaces its art");
         assertEquals(0, art.getRGB(20, 20) >>> 24, "So does the tank's modular kit");
-        assertNotEquals(0, art.getRGB(30, 30) >>> 24, "An unmodelled structure keeps its art");
+        assertEquals(0, art.getRGB(30, 30) >>> 24, "A missing native model cannot revive its old sprite");
     }
 
     private void model(String name) throws Exception {
@@ -106,7 +112,11 @@ class BoardArtworkTest {
         Files.createFile(file);
     }
 
-    private BoardArtwork.HexImage capture() throws Exception {
+    private static Map<String, HexAppearance> designs() {
+        return Map.of("building", new HexAppearance(null, STRUCTURES.get(Terrains.BUILDING), null, null));
+    }
+
+    private BoardArtwork.HexImage capture(Map<String, HexAppearance> designs) throws Exception {
         var task = new FutureTask<BoardArtwork.HexImage>(() -> {
             File data = Configuration.dataDir();
             Configuration.setDataDir(directory.toFile());
@@ -115,6 +125,7 @@ class BoardArtworkTest {
                 var coords = new Coords(0, 0);
                 board.setHex(coords, new Hex(0, "building:1;bldg_elev:2;bldg_cf:15;fuel_tank:1;"
                       + "fuel_tank_elev:1;fuel_tank_cf:15;fuel_tank_magn:10;heavy_industrial:1", ""));
+                board.getHex(coords).setAppearance(designs);
                 return artwork.capture(board, coords, board.getHex(coords));
             } finally {
                 Configuration.setDataDir(data);

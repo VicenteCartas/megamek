@@ -592,7 +592,6 @@ class GpuMapSourceTest {
                     for (var tile : actual.tiles()) {
                         var previous = expected.tile(tile.coords());
                         assertEquals(previous.tileset(), tile.tileset());
-                        assertEquals(previous.decals(), tile.decals());
                         assertEquals(previous.features(), tile.features());
                         assertEquals(previous.text(), tile.text());
                     }

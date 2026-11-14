@@ -189,9 +189,9 @@ class InfantryFootprintTest {
             for (int y = 0; y < 7; y++) {
                 var coords = new Coords(x, y);
                 boolean wet = water.contains(coords);
-                tiles.add(new BoardScene.Tile(coords, wet ? waterLevel : 2, wet ? 1 : -1, false, 0,
-                      BoardScene.Surface.SAND, null, null, List.of(), List.of(),
-                      wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(coords, wet ? waterLevel : 2, wet ? 1 : -1, false, 0,
+                      BoardScene.Surface.SAND, List.of(), List.of(),
+                      wet ? BoardLiquid.WATER : BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

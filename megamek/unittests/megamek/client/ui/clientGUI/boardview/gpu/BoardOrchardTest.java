@@ -40,7 +40,6 @@ class BoardOrchardTest {
                 assertEquals(BoardScene.FeatureKind.TREE, tree.kind());
             }
             BoardFeaturesTest.assertWoodsHeights(trees, height, 1);
-            assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
             assertEquals(trees, BoardFeatures.capture(hex, coords, Map.of()));
         }
     }
@@ -78,7 +77,6 @@ class BoardOrchardTest {
         assertFalse(BoardFeatures.orchard(hex));
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
               .noneMatch(feature -> feature.kind() == BoardScene.FeatureKind.TREE));
-        assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Unrelated fluff retains its artwork");
         hex.addTerrain(new Terrain(Terrains.JUNGLE, 1));
         assertFalse(BoardFeatures.orchard(hex));
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()

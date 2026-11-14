@@ -649,9 +649,7 @@ class GpuTerrainRealismSmokeTest {
                         terrain.scorch(installed.board, new GpuGroundDamage.Scorch(centre,
                               BoardRelief.metres(80), BoardRelief.metres(15)));
                         // Cold nuclear residue retains the directory workload without a wall-clock-varying image.
-                        var clock = GpuGroundDamage.class.getDeclaredField("scorchedAt");
-                        clock.setAccessible(true);
-                        clock.setLong(terrain.groundDamage(), System.nanoTime() - 3_600_000_000_000L);
+                        terrain.groundDamage().advance(3600);
                         terrain.groundDamage().upload();
                         assertTrue(terrain.groundDamage().scorchShown());
                     }

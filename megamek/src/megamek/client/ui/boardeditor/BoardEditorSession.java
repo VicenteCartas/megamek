@@ -490,6 +490,11 @@ public final class BoardEditorSession {
      * while its object stays in its hex.
      */
     private List<HexIssue> importIssues = List.of();
+    /**
+     * The art without a 3D version that the opened board held ({@link BoardSceneryLayouts#droppedArt}), which the
+     * document dropped, until the editor's window has told its user ({@link #takeDroppedArt}).
+     */
+    private List<BoardSceneryLayouts.DroppedArt> droppedArt = List.of();
     /** Whether an object's model exists, per asset, so validation reads the disk once per asset. */
     private final Map<String, Boolean> modelFiles = new java.util.HashMap<>();
     /** Whether a decal's image exists, per asset; a decal may share a model's asset name. */
@@ -716,10 +721,12 @@ public final class BoardEditorSession {
      * is never decoded again. The board is then native: every editor document is a .board2 document, where road level 2
      * is the Alley finish. It holds no token the conversion took ({@link BoardSceneryLayouts#withoutTakenTokens}) and its
      * roads hold their connections as stored ones, so the document is exactly what its saved .board2 holds, and its 2D
-     * Preview shows what a 2D player of that file sees.
+     * Preview shows what a 2D player of that file sees. The art without a 3D version among the dropped tokens is kept
+     * for the editor's window to tell ({@link #takeDroppedArt}).
      */
     private void replace(Board board, Path path) {
         List<HexIssue> converted = BoardSceneryLayouts.convert(board);
+        droppedArt = BoardSceneryLayouts.droppedArt(board);
         List<Coords> every = new ArrayList<>();
         for (int y = 0; y < board.getHeight(); y++) {
             for (int x = 0; x < board.getWidth(); x++) {
@@ -737,6 +744,13 @@ public final class BoardEditorSession {
         currentId = savedId = ++nextId;
         install(board);
         savedTags = Set.copyOf(board.getTags());
+    }
+
+    /** The art without a 3D version that the last opened board held and the document dropped, handed over once. */
+    public List<BoardSceneryLayouts.DroppedArt> takeDroppedArt() {
+        List<BoardSceneryLayouts.DroppedArt> dropped = droppedArt;
+        droppedArt = List.of();
+        return dropped;
     }
 
     /**
@@ -934,7 +948,8 @@ public final class BoardEditorSession {
                     // A stamp brush keeps only its id; each press stamps the layout's members (BoardSceneryLayouts.stamp).
                     if (design.layout() == null) {
                         paintTemplate.setDecorations(List.of(new BoardDecoration("brush", design.kind(), design.id(), null,
-                              0, 0, 0, false, 1, BoardDecoration.Placement.surface("ground", "top",
+                              0, 0, 0, false, BoardEditorBlueprint.placedScale(design.id()),
+                              BoardDecoration.Placement.surface("ground", "top",
                                     // A maglev is suspended a level up, a billboard's panel on its legs; a rail lies on the ground.
                                     megamek.common.board.RailRoute.Kind.of(design.id()) == megamek.common.board.RailRoute.Kind.MAGLEV ? 1
                                           : BoardBillboard.ASSET.equals(design.id()) ? BoardBillboard.DEFAULT_LEVELS : 0), 0, false)

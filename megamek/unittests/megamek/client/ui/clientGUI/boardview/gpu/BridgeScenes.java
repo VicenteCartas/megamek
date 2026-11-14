@@ -33,8 +33,8 @@ final class BridgeScenes {
         hex.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, exits));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, height));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
-        return new BoardScene.Tile(at, ground, -1, false, 0, tile.surface(), null, null,
-              BoardFeatures.capture(hex, at, Map.of()), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE);
+        return BoardScenes.newTile(at, ground, -1, false, 0, tile.surface(),
+              BoardFeatures.capture(hex, at, Map.of()), List.of(), BoardLiquid.NONE, null, BoardRoad.Kind.NONE);
     }
 
     /**
@@ -104,18 +104,15 @@ final class BridgeScenes {
     }
 
     static BoardScene.Tile appearance(BoardScene.Tile t, Map<String, HexAppearance> appearance) {
-        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
-              t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
-              t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
-              t.groundCover(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), appearance);
+        return BoardScenes.newTile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.features(), t.text(), t.liquid(), t.tileset(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
+              t.groundCover(), t.ultraSublevel(), t.tilesetScenery(), appearance);
     }
 
     /** {@code tile} with its deck carrying a road of {@code kind} on {@code exits} (a stored {@code bridge_road}). */
     static BoardScene.Tile withDeckRoad(BoardScene.Tile t, BoardRoad.Kind kind, int exits) {
-        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
-              t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(),
-              t.tileset(), t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(),
-              t.cliffTopExits(), t.bare(), t.groundCover(), t.ultraSublevel(), t.tilesetDecals(),
+        return BoardScenes.newTile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.features(), t.text(), t.liquid(),
+              t.tileset(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(),
+              t.cliffTopExits(), t.bare(), t.groundCover(), t.ultraSublevel(),
               t.tilesetScenery(), t.appearance(), t.cover(), t.barren(), kind, exits, t.deckMud(), t.railBed());
     }
 
@@ -133,9 +130,9 @@ final class BridgeScenes {
             bridge.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, exits));
             bridge.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 0));
             bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
-            route.put(at, withDeckRoad(new BoardScene.Tile(at, 0, 1, false, 0, BoardScene.Surface.GRASS, null, null,
+            route.put(at, withDeckRoad(BoardScenes.newTile(at, 0, 1, false, 0, BoardScene.Surface.GRASS,
                   BoardFeatures.capture(bridge, at, Map.of()), List.of(),
-                  BoardLiquid.WATER, null, true, BoardRoad.Kind.NONE), deck, deck == BoardRoad.Kind.NONE ? 0 : exits));
+                  BoardLiquid.WATER, null, BoardRoad.Kind.NONE), deck, deck == BoardRoad.Kind.NONE ? 0 : exits));
         }
         Coords entrance = start.translated((direction + 3) % 6), exit = start.translated(direction, length);
         route.put(entrance, BoardScenes.tile(entrance, before, before == BoardRoad.Kind.NONE ? 0 : exits, 0, BoardScene.Surface.GRASS));
@@ -195,12 +192,10 @@ final class BridgeScenes {
         var features = new java.util.ArrayList<BoardScene.Feature>();
         RailRoute.derived(hex, "terrain").forEach(marker -> features.add(feature(marker)));
         if (deck) { features.add(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, level, BoardScene.FeatureKind.PROP, sides)); }
-        var t = new BoardScene.Tile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS, null, null,
-              features, List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE);
-        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
-              t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
-              t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
-              t.groundCover(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), hex.getAppearance(),
+        var t = BoardScenes.newTile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS,
+              features, List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, BoardRoad.Kind.NONE);
+        return BoardScenes.newTile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.features(), t.text(), t.liquid(), t.tileset(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
+              t.groundCover(), t.ultraSublevel(), t.tilesetScenery(), hex.getAppearance(),
               t.cover(), t.barren(), BoardRoad.Kind.NONE, 0, false, RailRoute.groundSides(hex));
     }
 
@@ -231,17 +226,15 @@ final class BridgeScenes {
         bridge.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, exits));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, deck));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
-        return new BoardScene.Tile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS, null, null,
-              BoardFeatures.capture(bridge, at, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true,
+        return BoardScenes.newTile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS,
+              BoardFeatures.capture(bridge, at, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null,
               BoardRoad.Kind.NONE);
     }
 
     /** The tile with its bridge's Pillars toggle on. */
     static BoardScene.Tile pillared(BoardScene.Tile t) {
-        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
-              t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
-              t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
-              t.groundCover(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(),
+        return BoardScenes.newTile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.features(), t.text(), t.liquid(), t.tileset(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
+              t.groundCover(), t.ultraSublevel(), t.tilesetScenery(),
               Map.of("bridge", HexAppearance.PILLARS));
     }
 
@@ -251,9 +244,9 @@ final class BridgeScenes {
         hex.addTerrain(new Terrain(Terrains.BRIDGE, 1, true, exits));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 3));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, 100));
-        return appearance(new BoardScene.Tile(ground.coords(), ground.elevation(), ground.waterDepth(),
-              ground.frozen(), ground.roadExits(), ground.surface(), null, null,
-              BoardFeatures.capture(hex, ground.coords(), Map.of()), List.of(), ground.liquid(), null, true, ground.road()),
+        return appearance(BoardScenes.newTile(ground.coords(), ground.elevation(), ground.waterDepth(),
+              ground.frozen(), ground.roadExits(), ground.surface(),
+              BoardFeatures.capture(hex, ground.coords(), Map.of()), List.of(), ground.liquid(), null, ground.road()),
               Map.of("bridge", HexAppearance.NATURAL_BRIDGE));
     }
 
@@ -276,8 +269,8 @@ final class BridgeScenes {
                 var ground = BoardScenes.tile(at, road ? BoardRoad.Kind.GRAVEL : BoardRoad.Kind.NONE,
                       road ? (1 << ((direction + 1) % 6)) | (1 << ((direction + 4) % 6)) : 0, level, family);
                 if (water && canyon) {
-                    ground = new BoardScene.Tile(at, 0, 1, false, 0, family, null, null,
-                          List.of(), List.of(), BoardLiquid.WATER, null, true, BoardRoad.Kind.NONE);
+                    ground = BoardScenes.newTile(at, 0, 1, false, 0, family,
+                          List.of(), List.of(), BoardLiquid.WATER, null, BoardRoad.Kind.NONE);
                 }
                 tiles.add(at.equals(bridge) ? naturalSpan(ground, (1 << direction) | (1 << ((direction + 3) % 6))) : ground);
             }

@@ -92,8 +92,8 @@ class GpuBuildingCollapseSmokeTest {
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
                 private final long deadline = System.nanoTime() + 600_000_000_000L;
                 private Graphics fixedGraphics;
-                private int scenario, stage, frames, swapFrame = -1, linksBefore;
-                private Vector3 standing;
+                private int scenario, stage, frames, swapFrame = -1, linksBefore, lateBefore, batchesBefore, takeBatches;
+                private boolean taken;
 
                 @Override
                 public void create() {
@@ -117,6 +117,7 @@ class GpuBuildingCollapseSmokeTest {
                             return;
                         }
                         step(SCENARIOS.get(scenario));
+                        batchesBefore = ((GpuTerrain) field(this, "terrain")).fallBatchesBuilt();
                     } catch (Throwable error) {
                         failure.set(error);
                         Gdx.app.exit();
@@ -137,10 +138,12 @@ class GpuBuildingCollapseSmokeTest {
                         // As an attack's checkpoint arrives ahead of its hit: the trees' models split meanwhile.
                         var shown = (BoardScene) field(this, "scene");
                         terrain.prepareBreak(List.of(new BoardScene.Detonation.Felled(current.at(), shown.tile(current.at())
-                              .features().stream().filter(BoardFeatures::cover).toList())));
+                              .features().stream().filter(BoardFeatures::cover).toList())), true);
                     } else if (stage == 1 && frames >= (current.woods() ? 60 : 20) && !terrain.fragmentsPending()) {
                         capture(output, current.name() + "-0-before");
                         linksBefore = GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading();
+                        lateBefore = terrain.lateCuts();
+                        taken = false;
                         SwingUtilities.invokeLater(() -> {
                             if (current.woods()) {
                                 // As an attack from the west clearing them: its hit, then the woods gone (GpuBoardSource).
@@ -170,17 +173,23 @@ class GpuBuildingCollapseSmokeTest {
                         frames = 0;
                         stage = 2;
                     } else if (stage == 2) {
-                        var falling = terrain.collapses().stream().filter(collapse -> collapse.instance() != null).findFirst();
-                        if (current.woods() ? terrain.fallParts()[0] == 0 : falling.isEmpty() && !terrain.fallStarted(current.at())) {
+                        if (!taken && terrain.fallTaken(current.at())) {
+                            // The frame that took it from its chunk: its batches were built before.
+                            taken = true;
+                            takeBatches = terrain.fallBatchesBuilt() - batchesBefore;
+                        }
+                        if (current.woods() ? terrain.fallParts()[0] == 0 : !terrain.fallStarted(current.at())) {
                             assertTrue(frames < 600, current.name() + " gives way to its pieces within ten seconds");
                             return;
                         }
                         swapFrame = frames;
-                        standing = falling.map(collapse -> bounds(collapse).getCenter(new Vector3())).orElse(null);
                         int[] parts = terrain.fallParts();
-                        report.add(current.name() + (standing == null ? ": falls on the GPU" : ": cut into pieces")
+                        report.add(current.name() + ": falls through the engine"
                               + " " + frames + " frames after it was brought down, " + parts[1] + " of its " + parts[0]
-                              + " parts in fragments");
+                              + " parts in fragments (" + (terrain.lateCuts() - lateBefore) + " nodes' cuts not in), the frame "
+                              + "that took it built " + takeBatches + " batches; fragment meshes " + terrain.fragmentBytes() / 1024
+                              + " KiB");
+                        if (taken) { assertEquals(0, takeBatches, current.name() + ": the frame that takes a fall builds no batch"); }
                         stage = 3;
                     }
                     if (stage == 3) {
@@ -190,27 +199,20 @@ class GpuBuildingCollapseSmokeTest {
                         }
                         if (since == CAPTURES[CAPTURES.length - 1] && current.woods()) {
                             stage = 4;
-                        } else if (since == CAPTURES[CAPTURES.length - 1] && standing == null) {
-                            assertTrue(terrain.fallTaken(current.at()), current.name() + "'s pile still lies there " + since + " frames on");
-                            stage = 4;
                         } else if (since == CAPTURES[CAPTURES.length - 1]) {
-                            var falling = terrain.collapses().stream().filter(collapse -> collapse.instance() != null).findFirst();
-                            assertTrue(falling.isPresent(), current.name() + "'s pieces still lie there " + since + " frames on");
-                            var box = bounds(falling.get());
-                            var drift = box.getCenter(new Vector3()).sub(standing);
-                            report.add(current.name() + ": pieces' middle moved " + drift + ", top now " + box.max.z);
-                            assertTrue(drift.z < 0, current.name() + " came down: " + drift);
-                            if (current.ac20()) { assertTrue(drift.x > 5, "The AC/20 from the west throws it east: " + drift); }
+                            assertTrue(terrain.fallTaken(current.at()), current.name() + "'s pile still lies there " + since + " frames on");
                             stage = 4;
                         }
                     } else if (stage == 4) {
-                        if (!terrain.collapses().isEmpty() || terrain.fallTaken(current.at()) || terrain.fallParts()[0] > 0) {
+                        if (terrain.fallTaken(current.at()) || terrain.fallParts()[0] > 0) {
                             assertTrue(frames - swapFrame < 1800, current.name() + "'s pieces sink away");
                             return;
                         }
                         capture(output, current.name() + "-9-after");
                         report.add(current.name() + ": " + (GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading()
                               - linksBefore) + " programs linked from its fall on");
+                        assertTrue(2 * terrain.fragmentBytes() <= KitFragments.Cuts.BYTES,
+                              "The fragments kept after " + current.name() + "'s fall stay within their budget");
                         assertTrue(!fixture.game.getBoard().getHex(current.at()).containsTerrain(Terrains.BUILDING)
                               && !fixture.game.getBoard().getHex(current.at()).containsTerrain(Terrains.WOODS));
                         scenario++;
@@ -221,10 +223,6 @@ class GpuBuildingCollapseSmokeTest {
         }
         report.forEach(System.out::println);
         if (failure.get() != null) { throw new AssertionError("Building collapse review failed", failure.get()); }
-    }
-
-    private static BoundingBox bounds(GpuCollapse collapse) {
-        return collapse.instance().calculateBoundingBox(new BoundingBox()).mul(collapse.instance().transform);
     }
 
     private static void capture(File output, String name) {

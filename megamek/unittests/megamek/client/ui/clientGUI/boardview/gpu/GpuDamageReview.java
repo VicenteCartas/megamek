@@ -162,10 +162,6 @@ final class GpuDamageReview {
                 assertTrue(UnitDamageDisplay.locationParts(unit, "RL").stream()
                       .allMatch(part -> texture(part) != null && texture(part).getWidth() == 128));
                 var scene = (BoardScene) field(view, "scene");
-                var tile = scene.tile(coords);
-                assertNotNull(tile.decals(), "The 2D limb marker remains available as fallback");
-                assertNotNull(tile.decalsWithoutLimbs(), "An empty replacement decal is retained, not mistaken for unavailable");
-                assertNotEquals(tile.decals(), tile.decalsWithoutLimbs());
                 var models = salvageModels(terrain);
                 var props = limbInstances(terrain, models);
                 assertEquals(3, props.size());
@@ -176,7 +172,6 @@ final class GpuDamageReview {
                     assertEquals(2 * BoardGeometry.LEVEL + .12f * BoardGeometry.HEX_SCALE,
                           UnitBounds.world(prop).min.z, BoardRelief.metres(.5f));
                 }
-                assertSame(tile.decalsWithoutLimbs(), selectedDecals(terrain, coords));
                 view.boardCamera.center(BoardGeometry.center(coords, 2));
                 view.boardCamera.zoom(.16f);
                 capture(view, "runtime-limb-remains");
@@ -189,8 +184,6 @@ final class GpuDamageReview {
                     missing.update(scene);
                     assertEquals(3, limbInstances(standalone, salvageModels(standalone)).size());
                     assertEquals(3, limbInstances(missing, salvageModels(missing)).size());
-                    assertSame(tile.decalsWithoutLimbs(), selectedDecals(standalone, coords));
-                    assertSame(tile.decalsWithoutLimbs(), selectedDecals(missing, coords));
                 } finally {
                     standalone.dispose();
                     missing.dispose();
@@ -235,15 +228,6 @@ final class GpuDamageReview {
             if (!MathUtils.isEqual(before.transform.val[i], after.transform.val[i], tolerance)) { return false; }
         }
         return true;
-    }
-
-    private static BoardScene.Pixels selectedDecals(GpuTerrain terrain, Coords coords) throws Exception {
-        for (var entry : ((Map<?, ?>) field(terrain, "decalPixels")).entrySet()) {
-            if (coords.equals(field(entry.getKey(), "coords")) && (int) field(entry.getKey(), "kind") == 0) {
-                return (BoardScene.Pixels) entry.getValue();
-            }
-        }
-        return null;
     }
 
     private static List<Model> salvageModels(GpuTerrain terrain) throws Exception {

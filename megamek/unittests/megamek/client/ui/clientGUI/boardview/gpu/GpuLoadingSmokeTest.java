@@ -47,6 +47,12 @@ class GpuLoadingSmokeTest {
         terrainField.setAccessible(true);
         loadingField.setAccessible(true);
         try (var fixture = wide ? GpuBoardFixture.create(Board.createEmptyBoard(24, 16)) : GpuBoardFixture.create()) {
+            javax.swing.SwingUtilities.invokeAndWait(() -> {
+                fixture.entity.setPosition(null);
+                fixture.entity.setDeployed(false);
+                fixture.source.refresh();
+            });
+            assertFalse(fixture.source.reserveUnits().isEmpty(), "Deployment models must warm up off board");
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
                 final long deadline = System.nanoTime() + 120_000_000_000L;
                 final Map<String, Integer> completions = new HashMap<>();

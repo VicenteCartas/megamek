@@ -172,7 +172,7 @@ class BoardLegacyImportTest {
         assertEquals(1, seaport.terrainLevel(Terrains.WOODS));
         assertTrue(seaport.getDecorations().isEmpty());
         assertEquals(new HexAppearance("woods/container-yard/rows", null, null, null), seaport.getAppearance().get("vegetation"));
-        var yard = BoardFeatures.capture(seaport, SEAPORT, Map.of(), Set.of(), board::getHex);
+        var yard = BoardFeatures.capture(seaport, SEAPORT, Map.of(), board::getHex);
         assertTrue(yard.stream().noneMatch(f -> f.kind() == BoardScene.FeatureKind.TREE), "No woods trees grow in the container yard");
         assertTrue(yard.stream().anyMatch(f -> f.asset().equals("scenery/seaport/yard/light-rows")
               && BoardFeatures.terrainOwned(f.decoration())));
@@ -576,7 +576,7 @@ class BoardLegacyImportTest {
     }
 
     private static List<String> drawnTrees(Hex hex) {
-        return BoardFeatures.capture(hex, TABLES, Map.of(), Set.of(), coords -> null).stream()
+        return BoardFeatures.capture(hex, TABLES, Map.of(), coords -> null).stream()
               .filter(f -> f.decoration() != null && BoardFeatures.hasSnowForm(f.decoration().asset()))
               .map(BoardScene.Feature::asset).toList();
     }
@@ -656,7 +656,6 @@ class BoardLegacyImportTest {
                 assertTrue(hex.hasPavedRoad(), "The authoritative game rule accepts road level " + level);
                 assertTrue(HexTile.road(hex));
                 assertEquals(BoardRoad.Kind.PAVED, BoardRoad.capture(hex));
-                assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
                 var at = new Coords(3, 3);
                 var road = BoardRoad.layout(at, exits, BoardRoad.capture(hex), direction -> BoardRoad.Kind.NONE);
                 for (int edge = 0; edge < 6; edge++) {

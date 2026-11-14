@@ -42,10 +42,8 @@ public final class TilesetScenery {
     private static final MMLogger LOGGER = MMLogger.create(TilesetScenery.class);
     /** The parsed tileset of the data directory it was read from ({@link TilesetMatcher#root}). */
     private static volatile TilesetMatcher tileset;
-    /** The structure models the tileset names that do not exist, each reported once. */
-    private static final Set<String> MISSING = ConcurrentHashMap.newKeySet();
     /** File decisions belong to one data root and asset-reload generation, shared by capture and model readers. */
-    private record BuildingFile(File custom, boolean customExists, boolean legacyExists) { }
+    private record BuildingFile(File custom, boolean customExists) { }
     private record BuildingFiles(File root, Map<String, BuildingFile> files) { }
     private static volatile BuildingFiles buildingFiles;
     private static final Map<File, Boolean> SINGLE_HEX_BUILDINGS = new ConcurrentHashMap<>();
@@ -143,7 +141,6 @@ public final class TilesetScenery {
         SINGLE_HEX_BUILDINGS.clear();
         BuildingVolumes.reload();
         VARIANTS.clear();
-        MISSING.clear();
         return tileset;
     }
 
@@ -159,7 +156,7 @@ public final class TilesetScenery {
         return result;
     }
 
-    /** New kits use family/name paths; the selected legacy asset keeps its tileset provenance for fallback. */
+    /** Native building kits use family/name paths under models/buildings. */
     public static File customBuildingFile(String asset) {
         return buildingFile(asset).custom();
     }
@@ -227,10 +224,10 @@ public final class TilesetScenery {
         return "buildings/standard/" + (name == null ? "building" : name) + "-" + weight(buildingWeight(hex));
     }
 
-    /** A fuel tank's kit is determined by its weight alone; its connection pieces follow the hex's exits. */
+    /** A fuel tank uses one of the four rules-weight kits; its connection pieces follow the hex's exits. */
     public static String genericFuelTank(Hex hex) {
         return hex.containsTerrain(Terrains.FUEL_TANK)
-              ? "buildings/fuel_tanks/fuel_tank_" + weight(hex.terrainLevel(Terrains.FUEL_TANK)) : null;
+              ? "buildings/fuel_tanks/fuel_tank_" + weight(rulesWeight(hex.terrainLevel(Terrains.FUEL_TANK))) : null;
     }
 
     /** The weight of {@code hex}'s building or wall ({@link #buildingWeight(int, Hex)} for its {@code building} type). */
@@ -290,8 +287,7 @@ public final class TilesetScenery {
         boolean exists = exact.isFile();
         File custom = exact;
         if (!exists && generated.isFile()) { custom = generated; exists = true; }
-        boolean legacy = new File(root, "models/board/" + asset + ".glb").isFile();
-        return new BuildingFile(custom, exists, legacy);
+        return new BuildingFile(custom, exists);
     }
 
     /** Whether the asset's kit is generated from a JSON spec, which holds both footprints ({@link #customBuildingFile}). */
@@ -445,8 +441,8 @@ public final class TilesetScenery {
 
     /**
      * The hex's structure models by structure terrain: a designed building's or fuel tank's model, else the kit for its
-     * weight ({@link #genericBuilding}, {@link #genericFuelTank}), else its tileset entry; only models that exist for that
-     * structure ({@link BoardGenerator#exists}, or a custom kit).
+     * weight ({@link #genericBuilding}, {@link #genericFuelTank}). Industrial terrain selects its generated equipment
+     * layout through the shared tileset. Only available native models are returned.
      */
     public static Map<Integer, String> structureModels(Hex hex) {
         return structureModels(hex, buildingConnected(hex, null, null));
@@ -474,26 +470,16 @@ public final class TilesetScenery {
               || buildingFile(generic).customExists())) { models.putIfAbsent(Terrains.BUILDING, generic); }
         String tank = genericFuelTank(hex);
         if (tank != null && buildingFile(tank).customExists()) { models.putIfAbsent(Terrains.FUEL_TANK, tank); }
-        if (hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL)) {
+        // Industrial terrain still chooses its generated equipment layout through the shared tileset selector.
+        // Buildings and tanks use native designs or their gameplay kits, never a pre-conversion art/model fallback.
+        if (hex.containsTerrain(Terrains.INDUSTRIAL)) {
             List<TilesetMatcher.Pick> images = new ArrayList<>(appearanceLayers(definitions, hex, false));
             images.add(definitions.select(hex).base());
             for (TilesetMatcher.Pick image : images) {
                 String model = image == null ? "" : image.key();
-                if (model.startsWith("buildings/")) {
-                    BuildingFile file = buildingFile(model);
-                    boolean glb = file.legacyExists(), custom = file.customExists();
-                    // A generated asset counts only for the structure its generator builds (BoardGenerator).
-                    var generator = BoardGenerator.of(model);
-                    // An entry that names only the key has no art to fall back to.
-                    if (!glb && !custom && generator == null && !TilesetMatcher.image(image.source()) && MISSING.add(model)) {
-                        LOGGER.warn("The Classic tileset names the structure model {}, which does not exist", model);
-                    }
-                    for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
-                        boolean drawn = glb || custom || generator != null && generator.builds(terrain);
-                        if (drawn && hex.containsTerrain(terrain) && image.has(terrain)) {
-                            models.putIfAbsent(terrain, model);
-                        }
-                    }
+                var generator = BoardGenerator.of(model);
+                if (generator != null && generator.builds(Terrains.INDUSTRIAL) && image.has(Terrains.INDUSTRIAL)) {
+                    models.putIfAbsent(Terrains.INDUSTRIAL, model);
                 }
             }
         }

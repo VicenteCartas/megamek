@@ -84,8 +84,8 @@ class BoardCameraCollisionTest {
     }
 
     private static BoardScene scene() {
-        return new BoardScene(0, 1, 1, List.of(new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0,
-              BoardScene.Surface.GRASS, null, List.of(), List.of())), List.of(), List.of(), -1, "", List.of());
+        return new BoardScene(0, 1, 1, List.of(BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0,
+              BoardScene.Surface.GRASS, List.of(), List.of())), List.of(), List.of(), -1, "", List.of());
     }
 
     private static BoardTacticalGeometry.Surface surface(List<BoardSurface.Face> faces) {

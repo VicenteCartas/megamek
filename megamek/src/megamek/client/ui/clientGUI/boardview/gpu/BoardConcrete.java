@@ -1,7 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -18,16 +17,7 @@ import megamek.common.board.RailRoute;
  * cached per scene, with the hexes whose placed objects pin them. No game state or GL objects.
  */
 final class BoardConcrete {
-    /** One immutable derived outline, shared by terrain and picking; no scene, artwork or GL resources are retained. */
-    private record Cached(WeakReference<List<BoardScene.Tile>> tiles, int width, int height, float scale,
-          BoardConcrete shape) {
-        boolean matches(BoardScene scene) {
-            return tiles.get() == scene.tiles() && width == scene.width() && height == scene.height()
-                  && scale == BoardGeometry.hexScale();
-        }
-    }
-    // Retain the displayed and pending outlines. A cache miss must not hold a monitor during board construction.
-    private static volatile Cached cached, previous;
+    final float scale = BoardGeometry.hexScale();
     private final ConcreteFit fit;
     private final List<Cut> cuts;
 
@@ -35,25 +25,7 @@ final class BoardConcrete {
     record Cut(Coords at, String object, String asset) { }
 
     static BoardConcrete of(BoardScene scene) {
-        Cached first = cached, second = previous;
-        if (first != null && first.matches(scene)) { return first.shape(); }
-        if (second != null && second.matches(scene)) { return second.shape(); }
-        BoardConcrete shape = new BoardConcrete(scene);
-        synchronized (BoardConcrete.class) {
-            if (cached != null && cached.matches(scene)) { return cached.shape(); }
-            previous = cached;
-            cached = new Cached(new WeakReference<>(scene.tiles()), scene.width(), scene.height(), BoardGeometry.hexScale(), shape);
-        }
-        return shape;
-    }
-
-    /** A scene whose concrete inputs are unchanged keeps the previous fit; the cache then serves it for the new tiles. */
-    static BoardConcrete adopt(BoardScene scene, BoardConcrete shape) {
-        synchronized (BoardConcrete.class) {
-            previous = cached;
-            cached = new Cached(new WeakReference<>(scene.tiles()), scene.width(), scene.height(), BoardGeometry.hexScale(), shape);
-        }
-        return shape;
+        return scene.ground().concrete(scene);
     }
 
     /** The fit itself, with the hexes the scene's placed objects pin. */
@@ -103,7 +75,7 @@ final class BoardConcrete {
         return other != null && fit.sameCorners(other.fit, coords);
     }
 
-    private BoardConcrete(BoardScene scene) {
+    BoardConcrete(BoardScene scene) {
         List<ConcreteFit.Cell> cells = new ArrayList<>(scene.tiles().size());
         for (BoardScene.Tile tile : scene.tiles()) { cells.add(cell(scene, tile)); }
         // A placed object keeps its hex's outline only where the fit moves a wall or bank into it. Pinning its hex can move
@@ -146,7 +118,7 @@ final class BoardConcrete {
 
     /** What the fit reads of a tile: structures and ground drawn without the fitted relief keep their hex. */
     private static ConcreteFit.Cell cell(BoardScene scene, BoardScene.Tile tile) {
-        boolean fixed = !tile.detailedGround() || edges(tile) == HexAppearance.Edges.HEX
+        boolean fixed = edges(tile) == HexAppearance.Edges.HEX
               || tile.features().stream().anyMatch(feature -> fitFeature(feature) && feature.decoration() == null);
         return new ConcreteFit.Cell(tile.coords(), tile.elevation(), tile.surface() == BoardScene.Surface.CONCRETE,
               tile.liquid().present(), tile.liquid().molten(), tile.frozen(), tile.ultraSublevel(), fixed, tile.wayExits(),

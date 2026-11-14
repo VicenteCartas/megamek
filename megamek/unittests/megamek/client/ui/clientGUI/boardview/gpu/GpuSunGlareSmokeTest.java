@@ -49,7 +49,7 @@ class GpuSunGlareSmokeTest {
         assertTrue(output.isDirectory() || output.mkdirs());
         GpuAtmosphere atmosphere = new GpuAtmosphere();
         GpuTerrain terrain = new GpuTerrain();
-        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS, null, List.of(),
+        var tile = BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS, List.of(),
               List.of());
         BoardScene scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
         BoardCamera camera = new BoardCamera();

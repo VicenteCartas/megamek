@@ -40,7 +40,6 @@ class BoardUltraSublevelTest {
                 BoardScene scene = scene(at -> at.equals(PIT) ? hex : new Hex(-1, "", theme));
                 var tile = scene.tile(PIT);
                 assertTrue(tile.ultraSublevel());
-                assertTrue(tile.detailedGround());
                 assertEquals(-2, tile.elevation());
                 assertEquals(-2, hex.getLevel(), "The cosmetic recess never edits game elevations");
                 assertTrue(tile.features().isEmpty());
@@ -272,7 +271,7 @@ class BoardUltraSublevelTest {
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 Coords at = new Coords(x, y);
-                var artwork = new BoardArtwork.HexImage(at, null, null, List.of(), Map.of(), null);
+                var artwork = new BoardArtwork.HexImage(at, List.of(), Map.of(), null);
                 tiles.add(BoardScene.captureTile(source.apply(at), artwork, null, pool,
                       c -> c.getX() < 0 || c.getY() < 0 || c.getX() >= width || c.getY() >= height ? null : source.apply(c)));
             }

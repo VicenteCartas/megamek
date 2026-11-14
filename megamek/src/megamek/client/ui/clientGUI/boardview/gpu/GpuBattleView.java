@@ -148,19 +148,18 @@ class GpuBattleView extends ApplicationAdapter {
     private static final float NUCLEAR_DAMAGE = 200;
     private final Map<Integer, Hit> hits = new HashMap<>();
     private final MeepleDebris.Ground debrisGround = this::debrisHeight;
-    /**
-     * What a collapse's pieces land on (GpuTerrain#advanceCollapses): the board as it stands, which no longer holds their
-     * structure. Within the pile's own reach they look past a deck or building standing above their foot, as an authored
-     * building's standing shares do, which keep the tower's walls their cut gave them; beyond it they land on the
-     * neighbours they fall onto.
-     */
-    private final MeepleDebris.Ground collapseGround = (x, y, from, own) -> debrisHeight(x, y, from, own, own);
     /** The units seen dead, in either camera: a meeple explodes only as its unit first shows dead. */
     private final Set<String> deadUnits = new HashSet<>();
-    /** This frame's ghosts of exploded meeples ({@link #ghost}): the instances placed for them, by how much shows. */
+    /**
+     * This frame's destroyed units shown in the playback of what they fired or took ({@link #ghost}): the instances
+     * placed for them, by how much shows. They draw as themselves, in their colours and camouflage, fading in and out
+     * (GpuUnitShader.Shown#opacity); they carry no marker, outline or nameplate and are not picked.
+     */
     private final Map<ModelInstance, Float> unitGhosts = new java.util.IdentityHashMap<>();
-    /** Battle seconds over which a ghost fades in and out. */
+    /** Battle seconds over which such a unit fades in and out. */
     private static final float GHOST_FADE_SECONDS = .25f;
+    /** The units alive in the frame's scene before a review's holds: a review shows the others fading (#prepareUnits). */
+    private final Set<Integer> aliveUnits = new HashSet<>();
     private final GpuUnitModels unitModels = GpuUnitModels.ENABLED ? new GpuUnitModels() : null;
     private final UnitDamageDisplay damageDisplay = new UnitDamageDisplay();
     private final MeepleCasualties casualties = new MeepleCasualties(damageDisplay);
@@ -267,7 +266,7 @@ class GpuBattleView extends ApplicationAdapter {
      * views and settings (the Tactical View, the wireframe view, SMAA, a render resolution below 100%) link their own
      * programs when they first show, without a loading stage.
      */
-    private enum WarmUp { BOARD, CLOSE, DONE }
+    private enum WarmUp { BOARD, CLOSE, PAGES, DONE }
     private WarmUp warmUp = WarmUp.DONE;
     /** Whether the close view was drawn under this loading stage. */
     private boolean probed;
@@ -461,7 +460,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (source.isEditor()) { editorBadges = new GpuEditorBadges(); }
         if (source.isGameplay()) { markers.prepareModels(); }
         unitTextures = new GpuTextures<>(false, true);
-        overlay = new GpuBoardOverlay(shapes());
+        overlay = new GpuBoardOverlay(shapes(), groundSurfaces);
         unitBases = new GpuUnitBases(theme.skin);
         // The HUD draws with the view's batch, which it does not own: the battle HUD over a game, the map tools over
         // the board editor and the map preview. The batch outlives an asset reload, which recreates the renderers.
@@ -529,8 +528,8 @@ class GpuBattleView extends ApplicationAdapter {
         probed = false;
         terrain = new GpuTerrain(unitModels, unitBounds);
         terrain.setCombatScars(source.isGameplay());
-        terrain.setFragments(source.isGameplay());
         terrain.setEditable(source.isEditor());
+        groundSurfaces.installed(terrain::tacticalSurface);
         offscreenLinks = new GpuGlsl.Preparation();
         GpuGlsl.linkOffscreen(offscreenLinks);
         fireControl = new GpuFireControl(sprites());
@@ -769,6 +768,7 @@ class GpuBattleView extends ApplicationAdapter {
         // Moving to another monitor can change DPI without changing the window's dimensions.
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         BoardSource.Frame frame = source.takeFrame();
+        terrain.setBoardState(frame.boardState());
         if (frame.scene() == null) {
             // Without a board the HUD still draws: a dialog asked now holds the EDT until it is answered here.
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
@@ -803,12 +803,8 @@ class GpuBattleView extends ApplicationAdapter {
         scene = frame.scene();
         if (unitModels != null) { unitModels.setDisplayMode(displayMode(), boardCamera.tactical()); }
         history.accept(frame.timeline(), scene, frame.reports(), this::hasInfantryTransports);
-        // The trees an attack takes down split into their pieces ahead of its hit (GpuTerrain#breakTrees).
-        for (var event : frame.timeline()) {
-            if (event instanceof BoardScene.SceneUpdate update && !update.broken().isEmpty()) {
-                terrain.prepareBreak(update.broken());
-            }
-        }
+        // What the timeline is about to bring down or break is cut into its pieces ahead of its fall, and only that.
+        terrain.prepareFalls(frame.timeline(), boardCamera.camera, history.running());
         // The editor plays Destroyed's collapse, which comes with the frame that shows the ruin (GpuMapSource#editorCommand).
         // Any other change of its tiles shows at once, as Skip to results shows it, so no collapse plays on, or lies, where
         // a structure stands again; with nothing falling the skip changes nothing.
@@ -835,6 +831,10 @@ class GpuBattleView extends ApplicationAdapter {
         updateSlowMotion();
         // Historical review is presentation only: it must never signal a live movement completion to Swing.
         source.playbackState(frame, history.running());
+        aliveUnits.clear();
+        for (var unit : scene.units()) {
+            if (!dead(unit)) { aliveUnits.add(unit.id()); }
+        }
         scene = playback.present(scene);
         BoardSource.Frame unitFrame = frame.withScene(scene);
         if (ui instanceof GpuHud hud) {
@@ -842,7 +842,9 @@ class GpuBattleView extends ApplicationAdapter {
             unitFrame = hud.state.presented(unitFrame);
             scene = unitFrame.scene();
         }
-        if (warmUp != WarmUp.DONE) { scene = withReserve(scene); }
+        // Reserve models are probed only once the terrain can draw. Picking their temporary position while chunks
+        // are still loading would rebuild uncached terrain surfaces on every loading frame.
+        if (warmUp != WarmUp.DONE && terrain.ready(scene)) { scene = withReserve(scene); }
         // Dying meeples still wear their unit's camouflage (MeepleCasualties).
         camouflage.retain(Stream.concat(scene.units().stream(), casualties.units().stream()).toList());
         if (unitModels != null) {
@@ -873,9 +875,12 @@ class GpuBattleView extends ApplicationAdapter {
         // Authored transforms move the installed shell below. Slice, replant and rebuild sky occlusion after release.
         boolean authoredGesture = source.editorAuthoredGesture() && terrain.ready(scene);
         skyVisibility.update(terrain.environment(), authoredGesture ? terrain.presentation(scene) : scene, 1);
-        if (!authoredGesture) { terrain.update(scene, boardCamera.camera); }
+        if (!authoredGesture) {
+            var upcoming = !source.isEditor() && terrain.ready(scene) ? playback.preparingTerrain() : null;
+            terrain.update(upcoming == null ? scene : upcoming, boardCamera.camera, upcoming == null);
+        }
         // Keep draining preparation, but do not build another terrain level for the shader probe's temporary camera.
-        boolean detailChanged = terrain.refine(warmUp == WarmUp.CLOSE ? null : boardCamera.camera, source.isEditor());
+        boolean detailChanged = terrain.refine(warmUp == WarmUp.CLOSE ? null : boardCamera.camera);
         settings.set(terrain.settings());
         tuning.terrainProgress(terrain.buildProgress());
         if (!terrain.ready(scene)) {
@@ -930,6 +935,7 @@ class GpuBattleView extends ApplicationAdapter {
         fireControl.update(scene, HIDE_TARGET_ARROWS_DURING_ATTACKS && !playback.attacks().isEmpty(), unitFrame.status(),
               unitFrame.panels().fire());
         tactical.update(scene, detailChanged, hovered, !unitFrame.panels().move().route().isEmpty(), hoveredUnit);
+        if (detailChanged) { overlay.terrainChanged(); }
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(tuning.fovStyle(), tuning.fovDarkness(), tuning.sensorStyle(), tuning.sensorDarkness());
         attackEffects.setWind(atmosphereSettings.effects());
@@ -979,7 +985,6 @@ class GpuBattleView extends ApplicationAdapter {
         markers.beginFrame(scene.markers(), Gdx.graphics.getDeltaTime());
         prepareUnits();
         casualties.advance(animationSeconds(), debrisGround, atmosphereSettings.gravity() / BoardAtmosphere.STANDARD_GRAVITY);
-        terrain.advanceCollapses(animationSeconds(), collapseGround, atmosphereSettings.gravity() / BoardAtmosphere.STANDARD_GRAVITY);
         terrain.advanceFalls(animationSeconds(), atmosphereSettings.gravity() / BoardAtmosphere.STANDARD_GRAVITY);
         applyHover();
         for (var unit : scene.units()) {
@@ -1049,10 +1054,9 @@ class GpuBattleView extends ApplicationAdapter {
         }
         unitBounds.begin();
         List<ModelInstance> units = new ArrayList<>(unitInstances.values());
-        // Both views share the casualties and their clock. Ghosts cast no shadow, nor anything half faded.
+        // Both views share the casualties and their clock. Nothing half faded casts a shadow.
         casualties.casualties().forEach(casualty -> units.add(casualty.instance));
-        units.removeIf(instance -> unitGhosts.containsKey(instance)
-              || instance.userData instanceof GpuUnitShader.Shown shown && shown.opacity < .5f);
+        units.removeIf(instance -> instance.userData instanceof GpuUnitShader.Shown shown && shown.opacity < .5f);
         List<ModelInstance> outlined = scene.units().stream()
               .filter(unit -> !unit.sensorContact() || GpuMarkers.outlineEnabled(BoardMarker.Kind.SENSOR_CONTACT))
               .map(unit -> unitInstances.get(unit.id() + ":" + unit.part()))
@@ -1063,8 +1067,9 @@ class GpuBattleView extends ApplicationAdapter {
               || !boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance)));
         float seeThrough = tuning.seeThrough();
         boolean wireframeView = tuning.wireframe() && GpuWireframe.supported();
-        // Trees dissolve between detail levels, except in the wireframe view, whose depth fill and lines cannot.
-        terrain.treeDissolves = !wireframeView;
+        // Trees and kit structures dissolve between detail levels, except in the wireframe view, whose depth fill and
+        // lines cannot, and under the loading stage, where every prop takes its level at once.
+        terrain.dissolveLevels = !wireframeView && !hidden;
         // The units' poses and anchors and the camera are final for this frame. The tuning model follows the camera,
         // which can leave Free Flight by itself (its keys, the Tactical View).
         renderStage("board-space HUD");
@@ -1195,7 +1200,6 @@ class GpuBattleView extends ApplicationAdapter {
         renderHexText(wireframeView);
         renderStage("overlay labels and ghosts");
         overlay.renderGhost(boardCamera.camera, shownUnit);
-        overlay.renderGhosts(boardCamera.camera, unitGhosts);
         fireControl.renderLabels(boardCamera.camera, boardCamera.tactical());
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         tactical.renderLabels(boardCamera.camera);
@@ -1255,7 +1259,7 @@ class GpuBattleView extends ApplicationAdapter {
                 // Probing moves the camera: not while the board makes its entrance. An editor loads what its starting view
                 // draws and the rest when it is asked for: a closer view's programs link while the board shows.
                 if (probed || source.isEditor() || entrancePending || boardCamera.isFraming() || boardCamera.tactical()) {
-                    warmUp = WarmUp.DONE;
+                    warmUp = source.isEditor() ? WarmUp.DONE : WarmUp.PAGES;
                 } else {
                     boardCamera.look(BoardGeometry.center(new Coords(scene.width() / 2, scene.height() / 2), 0),
                           CLOSE_ZOOM);
@@ -1272,6 +1276,12 @@ class GpuBattleView extends ApplicationAdapter {
                     warmUp = WarmUp.BOARD;
                 }
             }
+            case PAGES -> {
+                // Finish the visible geometry batches while the loading stage still owns the frame. Otherwise a
+                // dense board opens with thousands of module draws and needs minutes of slow frames to catch up.
+                terrain.prewarmPages();
+                if (!terrain.busy() && !terrain.pagesMerging()) { warmUp = WarmUp.DONE; }
+            }
             default -> { }
         }
         ScreenUtils.clear(.045f, .065f, .075f, 1, true);
@@ -1283,7 +1293,7 @@ class GpuBattleView extends ApplicationAdapter {
     private BoardScene withReserve(BoardScene shown) {
         List<BoardScene.Unit> reserve = source.reserveUnits();
         if (reserve.isEmpty()) { return shown; }
-        Coords middle = BoardGeometry.pick(shown, boardCamera.camera.getPickRay(boardCamera.camera.viewportWidth / 2,
+        Coords middle = terrain.pick(shown, boardCamera.camera.getPickRay(boardCamera.camera.viewportWidth / 2,
               boardCamera.camera.viewportHeight / 2, 0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight));
         BoardScene.Tile tile = shown.tile(middle == null ? new Coords(shown.width() / 2, shown.height() / 2) : middle);
         if (tile == null) { return shown; }
@@ -1759,6 +1769,9 @@ class GpuBattleView extends ApplicationAdapter {
                   : unitModels == null ? null : unitModels.get(unit.model(), unit.id(), unit.part());
             boolean authored = !unit.sensorContact() && visual != null;
             boolean dead = dead(unit);
+            // A review holds the units of its attack as they were (UnitPlayback#present): one the game has dead or gone
+            // since plays it fading in and out, as one destroyed in its own turn does, and does not die again.
+            boolean reviewedDead = playback.reviewing() && !unit.sensorContact() && !aliveUnits.contains(unit.id());
             var death = playback.attacks().stream().filter(attack -> attack.death() && attack.event.entityId() == unit.id())
                   .findFirst().orElse(null);
             float collapse = death == null ? dead ? 1 : 0 : death.event.result().crewLoss() ? 0 : death.deathProgress();
@@ -1784,8 +1797,8 @@ class GpuBattleView extends ApplicationAdapter {
             String key = unit.id() + ":" + unit.part();
             ModelInstance instance = unitInstances.get(key);
             // Its death begins as the hit that killed it lands, or as a death no hit caused starts to play.
-            boolean destroyed = death == null ? dead : death.seconds >= 0;
-            boolean dying = destroyed && deadUnits.add(key);
+            boolean destroyed = death == null ? dead || reviewedDead : death.seconds >= 0;
+            boolean dying = destroyed && deadUnits.add(key) && !reviewedDead;
             if (!destroyed && deadUnits.remove(key)) { casualties.revived(unit); }
             if (!destroyed && death != null && !death.event.result().crewLoss()
                   && instance instanceof GpuUnitInstance standing
@@ -1866,7 +1879,7 @@ class GpuBattleView extends ApplicationAdapter {
             // The hex the unit stands in right now, also while it walks through other hexes.
             BoardScene.Tile standing = BoardGeometry.tile(scene, position.x, position.y);
             shown.a = standing == null ? 0 : GpuUnitVisibility.ownHex(standing);
-            shown.opacity = 1;
+            shown.opacity = destroyed ? ghost : 1;
             if (authored && appearance == null && !unit.image().equals(unitTints.get(key))) {
                 // The sprite average and imported paint factor share linear RGB; normalize that pigment once.
                 Color tint = GpuCutout.averageColor(unit.image());
@@ -1976,9 +1989,9 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /**
-     * How much shows of a destroyed unit's ghost: attacks resolve together, and one it fired or took after its death
-     * plays on its ghost, which fades in as that attack or the death begins and out as the attack ends. None without
-     * one: the hit that killed it plays on the unit.
+     * How much shows of a destroyed unit: attacks resolve together, and one it fired or took after its death plays on
+     * the unit itself, which fades in as that attack or the death begins and out as the attack ends. None without one:
+     * the hit that killed it plays on the unit.
      */
     private float ghost(BoardScene.Unit unit, UnitAttack death) {
         float shown = 0;
@@ -2067,21 +2080,13 @@ class GpuBattleView extends ApplicationAdapter {
      * the building's roof that covered it; never past the ground. NaN off the board.
      */
     private float debrisHeight(float x, float y, float from, boolean own) {
-        return debrisHeight(x, y, from, own, true);
-    }
-
-    /**
-     * {@link #debrisHeight}, the pieces looking past what stands above where they started only with {@code past}: the
-     * pieces of a structure that came down look past only within their own reach ({@link #collapseGround}).
-     */
-    private float debrisHeight(float x, float y, float from, boolean own, boolean past) {
         var tile = BoardGeometry.tile(scene, x, y);
         if (tile == null) { return Float.NaN; }
         float top = (tile.elevation() + 40) * BoardGeometry.level();
         var hit = surfaceHit(x, y, top);
         float height = hit == null ? BoardGeometry.surfaceZ(tile) : top - (float) Math.sqrt(hit.distance());
         String struck = hit == null ? "ground" : hit.receiver();
-        if (past && height > from && ("bridge".equals(struck) || own && "building".equals(struck))) {
+        if (height > from && ("bridge".equals(struck) || own && "building".equals(struck))) {
             hit = surfaceHit(x, y, from);
             height = hit == null ? BoardGeometry.surfaceZ(tile) : from - (float) Math.sqrt(hit.distance());
         }
@@ -2107,10 +2112,11 @@ class GpuBattleView extends ApplicationAdapter {
             boardCamera.frameAttacks(state.attacks(), playbackCameraWidth());
         } else if (state.transition() != null) {
             // A structure comes down, or an elevator moves, where it is: the camera stays where the player has it. The
-            // clock waits for the terrain to take what falls (GpuTerrain#ready).
+            // clock waits for an elevator's platform and for the reads of stored cuts (GpuTerrain#ready), never for a cut.
             return terrain.ready(state.transition());
         } else {
-            // A strike, a bombardment or an explosion goes off where it is: the camera is the player's throughout.
+            // A strike, a bombardment or an explosion goes off where it is: the camera is the player's throughout. Its
+            // clock never waits: the timeline names its falls ahead, so their stored cuts are read by its flash.
             return true;
         }
         return !boardCamera.isFraming();
@@ -2673,7 +2679,7 @@ class GpuBattleView extends ApplicationAdapter {
         List<ModelInstance> depthless = new ArrayList<>();
         for (BoardScene.Unit unit : unitAnchors.keySet()) {
             ModelInstance instance = unitInstances.get(unit.id() + ":" + unit.part());
-            if (!unitGhosts.containsKey(instance) && boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance))) {
+            if (boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance))) {
                 if (unit.sensorContact()) {
                     unitBatch.render(instance);
                 } else if (thermal) {
@@ -2817,7 +2823,7 @@ class GpuBattleView extends ApplicationAdapter {
         var overlays = source.uiPreferences().overlays();
         hexText.update(scene, theme.skin.getFont("default-font"), theme.skin.getFont(GpuBoardSkin.OUTLINE_FONT),
               terrain::roofBounds, boardCamera.tactical(), overlays.hexTypes(),
-              overlays.hexLabelOutline() || wireframeView, terrain::fallTaken, terrain.fallsRevision(), comingTiles);
+              overlays.hexLabelOutline() || wireframeView, terrain::fallShown, terrain.fallsRevision(), comingTiles);
         hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(), 0,
               atmosphere, wireframeView);
     }

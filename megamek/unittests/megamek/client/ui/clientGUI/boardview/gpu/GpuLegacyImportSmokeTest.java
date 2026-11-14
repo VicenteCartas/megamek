@@ -402,7 +402,7 @@ class GpuLegacyImportSmokeTest {
                   "A second click selects that table alone");
 
             BoardDecoration before = object(session.get(), table), sibling = object(session.get(), "L1_1_1");
-            Map<Object, Object> batches = objectBatches(terrain);
+            Map<Object, Object> geometries = objectGeometries(terrain);
             Vector2 from = top(view, terrain, table);
             var input = Gdx.input.getInputProcessor();
             GpuBoardTestUi.withModifiers(0, () -> input.touchDown(Math.round(from.x), Math.round(from.y), 0, Input.Buttons.LEFT));
@@ -417,11 +417,11 @@ class GpuLegacyImportSmokeTest {
             while (terrain.busy()) { view.render(); }
             settle(view, source);
             GpuBoardTestUi.capture(new File(OUTPUT, "legacy-import-table-moved.png"));
-            // The commit keeps the objects' instanced batches: an edit copies no object vertices again.
-            Map<Object, Object> kept = objectBatches(terrain);
-            assertFalse(batches.isEmpty());
-            for (var entry : batches.entrySet()) {
-                assertSame(entry.getValue(), kept.get(entry.getKey()), "Instanced batch kept for " + entry.getKey());
+            // The commit keeps the objects' geometries in the pools: an edit copies no object vertices again.
+            Map<Object, Object> kept = objectGeometries(terrain);
+            assertFalse(geometries.isEmpty());
+            for (var entry : geometries.entrySet()) {
+                assertSame(entry.getValue(), kept.get(entry.getKey()), "Pool geometry kept for " + entry.getKey());
             }
 
             // A tree's inspector has the Snow toggle (on by default; a table has none). Off keeps that tree bare on snow.
@@ -915,8 +915,8 @@ class GpuLegacyImportSmokeTest {
         return ((ProfiledView) view).profile().getOrDefault("opaque terrain", new int[2])[0];
     }
 
-    /** The instanced batches of the editor objects' model parts, by part. */
-    private static Map<Object, Object> objectBatches(GpuTerrain terrain) throws Exception {
+    /** The geometries of the editor objects' model parts in the pools of the GPU-driven path, by range. */
+    private static Map<Object, Object> objectGeometries(GpuTerrain terrain) throws Exception {
         Set<Object> meshes = new java.util.HashSet<>();
         for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
             for (Object part : (com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(chunk, "decorationRenderables")) {
@@ -924,7 +924,7 @@ class GpuLegacyImportSmokeTest {
             }
         }
         Map<Object, Object> result = new java.util.HashMap<>();
-        for (var entry : ((Map<?, ?>) GpuTestSupport.field(GpuTestSupport.field(terrain, "trees"), "sharedParts")).entrySet()) {
+        for (var entry : ((Map<?, ?>) GpuTestSupport.field(GpuTestSupport.indirect(terrain), "geometriesByRange")).entrySet()) {
             if (meshes.contains(GpuTestSupport.field(entry.getKey(), "mesh"))) { result.put(entry.getKey(), entry.getValue()); }
         }
         return result;

@@ -366,7 +366,7 @@ class GpuLightingConsistencySmokeTest {
         stage.addActor(section);
         stage.getViewport().update(WIDTH, HEIGHT, true);
         section.setSize(WIDTH, HEIGHT);
-        var tile = new BoardScene.Tile(new Coords(0, 0), 2, -1, false, 0, BoardScene.Surface.GRASS, null, null,
+        var tile = BoardScenes.newTile(new Coords(0, 0), 2, -1, false, 0, BoardScene.Surface.GRASS,
               List.of(), List.of(), BoardLiquid.NONE);
         var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
         var manual = new BoardScene(0, 1, 1, scene.tiles(), List.of(), List.of(), -1, "", List.of(),
@@ -1250,7 +1250,7 @@ class GpuLightingConsistencySmokeTest {
     }
 
     private static BoardScene scene(boolean molten) {
-        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS, null, null,
+        var tile = BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS,
               List.of(), List.of(),
               molten ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.NONE);
         return new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());

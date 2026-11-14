@@ -109,7 +109,7 @@ class BoardEditorTransformsTest {
             Coords at = new Coords(x, 0);
             var marks = BoardEditorTerrain.capture(new Hex(x * 3, "deployment_zone:1:1", ""), at);
             fills.addAll(marks.fills()); labels.addAll(marks.labels());
-            tiles.add(new BoardScene.Tile(at, x * 3, -1, false, 0, BoardScene.Surface.GRASS, null, null, List.of(),
+            tiles.add(BoardScenes.newTile(at, x * 3, -1, false, 0, BoardScene.Surface.GRASS, List.of(),
                   List.of()));
         }
         var scene = new BoardScene(0, 2, 1, tiles, List.of(), List.of(), -1, "", List.of(), null,

@@ -57,7 +57,7 @@ class GpuUnitInstanceSmokeTest {
                                 var normal = new ModelInstance(merged);
                                 for (boolean top : List.of(false, true)) {
                                     renderer.topView = top;
-                                    renderer.frame(List.of(merged), new Vector3(), null, "depth-equivalence", id);
+                                    renderer.frame(List.of(merged), new Vector3(), null);
                                     // Packed depth is numerical RGBA8 data; do not pass it through HDR/display conversion.
                                     renderer.output.pixels().begin();
                                     Gdx.gl.glDepthMask(true);

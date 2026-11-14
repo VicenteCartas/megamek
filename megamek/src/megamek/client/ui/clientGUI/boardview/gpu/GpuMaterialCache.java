@@ -654,7 +654,14 @@ final class GpuMaterialCache {
         }
 
         /** Whether two chunks' charts lie alike: a hex's built walls keep their place in either. */
-        boolean sameLayout(Charts other) { return other != null && slots.equals(other.slots); }
+        boolean sameLayout(Charts other, Coords hex) {
+            if (other == null) { return false; }
+            for (int edge = 0; edge < 6; edge++) {
+                Edge key = new Edge(hex, edge);
+                if (!java.util.Objects.equals(slots.get(key), other.slots.get(key))) { return false; }
+            }
+            return true;
+        }
 
         /** The hex edge a triangle's outward normal faces most: the same for admission and chart placement. */
         private static int facing(Vector3 a, Vector3 b, Vector3 c) {

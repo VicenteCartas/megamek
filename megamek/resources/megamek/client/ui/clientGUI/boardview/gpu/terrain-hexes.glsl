@@ -1,6 +1,6 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // One texel per board hex (GpuBiomeSurface) and the world fields every lit surface can share with it.
-// R biome/stencil quarters, low G aqueous palette + 1 (bit 4 uniform biome), B ice, A elevation + 64.
+// R biome/stencil quarters, low G aqueous palette + 1 (bit 4 uniform biome), B ice (bit 2: no cover grows), A elevation + 64.
 // BOARD_HEX
 // LAVA_LIGHTS
 uniform vec2 u_biomeBoard;

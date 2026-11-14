@@ -240,8 +240,8 @@ class GpuShadowSmokeTest {
         for (int x = 0; x < 9; x++) {
             for (int y = 0; y < 9; y++) {
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, coords.equals(raised) ? LEVELS : 0, -1, false, 0,
-                      BoardScene.Surface.CONCRETE, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(coords, coords.equals(raised) ? LEVELS : 0, -1, false, 0,
+                      BoardScene.Surface.CONCRETE, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());

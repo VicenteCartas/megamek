@@ -796,7 +796,7 @@ class GpuTerrainEffectsSmokeTest {
             for (int y = 0; y < height; y++) {
                 var family = materials ? BoardScene.Surface.values()[x % 6] : BoardScene.Surface.GRASS;
                 var coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE,
+                tiles.add(BoardScenes.newTile(coords, 0, -1, false, 0, family, List.of(), List.of(), BoardLiquid.NONE, null, BoardRoad.Kind.NONE,
                       materials && y != 1 ? BoardFireSmoke.NONE : effects.apply(coords)));
             }
         }

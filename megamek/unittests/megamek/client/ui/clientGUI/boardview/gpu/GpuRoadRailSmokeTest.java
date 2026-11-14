@@ -108,7 +108,7 @@ class GpuRoadRailSmokeTest {
             Object tile = ((Map<?, ?>) GpuTestSupport.field(chunk, "tileMeshes")).get(at);
             if (tile == null) { continue; }
             var pages = new java.util.HashSet<Integer>();
-            var draws = GpuTerrainDepth.snapshot((java.util.List<ModelInstance>) GpuTestSupport.field(chunk, "overlays"));
+            var draws = GpuTerrainDepth.snapshot((java.util.List<ModelInstance>) GpuTestSupport.field(GpuTestSupport.field(chunk, "ground"), "overlays"));
             for (Object range : (java.util.List<?>) GpuTestSupport.field(tile, "ranges")) {
                 Material material = (Material) GpuTestSupport.field(range, "material");
                 var mask = material.get(GpuRoads.Mask.class, GpuRoads.Mask.TYPE);

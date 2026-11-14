@@ -195,7 +195,7 @@ class GpuShrubSmokeTest {
     }
 
     private static BoardScene.Tile tile(String family, Coords coords, BoardScene.Pixels ground) {
-        return new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, null,
+        return BoardScenes.newTile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS,
               List.of(new BoardScene.Feature("vegetation/foliage-" + family, 0, 0, 20, 1.7f, 1.1f, 0,
                     BoardScene.FeatureKind.TREE)), List.of());
     }

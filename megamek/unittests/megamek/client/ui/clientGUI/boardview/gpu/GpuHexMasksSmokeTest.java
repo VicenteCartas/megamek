@@ -319,8 +319,8 @@ class GpuHexMasksSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 7 && y == 1 ? raised : x == 2 ? 2 : 0, x == 4 ? 3 : -1,
-                      x == 4 && y == 1, 0, BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), x == 7 && y == 1 ? raised : x == 2 ? 2 : 0, x == 4 ? 3 : -1,
+                      x == 4 && y == 1, 0, BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of(), null,

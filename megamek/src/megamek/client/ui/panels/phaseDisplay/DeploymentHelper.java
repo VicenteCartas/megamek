@@ -404,17 +404,15 @@ public class DeploymentHelper {
     }
 
     private @Nullable ElevationOption showElevationChoiceDialog(List<ElevationOption> elevationOptions) {
-        var dlg = new DeployElevationChoiceDialog(clientgui.getFrame(),
-                                                  elevationOptions);
-        DialogResult result = dlg.showDialog();
-        if ((result == DialogResult.CONFIRMED) && (dlg.getFirstChoice() != null)) {
-            if (dlg.getFirstChoice().type() == DeploymentElevationType.ELEVATIONS_ABOVE) {
+        ElevationOption choice = DeployElevationChoiceDialog.choose(clientgui, elevationOptions);
+        if (choice != null) {
+            if (choice.type() == DeploymentElevationType.ELEVATIONS_ABOVE) {
                 int elevation = showHighElevationChoiceDialog();
                 return (elevation == -1) ?
                        null :
                        new ElevationOption(elevation, DeploymentElevationType.ELEVATIONS_ABOVE);
             } else {
-                return dlg.getFirstChoice();
+                return choice;
             }
         } else {
             return null;

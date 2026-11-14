@@ -48,9 +48,11 @@ final class GpuLiquidShader {
         String functions = GpuShaderSource.read("liquid-animation.glsl");
         // Ice wraps the original surface in a helper. Its authored samples must stay in that helper's scope.
         String entry = source.contains("void iceBaseSurface() {") ? "void iceBaseSurface() {" : "void main() {";
-        return source.replace("texture(u_diffuseTexture, v_diffuseUV)", "liquidColor")
-              .replace("texture(u_emissiveTexture, v_emissiveUV)", "liquidColor")
-              .replace(entry, functions + "\n" + entry + "\nvec4 liquidColor = liquidSample(v_diffuseUV);\n");
+        // Replace the sampler, retaining its coordinates: model surfaces may apply a parallax shift before reading.
+        // Matching only the old unshifted expression silently left those models on the first animation frame.
+        return source.replace("texture(u_diffuseTexture, ", "liquidSample(")
+              .replace("texture(u_emissiveTexture, ", "liquidSample(")
+              .replace(entry, functions + "\n" + entry);
     }
 
     static void register(DefaultShader shader) {

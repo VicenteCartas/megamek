@@ -21,7 +21,7 @@ final class UnitPlaybackFixture {
     }
 
     static BoardScene scene(BoardScene.Unit... units) {
-        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, null, null, List.of(), List.of());
+        var tile = BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, null, List.of(), List.of());
         return new BoardScene(0, 1, 1, List.of(tile), List.of(units), List.of(), -1, "MOVEMENT", List.of());
     }
 

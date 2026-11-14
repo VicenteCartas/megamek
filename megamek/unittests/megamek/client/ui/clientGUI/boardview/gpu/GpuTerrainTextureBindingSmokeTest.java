@@ -132,8 +132,8 @@ class GpuTerrainTextureBindingSmokeTest {
                             // A dry border keeps the board edge free of water cuts, whose depth-only program would
                             // otherwise be the frame's last draw instead of a water surface.
                             boolean border = x == 0 || y == 0 || x == 71 || y == 39;
-                            tiles.add(new BoardScene.Tile(new Coords(x, y), 0, border ? -1 : 1, false, 0,
-                                  BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                            tiles.add(BoardScenes.newTile(new Coords(x, y), 0, border ? -1 : 1, false, 0,
+                                  BoardScene.Surface.GRASS, List.of(), List.of()));
                         }
                     }
                     BoardScene scene = new BoardScene(0, 72, 40, tiles, List.of(), List.of(), -1, "", List.of());

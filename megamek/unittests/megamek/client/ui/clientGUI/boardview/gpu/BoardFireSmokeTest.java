@@ -83,8 +83,6 @@ class BoardFireSmokeTest {
                     fixture.source.refresh();
                     var burning = fixture.source.takeFrame().scene().tile(coords);
                     assertEquals(plain.surface(), burning.surface());
-                    assertEquals(plain.decals(), burning.decals(), "No flat fire or smoke underneath the volume");
-                    assertEquals(plain.detailedGround(), burning.detailedGround());
                     assertEquals(new BoardFireSmoke(2, 2), burning.fireSmoke());
                     fixture.source.setVisibleArea(new Rectangle(0, 15, 2, 2));
                     fixture.source.refresh();
@@ -117,10 +115,8 @@ class BoardFireSmokeTest {
                     fixture.game.getBoard().setHex(coords, hex.duplicate());
                     fixture.source.refresh();
                     var screened = fixture.source.takeFrame().scene().tile(coords);
-                    assertTrue(screened.detailedGround());
                     assertTrue(screened.fireSmoke().screen());
                     assertTrue(screened.fireSmoke().present());
-                    assertEquals(plain.decals(), screened.decals(), "The chaff volume replaces the old smoke sprite");
                     assertEquals(level, fixture.game.getBoard().getHex(coords).terrainLevel(Terrains.SCREEN));
                 }
             });

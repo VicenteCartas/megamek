@@ -49,7 +49,6 @@ class BoardLegacyArtRenderTest {
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = { "ground_fluff:1:3", "grass:1;ground_fluff:4:5", "road:1:09;road_fluff:1",
           "road:1:18;road_fluff:2", "woods:1;fluff:12", "rough:1;fluff:1", "rough:2;fluff:2",
-          "building:1;bldg_elev:2;bldg_cf:15;fluff:11:7", "building:2;bldg_elev:1;bldg_cf:30;bldg_fluff:29",
           "pavement:1;ground_fluff:2:2", "water:2:63;fluff:100:6" })
     void aDesignDrawsExactlyWhatItsTokenDrew(String terrain) throws Exception {
         Board game = converted(terrain);
@@ -64,11 +63,32 @@ class BoardLegacyArtRenderTest {
         Board saved = BoardFile.readNative(text.toString(StandardCharsets.UTF_8));
         var reloaded = BoardTiles.captureAll(saved).get(AT.getX() * saved.getHeight() + AT.getY());
         for (RecordComponent component : BoardScene.Tile.class.getRecordComponents()) {
-            if (component.getName().equals("appearance")) { continue; }
+            if (component.getName().equals("ground")) { continue; }
             Object expected = component.getAccessor().invoke(today);
             assertEquals(expected, component.getAccessor().invoke(drawn), component.getName());
             assertEquals(expected, component.getAccessor().invoke(reloaded), component.getName() + " of the .board2");
         }
+        // Its ground likewise, except the designs the conversion wrote.
+        for (RecordComponent component : BoardScene.Tile.Ground.class.getRecordComponents()) {
+            if (component.getName().equals("appearance")) { continue; }
+            Object expected = component.getAccessor().invoke(today.ground());
+            assertEquals(expected, component.getAccessor().invoke(drawn.ground()), component.getName());
+            assertEquals(expected, component.getAccessor().invoke(reloaded.ground()), component.getName() + " of the .board2");
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = { "building:1;bldg_elev:2;bldg_cf:15;fluff:11:7",
+          "building:2;bldg_elev:1;bldg_cf:30;bldg_fluff:29" })
+    void convertedBuildingsKeepTheirNativeDesignAfterSaving(String terrain) throws Exception {
+        Board game = converted(terrain);
+        var drawn = BoardTiles.captureAll(game).get(AT.getX() * game.getHeight() + AT.getY());
+        assertTrue(drawn.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING));
+        var text = new ByteArrayOutputStream();
+        BoardFile.write(game, text);
+        Board saved = BoardFile.readNative(text.toString(StandardCharsets.UTF_8));
+        var reloaded = BoardTiles.captureAll(saved).get(AT.getX() * saved.getHeight() + AT.getY());
+        assertEquals(drawn, reloaded, "Native building designs survive without a tileset-model fallback");
     }
 
     @Test

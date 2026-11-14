@@ -137,10 +137,9 @@ class BoardScatterTest {
             assertTrue(rotations.size() > occupied, "No small repeating rotation set");
             assertTrue(shapes.containsAll(List.of("scatter-rock", "scatter-slab")), theme);
             if (theme.equals("grass")) {
-                assertTrue(shapes.containsAll(List.of("scatter-grass", "scatter-plant")));
+                assertTrue(shapes.contains("scatter-plant"));
             } else if (theme.equals("desert")) {
                 assertTrue(shapes.contains("scatter-plant"));
-                assertFalse(shapes.contains("scatter-grass"));
             } else if (theme.equals("dirt")) {
                 assertTrue(shapes.contains("scatter-dry-grass"));
             } else {
@@ -185,7 +184,7 @@ class BoardScatterTest {
     }
 
     @Test
-    void shallowWaterCanCaptureGrassAndBushesWhileDeeperWaterStaysClear() {
+    void shallowWaterCanCaptureBushesWhileDeeperWaterStaysClear() {
         Hex shallow = new Hex(0);
         shallow.setTheme("grass");
         shallow.addTerrain(new Terrain(Terrains.WATER, 0));
@@ -200,8 +199,8 @@ class BoardScatterTest {
                 assertTrue(scatter(deep, coords).isEmpty(), "Positive-depth water rejects cosmetics during capture");
             }
         }
-        assertTrue(BoardScatter.DENSITY_MULTIPLIER <= 0 || shapes.containsAll(List.of("scatter-grass", "scatter-plant")),
-              "Depth-zero water remains eligible for the ordinary grass/bush population");
+        assertTrue(BoardScatter.DENSITY_MULTIPLIER <= 0 || shapes.contains("scatter-plant"),
+              "Depth-zero water remains eligible for the ordinary bush population");
     }
 
     @Test
@@ -210,7 +209,7 @@ class BoardScatterTest {
               BoardScene.Surface.DESERT, BoardScene.Surface.ROCK, BoardScene.Surface.LUNAR,
               BoardScene.Surface.MARS, BoardScene.Surface.SNOW, BoardScene.Surface.TROPICAL,
               BoardScene.Surface.VOLCANO)) {
-            var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, family, null, List.of(), List.of());
+            var tile = BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, family, List.of(), List.of());
             var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
             var surface = new BoardSurface(scene, tile);
             for (int rotation : new int[] { 0, 137, 359 }) {
@@ -255,7 +254,7 @@ class BoardScatterTest {
               float.class, BoardSurface.class);
         encode.setAccessible(true);
         for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DESERT)) {
-            var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, family, null, List.of(), List.of());
+            var tile = BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, family, List.of(), List.of());
             var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
             var surface = new BoardSurface(scene, tile);
             for (int variant = 0; variant < BoardScatter.BUSHES / 2; variant++) {
@@ -310,7 +309,7 @@ class BoardScatterTest {
     @Test
     void capturedBushesPreserveTissueAndExistingPigmentVariation() {
         for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DESERT)) {
-            var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, family, null, List.of(), List.of());
+            var tile = BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, family, List.of(), List.of());
             var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
             var surface = new BoardSurface(scene, tile);
             var polygons = BoardScatter.plant(family).polygons();

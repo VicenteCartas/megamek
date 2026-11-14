@@ -79,7 +79,6 @@ class GpuBackdropSmokeTest {
                         assertFalse(terrain.columns());
                         long backdrops = scene.tiles().stream().filter(tile -> tile.backdrop().present()).count();
                         assertTrue(backdrops > 0);
-                        assertTrue(scene.tiles().stream().allMatch(BoardScene.Tile::detailedGround));
                         assertTrue(atmosphere.spaceBackdrop(scene));
                         var selectable = scene.tiles().stream().filter(tile -> tile.backdrop() == BoardBackdrop.SPACE
                               && tile.features().isEmpty()).findFirst().orElseThrow();
@@ -88,7 +87,7 @@ class GpuBackdropSmokeTest {
                               new Ray(center.add(0, 0, 1000), new Vector3(0, 0, -1))));
                         boolean nativeMaterial = false;
                         for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                            for (Object object : (List<?>) field(chunk, "opaque")) {
+                            for (Object object : (List<?>) field(field(chunk, "ground"), "opaque")) {
                                 for (var material : ((ModelInstance) object).materials) {
                                     var backdrop = material.get(GpuBackdrop.class, GpuBackdrop.TYPE);
                                     nativeMaterial |= backdrop != null;
@@ -100,12 +99,12 @@ class GpuBackdropSmokeTest {
                             Object emptySpace = tiles.get(new Coords(0, 0));
                             if (emptySpace != null) {
                                 for (Object range : (List<?>) field(emptySpace, "ranges")) {
-                                    assertFalse((int) field(range, "layer") == 0,
+                                    assertFalse(field(range, "layer") == GpuTerrain.Layer.SOLID,
                                           "The empty corner SPACE tile retains no solid ground range");
                                 }
                             }
                             var shadows = new Array<Renderable>();
-                            ((GpuTerrainDepth) field(chunk, "depthTerrain")).shadows.getRenderables(shadows, null);
+                            ((GpuTerrainDepth) field(field(chunk, "ground"), "depthTerrain")).shadows.getRenderables(shadows, null);
                             for (var shadow : shadows) {
                                 assertFalse(shadow.material.has(GpuBackdrop.TYPE),
                                       "Space and sky do not cast solid shadows across neighboring platforms");

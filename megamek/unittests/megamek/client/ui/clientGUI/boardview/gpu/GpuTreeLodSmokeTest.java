@@ -60,6 +60,8 @@ class GpuTreeLodSmokeTest {
             public void create() {
                 GpuAssets assets = new GpuAssets();
                 GpuTerrain terrain = new GpuTerrain();
+                // Grass and undergrowth draw only up close: the counts below compare the tree's levels alone.
+                terrain.setScatterHidden(true);
                 ModelBatch depth = new ModelBatch(GpuTreeInstances.depthProvider(new DepthShader.Config()));
                 GLProfiler profiler = new GLProfiler(Gdx.graphics);
                 Model occupant = new ModelBuilder().createBox(4, 4, 40, new Material(), VertexAttributes.Usage.Position);
@@ -74,7 +76,8 @@ class GpuTreeLodSmokeTest {
                     ModelInstance unit = new ModelInstance(occupant);
                     unit.transform.setToTranslation(new Vector3(center).add(0, 0, 18));
                     for (String name : TREES) {
-                        BoardScene scene = scene(name);
+                        // A board of its own: one board's hex that lost its tree grows no other (BoardPlanting).
+                        BoardScene scene = scene(name, TREES.indexOf(name));
                         terrain.update(scene);
                         int[] triangles = new int[TreeLod.LEVELS];
                         for (int level = 0; level < TreeLod.LEVELS; level++) {
@@ -220,24 +223,30 @@ class GpuTreeLodSmokeTest {
         return -1;
     }
 
+    /**
+     * The vertices a draw submits: the profiler's count of draw calls, and the indices the GPU-driven path's commands
+     * name (GpuIndirectInstances#indicesDrawn), which the profiler never sees.
+     */
     private static int count(GLProfiler profiler, Runnable draw) {
         profiler.reset();
         ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
+        long indirect = GpuIndirectInstances.indicesDrawn;
         draw.run();
-        return (int) profiler.getVertexCount().total;
+        // The path's share first, as whole numbers: the profiler's total is a float, too coarse for the running count.
+        return (int) profiler.getVertexCount().total + (int) (GpuIndirectInstances.indicesDrawn - indirect);
     }
 
-    private static BoardScene scene(String name) {
+    private static BoardScene scene(String name, int board) {
         BufferedImage ground = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < ground.getHeight(); y++) {
             for (int x = 0; x < ground.getWidth(); x++) {
                 ground.setRGB(x, y, 0xff6b8255);
             }
         }
-        BoardScene.Tile tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS, null,
+        BoardScene.Tile tile = BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.GRASS,
               List.of(new BoardScene.Feature(name, 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE)),
               List.of());
-        return new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));
+        return new BoardScene(board, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));
     }
 
     /** The shipped near mesh is the coverage reference for its coarser detail levels. */
@@ -317,7 +326,7 @@ class GpuTreeLodSmokeTest {
         var instances = new GpuTreeInstances((name, level) -> {
             try { return (Model) prepare.invoke(null, assets.lodModel(name, level)); }
             catch (ReflectiveOperationException error) { throw new IllegalStateException(error); }
-        });
+        }, false);
         String[] labels = { "Near / 150px", "Medium / 150px", "Near / 88px", "Medium / 88px", "Far / 52px", "Far / 26px", "Impostor / 26px", "Impostor / 12px" };
         int[] levels = { 0, 1, 0, 1, 2, 2, 3, 3 };
         float[] sizes = { 150, 150, 88, 88, 52.8f, 26.4f, 26.4f, 12 };
@@ -431,7 +440,6 @@ class GpuTreeLodSmokeTest {
             }
         } finally {
             graphics.dispose();
-            instances.dispose();
             preview.dispose();
         }
         ImageIO.write(sheet, "png", new File(System.getProperty("megamek.gpu.screenshots"), "tree-lod-transitions.png"));
@@ -446,18 +454,9 @@ class GpuTreeLodSmokeTest {
         Gdx.gl.glDepthMask(true);
         ScreenUtils.clear(GpuColor.linear(.035f) * GpuSceneRadiance.SCALE, GpuColor.linear(.055f) * GpuSceneRadiance.SCALE,
               GpuColor.linear(.075f) * GpuSceneRadiance.SCALE, 1, true);
-        drawFoliage(instances, stand, level, batch, environment, camera);
+        GpuTestSupport.drawTrees(preview, instances, stand, level, batch, camera.camera, environment);
         output.display();
         return pixels();
-    }
-
-    private static void drawFoliage(GpuTreeInstances instances, GpuTreeInstances.Stand stand, int level,
-          ModelBatch batch, Environment environment, BoardCamera camera) {
-        instances.begin(GpuTreeInstances.Pass.COLOUR);
-        instances.add(stand, level, true);
-        batch.begin(camera.camera);
-        batch.render(instances, environment);
-        batch.end();
     }
 
     /** A new terrain shading pass, as each frame starts one: the provider's shaders refresh their cached globals. */

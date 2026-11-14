@@ -117,9 +117,7 @@ class GpuAuthoredScorchSmokeTest {
                           "Erasing authored scorch restores field shrubs through the existing surface cache");
                     terrain.scorch(scene, new GpuGroundDamage.Scorch(BoardGeometry.center(dirt, 0),
                           BoardGeometry.width() * board.getWidth() * 2, 0));
-                    var clock = GpuGroundDamage.class.getDeclaredField("scorchedAt");
-                    clock.setAccessible(true);
-                    clock.setLong(terrain.groundDamage(), System.nanoTime() - 3_600_000_000_000L);
+                    terrain.groundDamage().advance(3600);
                 }
                 var centre = BoardGeometry.center(bank, scene.tile(bank).elevation());
                 var outward = BoardGeometry.center(bank.translated(2), scene.tile(bank).elevation()).sub(centre).nor();
@@ -148,8 +146,12 @@ class GpuAuthoredScorchSmokeTest {
                 } else {
                     assertTrue(shown.tiles().stream().allMatch(BoardScene.Tile::barren),
                           "Every affected tile is barren, including tiles without scatter features");
-                    assertEquals(0, fieldPlants, phase + " removes actual generated field shrubs");
-                    assertEquals(cleanFieldStones, fieldStones, phase + " preserves the same field stones");
+                    if (phase.equals("singed")) {
+                        // A hex authored scorched was made bare. A blast in play keeps its ground as it was made and
+                        // hides its field cover at the draw (GpuGameTerrainSmokeTest).
+                        assertEquals(0, fieldPlants, phase + " removes actual generated field shrubs");
+                        assertEquals(cleanFieldStones, fieldStones, phase + " preserves the same field stones");
+                    }
                 }
                 for (int i = 0; i < samples.size(); i++) {
                     var mesh = new MeshBuilder();
@@ -162,13 +164,10 @@ class GpuAuthoredScorchSmokeTest {
                         cleanVertices[i] = mesh.getNumVertices();
                         assertTrue(cleanVertices[i] > 0, "The dirt fixture must draw " + samples.get(i).asset());
                     } else {
-                        assertEquals(i < 2 ? 0 : cleanVertices[i], mesh.getNumVertices(),
-                              phase + " removes dry grass and shrubs while preserving rock geometry");
+                        assertEquals(0, mesh.getNumVertices(),
+                              phase + " removes every decorative scatter object, its stones too");
                     }
                 }
-                var planted = terrain.planted(bank);
-                assertTrue(planted != null && planted.rim() != null && !planted.rim().isEmpty(),
-                      "The focused two-level bank must exercise actual rim blades");
                 terrain.setGrass(true);
                 frame.render(terrain, camera, scene);
                 int[] withGrass = pixels();

@@ -899,8 +899,10 @@ final class GpuGlsl {
         LOGGER.info("3D board: {} on {}, shaders compiled as GLSL {}", GL11.glGetString(GL11.GL_VERSION), renderer,
               chosen);
         // Machine-specific state belongs with MegaMek's other written settings.
-        programCache = GpuProgramCache.open(
-              GpuProgramCache.directory(new File(Configuration.configDir(), "gpu-program-cache").toPath()));
+        java.nio.file.Path caches = GpuProgramCache.directory(new File(Configuration.configDir(), "gpu-program-cache").toPath());
+        programCache = GpuProgramCache.open(caches);
+        // Kit cuts are kept beside the programs, for the same reason: each is made once on this machine.
+        KitFragments.store(caches.resolveSibling(caches.getFileName() + "-fragments"));
         // Another board window in this run keeps the helper it has.
         if (linkHelper == null || !linkHelper.serves(programCache)) {
             var capabilities = GL.getCapabilities();

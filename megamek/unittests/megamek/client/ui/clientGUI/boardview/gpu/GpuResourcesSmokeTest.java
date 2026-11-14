@@ -94,8 +94,8 @@ class GpuResourcesSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 17; x++) {
             for (int y = 0; y < 17; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 8 ? 3 : 0, x == 7 && y == 8 ? 1 : -1, false, 0,
-                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), x == 8 ? 3 : 0, x == 7 && y == 8 ? 1 : -1, false, 0,
+                      BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 17, 17, tiles, List.of(), List.of(), -1, "", List.of());
@@ -142,8 +142,8 @@ class GpuResourcesSmokeTest {
                 terrain.update(scene);
             }
             List<BoardScene.Tile> elevated = new ArrayList<>(tiles);
-            elevated.set(tiles.indexOf(scene.tile(moved)), new BoardScene.Tile(moved, 6, -1, false, 0,
-                  BoardScene.Surface.GRASS, null, List.of(), List.of()));
+            elevated.set(tiles.indexOf(scene.tile(moved)), BoardScenes.newTile(moved, 6, -1, false, 0,
+                  BoardScene.Surface.GRASS, List.of(), List.of()));
             BoardScene elevatedScene = new BoardScene(0, 17, 17, elevated, List.of(), List.of(), -1, "", List.of());
             Ray ray = new Ray(BoardGeometry.center(moved, 6).add(0, 0, 1000), new Vector3(0, 0, -1));
             BoardGeometry.Hit expected = BoardGeometry.hit(elevatedScene, ray);
@@ -214,8 +214,8 @@ class GpuResourcesSmokeTest {
                 for (int x = 0; x < 5; x++) {
                     for (int y = 0; y < 5; y++) {
                         Coords coords = new Coords(x, y);
-                        tiles.add(new BoardScene.Tile(coords, x == 4 ? 2 : 0,
-                              coords.equals(target) ? depth : -1, false, 0, BoardScene.Surface.GRASS, null,
+                        tiles.add(BoardScenes.newTile(coords, x == 4 ? 2 : 0,
+                              coords.equals(target) ? depth : -1, false, 0, BoardScene.Surface.GRASS,
                               coords.equals(target) && depth < 0
                                     ? List.of(new BoardScene.Feature("buildings/standard/building-hard",
                                           0, 0, 0, 1, 3, 0, BoardScene.FeatureKind.BUILDING)) : List.of(),
@@ -357,8 +357,8 @@ class GpuResourcesSmokeTest {
           ModelBatch units, ModelInstance unit, Coords target) {
         List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
         BoardScene.Tile tile = scene.tile(target);
-        tiles.set(target.getX() * scene.height() + target.getY(), new BoardScene.Tile(target, 0, -1, false, 0,
-              tile.surface(), null,
+        tiles.set(target.getX() * scene.height() + target.getY(), BoardScenes.newTile(target, 0, -1, false, 0,
+              tile.surface(),
               List.of(new BoardScene.Feature("vegetation/tree", 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE)),
               List.of()));
         BoardScene trees = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
@@ -526,8 +526,8 @@ class GpuResourcesSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 2 && y == 2 ? elevation : 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), x == 2 && y == 2 ? elevation : 0, -1, false, 0,
+                      BoardScene.Surface.GRASS, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of(), light);

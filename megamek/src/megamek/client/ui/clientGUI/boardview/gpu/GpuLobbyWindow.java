@@ -1583,7 +1583,16 @@ public final class GpuLobbyWindow {
 
             @Override
             public void inspect(String board, Consumer<BoardSource> ready) {
-                mapSetup(controller -> controller.inspect(board, source -> GpuHost.post(() -> ready.accept(source))));
+                mapSetup(controller -> controller.inspect(board, source -> {
+                    GpuHost.post(() -> ready.accept(source));
+                    // The inspection is a 3D view of the board without a board window: the lobby tells what it dropped,
+                    // on the card the board window uses.
+                    if (source != null) {
+                        GpuBoardWindow.tellDroppedArt(controller.inspectedBoard(), (title, text) -> onScreen(shown ->
+                              shown.nativeDialog(dialogs -> dialogs.error(title, text, Messages.getString("Ok.text"),
+                                    null, null))));
+                    }
+                }));
             }
 
             @Override

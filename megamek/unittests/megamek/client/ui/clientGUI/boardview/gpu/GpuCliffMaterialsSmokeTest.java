@@ -273,9 +273,9 @@ class GpuCliffMaterialsSmokeTest {
             for (int x = 0; x < 7; x++) {
                 Coords coords = new Coords(x, y);
                 // End the artwork road on the plateau so a connected ramp cannot cover the wall being sampled.
-                tiles.add(new BoardScene.Tile(coords, coords.equals(RAISED) ? 6 : 0, -1, false,
+                tiles.add(BoardScenes.newTile(coords, coords.equals(RAISED) ? 6 : 0, -1, false,
                       road && coords.equals(RAISED) ? 18 : 0,
-                      family, null, List.of(), List.of()));
+                      family, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

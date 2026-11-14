@@ -72,7 +72,7 @@ final class BoardRelief {
      * keeps its width and a spit of land its tip, where a plain sum would narrow both toward their middles.
      */
     private static final float SHORE_NARROW = .75f;
-    /** The pull of land whose corners stay put (paving, special artwork, roads): it keeps the shore back from them. */
+    /** The pull of land whose corners stay put (paving and roads): it keeps the shore back from them. */
     private static final float SHORE_HARD = 2.5f;
     /**
      * Radii, in hex-scale units, of the water every water hex keeps round its centre and of the land every land hex
@@ -248,7 +248,7 @@ final class BoardRelief {
      * {@link #waterFamily}). {@code abutments}: the sides whose bank this hex's built deck lands on, on an abutment
      * ({@link BoardBridgeFooting#abutted}), the widest {@code abutment} half wide.
      */
-    record Site(Coords coords, int level, boolean sculpted, boolean detailed, int family, boolean ultraSublevel, boolean liquid, boolean molten,
+    record Site(Coords coords, int level, boolean sculpted, int family, boolean ultraSublevel, boolean liquid, boolean molten,
           int depth, boolean road, int ramps, int cliffTopExits, int deckRoads, int abutments, float abutment, int ix, int iy) {
         float x() { return cornerX(ix); }
 
@@ -339,7 +339,7 @@ final class BoardRelief {
 
     /**
      * Supported roads share natural edge relief, while BoardSurface owns their level centres and graded approaches.
-     * Unsupported artwork retains its outline. Volcanic ground and banks share the normal slopes and cliffs.
+     * Volcanic ground and banks share the normal slopes and cliffs.
      * A liquid hex ignores roads, as its surface does.
      */
     private static Site site(BoardScene scene, BoardScene.Tile tile, int ramps) {
@@ -365,7 +365,7 @@ final class BoardRelief {
                 abutment = Math.max(abutment, BoardBridgeFooting.abutmentHalfWidth(tile, d));
             }
         }
-        return new Site(tile.coords(), tile.groundLevel(), shaped, shaped && tile.detailedGround(), family.ordinal(),
+        return new Site(tile.coords(), tile.groundLevel(), shaped, family.ordinal(),
               tile.ultraSublevel(), liquid, tile.liquid().molten(), depth(tile), road, liquid ? 0 : ramps,
               tile.cliffTopExits(), deckRoads, abutments, abutment, centerIx(tile.coords()), centerIy(tile.coords()));
     }
@@ -380,10 +380,8 @@ final class BoardRelief {
         BoardScene.Surface best = null;
         for (int direction = 0; direction < 6; direction++) {
             BoardScene.Tile land = scene.tile(tile.coords().translated(direction));
-            // Buildings and roads can keep authored artwork while still standing on a concrete slab. Their banks
-            // continue that material without changing the original land or its foundations.
-            if (land == null || land.backdrop().present() || land.liquid().present()
-                  || !land.detailedGround() && land.surface() != BoardScene.Surface.CONCRETE) { continue; }
+            // Continue the neighbouring land material into the waterbed without changing its foundations.
+            if (land == null || land.backdrop().present() || land.liquid().present()) { continue; }
             int count = ++counts[land.surface().ordinal()];
             if (best == null || count > counts[best.ordinal()]) { best = land.surface(); }
         }
@@ -409,7 +407,7 @@ final class BoardRelief {
     /** Largest height any sculpted vertex reaches above its hex level: relief crowns and rim rocks. */
     static float headroom(BoardScene.Tile tile) {
         if (tile.backdrop().present()) { return 0; }
-        return tile.detailedGround() && tile.surface() != BoardScene.Surface.CONCRETE
+        return tile.surface() != BoardScene.Surface.CONCRETE
               ? BoardGeometry.width() * .12f : BoardGeometry.width() * .02f;
     }
 
@@ -554,7 +552,7 @@ final class BoardRelief {
 
     /**
      * Whether a hex is land of natural ground, whose corners the water's shore may move (see {@link Corner#move});
-     * paving, special artwork and roads keep their corners.
+     * paving and roads keep their corners.
      */
     /** Inputs to the long-range shore field; height and natural ground family do not change its pull. */
     static int shoreClass(BoardScene scene, BoardScene.Tile tile) {
@@ -563,7 +561,7 @@ final class BoardRelief {
     }
 
     private static boolean shoreGround(Site site) {
-        return !site.liquid() && site.detailed() && site.family() != CONCRETE;
+        return !site.liquid() && site.sculpted() && site.family() != CONCRETE;
     }
 
     // ---- Shore field -----------------------------------------------------------------------------------------
@@ -909,11 +907,11 @@ final class BoardRelief {
     }
 
     /**
-     * Hexes whose surfaces continue into each other without a cliff, bank or special artwork seam. A water hex's banks
+     * Hexes whose surfaces continue into each other without a cliff or bank. A water hex's banks
      * are its own, so it joins no neighbour.
      */
     private static boolean joined(Site a, Site b) {
-        return a != null && b != null && a.detailed() && b.detailed() && a.level() == b.level() && !a.liquid()
+        return a != null && b != null && a.sculpted() && b.sculpted() && a.level() == b.level() && !a.liquid()
               && !b.liquid() && !a.road() && !b.road() && (a.family() == CONCRETE) == (b.family() == CONCRETE);
     }
 
@@ -1014,7 +1012,7 @@ final class BoardRelief {
                     fallingWater |= !a.frozen() && !b.frozen() && !BoardSurface.waterSlope(a, b);
                     slopingWater |= BoardSurface.waterSlope(a, b);
                 }
-                boolean bank = p != null && !p.liquid() && p.detailed() && !p.road() && p.family() != CONCRETE;
+                boolean bank = p != null && !p.liquid() && p.sculpted() && !p.road() && p.family() != CONCRETE;
                 naturalBank |= bank;
                 if (bank) { bankTop = Math.max(bankTop, p.level()); }
                 if (p != null && p.liquid()) { waterTop = Math.max(waterTop, p.level()); }
@@ -1027,7 +1025,7 @@ final class BoardRelief {
             pinned = anyPinned;
             boolean natural = BoardGeometry.tuning().stepsBetweenTops();
             for (Site site : around) {
-                if (site != null) { natural &= site.sculpted() && site.detailed() && !site.fixedRoad() && !site.ultraSublevel(); }
+                if (site != null) { natural &= site.sculpted() && !site.fixedRoad() && !site.ultraSublevel(); }
             }
             // At a dry board edge the slope and the cut face share one corner profile, kept on the board's outline
             // (boardBandOffset); beside a road the cut stays on the lattice, where the road leaving the board ends.
@@ -1320,7 +1318,7 @@ final class BoardRelief {
         for (Site site : corner.around) {
             boolean fixed = site.fixedOutline();
             footPinned |= fixed && site.level() == from;
-            rimPinned |= fixed && !(site.liquid() && waterAbove(corner)) && site.level() == to;
+            rimPinned |= fixed && site.level() == to;
             for (Site other : corner.around) {
                 if (site.level() == to && other.level() == from) { drop = Math.max(drop, drop(site, other)); }
             }
@@ -1365,7 +1363,7 @@ final class BoardRelief {
      * smoothly between the levels of a three-level corner.
      */
     private void bandOffset(Corner corner, float z, float[] out) {
-        // A corner that touches special artwork or a building keeps its place: the bands of the other steps
+        // A corner that touches unsculpted ground or a building keeps its place: the bands of the other steps
         // through it close there, so no outline that keeps its edge is ever pushed aside. One that touches water moves
         // with the slopes through it; the water hexes there keep clear of it (cornerReach, cornerInset).
         if (!corner.banded || corner.low == corner.high) {
@@ -1388,7 +1386,7 @@ final class BoardRelief {
         for (int i = 0; i < 3; i++) {
             Site p = corner.around[i], q = corner.around[(i + 1) % 3];
             if (p == null || q == null) { continue; }
-            if (p.level() == q.level() && p.detailed() && q.detailed() && !p.liquid() && !q.liquid()) { continue; }
+            if (p.level() == q.level() && p.sculpted() && q.sculpted() && !p.liquid() && !q.liquid()) { continue; }
             Site upper = p.level() >= q.level() ? p : q, lower = upper == p ? q : p;
             float bottom = lower.level() * level, top = upper.level() * level;
             boolean inside = z >= bottom - EPSILON * level && z <= top + EPSILON * level;
@@ -1587,7 +1585,7 @@ final class BoardRelief {
             nx = px;
             ny = py;
             footPinned = lower == null || !lower.sculpted() || lower.fixedOutline();
-            rimPinned = upper != null && upper.fixedOutline() && !(upper.liquid() && lower != null && !lower.liquid());
+            rimPinned = upper != null && upper.fixedOutline();
             profiled = upper != null && lower != null && upper.sculpted() && (lower.sculpted() || lower.liquid());
             bandNormal = profiled ? bandNormal(upper, lower) : new Vector3(nx, ny, 0);
             room = profiled ? room(upper, lower) : 0;
@@ -2826,7 +2824,7 @@ final class BoardRelief {
 
     /**
      * Room a step takes on each side of its edge, in world units: none unless hex transitions or padding are on, and
-     * only between detailed grounds, water among them. Special artwork, buildings and roads keep their outline
+     * only between sculpted grounds, water among them. Buildings and roads keep their outline
      * on the hex edge, natural ground carrying a road down onto a concrete one sloping down onto it there (a cliff beside
      * stands at the paving's edge); water keeps its own where
      * {@link #band} says. Pits have no ground to carry a talus apron. A bank a built deck lands on stands on its edge,
@@ -2835,7 +2833,7 @@ final class BoardRelief {
      */
     private static float room(Site upper, Site lower) {
         float width = BoardGeometry.tuning().stepsBetweenTops() && upper != null && lower != null
-              && upper.level() != lower.level() && upper.detailed() && lower.detailed()
+              && upper.level() != lower.level() && upper.sculpted() && lower.sculpted()
               && !(upper.liquid() && lower.liquid())
               && !upper.fixedRoad() && !(lower.fixedRoad() && (upper.family() == CONCRETE || !upper.road()))
               && !upper.ultraSublevel() && !lower.ultraSublevel()
@@ -2932,7 +2930,7 @@ final class BoardRelief {
     private static boolean wetCliff(Site upper, Site lower) {
         return upper != null && lower != null && !upper.liquid() && lower.liquid()
               && upper.level() >= lower.level() && (upper.family() == CONCRETE
-              || tuning().cliffsIntoWater() && upper.sculpted() && upper.detailed() && lower.sculpted() && lower.detailed()
+              || tuning().cliffsIntoWater() && upper.sculpted() && lower.sculpted()
               && upper.level() > lower.level() && wall(upper, lower));
     }
 
@@ -3880,7 +3878,7 @@ final class BoardRelief {
 
     /** Authored Rough on an exposed ridge reads as attached bedrock, sharing the strike of nearby outcrops. */
     private boolean roughRidge() {
-        if (!sculpted || !self.detailed() || self.liquid() || self.family() == CONCRETE) { return false; }
+        if (!sculpted || self.liquid() || self.family() == CONCRETE) { return false; }
         int exposed = 0;
         for (int e = 0; e < 6; e++) {
             Site other = neighbor(self, e);
@@ -3991,7 +3989,7 @@ final class BoardRelief {
     private void rocks(List<BoardSurface.Face> destination, Vector3 anchor) {
         // Geological rim and fallen rocks belong on banks and riverbeds, including positive-depth water.
         // Cosmetic field scatter has its own stricter water rule; coarse tiers carry these only on a late level.
-        if (!detail.formations() || !self.detailed() || tile.liquid().volcanic()) { return; }
+        if (!detail.formations() || !self.sculpted() || tile.liquid().volcanic()) { return; }
         float m = metres(1);
         BoardScene.Surface family = BoardScene.Surface.values()[self.family()];
         boolean paved = tile.surface() == BoardScene.Surface.CONCRETE;
@@ -4114,7 +4112,7 @@ final class BoardRelief {
      */
     private void fallRocks(List<BoardSurface.Face> destination, Vector3 anchor, Vector3[] crests, int falls,
           int mouths) {
-        if (!detail.formations() || !self.detailed() || tile.liquid().volcanic()) { return; }
+        if (!detail.formations() || !self.sculpted() || tile.liquid().volcanic()) { return; }
         float m = metres(1);
         BoardScene.Surface family = BoardScene.Surface.values()[self.family()];
         int perEdge = crests.length / 6;
@@ -4175,7 +4173,7 @@ final class BoardRelief {
      */
     void field(List<BoardSurface.Face> destination) {
         // Cosmetic stones and shrubs share the full-detail tier; they never contribute gameplay cover.
-        if (!sculpted || detail != TerrainLod.FULL || !self.detailed() || !BoardScatter.allowed(tile)
+        if (!sculpted || detail != TerrainLod.FULL || !BoardScatter.allowed(tile)
               || tile.surface() == BoardScene.Surface.FUNGUS || tile.biome() != BoardScene.Biome.NONE
               || !tile.features().isEmpty()) { return; }
         Vector3 anchor = new Vector3(BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()), 0);
@@ -4218,7 +4216,7 @@ final class BoardRelief {
      * what stands on it, so the tree and any unit keep the game level.
      */
     private void pits(List<BoardSurface.Face> destination) {
-        if (!detail.formations() || !self.detailed() || tile.surface() != BoardScene.Surface.CONCRETE) { return; }
+        if (!detail.formations() || !self.sculpted() || tile.surface() != BoardScene.Surface.CONCRETE) { return; }
         float m = metres(1);
         List<BoardScene.Feature> trees = tile.features().stream()
               .filter(feature -> feature.kind() == BoardScene.FeatureKind.TREE && !feature.authoredPlacement()).toList();

@@ -141,10 +141,10 @@ final class BoardScatter {
             int choice = random.nextInt(10);
             String asset = choice % 2 == 0 ? "scatter-rock" : "scatter-slab";
             if (plants && surface == BoardScene.Surface.TROPICAL && choice < 8) {
-                asset = hex.containsTerrain(Terrains.TUNDRA) ? "scatter-dry-grass" : "scatter-plant";
+                asset = "scatter-plant";
             } else if (plants && surface == BoardScene.Surface.GRASS) {
-                if (choice < 5 || hex.containsTerrain(Terrains.TUNDRA) && choice < 8) {
-                    asset = hex.containsTerrain(Terrains.TUNDRA) ? "scatter-dry-grass" : "scatter-grass";
+                if (choice < 5) {
+                    asset = null;
                 } else if (choice < 8) {
                     asset = "scatter-plant";
                 }
@@ -158,9 +158,12 @@ final class BoardScatter {
             }
             double angle = random.nextDouble() * Math.PI * 2;
             float radius = 16 + 12 * (float) Math.sqrt(random.nextFloat());
+            float rotation = random.nextFloat() * 360, scale = .7f + random.nextFloat() * .5f;
+            float height = .10f + random.nextFloat() * .13f;
+            // Native grass has its own instanced cover. Keep the random sequence for the other scatter placements.
+            if (asset == null) { continue; }
             var feature = new BoardScene.Feature(asset, (float) Math.cos(angle) * radius,
-                  (float) Math.sin(angle) * radius, random.nextFloat() * 360, .7f + random.nextFloat() * .5f,
-                  .10f + random.nextFloat() * .13f, 0, BoardScene.FeatureKind.SCATTER);
+                  (float) Math.sin(angle) * radius, rotation, scale, height, 0, BoardScene.FeatureKind.SCATTER);
             // Replace only tundra's plants with support-rooted dwarf shrubs. Consume the same random values so
             // its loose rocks and slabs retain their original positions, sizes and rotations.
             if (!tundra || stone(asset)) { result.add(feature); }

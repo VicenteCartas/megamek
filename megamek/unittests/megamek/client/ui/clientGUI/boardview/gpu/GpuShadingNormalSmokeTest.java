@@ -775,7 +775,7 @@ class GpuShadingNormalSmokeTest {
         var instances = new GpuTreeInstances((name, level) -> {
             try { return (com.badlogic.gdx.graphics.g3d.Model) prepare.invoke(null, assets.lodModel(name, level)); }
             catch (ReflectiveOperationException error) { throw new IllegalStateException(error); }
-        });
+        }, false);
         // Borrow the production grass template and upload path, including its seeded bend/normal construction.
         // Fixed roots avoid board arrival-time growth; this tests actual blade shading, not planting/density.
         Class<?> bladeClass = Class.forName(GpuGroundCover.class.getName() + "$Batch");
@@ -864,17 +864,22 @@ class GpuShadingNormalSmokeTest {
                             camera.near = .01f; camera.far = diameter * 12; camera.update();
                             Runnable draw = () -> {
                                 batch.begin(camera);
+                                GpuIndirectInstances.Instances list = null;
                                 if (grass) { batch.render(tuft, environment); }
                                 else {
-                                    instances.begin(GpuTreeInstances.Pass.COLOUR);
-                                    if (objectParts) { instances.add(mirroredParts); }
-                                    else { instances.add(stand, level, true); }
-                                    var actual = new com.badlogic.gdx.utils.Array<com.badlogic.gdx.graphics.g3d.Renderable>();
-                                    instances.getRenderables(actual, null); // Borrowed instance-owned parts; pool is unused.
-                                    for (var part : actual) { observedRoles.add(part.material.id); }
-                                    batch.render(instances, environment);
+                                    // Through the terrain's GPU-driven path, as its colour pass draws them.
+                                    var indirect = GpuTestSupport.indirect(preview);
+                                    list = objectParts ? indirect.list(null, mirroredParts, 0, mirroredParts, null, null)
+                                          : instances.list(indirect, null, stand, level, false);
+                                    for (var part : GpuTestSupport.draws(indirect, objectParts
+                                          ? GpuIndirectInstances.Pass.COLOUR : GpuIndirectInstances.Pass.TREE_COLOUR,
+                                          list, camera, environment)) {
+                                        observedRoles.add(part.material.id);
+                                        batch.render(part);
+                                    }
                                 }
                                 batch.end();
+                                GpuIndirectInstances.release(list);
                             };
                             setProxyMode(batch, 0);
                             specimenFrame(output, preview, camera, draw); // Material/program first use.
@@ -990,7 +995,7 @@ class GpuShadingNormalSmokeTest {
             new com.fasterxml.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter()
                   .writeValue(destination.resolve("review.json").toFile(), report);
         } finally {
-            ((com.badlogic.gdx.utils.Disposable) blades).dispose(); instances.dispose(); preview.dispose(); assets.dispose();
+            ((com.badlogic.gdx.utils.Disposable) blades).dispose(); preview.dispose(); assets.dispose();
             applySources(manager, Map.of(), "restore-proxies");
         }
     }

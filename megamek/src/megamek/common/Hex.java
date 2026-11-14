@@ -83,12 +83,17 @@ public class Hex implements Serializable {
     private List<BoardDecoration> decorations;
     private megamek.common.board.BuildingVolumes.Reference buildingReference;
     /**
-     * A destroyed structure's terrains (Board#collapseBuilding, or an editor's Destroyed): the building, fuel tank or
+     * Destroyed terrain (Board#collapseBuilding, a blast, or an editor's Destroyed): the building, fuel tank or
      * bridge that stood here as it stood, so that its ruin is drawn (a bridge's landings and piers, the roads ending at
      * them) and an editor can restore it. Presentation only: the rules see the rubble that replaced it, never these. Null
-     * without a ruin, and in historical serialized games.
+     * without a ruin, and in historical serialized games. A destroyed road keeps its former connections here too,
+     * so surviving roads end at the break without providing a road for movement rules.
      */
     private Map<Integer, Terrain> ruins;
+    // Absolute route heights at destruction. Cratering can subsequently change the hex's ground level.
+    // Null in older saves, whose route ruins use the unchanged ground/bridge height as a fallback.
+    private Integer groundRailRuinLevel;
+    private Integer bridgeRailRuinLevel;
 
     /**
      * What makes up a structure that can be destroyed: a building's, a fuel tank's and a bridge's terrains with the way
@@ -189,6 +194,8 @@ public class Hex implements Serializable {
     public void shiftLevel(int delta) {
         if (delta == 0) { return; }
         setLevel(getLevel() + delta);
+        if (groundRailRuinLevel != null) { groundRailRuinLevel += delta; }
+        if (bridgeRailRuinLevel != null) { bridgeRailRuinLevel += delta; }
         Terrain elevator = getTerrain(Terrains.SOLARIS_ELEVATOR);
         if (elevator != null) {
             addTerrain(new Terrain(Terrains.SOLARIS_ELEVATOR, elevator.getLevel() + delta, elevator.hasExitsSpecified(),
@@ -253,6 +260,18 @@ public class Hex implements Serializable {
         ruins.put(terrain.getType(), terrain);
     }
 
+    /** Records a destroyed route together with the absolute height it occupied before any cratering. */
+    public void addRailRuin(Terrain rail, int absoluteLevel) {
+        if (rail.getType() == Terrains.RAIL) { groundRailRuinLevel = absoluteLevel; }
+        else if (rail.getType() == Terrains.BRIDGE_RAIL) { bridgeRailRuinLevel = absoluteLevel; }
+        else { throw new IllegalArgumentException("Not a rail terrain: " + rail.getType()); }
+        addRuin(rail);
+    }
+
+    public @Nullable Integer getRailRuinLevel(boolean deck) {
+        return deck ? bridgeRailRuinLevel : groundRailRuinLevel;
+    }
+
     /**
      * The structure standing here is destroyed: its terrains ({@link #STRUCTURE_TERRAINS}) leave the hex for its ruin,
      * which keeps them as they were. Nothing else changes: whoever destroys it adds the rubble.
@@ -261,10 +280,15 @@ public class Hex implements Serializable {
         // A structure that stands again where one fell (a repaired span, one painted over its ruin) leaves a ruin of its
         // own; with none standing the ruin stays as it is.
         if (Arrays.stream(STRUCTURE_TERRAINS).noneMatch(terrains::containsKey)) { return; }
-        ruins = null;
+        int deckLevel = level + (containsTerrain(Terrains.BRIDGE_ELEV) ? terrainLevel(Terrains.BRIDGE_ELEV) : 0);
+        if (ruins != null) { ruins.keySet().removeIf(Hex::structureTerrain); }
+        bridgeRailRuinLevel = null;
         for (int type : STRUCTURE_TERRAINS) {
             Terrain terrain = terrains.remove(type);
-            if (terrain != null) { addRuin(terrain); }
+            if (terrain != null) {
+                if (type == Terrains.BRIDGE_RAIL) { addRailRuin(terrain, deckLevel); }
+                else { addRuin(terrain); }
+            }
         }
     }
 
@@ -281,14 +305,48 @@ public class Hex implements Serializable {
     public void removeRuins() {
         if (ruins == null) { return; }
         ruins = null;
+        groundRailRuinLevel = bridgeRailRuinLevel = null;
         terrains.remove(Terrains.RUBBLE);
+    }
+
+    /** Remember a destroyed road's connections for the cut ends of surviving roads. No road remains for the rules. */
+    public void destroyRoad(java.util.function.Function<Coords, Hex> board) {
+        Terrain road = terrains.remove(Terrains.ROAD);
+        if (road == null) { return; }
+        int connected = 0;
+        for (int d = 0; d < 6; d++) {
+            Hex next = board.apply(coords.translated(d));
+            Terrain other = next == null ? null : next.getTerrain(Terrains.ROAD);
+            if (other == null && next != null) { other = next.getRuin(Terrains.ROAD); }
+            if (other != null && (other.getExits() & 1 << ((d + 3) % 6)) != 0) { connected |= 1 << d; }
+        }
+        // Store only connections that really met another road, even when either side had explicit exits.
+        addRuin(new Terrain(Terrains.ROAD, road.getLevel(), true, road.getExits() & connected));
+    }
+
+    /** The surviving road's visual exits into destroyed roads; ordinary dead ends have none. */
+    public int roadCuts(java.util.function.Function<Coords, Hex> board) {
+        Terrain road = getTerrain(Terrains.ROAD);
+        if (road == null) { return 0; }
+        int cuts = 0;
+        for (int d = 0; d < 6; d++) {
+            Hex next = board.apply(coords.translated(d));
+            Terrain lost = next == null || next.containsTerrain(Terrains.ROAD) ? null : next.getRuin(Terrains.ROAD);
+            if (lost != null && (lost.getExits() & 1 << ((d + 3) % 6)) != 0) { cuts |= 1 << d; }
+        }
+        // Auto roads lose their derived exits when their neighbour disappears. Explicitly edited roads own their
+        // current topology, so an old neighbour's damage cannot add a branch the author removed.
+        return road.hasExitsSpecified() ? cuts & road.getExits() : cuts;
     }
 
     /** The destroyed structure stands again as it stood, and the rubble that replaced it goes. */
     public void restoreRuins() {
         if (ruins == null) { return; }
         terrains.putAll(ruins);
+        // A blast can leave only deck-route history: restoring that history cannot create a track in mid-air.
+        if (!terrains.containsKey(Terrains.BRIDGE)) { terrains.remove(Terrains.BRIDGE_RAIL); }
         ruins = null;
+        groundRailRuinLevel = bridgeRailRuinLevel = null;
         terrains.remove(Terrains.RUBBLE);
     }
 
@@ -853,6 +911,8 @@ public class Hex implements Serializable {
         copy.decorations = decorations;
         copy.buildingReference = buildingReference;
         if (ruins != null) { ruins.values().forEach(ruin -> copy.addRuin(new Terrain(ruin))); }
+        copy.groundRailRuinLevel = groundRailRuinLevel;
+        copy.bridgeRailRuinLevel = bridgeRailRuinLevel;
         return copy;
     }
 

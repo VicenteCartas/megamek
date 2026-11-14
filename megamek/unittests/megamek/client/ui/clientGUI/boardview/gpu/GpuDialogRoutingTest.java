@@ -48,6 +48,29 @@ import org.mockito.MockedStatic;
 class GpuDialogRoutingTest {
 
     @Test
+    void rooftopDeploymentChoiceReturnsSelectionAndCancelWithoutConstructingSwingWindows() throws Exception {
+        ClientGUI gui = GpuDialogFixture.routingClient();
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            GpuDialogFixture.present(gui, fixture.view, fixture.source);
+            try {
+                var roof = new megamek.common.board.ElevationOption(2, megamek.common.board.DeploymentElevationType.BUILDING_TOP);
+                var ground = new megamek.common.board.ElevationOption(0, megamek.common.board.DeploymentElevationType.ON_GROUND);
+                var options = List.of(ground, roof);
+                int windows = java.awt.Window.getWindows().length;
+                var selected = GpuDialogFixture.ask(fixture.source,
+                      () -> megamek.client.ui.dialogs.phaseDisplay.DeployElevationChoiceDialog.choose(gui, options),
+                      new DialogAnswer(0, List.of(1), null, false, List.of()));
+                assertEquals(roof, selected.result());
+                assertEquals(2, selected.request().rows().size());
+                assertNull(GpuDialogFixture.ask(fixture.source,
+                      () -> megamek.client.ui.dialogs.phaseDisplay.DeployElevationChoiceDialog.choose(gui, options),
+                      new DialogAnswer(1, List.of(1), null, false, List.of())).result());
+                assertEquals(windows, java.awt.Window.getWindows().length);
+            } finally { GpuDialogFixture.dismiss(); }
+        }
+    }
+
+    @Test
     void confirmAndMessageReturnWhatJOptionPaneReturnsForTheSameAnswer() throws Exception {
         ClientGUI gui = GpuDialogFixture.routingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {

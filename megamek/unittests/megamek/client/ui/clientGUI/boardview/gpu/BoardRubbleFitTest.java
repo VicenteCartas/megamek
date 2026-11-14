@@ -129,7 +129,7 @@ class BoardRubbleFitTest {
     }
 
     private static BoardScene.Tile capture(Hex hex, Coords at) {
-        var artwork = new BoardArtwork.HexImage(at, null, null, List.of(), Map.of(), null);
+        var artwork = new BoardArtwork.HexImage(at, List.of(), Map.of(), null);
         return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool(), neighbour -> null);
     }
 }

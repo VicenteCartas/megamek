@@ -330,9 +330,9 @@ class BoardNaturalBridgeTest {
         for (boolean water : new boolean[] { false, true }) {
             var scene = BridgeScenes.canyonScene(BoardScene.Surface.GRASS, water, true);
             var tile = scene.tile(BoardScenes.CENTER);
-            var without = new BoardScene.Tile(tile.coords(), tile.elevation(), tile.waterDepth(), tile.frozen(),
-                  tile.roadExits(), tile.surface(), null, null, List.of(), List.of(),
-                  tile.liquid(), null, true, tile.road());
+            var without = BoardScenes.newTile(tile.coords(), tile.elevation(), tile.waterDepth(), tile.frozen(),
+                  tile.roadExits(), tile.surface(), List.of(), List.of(),
+                  tile.liquid(), null, tile.road());
             var groundOnly = BoardScenes.replace(scene, without);
             var before = new BoardSurface(groundOnly, without);
             var after = new BoardSurface(scene, tile);
@@ -682,10 +682,9 @@ class BoardNaturalBridgeTest {
 
     /** The tile marking its sides in {@code exits} as cliff tops (CLIFF_TOP), as the board stores them. */
     private static BoardScene.Tile cliffTop(BoardScene.Tile t, int exits) {
-        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
-              t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(), t.detailedGround(),
+        return BoardScenes.newTile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.features(), t.text(), t.liquid(), t.tileset(),
               t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), exits, t.bare(), t.groundCover(),
-              t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), t.appearance());
+              t.ultraSublevel(), t.tilesetScenery(), t.appearance());
     }
 
     /**

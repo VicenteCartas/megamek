@@ -22,7 +22,7 @@ class GpuAuthoredNightLightsTest {
         var root = new java.io.File(megamek.common.Configuration.dataDir(), "models");
         var file = new java.io.File(root, "buildings/lunar_habitat/lunar_habitat.json");
         var json = new com.fasterxml.jackson.databind.ObjectMapper();
-        var spec = json.readTree(file).get(0);
+        var spec = GeneratedKit.resolved(json.readTree(file), null, false);
         var pieces = RigidGlb.loadLods(new com.badlogic.gdx.files.FileHandle(
               new java.io.File(file.getParentFile(), spec.get("pieces").asText())), root.toPath());
         for (var level : pieces) {

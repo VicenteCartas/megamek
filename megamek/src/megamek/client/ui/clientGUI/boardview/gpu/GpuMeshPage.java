@@ -61,7 +61,7 @@ final class GpuMeshPage implements Disposable {
         if (part.meshPart.size == 0) { return; }
         current.add(part);
         indices += part.meshPart.size;
-        if (shown) { visible.add(part); visibleSet.add(part); }
+        if (shown) { visible.add(part); }
     }
 
     /** All sources are supplied, including hidden chunks. Only source replacement outdates the merge. */
@@ -142,6 +142,10 @@ final class GpuMeshPage implements Disposable {
             for (Renderable part : cached) { submit.accept(part, part.material); }
             return;
         }
+
+        // Membership is needed only for a partial or outdated page. An unchanged overview draws its merged meshes
+        // directly, without hashing every building module on every frame.
+        if (visibleSet.isEmpty()) { for (Renderable part : visible) { visibleSet.add(part); } }
 
         // A partial or outdated page keeps only its visible merged sources. Adjacent ranges of the same material/mesh
         // form one draw. Reuse the small renderable pool; no vertex or index buffers change during a pan.

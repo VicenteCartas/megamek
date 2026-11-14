@@ -45,7 +45,10 @@ import javax.swing.border.MatteBorder;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.buttons.ButtonEsc;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CloseAction;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
+import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.DeploymentElevationType;
 import megamek.common.board.ElevationOption;
@@ -57,6 +60,20 @@ public class DeployElevationChoiceDialog extends AbstractChoiceDialog<ElevationO
 
     private static final int BASE_PADDING = 10;
 
+    /** Ask in the active presentation before constructing and laying out a Swing window. */
+    public static ElevationOption choose(ClientGUI gui, List<ElevationOption> options) {
+        if (GpuBoardWindow.drawsDialogsFor(gui)) {
+            var rows = options.stream().map(option -> new GpuBoardWindow.DialogRow(label(option), "", null, true)).toList();
+            var answer = gui.askRows(titleMessage(), Messages.getString("DeploymentDisplay.choiceDialogTitle"),
+                  rows, false, List.of(), null, List.of(Messages.getString("Okay"), Messages.getString("Cancel")), 1);
+            if (answer != null) {
+                return answer.selected().isEmpty() ? null : options.get(answer.selected().getFirst());
+            }
+        }
+        var dialog = new DeployElevationChoiceDialog(gui.getFrame(), options);
+        return dialog.showDialog() == DialogResult.CONFIRMED ? dialog.getFirstChoice() : null;
+    }
+
     public DeployElevationChoiceDialog(JFrame parent, List<ElevationOption> elevationOptions) {
         super(parent, "DeploymentDisplay.choiceDialogTitle", titleMessage(), elevationOptions, false);
         setColumns(elevationOptions.size() > 6 ? 2 : 1);
@@ -66,6 +83,10 @@ public class DeployElevationChoiceDialog extends AbstractChoiceDialog<ElevationO
 
     @Override
     protected void detailLabel(JToggleButton button, ElevationOption elevationOption) {
+        button.setText(label(elevationOption));
+    }
+
+    private static String label(ElevationOption elevationOption) {
         String description = Messages.getString("DeploymentDisplay.deployElevation." + elevationOption.type());
         String elevationAltitude = elevationOption.type() == DeploymentElevationType.ALTITUDE
               ? Messages.getString("DeploymentDisplay.altitude")
@@ -75,7 +96,7 @@ public class DeployElevationChoiceDialog extends AbstractChoiceDialog<ElevationO
         if (elevationOption.type() != DeploymentElevationType.ELEVATIONS_ABOVE) {
             text += "<BR>" + spanCSS("elevation", elevationText) + "</BODY></HTML>";
         }
-        button.setText(text);
+        return text;
     }
 
     @Override

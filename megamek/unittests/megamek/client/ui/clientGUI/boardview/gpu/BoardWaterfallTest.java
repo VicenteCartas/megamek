@@ -83,9 +83,8 @@ class BoardWaterfallTest {
     /** Exercise ordinary water with exactly the same drops, adjoining cliffs and connected mouths as the lava map. */
     static BoardScene withWater(BoardScene scene) {
         var tiles = scene.tiles().stream().map(t -> !t.liquid().molten() ? t
-              : new BoardScene.Tile(t.coords(), t.elevation(), 1, t.frozen(), t.roadExits(), t.surface(), t.decals(),
-                    t.decalsWithoutLimbs(), t.features(), t.text(),
-                    BoardLiquid.WATER, t.tileset(), t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable())).toList();
+              : BoardScenes.newTile(t.coords(), t.elevation(), 1, t.frozen(), t.roadExits(), t.surface(), t.features(), t.text(),
+                    BoardLiquid.WATER, t.tileset(), t.road(), t.fireSmoke(), t.biome(), t.impassable())).toList();
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
     }
 
@@ -425,8 +424,8 @@ class BoardWaterfallTest {
     }
 
     private static BoardScene.Tile tile(Coords coords, int level, int depth) {
-        return new BoardScene.Tile(coords, level, depth, false, 0, BoardScene.Surface.SAND, null, null, List.of(),
-              List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null, true);
+        return BoardScenes.newTile(coords, level, depth, false, 0, BoardScene.Surface.SAND, List.of(),
+              List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null);
     }
 
     @Test

@@ -348,8 +348,8 @@ class GpuWaterQualitySmokeTest {
                 boolean island = Math.hypot(u - .30f, v - .42f) < .046f;
                 boolean wet = !island && (Math.min(left, right) < 1 || u > .45f && u < .62f && Math.abs(v - .5f) < .055f);
                 int depth = !wet ? -1 : Math.min(left, right) > .78f ? 1 : u < .23f ? 2 : 3;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), !wet && island ? 2 : 0, depth, false, 0,
-                      BoardScene.Surface.SAND, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), !wet && island ? 2 : 0, depth, false, 0,
+                      BoardScene.Surface.SAND, List.of(), List.of()));
             }
         }
         return new BoardScene(0, size, size, tiles, List.of(), List.of(), -1, "", List.of());

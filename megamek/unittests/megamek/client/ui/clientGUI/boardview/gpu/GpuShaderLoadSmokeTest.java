@@ -256,12 +256,12 @@ class GpuShaderLoadSmokeTest {
                             var terrain = (GpuTerrain) GpuTestSupport.field(this, "terrain");
                             boolean curved = false, coated = false;
                             for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
-                                for (Object instance : (List<?>) GpuTestSupport.field(chunk, "opaque")) {
+                                for (Object instance : (List<?>) GpuTestSupport.field(GpuTestSupport.field(chunk, "ground"), "opaque")) {
                                     for (var material : ((ModelInstance) instance).materials) {
                                         curved |= GpuTessellation.curved(material);
                                     }
                                 }
-                                for (Object instance : (List<?>) GpuTestSupport.field(chunk, "overlays")) {
+                                for (Object instance : (List<?>) GpuTestSupport.field(GpuTestSupport.field(chunk, "ground"), "overlays")) {
                                     for (var material : ((ModelInstance) instance).materials) {
                                         coated |= GpuTessellation.curved(material) && material.has(GpuRoads.Mask.TYPE);
                                     }

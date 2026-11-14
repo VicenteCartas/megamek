@@ -58,7 +58,6 @@ class BoardIceTest {
                 var hidden = source.takeFrame().scene();
                 assertFalse(hidden.tile(coords).blackIce());
                 assertFalse(hidden.tile(coords).frozen());
-                assertTrue(hidden.tile(coords).detailedGround());
                 assertTrue(BoardRoad.rendered(hidden.tile(coords)));
                 assertEquals(BoardTactical.EMPTY, hidden.tactical());
                 hex.getTerrain(Terrains.BLACK_ICE).detectBlackIce();
@@ -209,12 +208,9 @@ class BoardIceTest {
             try (var artwork = new BoardArtwork()) {
                 board.setHex(coords, new Hex(0, "ground_fluff:4", ""));
                 var blank = artwork.capture(board, coords, board.getHex(coords));
-                assertTrue(blank.blankTerrains().contains(Terrains.GROUND_FLUFF));
-                assertTrue(BoardFeatures.detailedGround(board.getHex(coords), blank.structureModels(), blank.blankTerrains()));
                 board.setHex(coords, new Hex(0, "ground_fluff:2000", ""));
                 artwork.invalidate(coords);
                 var visible = artwork.capture(board, coords, board.getHex(coords));
-                assertFalse(visible.blankTerrains().contains(Terrains.GROUND_FLUFF));
                 assertTrue(BoardEditorTerrain.badges(board.getHex(coords)).isEmpty());
             }
             var flags = new Hex(0, "black_ice:1;bldg_base_collapsed:1;metal_deposit:1;fluff:0;road_fluff:99", "");

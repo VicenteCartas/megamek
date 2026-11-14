@@ -104,9 +104,9 @@ class ZzAveragingProbeSmokeTest {
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      BoardScene.Surface.valueOf(material.toUpperCase(Locale.ROOT)), null, null, List.of(), List.of(),
-                      BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), 0, -1, false, 0,
+                      BoardScene.Surface.valueOf(material.toUpperCase(Locale.ROOT)), List.of(), List.of(),
+                      BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

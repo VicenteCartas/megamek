@@ -35,7 +35,11 @@ final class GpuCrystalTransmission implements Disposable {
 
     /** Closed convex primitives retain their actual facet planes for internal optical transport. */
     private static final Map<Mesh, Map<Long, float[]>> VOLUMES = new WeakHashMap<>();
+    private static final float[] NO_PLANES = new float[0];
     static float[] planes(MeshPart part) {
+        // An instanced draw (a fall's pieces) has no one volume: its instances each stand elsewhere, and a GPU-driven
+        // draw's mesh part names its commands, not a range. It shades the surface without the inner transport.
+        if (part.mesh.isInstanced()) { return NO_PLANES; }
         long key = ((long) part.offset << 32) | part.size;
         return VOLUMES.computeIfAbsent(part.mesh, ignored -> new HashMap<>()).computeIfAbsent(key, ignored -> {
             Mesh mesh = part.mesh;

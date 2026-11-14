@@ -182,7 +182,9 @@ final class GpuGroundDamage implements Disposable {
     /** Texture storage may be square; the trimmed artwork keeps its physical canvas proportions. */
     private record BrushArt(List<Pixmap> levels, List<int[]> texels, float aspect) { }
     private final Map<Style, BrushArt> brushes = new EnumMap<>(Style.class);
-    private record Stamp(int level, Vector3 point, float radius, float angle, Style style, int seed, float strength) { }
+    /** {@code area}: an area effect's mark, which clears the dressing of the hexes it paints ({@link #scorched}). */
+    private record Stamp(int level, Vector3 point, float radius, float angle, Style style, int seed, float strength,
+          boolean area) { }
     private final ArrayDeque<Stamp> pending = new ArrayDeque<>();
     /** The tile of the oldest waiting mark that painting resumes from: 0 until a mark spans frames. */
     private int resumeTile;
@@ -199,6 +201,8 @@ final class GpuGroundDamage implements Disposable {
     private boolean directoryDirty;
     private int marks;
     private boolean scorched;
+    /** Hexes an area effect's painted mark touched (artillery, fuel-air); cleared with the marks themselves. */
+    private final Set<Coords> blastedHexes = new HashSet<>();
     /** Blast seconds since the last scorch ({@link #advance}). */
     private float scorchAge;
     private long scorchRevision;
@@ -256,19 +260,28 @@ final class GpuGroundDamage implements Disposable {
 
     long scorchRevision() { return scorchRevision; }
 
-    /**
-     * Baked decorative vegetation belongs to its hex. Clear it when authored scorch reaches that hex or a nuclear
-     * directory texel's bilinear footprint touches it. This reads the existing mask only when the scene or scorch
-     * changes; it neither advances the displayed authored mask nor changes gameplay vegetation.
-     */
-    boolean scorched(BoardScene scene, BoardScene.Tile tile) {
+    /** Whether the board's author scorched this hex or one beside it ({@link HexAppearance#scorch}): it was made bare. */
+    static boolean authoredScorch(BoardScene scene, BoardScene.Tile tile) {
         if (HexAppearance.scorch(tile.appearance()) > 0) { return true; }
         for (int direction = 0; direction < 6; direction++) {
             var neighbor = scene.neighbor(tile, direction);
             if (neighbor != null && HexAppearance.scorch(neighbor.appearance()) > 0) { return true; }
         }
-        if (!scorched || directory.isEmpty() || boardId != scene.boardId()
-              || columns != scene.width() || rows != scene.height()) { return false; }
+        return false;
+    }
+
+    /**
+     * Decorative objects, paint and vegetation belong to their hex. Only an area effect clears them: authored scorch
+     * on the hex or beside it, an area round's mark on it (artillery, fuel-air), or a nuclear or orbital blast whose
+     * directory texel's bilinear footprint touches it. A direct-fire scar (a laser gouge, a missed autocannon round)
+     * marks the ground and leaves the hex's dressing alone. This reads the existing mask only when the scene or scorch
+     * changes; it neither advances the displayed authored mask nor changes gameplay vegetation.
+     */
+    boolean scorched(BoardScene scene, BoardScene.Tile tile) {
+        if (authoredScorch(scene, tile)) { return true; }
+        if (boardId != scene.boardId() || columns != scene.width() || rows != scene.height()) { return false; }
+        if (blastedHexes.contains(tile.coords())) { return true; }
+        if (!scorched || directory.isEmpty()) { return false; }
         float cx = BoardGeometry.centerX(tile.coords()), cy = -BoardGeometry.centerY(tile.coords());
         float halfWidth = BoardGeometry.width() * .5f + tileWorldSize;
         float halfHeight = BoardGeometry.height() * .5f + tileWorldSize;
@@ -480,7 +493,7 @@ final class GpuGroundDamage implements Disposable {
             resumeTile = 0;
         }
         pending.addLast(new Stamp(tile.elevation(), stampAt.cpy(), impact.radius(style), angle, style, seed,
-              impact.strength()));
+              impact.strength(), isArtillery(impact)));
     }
 
     /**
@@ -655,6 +668,8 @@ final class GpuGroundDamage implements Disposable {
                                   (layer & 255) << 24 | (layer >>> 8) << 16 | kept);
                             directoryDirty = true;
                         }
+                        // The painted footprint, so a crater across a hex border clears both hexes.
+                        if (mark.area() && blastedHexes.add(receiver.coords())) { scorchRevision++; }
                         // Premultiplied coverage, authored luminance, gloss and relief; newer art blends over older art.
                         for (int y = Math.max(by, y0); y < Math.min(by + step, y1 + 1); y++) {
                             for (int x = Math.max(bx, x0); x < Math.min(bx + step, x1 + 1); x++) {
@@ -902,6 +917,7 @@ final class GpuGroundDamage implements Disposable {
         brushes.values().forEach(art -> art.levels().forEach(Pixmap::dispose));
         brushes.clear();
         texture = null; capacity = 0; seen.clear(); marks = 0; scorched = false;
+        blastedHexes.clear();
         scorchRevision++;
         authored = new byte[0]; authoredTiles = null; authoredAny = false;
         nextSurfaceKey = -1;

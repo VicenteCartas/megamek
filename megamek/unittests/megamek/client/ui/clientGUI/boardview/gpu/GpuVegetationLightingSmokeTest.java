@@ -40,7 +40,7 @@ class GpuVegetationLightingSmokeTest {
     private static final int HEIGHT = 720;
 
     @Test
-    void dryAndWetBarkSnowAndGrassUseTheSharedReflectionModel() {
+    void dryAndWetBarkAndSnowUseTheSharedReflectionModel() {
         var failure = new AtomicReference<Throwable>();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
@@ -55,10 +55,8 @@ class GpuVegetationLightingSmokeTest {
     }
 
     private static void checkReflections(GpuShaderManager manager) {
-        var cover = new GpuGroundCover();
         try (var fixture = new Fixture()) {
-            var grass = scene(BoardScene.Surface.GRASS, BoardLiquid.Kind.NONE, false);
-            fixture.terrain.update(grass);
+            fixture.terrain.update(scene(BoardScene.Surface.GRASS, BoardLiquid.Kind.NONE, false));
             fixture.environment.get(DirectionalLightsAttribute.class, DirectionalLightsAttribute.Type).lights.first()
                   .set(.9f, .9f, .9f, -.3f, .4f, -1);
             // Trees and grass take their sun reflection from shadeSurface (surface-shading.glsl).
@@ -69,11 +67,11 @@ class GpuVegetationLightingSmokeTest {
             assertTrue(!lighting.equals(disabled));
             var missing = new ArrayList<String>();
             var root = BoardGeometry.center(new Coords(0, 0), 0);
-            for (String species : List.of("vegetation/tree-dead", "vegetation/pine-snow", "grass")) {
+            for (String species : List.of("vegetation/tree-dead", "vegetation/pine-snow")) {
                 var stand = new GpuTreeInstances.Stand();
-                if (!species.equals("grass")) { stand.add(species, new Matrix4().setToTranslation(root), 0); }
+                stand.add(species, new Matrix4().setToTranslation(root), 0);
                 for (boolean top : new boolean[] { true, false }) {
-                    var camera = camera(top, root.cpy().add(0, 0, species.equals("grass") ? 0 : 15), .14f);
+                    var camera = camera(top, root.cpy().add(0, 0, 15), .14f);
                     for (float wetness : new float[] { 0, .7f }) {
                         fixture.terrain.setWetness(wetness);
                         String name = species + (top ? "-top" : "-iso") + (wetness == 0 ? "-dry" : "-wet");
@@ -81,16 +79,7 @@ class GpuVegetationLightingSmokeTest {
                         for (int variant = 0; variant < 2; variant++) {
                             var result = manager.apply(variant == 0 ? Map.of() : Map.of("surface-shading.glsl", disabled));
                             assertTrue(result.success(), result.message());
-                            if (species.equals("grass")) {
-                                GpuTreeLodSmokeTest.newShadingPass(fixture.terrain);
-                                var blades = cover.visible(grass, camera.camera, grass.tiles(), fixture.terrain::planted);
-                                assertTrue(!blades.isEmpty(), "Exercise real planted grass");
-                                ScreenUtils.clear(0, 0, 0, 0, true);
-                                fixture.batch.begin(camera.camera);
-                                fixture.batch.render(blades, fixture.environment);
-                                fixture.batch.end();
-                                frames[variant] = pixels();
-                            } else { frames[variant] = fixture.pixels(camera, stand, 0); }
+                            frames[variant] = fixture.pixels(camera, stand, 0);
                             save("reflection-" + name + (variant == 0 ? "" : "-no-sheen"));
                         }
                         assertTrue(coverage(frames[0]) > 100, name + ": visible receiving geometry");
@@ -102,7 +91,6 @@ class GpuVegetationLightingSmokeTest {
             assertTrue(missing.isEmpty(), "Dry and wet vegetation must reflect light through GGX: " + missing);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } catch (ReflectiveOperationException error) { throw new IllegalStateException(error); }
-        finally { cover.dispose(); }
     }
 
     @Test
@@ -260,7 +248,7 @@ class GpuVegetationLightingSmokeTest {
             instances = new GpuTreeInstances((name, level) -> {
                 try { return (Model) prepare.invoke(null, assets.lodModel(name, level)); }
                 catch (ReflectiveOperationException error) { throw new IllegalStateException(error); }
-            });
+            }, false);
             environment.set(ColorAttribute.createAmbientLight(.02f, .02f, .02f, 1));
             environment.add(new DirectionalLight().set(.04f, .04f, .04f, -.3f, .4f, -1));
             lighting.lavaLighting = lights;
@@ -274,11 +262,7 @@ class GpuVegetationLightingSmokeTest {
         private void draw(BoardCamera camera, GpuTreeInstances.Stand stand, int level, Runnable clearTarget) {
             GpuTreeLodSmokeTest.newShadingPass(terrain); // Advance the production shader's per-pass global cache.
             clearTarget.run();
-            instances.begin(GpuTreeInstances.Pass.COLOUR);
-            instances.add(stand, level, true);
-            batch.begin(camera.camera);
-            batch.render(instances, environment);
-            batch.end();
+            GpuTestSupport.drawTrees(terrain, instances, stand, level, batch, camera.camera, environment);
         }
 
         int[] pixels(BoardCamera camera, GpuTreeInstances.Stand stand, int level) {
@@ -303,7 +287,7 @@ class GpuVegetationLightingSmokeTest {
 
         @Override
         public void close() {
-            instances.dispose(); lighting.dispose(); terrain.dispose(); assets.dispose(); output.close();
+            lighting.dispose(); terrain.dispose(); assets.dispose(); output.close();
         }
     }
 
@@ -330,8 +314,8 @@ class GpuVegetationLightingSmokeTest {
 
     private static BoardScene scene(BoardScene.Surface surface, BoardLiquid.Kind kind, boolean hidden) {
         var pixels = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
-        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, surface, null, null, List.of(), List.of(),
-              new BoardLiquid(kind, "", 0), null, true);
+        var tile = BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, surface, List.of(), List.of(),
+              new BoardLiquid(kind, "", 0), null);
         var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
         return new BoardScene(scene.boardId(), 1, 1, scene.tiles(), scene.units(), scene.plannedPath(), scene.selectedId(),
               scene.phase(), scene.commands(), scene.light(), scene.firingLines(), scene.rangeBorders(), scene.markers(),

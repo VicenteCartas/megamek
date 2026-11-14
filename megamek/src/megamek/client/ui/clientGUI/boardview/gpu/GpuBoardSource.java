@@ -137,7 +137,7 @@ final class GpuBoardSource implements BoardSource {
     private final GpuAtmosphereControls atmosphere;
     private final BoardScene.PixelPool terrainImages = new BoardScene.PixelPool();
     /** EDT-owned: the board's terrain tiles, the one capture the preview and the editor share; the markings are ours. */
-    private final BoardTiles terrain = new BoardTiles(terrainImages);
+    private final BoardTiles terrain = new BoardTiles(terrainImages, () -> this.view.getGpuBoardState().captured());
     private final List<BoardScene.Animation> pendingEvents = new ArrayList<>();
     /**
      * Deaths received since the last checkpoint. The server reports a death as it happens, before the movement or fall
@@ -1490,7 +1490,7 @@ final class GpuBoardSource implements BoardSource {
         boolean knownActor = actor != null && identified(actor);
         return new Frame(scene, List.of(), nextContext, List.copyOf(nextGlobal), nextTooltip, nextDetails,
               view.getCenterRequest(), boardGeneration, knownActor ? actor.getShortName() : "",
-              atmosphereFor(view.game.getPlanetaryConditions(), board.isSpace()), log, status, panels);
+              atmosphereFor(view.game.getPlanetaryConditions(), board.isSpace()), log, status, panels, view.getGpuBoardState());
     }
 
     /**
@@ -1741,6 +1741,11 @@ final class GpuBoardSource implements BoardSource {
         return result;
     }
 
+    /** Destroyed, or doomed with its phase resolved: a doomed unit still fires in the phase that dooms it. */
+    private boolean gone(Entity entity) {
+        return entity.isDestroyed() || entity.isDoomed() && view.game.getPhase().isReport();
+    }
+
     private List<BoardScene.FiringLine> firingLines() {
         List<BoardScene.FiringLine> result = new ArrayList<>();
         for (AttackAction action : view.getAttacks()) {
@@ -1751,6 +1756,8 @@ final class GpuBoardSource implements BoardSource {
                   || !board.contains(attacker.getPosition()) || !board.contains(target.getPosition())) {
                 continue;
             }
+            // A destroyed unit's lines go with it: the game keeps its attacks until the round's end.
+            if (gone(attacker) || target instanceof Entity struck && gone(struck)) { continue; }
             // ArtilleryAttackAction also represents direct artillery declared in the firing phase.
             boolean indirect = action instanceof ArtilleryAttackAction && switch (view.game.getPhase()) {
                 case TARGETING, TARGETING_REPORT, OFFBOARD, OFFBOARD_REPORT -> true;

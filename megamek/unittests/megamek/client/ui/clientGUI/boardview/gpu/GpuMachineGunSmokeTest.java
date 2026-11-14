@@ -87,8 +87,7 @@ class GpuMachineGunSmokeTest {
                                     if (hit && !fallback && frame % 4 == 0) {
                                         for (boolean top : List.of(false, true)) {
                                             renderer.topView = top;
-                                            renderer.frame(List.of(source, victim), origin.cpy().lerp(destination, .5f), effects,
-                                                  "machine-gun-" + (rapid ? "rapid" : "normal") + (top ? "-top" : "-iso"), frame);
+                                            renderer.frame(List.of(source, victim), origin.cpy().lerp(destination, .5f), effects);
                                         }
                                     }
                                     previous = emitted;

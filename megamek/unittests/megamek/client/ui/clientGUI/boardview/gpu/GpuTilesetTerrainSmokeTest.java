@@ -116,14 +116,14 @@ class GpuTilesetTerrainSmokeTest {
             for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) {
                 Coords at = new Coords(x, y);
                 shore.add(at.equals(center) ? pool(at, 2, art)
-                      : new BoardScene.Tile(at, 1, -1, false, 0, bank, null, null,
+                      : BoardScenes.newTile(at, 1, -1, false, 0, bank,
                             List.of(), List.of(), BoardLiquid.NONE, art));
             }
             scene = new BoardScene(0, 3, 3, shore, List.of(), List.of(), -1, "", List.of());
             terrain.update(scene);
             var support = terrain.tacticalSurface(center);
             int vertices = 0;
-            for (Object instance : (List<?>) field(((List<?>) field(terrain, "chunks")).getFirst(), "water")) {
+            for (Object instance : (List<?>) field(field(((List<?>) field(terrain, "chunks")).getFirst(), "ground"), "water")) {
                 for (Mesh mesh : ((ModelInstance) instance).model.meshes) {
                     int stride = mesh.getVertexSize() / Float.BYTES;
                     int colour = mesh.getVertexAttribute(Usage.ColorPacked).offset / Float.BYTES;
@@ -148,7 +148,7 @@ class GpuTilesetTerrainSmokeTest {
         List<BoardScene.Tile> frozen = new ArrayList<>();
         for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) {
             Coords at = new Coords(x, y);
-            frozen.add(at.equals(center) ? new BoardScene.Tile(at, 0, 2, true, 0, BoardScene.Surface.GRASS, null, null,
+            frozen.add(at.equals(center) ? BoardScenes.newTile(at, 0, 2, true, 0, BoardScene.Surface.GRASS,
                   List.of(), List.of(), BoardLiquid.WATER, art) : land(at, art));
         }
         terrain.update(new BoardScene(0, 3, 3, frozen, List.of(), List.of(), -1, "", List.of()));
@@ -163,7 +163,7 @@ class GpuTilesetTerrainSmokeTest {
 
     private static List<Material> materials(Object chunk, String layer) throws Exception {
         List<Material> result = new ArrayList<>();
-        for (Object instance : (List<?>) field(chunk, layer)) {
+        for (Object instance : (List<?>) field(field(chunk, "ground"), layer)) {
             for (Material material : ((ModelInstance) instance).materials) { result.add(material); }
         }
         return result;
@@ -234,12 +234,12 @@ class GpuTilesetTerrainSmokeTest {
     }
 
     private static BoardScene.Tile pool(Coords coords, int depth, BoardScene.Pixels art) {
-        return new BoardScene.Tile(coords, 0, depth, false, 0, BoardScene.Surface.GRASS, null, null,
+        return BoardScenes.newTile(coords, 0, depth, false, 0, BoardScene.Surface.GRASS,
               List.of(), List.of(), BoardLiquid.WATER, art);
     }
 
     private static BoardScene.Tile land(Coords coords, BoardScene.Pixels art) {
-        return new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, null, null,
+        return BoardScenes.newTile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS,
               List.of(), List.of(), BoardLiquid.NONE, art);
     }
 
@@ -261,8 +261,8 @@ class GpuTilesetTerrainSmokeTest {
         for (int x = 0; x < WIDTH; x++) {
             for (int y = 0; y < HEIGHT; y++) {
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, raised.getOrDefault(coords, 0), -1, false, 0,
-                      BoardScene.Surface.GRASS, null, null, List.of(), List.of(), BoardLiquid.NONE,
+                tiles.add(BoardScenes.newTile(coords, raised.getOrDefault(coords, 0), -1, false, 0,
+                      BoardScene.Surface.GRASS, List.of(), List.of(), BoardLiquid.NONE,
                       painted.getOrDefault(coords, art)));
             }
         }

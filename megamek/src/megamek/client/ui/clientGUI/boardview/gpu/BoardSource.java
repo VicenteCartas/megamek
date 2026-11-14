@@ -17,7 +17,7 @@ import megamek.common.board.Coords;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.preference.PreferenceManager;
 
-/** Renderer input boundary. Only immutable snapshots cross from the EDT to the GL thread. */
+/** Renderer input boundary. Game snapshots are immutable; shared presentation history belongs to the GL thread. */
 interface BoardSource extends AutoCloseable {
     /** One key binding with its display text ({@code KeyCommandBind.getDesc}), copied on the Swing thread. */
     public record Bind(KeyCommandBind command, int keyCode, int modifiers, String text) { }
@@ -83,13 +83,24 @@ interface BoardSource extends AutoCloseable {
      * One published snapshot. {@code status} and {@code panels} are always the newest capture; {@code panels} bundles
      * the HUD services' snapshots. A map preview or the board editor publishes empty ones. A battle's {@code tooltip}
      * is the hex tooltip of the hovered hex, or of the open menu's, and {@code hexDetails} that hex's lines below its
-     * terrain ({@link GpuBoardSource#hexDetails}); empty elsewhere.
+     * terrain ({@link GpuBoardSource#hexDetails}); empty elsewhere. Gameplay's render-owned presentation history is
+     * bound to this capture's board, so an EDT board replacement cannot change the owner of an already-taken frame.
      */
     public record Frame(BoardScene scene, List<BoardScene.Animation> timeline, BoardScene.Context context,
           List<BoardScene.Command> globalCommands, String tooltip, String hexDetails,
           BoardFocus centerRequest, long boardGeneration, String actorName,
           BoardAtmosphere.Settings scenarioAtmosphere, GpuReportLog.Snapshot reports,
-          GpuBattleStatus.Snapshot status, GpuHudData panels) {
+          GpuBattleStatus.Snapshot status, GpuHudData panels, GpuBoardState boardState) {
+        /** A frame without shared gameplay presentation history (previews, editors and synthetic sources). */
+        public Frame(BoardScene scene, List<BoardScene.Animation> timeline, BoardScene.Context context,
+              List<BoardScene.Command> globalCommands, String tooltip, String hexDetails,
+              BoardFocus centerRequest, long boardGeneration, String actorName,
+              BoardAtmosphere.Settings scenarioAtmosphere, GpuReportLog.Snapshot reports,
+              GpuBattleStatus.Snapshot status, GpuHudData panels) {
+            this(scene, timeline, context, globalCommands, tooltip, hexDetails, centerRequest, boardGeneration,
+                  actorName, scenarioAtmosphere, reports, status, panels, null);
+        }
+
         /** A frame without a hex's lines below its terrain. */
         public Frame(BoardScene scene, List<BoardScene.Animation> timeline, BoardScene.Context context,
               List<BoardScene.Command> globalCommands, String tooltip, BoardFocus centerRequest, long boardGeneration,
@@ -110,13 +121,13 @@ interface BoardSource extends AutoCloseable {
         /** This frame with the animation events queued since the previous frame was taken. */
         Frame withTimeline(List<BoardScene.Animation> events) {
             return new Frame(scene, events, context, globalCommands, tooltip, hexDetails, centerRequest,
-                  boardGeneration, actorName, scenarioAtmosphere, reports, status, panels);
+                  boardGeneration, actorName, scenarioAtmosphere, reports, status, panels, boardState);
         }
 
         /** This frame showing {@code shown}, the scene the playback presents; this frame when it is its own. */
         Frame withScene(BoardScene shown) {
             return shown == scene ? this : new Frame(shown, timeline, context, globalCommands, tooltip, hexDetails,
-                  centerRequest, boardGeneration, actorName, scenarioAtmosphere, reports, status, panels);
+                  centerRequest, boardGeneration, actorName, scenarioAtmosphere, reports, status, panels, boardState);
         }
 
         List<BoardScene.Movement> movements() {

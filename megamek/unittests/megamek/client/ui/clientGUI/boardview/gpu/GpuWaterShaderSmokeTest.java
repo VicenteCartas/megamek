@@ -829,8 +829,8 @@ class GpuWaterShaderSmokeTest {
         for (BoardScene.Tile tile : source.tiles()) {
             // Include dry banks beside roads as well as the pool's submerged terrain.
             int roads = falls && !tile.water() ? 1 : 0;
-            tiles.add(new BoardScene.Tile(tile.coords(), tile.elevation(), tile.waterDepth(), false, roads,
-                  tile.surface(), null, null, List.of(), List.of(), tile.liquid(), null, true));
+            tiles.add(BoardScenes.newTile(tile.coords(), tile.elevation(), tile.waterDepth(), false, roads,
+                  tile.surface(), List.of(), List.of(), tile.liquid(), null));
         }
         return new BoardScene(0, source.width(), source.height(), tiles, List.of(), List.of(), -1, "", List.of());
     }
@@ -1057,9 +1057,9 @@ class GpuWaterShaderSmokeTest {
             var at = new Coords(6 + kind.ordinal(), 4);
             var tile = scene.tile(at);
             int depth = kind == BoardLiquid.Kind.WATER || kind == BoardLiquid.Kind.HAZARDOUS ? 1 : -1;
-            tiles.set(at.getX() * scene.height() + at.getY(), new BoardScene.Tile(at, 2, depth,
-                  kind == BoardLiquid.Kind.WATER, 0, tile.surface(), null, null,
-                  List.of(), List.of(), new BoardLiquid(kind, "", 0), null, true));
+            tiles.set(at.getX() * scene.height() + at.getY(), BoardScenes.newTile(at, 2, depth,
+                  kind == BoardLiquid.Kind.WATER, 0, tile.surface(),
+                  List.of(), List.of(), new BoardLiquid(kind, "", 0), null));
         }
         return scene.withTiles(tiles);
     }
@@ -1074,8 +1074,8 @@ class GpuWaterShaderSmokeTest {
         for (int x = 0; x < 12; x++) {
             for (int y = 0; y < 10; y++) {
                 boolean water = !river || x == 4;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), river && y < 5 ? drop : 0, water ? 2 : -1, false,
-                      0, BoardScene.Surface.ROCK, null, List.of(), List.of()));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), river && y < 5 ? drop : 0, water ? 2 : -1, false,
+                      0, BoardScene.Surface.ROCK, List.of(), List.of()));
             }
         }
         return new BoardScene(0, 12, 10, tiles, List.of(), List.of(), -1, "", List.of());

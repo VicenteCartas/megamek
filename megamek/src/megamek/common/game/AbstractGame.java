@@ -33,6 +33,8 @@
 
 package megamek.common.game;
 
+import java.io.Serial;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
@@ -67,7 +69,10 @@ import megamek.server.scriptedEvents.TriggeredEvent;
  * This is a base class to derive all types of Game (TW, AS, BF, SBF...) from. Any such game will have players, units
  * (InGameObjects) and Forces (even if empty); the base class manages these.
  */
-public abstract class AbstractGame implements IGame {
+public abstract class AbstractGame implements IGame, Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     private static final MMLogger LOGGER = MMLogger.create(AbstractGame.class);
 

@@ -211,7 +211,7 @@ final class BoardRoad {
         return !tile.liquid().present() || !tile.liquid().molten() && !tile.frozen() && BoardBridge.feature(tile) == null;
     }
 
-    /** Unsupported road decoration and coexisting terrain retain their original artwork. */
+    /** Whether this hex's ground road is visible beneath its other terrain. */
     static boolean rendered(BoardScene.Tile tile) {
         return tile.road() != Kind.NONE && groundShown(tile);
     }
@@ -227,7 +227,7 @@ final class BoardRoad {
 
     /**
      * A carriageway the ground is shaped and cleared for ({@link BoardScene.Tile#wayExits}): a rendered road, or rails on
-     * the tile's detailed ground.
+     * the tile's ground.
      */
     static boolean carriageway(BoardScene.Tile tile) {
         return rendered(tile) || tile.railExits() != 0 && groundShown(tile);
@@ -2045,34 +2045,6 @@ final class BoardRoad {
         float edge = centre + (2 * BoardRelief.noise(wx, wy) - 1) * SCUFF_RAGGED;
         float t = Math.clamp((edge - SCUFF_CORE) / (SCUFF_EDGE - SCUFF_CORE), 0, 1);
         return SCUFF_WEAR * (1 - t * t * (3 - 2 * t));
-    }
-
-    /**
-     * How much of the meadow's grass a loose road of {@code kind} leaves at a point, 0 to 1, thickening back over RUT_THIN
-     * as its soil or stone thins out into the grass (terrain-road.frag): a gravel road's from its graded edge
-     * (GRAVEL_EDGE, #track); a dirt track's from the lips of its ruts (#ruts), on their crown over CROWN_THIN, and where
-     * gravel spreads on over it towards a gravel neighbour (GpuRoads#patches), from that stone's edge too, as much as the
-     * spread covers. A neighbour whose own track draws its hex (#trackedHexes) decides there.
-     */
-    float grass(Kind kind, float x, float y) {
-        float wx = BoardGeometry.centerX(coords) + x * BoardGeometry.hexScale();
-        float wy = BoardGeometry.centerY(coords) + y * BoardGeometry.hexScale();
-        for (int d = 0; d < 6; d++) {
-            if ((tracked & 1 << d) != 0 && BoardGeometry.contains(coords.translated(d), wx, wy)) { return 1; }
-        }
-        if (distance(x, y) >= SHOULDER) { return 1; }
-        float stone = BoardRelief.smooth((track(x, y).across() * TRACK_REACH - GRAVEL_EDGE) / RUT_THIN);
-        if (kind == Kind.GRAVEL) { return stone; }
-        float rut = ruts(x, y).across() * (RUT_OFFSET + RUT_REACH) - RUT_OFFSET;
-        float grass = BoardRelief.smooth((Math.abs(rut) - RUT_BARE) / (rut < 0 ? CROWN_THIN : RUT_THIN));
-        // The spread is whole at the border and gone by the join's reach (GpuRoads#coverage).
-        float spread = 0;
-        for (Join join : joins) {
-            if (tracked(join) && join.kind() == Kind.GRAVEL) {
-                spread = Math.max(spread, Math.min(1, 2 * join.coverage(x, y)));
-            }
-        }
-        return BoardRelief.lerp(grass, Math.min(grass, stone), spread);
     }
 
     /** Where a dirt track's ruts and their loose soil can lie (#ruts): within their reach of them, and its scuffed middle. */

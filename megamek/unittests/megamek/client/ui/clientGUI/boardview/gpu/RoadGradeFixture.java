@@ -83,7 +83,7 @@ final class RoadGradeFixture {
         for (int x = 0; x < board.getWidth(); x++) {
             for (int y = 0; y < board.getHeight(); y++) {
                 var at = new Coords(x, y);
-                var artwork = new BoardArtwork.HexImage(at, null, null,
+                var artwork = new BoardArtwork.HexImage(at,
                       List.of(), Map.of(), null);
                 tiles.add(BoardScene.captureTile(board.getHex(at), artwork, null, pixels, board::getHex));
             }

@@ -366,15 +366,39 @@ class BoardWaterSlopeTest {
         }
     }
 
+    @Test
+    void indexedWaterHeightsMatchTheDrawnSlopeIncludingEdgesAndCopiedGeometry() {
+        Coords high = new Coords(3, 3), low = high.translated(0);
+        BoardScene scene = scene(Map.of(high, 1, low, 0), Map.of(high, 2, low, 2));
+        for (TerrainLod lod : TerrainLod.values()) {
+            BoardSurface surface = new BoardSurface(scene, scene.tile(high), lod);
+            assertTrue(surface.waterGeometry().graded());
+            BoardSurface copied = surface.waterGeometry().surface(scene);
+            for (var face : surface.waterFaces) {
+                for (Vector3 point : List.of(face.a(), face.b(), face.c(),
+                      new Vector3(face.a()).add(face.b()).add(face.c()).scl(1f / 3))) {
+                    float expected = BoardSurface.sampleHeight(surface.waterFaces, point.x, point.y, Float.NaN);
+                    assertTrue(Float.isFinite(expected));
+                    assertEquals(expected, surface.waterHeight(point.x, point.y), .0001f);
+                    assertEquals(expected, copied.waterHeight(point.x, point.y), .0001f);
+                }
+            }
+            // Dry banks extend the nearest shore height rather than falling back to the hex level.
+            for (var point : surface.outline) {
+                assertEquals(surface.waterHeight(point.x, point.y), copied.waterHeight(point.x, point.y), .0001f);
+            }
+        }
+    }
+
     private static BoardScene scene(Map<Coords, Integer> levels, Map<Coords, Integer> depths) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
                 int depth = depths.getOrDefault(coords, -1);
-                tiles.add(new BoardScene.Tile(coords, levels.getOrDefault(coords, 2), depth, false, 0,
-                      BoardScene.Surface.SAND, null, null, List.of(), List.of(),
-                      depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(coords, levels.getOrDefault(coords, 2), depth, false, 0,
+                      BoardScene.Surface.SAND, List.of(), List.of(),
+                      depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -388,9 +412,8 @@ class BoardWaterSlopeTest {
             List<BoardScene.Tile> tiles = new ArrayList<>();
             for (int x = 0; x < 7; x++) {
                 for (int y = 0; y < 7; y++) {
-                    tiles.add(new BoardScene.Tile(new Coords(x, y), random.nextInt(3) == 0 ? 1 : 0,
-                          random.nextInt(5) == 0 ? -1 : random.nextInt(4), false, 0, BoardScene.Surface.GRASS,
-                          null, List.of(), List.of()));
+                    tiles.add(BoardScenes.newTile(new Coords(x, y), random.nextInt(3) == 0 ? 1 : 0,
+                          random.nextInt(5) == 0 ? -1 : random.nextInt(4), false, 0, BoardScene.Surface.GRASS, List.of(), List.of()));
                 }
             }
             BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -414,11 +437,34 @@ class BoardWaterSlopeTest {
                     Vector3 b = BoardGeometry.corner(tile.coords(), 0, edge + 1);
                     for (int sample = 1; sample < 60; sample++) {
                         Vector3 point = new Vector3(a).lerp(b, sample / 60f);
-                        assertEquals(surface.height(point.x, point.y), neighbor.height(point.x, point.y), 0.01f,
-                              "Beds of one level meet without a step: " + tile.coords() + " edge " + edge);
+                        float own = BoardSurface.sampleHeight(surface.faces, point.x, point.y, Float.NaN);
+                        float theirs = BoardSurface.sampleHeight(neighbor.faces, point.x, point.y, Float.NaN);
+                        // A natural shore moves the outline, so a spot on the hex edge may belong to one hex only.
+                        if (Float.isFinite(own) && Float.isFinite(theirs)) {
+                            assertEquals(own, theirs, 0.01f,
+                                  "Beds of one level meet without a step: " + tile.coords() + " edge " + edge);
+                        } else if (!Float.isFinite(own) && !Float.isFinite(theirs)) {
+                            assertTrue(covered(scene, tile.coords(), point),
+                                  "No hole between beds of one level: " + tile.coords() + " edge " + edge);
+                        }
                     }
                 }
             }
         }
+    }
+
+    /** Whether a hex near {@code at} draws ground over the point: one of its faces, or a slope between two levels. */
+    private static boolean covered(BoardScene scene, Coords at, Vector3 point) {
+        float floor = BoardGeometry.floor(scene);
+        for (Coords near : at.allAtDistanceOrLess(2)) {
+            BoardScene.Tile owner = scene.tile(near);
+            if (owner == null) { continue; }
+            BoardSurface surface = new BoardSurface(scene, owner);
+            if (Float.isFinite(BoardSurface.sampleHeight(surface.faces, point.x, point.y, Float.NaN))) { return true; }
+            for (BoardSurface.Face slope : surface.walls(scene, floor)) {
+                if (Float.isFinite(slope.height(point.x, point.y, 0))) { return true; }
+            }
+        }
+        return false;
     }
 }

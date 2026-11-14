@@ -221,18 +221,20 @@ final class MeepleShatter {
      * ahead of the explosion on another thread.
      */
     static Supplier<Cut> cutter(Node source, Vector3 up, int cuts, int seed) {
-        return cutter(drawnParts(source).stream().map(Source::new).toList(), Vector3.Zero, up, Planes.burst(cuts), seed, null);
+        return cutter(drawnParts(source).stream().map(Source::new).toList(), Vector3.Zero, up, Planes.burst(cuts), seed, null, true);
     }
 
     /**
      * Breaks {@code sources}, each brought into one frame by its transform, along {@code planes} about the frame's
      * {@code up}. Every cut is closed by its section: what the parts it crosses wrap, parts that overlap as one and a
-     * shell open at the cut across its opening. Read here, cut by the supplier, which needs no GL context.
+     * shell open at the cut across its opening. Read here, cut by the supplier, which needs no GL context. With
+     * {@code supports} each piece's support points too (Cut#supports), for pieces that rest on them, not on a box.
      *
      * @param origin where the frame lies on the board, near the parts so their coordinates stay small; zero for a frame
      *               of the body's own
      */
-    static Supplier<Cut> cutter(List<Source> sources, Vector3 origin, Vector3 up, Planes planes, int seed, Caps caps) {
+    static Supplier<Cut> cutter(List<Source> sources, Vector3 origin, Vector3 up, Planes planes, int seed, Caps caps,
+          boolean supports) {
         List<Channel> channels = new ArrayList<>();
         List<FloatArray> triangles = new ArrayList<>();
         Map<Mesh, float[]> vertices = new IdentityHashMap<>();
@@ -256,7 +258,7 @@ final class MeepleShatter {
         List<MeshPart> read = sources.stream().map(Source::part).toList();
         FloatArray[] all = triangles.toArray(FloatArray[]::new);
         var at = new Vector3(origin);
-        return () -> cut(channels, all, up, planes, seed, caps, read, at, true);
+        return () -> cut(channels, all, up, planes, seed, caps, read, at, supports);
     }
 
     /**
@@ -277,6 +279,27 @@ final class MeepleShatter {
             all.add(new FloatArray());
         }
         return cut(channels, all.toArray(FloatArray[]::new), up, planes, seed, caps, List.of(), Vector3.Zero, false);
+    }
+
+    /**
+     * As {@link #cut(List, List, VertexAttributes, Vector3, Planes, int, Caps)}, along the given planes ({@code planes}:
+     * a normal and its offset each), as a lattice of cells the caller laid out (KitFragments#shell).
+     */
+    static Cut cut(List<Material> materials, List<FloatArray> triangles, VertexAttributes attributes, List<float[]> planes,
+          Caps caps) {
+        List<Channel> channels = new ArrayList<>();
+        List<FloatArray> all = new ArrayList<>();
+        for (int index = 0; index < materials.size(); index++) {
+            channels.add(new Channel(materials.get(index), attributes));
+            all.add(triangles.get(index));
+        }
+        if (caps != null) {
+            channels.add(new Channel(caps.material(), caps.attributes()));
+            all.add(new FloatArray());
+        }
+        FloatArray[] records = all.toArray(FloatArray[]::new);
+        var bounds = bounds(channels, records);
+        return new Cut(channels, slice(channels, records, Vector3.Z, bounds, planes, caps), List.of(), Vector3.Zero, false);
     }
 
     private static List<NodePart> drawnParts(Node source) {
@@ -383,35 +406,52 @@ final class MeepleShatter {
     private static Cut cut(List<Channel> channels, FloatArray[] triangles, Vector3 up, Planes planes, int seed, Caps caps,
           List<MeshPart> read, Vector3 origin, boolean supports) {
         var axis = new Vector3(up).nor();
-        var whole = Piece.empty(channels.size(), List.of(axis));
+        var bounds = bounds(channels, triangles);
+        if (!bounds.isValid()) { return new Cut(channels, slice(channels, triangles, axis, bounds, List.of(), caps), read, origin, supports); }
+        var across = new Vector3(axis).crs(Math.abs(axis.x) < .9f ? Vector3.X : Vector3.Y).nor();
+        var beside = new Vector3(axis).crs(across).nor();
+        var center = bounds.getCenter(new Vector3());
+        float heading = Float.isNaN(planes.heading()) ? UnitAttack.noise(seed) * 360 : planes.heading();
+        List<float[]> along = planes.crumble() ? crumble(bounds, center, axis, across, beside, planes, heading, seed)
+              : burst(bounds, center, axis, across, beside, planes.steep(), heading, seed);
+        return new Cut(channels, slice(channels, triangles, axis, bounds, along, caps), read, origin, supports);
+    }
+
+    /** The bounds of every channel's triangles. */
+    private static BoundingBox bounds(List<Channel> channels, FloatArray[] triangles) {
         var bounds = new BoundingBox().inf();
         var point = new Vector3();
         for (int index = 0; index < channels.size(); index++) {
             Channel channel = channels.get(index);
-            whole.triangles()[index] = triangles[index];
-            for (int at = 0; at < whole.triangles()[index].size; at += channel.stride) {
-                bounds.ext(channel.position(whole.triangles()[index].items, at, point));
+            for (int at = 0; at < triangles[index].size; at += channel.stride) {
+                bounds.ext(channel.position(triangles[index].items, at, point));
             }
         }
+        return bounds;
+    }
+
+    /**
+     * The channels' triangles, one whole piece, broken along each plane in turn ({@code planes}: a normal and its offset
+     * each), every section closed in the caps' channel, else the meeple's painted walls ({@code "paint"}) or its first.
+     */
+    private static List<Piece> slice(List<Channel> channels, FloatArray[] triangles, Vector3 axis, BoundingBox bounds,
+          List<float[]> planes, Caps caps) {
+        var whole = Piece.empty(channels.size(), List.of(axis));
+        System.arraycopy(triangles, 0, whole.triangles(), 0, channels.size());
         List<Piece> pieces = new ArrayList<>(List.of(whole));
-        if (!bounds.isValid()) { return new Cut(channels, pieces, read, origin, supports); }
+        if (!bounds.isValid()) { return pieces; }
         Channel faces = caps != null ? channels.getLast() : channels.stream()
               .filter(channel -> "paint".equals(channel.material.id)).findFirst().orElse(channels.getFirst());
-        var across = new Vector3(axis).crs(Math.abs(axis.x) < .9f ? Vector3.X : Vector3.Y).nor();
-        var beside = new Vector3(axis).crs(across).nor();
-        var center = bounds.getCenter(new Vector3());
         // Section ends further apart than rounding meet: two triangles' crossings of one line, where a cap made by an
         // earlier cut only touches the middle of the other's edge.
-        float tolerance = Math.max(bounds.getDimensions(point).len() * 1e-5f, 1e-6f);
-        float heading = Float.isNaN(planes.heading()) ? UnitAttack.noise(seed) * 360 : planes.heading();
-        for (float[] plane : planes.crumble() ? crumble(bounds, center, axis, across, beside, planes, heading, seed)
-              : burst(bounds, center, axis, across, beside, planes.steep(), heading, seed)) {
+        float tolerance = Math.max(bounds.getDimensions(new Vector3()).len() * 1e-5f, 1e-6f);
+        for (float[] plane : planes) {
             var normal = new Vector3(plane[0], plane[1], plane[2]);
             List<Piece> next = new ArrayList<>();
             for (Piece piece : pieces) { split(channels, faces, caps, piece, normal, plane[3], tolerance, next); }
             pieces = next;
         }
-        return new Cut(channels, pieces, read, origin, supports);
+        return pieces;
     }
 
     /** The first break runs across the axis; the others turn about it by the golden angle, steep and oblique. */
@@ -617,6 +657,12 @@ final class MeepleShatter {
         for (int corner = 0; corner < 3; corner++) {
             corners[corner] = caps == null ? sample.clone() : blank(channel);
             float[] vertex = corners[corner];
+            // A cap takes the colour of the faces it closes where they share its layout: a dark wall's section stays
+            // dark, not the white of its texture alone.
+            if (caps != null && sample != null && sample.length == vertex.length) {
+                if (channel.packed >= 0) { vertex[channel.packed] = sample[channel.packed]; }
+                if (channel.unpacked >= 0) { System.arraycopy(sample, channel.unpacked, vertex, channel.unpacked, 4); }
+            }
             vertex[channel.position] = points[corner].x;
             vertex[channel.position + 1] = points[corner].y;
             vertex[channel.position + 2] = points[corner].z;

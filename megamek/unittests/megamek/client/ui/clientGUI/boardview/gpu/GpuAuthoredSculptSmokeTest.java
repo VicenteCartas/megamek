@@ -298,8 +298,8 @@ class GpuAuthoredSculptSmokeTest {
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < 5; x++) for (int y = 0; y < 5; y++) {
             var coords = new Coords(x, y);
-            tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, null, null,
-                  coords.equals(CENTER) ? List.of(feature) : List.of(), List.of(), BoardLiquid.NONE, null, true));
+            tiles.add(BoardScenes.newTile(coords, 0, -1, false, 0, family,
+                  coords.equals(CENTER) ? List.of(feature) : List.of(), List.of(), BoardLiquid.NONE, null));
         }
         var scene = new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());
         var surface = new BoardSurface(scene, scene.tile(CENTER), TerrainLod.FULL);

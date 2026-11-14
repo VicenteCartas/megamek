@@ -142,7 +142,7 @@ class GpuAttachmentSmokeTest {
                 controller.place(attachedScene, library, instances, animators, null, camera, new HashMap<>(), 2);
                 assertArrayEquals(relative.val, world(host, torso).inv().mul(world(ba, "trooper-3")).val, .002f,
                       "A failed brush keeps the suit rigidly attached to the animated torso");
-                var water = new BoardScene.Tile(new Coords(0, 0), 0, 2, false, 0, BoardScene.Surface.GRASS, null,
+                var water = BoardScenes.newTile(new Coords(0, 0), 0, 2, false, 0, BoardScene.Surface.GRASS,
                       List.of(), List.of());
                 var waterScene = new BoardScene(0, 1, 1, List.of(water), List.of(hostUnit, passenger), List.of(), -1, "MOVEMENT", List.of());
                 var center = BoardGeometry.center(new Coords(0, 0), -2);
@@ -294,8 +294,8 @@ class GpuAttachmentSmokeTest {
     }
 
     private static BoardScene scene(BoardScene.Unit... units) {
-        var tiles = List.of(new Coords(0, 0), new Coords(0, 1)).stream().map(coords -> new BoardScene.Tile(coords, 0, -1,
-              false, 0, BoardScene.Surface.GRASS, null, List.of(), List.of())).toList();
+        var tiles = List.of(new Coords(0, 0), new Coords(0, 1)).stream().map(coords -> BoardScenes.newTile(coords, 0, -1,
+              false, 0, BoardScene.Surface.GRASS, List.of(), List.of())).toList();
         return new BoardScene(0, 1, 2, tiles, List.of(units), List.of(), -1, "MOVEMENT", List.of());
     }
 

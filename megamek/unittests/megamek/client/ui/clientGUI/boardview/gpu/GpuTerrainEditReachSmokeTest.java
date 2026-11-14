@@ -61,8 +61,9 @@ class GpuTerrainEditReachSmokeTest {
     private static final String BOARDS = System.getProperty("megamek.gpu.reach.boards",
           "Map Pack Savannahs/16x17 Wide River (Svannah).board");
     private static final int SAMPLES = Integer.getInteger("megamek.gpu.reach.samples", 1);
-    /** {@code GpuTerrain.ChunkBuild}'s layers: solid, scatter, overlay (roads), liquid. */
-    private static final int LAYERS = 4, SCATTER_LAYER = 1;
+    /** {@code GpuTerrain.ChunkBuild}'s layers, as the terrain numbers them. */
+    private static final int LAYERS = GpuTerrain.Layer.values().length,
+          SCATTER_LAYER = GpuTerrain.Layer.SCATTER.ordinal();
     /** A road mask's slot in its section's atlas: where the mask lies there, not what is drawn. */
     private static final String MASK_SLOT = GpuRoads.VERTICES.get(GpuRoads.VERTICES.size() - 1).alias;
 
@@ -172,13 +173,13 @@ class GpuTerrainEditReachSmokeTest {
     private static void measureBoard(String name, Board board, List<Edit> edits, List<Result> results,
           List<String> problems, StringBuilder report) throws Exception {
         BoardScene before = capture(copy(board, null));
-        GpuTerrain incremental = new GpuTerrain();
+        GpuTerrain incremental = editor();
         try {
             incremental.update(before);
             Map<Coords, Signature> original = signatures(incremental);
             // Hexes whose geometry differs between two full builds of the same board are noise, not reach.
             Set<Coords> unstable;
-            GpuTerrain again = new GpuTerrain();
+            GpuTerrain again = editor();
             try {
                 again.update(before);
                 unstable = differing(original, signatures(again));
@@ -190,7 +191,7 @@ class GpuTerrainEditReachSmokeTest {
                 Plan plan = updateIncrementally(incremental, after);
                 Map<Coords, Signature> updated = signatures(incremental);
                 Map<Coords, Signature> rebuilt;
-                GpuTerrain full = new GpuTerrain();
+                GpuTerrain full = editor();
                 try {
                     full.update(after);
                     rebuilt = signatures(full);
@@ -221,7 +222,7 @@ class GpuTerrainEditReachSmokeTest {
                     problems.add(name + " " + edit.name() + " at " + edit.at() + ": missed " + missed + ", stale " + stale);
                     // Start the next edit from a correct terrain, so one miss cannot be reported again and again.
                     incremental.dispose();
-                    incremental = new GpuTerrain();
+                    incremental = editor();
                     incremental.update(before);
                     original = signatures(incremental);
                 }
@@ -229,6 +230,13 @@ class GpuTerrainEditReachSmokeTest {
         } finally {
             incremental.dispose();
         }
+    }
+
+    /** A terrain that keeps no game history, as the editor's: an edit and its revert are compared with full builds. */
+    private static GpuTerrain editor() {
+        GpuTerrain terrain = new GpuTerrain();
+        terrain.setEditable(true);
+        return terrain;
     }
 
     /** By edit kind and nearness to water: the furthest ring that changed against the furthest the editor rebuilt. */
@@ -352,11 +360,13 @@ class GpuTerrainEditReachSmokeTest {
         while (terrain.busy()) {
             terrain.refine(null);
             Object rebuild = field(terrain, "rebuild");
-            if (plan == null && rebuild != null && field(rebuild, "plan") != null) {
+            // One update may be carried out as several rebuilds: every plan it shows counts.
+            if (rebuild != null && field(rebuild, "plan") != null) {
                 Object update = field(rebuild, "plan");
-                Set<Coords> tiles = new HashSet<>((Set<Coords>) field(update, "changedTiles"));
+                Set<Coords> tiles = plan == null ? new HashSet<>() : plan.tiles(), sections = plan == null ? new HashSet<>() : plan.sections();
+                tiles.addAll((Set<Coords>) field(update, "changedTiles"));
                 tiles.addAll((Set<Coords>) field(terrain, "atlasTileChanges"));
-                Set<Coords> sections = new HashSet<>((Set<Coords>) field(update, "changed"));
+                sections.addAll((Set<Coords>) field(update, "changed"));
                 sections.addAll((Set<Coords>) field(terrain, "atlasChanges"));
                 plan = new Plan(tiles, sections);
             }
@@ -394,7 +404,7 @@ class GpuTerrainEditReachSmokeTest {
                     });
                     VertexAttributes attributes = mesh.getVertexAttributes();
                     int stride = mesh.getVertexSize() / 4, offset = (int) field(range, "offset");
-                    int layer = (int) field(range, "layer");
+                    int layer = ((GpuTerrain.Layer) field(range, "layer")).ordinal();
                     for (int at = offset; at < offset + (int) field(range, "count"); at += 3) {
                         long geometry = 0, uv = 0;
                         for (int corner = 0; corner < 3; corner++) {

@@ -516,7 +516,8 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
         for (int index = 0; index < chunks.size(); index++) {
             Object chunk = chunks.get(index);
             for (String category : List.of("opaque", "scatter", "overlays", "water")) {
-                for (Object value : (List<?>) field(chunk, category)) {
+                Object owner = category.equals("scatter") ? chunk : field(chunk, "ground");
+                for (Object value : (List<?>) field(owner, category)) {
                     for (Mesh mesh : ((ModelInstance) value).model.meshes) { addOrigin(mesh, category, index); }
                 }
             }

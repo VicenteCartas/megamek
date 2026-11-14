@@ -46,10 +46,10 @@ final class GpuBuilding implements Disposable {
     private final ConnectedKit.Kit kit;
     private final Function<ModelData, Model> upload;
     private final List<Model> models = new ArrayList<>();
-    /** Each level's kit data, which its fragments are cut from ({@link KitFragments}). */
+    /** Each level's kit data, which its falling nodes are cut from ({@link KitFragments}). */
     private final List<RigidGlb.Data> data;
-    /** Each level a scene drew, broken into fragments on the kit cutter's thread ({@link #cutFragments}). */
-    private final Map<Model, java.util.concurrent.CompletableFuture<KitFragments>> fragments = new java.util.IdentityHashMap<>();
+    /** Each level a fall asked about, as its nodes' cuts read it ({@link #fragmentLevel}). */
+    private final Map<Model, KitFragments.Level> fragmentLevels = new java.util.IdentityHashMap<>();
     private final Map<Recipe, Assembly> assemblies = new HashMap<>();
     // Whether the kit holds junctions or notch twins where its walls meet the neighbours' at a corner, or crown twins
     // for its roofs' corners inside a building (ConnectedKit#junctions).
@@ -125,8 +125,9 @@ final class GpuBuilding implements Disposable {
             }
             // Every kit shares its picking geometry, a corner's junctions too; only enterable buildings need wall/roof
             // footprints.
+            triangles.putAll(GpuTerrain.nodeTriangles(models.getFirst().nodes,
+                  part -> !part.material.id.endsWith(GeneratedMesh.BUILDING_FLOOR)));
             for (Node node : models.getFirst().nodes) {
-                triangles.put(node.id, GpuTerrain.triangles(List.of(node), part -> !part.material.id.endsWith(GeneratedMesh.BUILDING_FLOOR)));
                 bounds.put(node.id, node.calculateBoundingBox(new BoundingBox()));
                 junctions |= node.id.contains("-junction-") || node.id.contains("-notch-") || node.id.endsWith("-crown");
             }
@@ -447,47 +448,21 @@ final class GpuBuilding implements Disposable {
         return Float.isFinite(nearest);
     }
 
-    /** Starts breaking the level's nodes into fragments for a fall, unless it has; render thread. */
-    void cutFragments(Model level) {
+    /**
+     * The level as the cuts of its falling nodes read it (KitFragments.Cuts), made when a fall first asks; null for a
+     * model that is not the kit's own, a hex's with doors, whose pieces fall whole. Render thread.
+     */
+    KitFragments.Level fragmentLevel(Model level) {
         int lod = models.indexOf(level);
-        if (lod < 0 || fragments.containsKey(level)) { return; }
-        // As a falling piece leaves them out (GpuTerrain#addPieces, #instance): glass and the floor caps.
-        Set<String> skipped = new java.util.HashSet<>();
-        for (var material : level.materials) {
-            if (GpuTerrain.blended(material) || material.id.endsWith(GeneratedMesh.BUILDING_FLOOR)) { skipped.add(material.id); }
-        }
-        fragments.put(level, KitFragments.cutLater(data.get(lod), skipped));
-    }
-
-    /** The level's fragments once installed ({@link #installFragments}); null while they are cut, or when they failed. */
-    KitFragments fragments(Model level) {
-        var cut = fragments.get(level);
-        if (cut == null || !cut.isDone() || cut.isCompletedExceptionally()) { return null; }
-        KitFragments result = cut.join();
-        return result.installed() ? result : null;
-    }
-
-    /** The installed fragments' bytes, for reports. */
-    long fragmentBytes() {
-        return fragments.values().stream().filter(cut -> cut.isDone() && !cut.isCompletedExceptionally())
-              .mapToLong(cut -> cut.join().bytes()).sum();
-    }
-
-    /** Whether a level is still being cut, or cut and not installed yet. */
-    boolean fragmentsPending() {
-        return fragments.values().stream().anyMatch(cut -> !cut.isDone()
-              || !cut.isCompletedExceptionally() && !cut.join().installed());
-    }
-
-    /** Installs one level's fragments that finished cutting, if any, and says whether it did: render thread, between falls. */
-    boolean installFragments() {
-        for (var cut : fragments.values()) {
-            if (cut.isDone() && !cut.isCompletedExceptionally() && !cut.join().installed()) {
-                cut.join().install();
-                return true;
+        if (lod < 0) { return null; }
+        return fragmentLevels.computeIfAbsent(level, key -> {
+            // As a falling piece leaves them out (GpuTerrain#addPieces, #instance): glass and the floor caps.
+            Set<String> skipped = new java.util.HashSet<>();
+            for (var material : level.materials) {
+                if (GpuTerrain.blended(material) || material.id.endsWith(GeneratedMesh.BUILDING_FLOOR)) { skipped.add(material.id); }
             }
-        }
-        return false;
+            return new KitFragments.Level(data.get(lod), skipped);
+        });
     }
 
     int assemblyCount() { return assemblies.size(); }
@@ -495,12 +470,7 @@ final class GpuBuilding implements Disposable {
 
     @Override
     public void dispose() {
-        // A queued cut never runs; one running ends unused (never installed, its fragments hold no mesh).
-        fragments.values().forEach(cut -> {
-            cut.cancel(false);
-            cut.thenAccept(KitFragments::dispose);
-        });
-        fragments.clear();
+        fragmentLevels.clear();
         interiors.values().forEach(Model::dispose);
         interiors.clear();
         shown.clear();

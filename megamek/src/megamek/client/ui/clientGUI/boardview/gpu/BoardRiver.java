@@ -78,7 +78,7 @@ final class BoardRiver {
     private final class Channel {
         private final List<Span> spans;
         private final float depthA, depthB;
-        private final boolean broadA, broadB, detailedA, detailedB, uniform;
+        private final boolean broadA, broadB, uniform;
         /** The spans' bounds, and the largest radius any point of the channel can have at any wander. */
         private final float minX, minY, maxX, maxY, reach;
 
@@ -88,9 +88,7 @@ final class BoardRiver {
             depthB = Math.clamp(b.waterDepth(), 0, 1);
             this.broadA = broadA;
             this.broadB = broadB;
-            detailedA = a.detailedGround();
-            detailedB = b.detailedGround();
-            uniform = depthA == depthB && broadA == broadB && detailedA == detailedB;
+            uniform = depthA == depthB && broadA == broadB;
             float left = Float.POSITIVE_INFINITY, bottom = Float.POSITIVE_INFINITY;
             float right = Float.NEGATIVE_INFINITY, top = Float.NEGATIVE_INFINITY;
             for (Span span : spans) {
@@ -104,9 +102,9 @@ final class BoardRiver {
             minY = bottom;
             maxY = top;
             // The radius grows with the wander and changes monotonically along the channel, so the endpoints at the
-            // largest wander bound every point of it; open water and special artwork add their own fixed caps.
+            // largest wander bound every point of it; open water adds its own fixed cap.
             float wanderBound = .3f * BoardRelief.SHORE_WANDER * MAX_GRADIENT;
-            reach = Math.max(Math.max(radius(0, wanderBound), radius(1, wanderBound)), Math.max(72 * scale, width / 2));
+            reach = Math.max(Math.max(radius(0, wanderBound), radius(1, wanderBound)), width / 2);
         }
 
         /** How far a point lies outside the channel's bounds; no span comes nearer than this. */
@@ -148,10 +146,6 @@ final class BoardRiver {
             // stream gradually too: a large round cap at the lake's first centre would make a sharp inlet corner.
             float open = BoardRelief.lerp(broadA ? 1 : 0, broadB ? 1 : 0, smooth);
             radius = BoardRelief.lerp(radius, Math.max(radius, width / (2 * scale)), open);
-            // Special artwork (including bridges) keeps its original water footprint. The approach widens smoothly,
-            // and both kinds of hex still ask the same world field at their shared opening.
-            float natural = (detailedA ? 1 - s : 0) + (detailedB ? s : 0);
-            radius = Math.max(radius, 72 * (1 - natural));
             return radius * scale;
         }
     }

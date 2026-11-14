@@ -668,7 +668,7 @@ class GpuHexTextSmokeTest {
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, null, List.of(),
+                tiles.add(BoardScenes.newTile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, List.of(),
                       (neighbours
                             ? y == LABELED.getY() && Math.abs(x - LABELED.getX()) == 1
                             : coords.equals(LABELED)) ? text : List.of()));
@@ -997,7 +997,7 @@ class GpuHexTextSmokeTest {
                 List<BoardScene.Feature> features = variedHeadroom
                       ? List.of(new BoardScene.Feature("scatter-rock", 0, 0, 0, 1, (x * size + y) * .01f, 0,
                             BoardScene.FeatureKind.SCATTER)) : List.of();
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null,
+                tiles.add(BoardScenes.newTile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
                       features, x < size / 2 ? firstPage : labels));
             }
         }
@@ -1276,10 +1276,10 @@ class GpuHexTextSmokeTest {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
                 boolean labeled = coords.equals(LABELED);
-                tiles.add(new BoardScene.Tile(coords, cliff && y >= 4 ? 8 : 2, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, null,
+                tiles.add(BoardScenes.newTile(coords, cliff && y >= 4 ? 8 : 2, -1, false, 0,
+                      BoardScene.Surface.GRASS,
                       labeled && detailedLabels ? rocks : List.of(), labeled ? text : List.of(),
-                      BoardLiquid.NONE, null, detailedLabels));
+                      BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

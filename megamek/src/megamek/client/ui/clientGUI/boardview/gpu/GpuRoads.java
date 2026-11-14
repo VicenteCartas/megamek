@@ -40,6 +40,7 @@ import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexTile;
+import megamek.common.board.RailRoute;
 import megamek.common.board.SingleLane;
 
 /** Road material masks on terrain or bridge decks; the supporting surfaces own their physical shape. */
@@ -244,7 +245,13 @@ final class GpuRoads {
      * loose road's grit on the paved road it meets; {@code spill}: a gravel road's spill onto it.
      */
     record Fade(float outer, float inner, float end, boolean wheels, BoardRoad.Join join, float setback, boolean landing,
-          boolean deck, boolean carried, boolean spill) {
+          boolean deck, boolean carried, boolean spill, int cuts) {
+        Fade(float outer, float inner, float end, boolean wheels, BoardRoad.Join join, float setback, boolean landing,
+              boolean deck, boolean carried, boolean spill) {
+            this(outer, inner, end, wheels, join, setback, landing, deck, carried, spill, 0);
+        }
+
+        Fade withCuts(int damage) { return new Fade(outer, inner, end, wheels, join, setback, landing, deck, carried, spill, damage); }
         Fade(float outer, float inner, float end) { this(outer, inner, end, false, null, 0, false, false, false, false); }
         Fade(float outer, float inner, float end, boolean wheels, BoardRoad.Join join) {
             this(outer, inner, end, wheels, join, 0, false, false, false, false);
@@ -459,10 +466,16 @@ final class GpuRoads {
      * (#runOn); against a gravel road it ends square, under the gravel's slight overlap (#overlap).
      */
     static BoardRoad painted(BoardScene scene, BoardScene.Tile tile, BoardRoad road) {
-        int ends = 0;
+        return painted(scene, tile, road, false);
+    }
+
+    /** Destroyed edges apply to both terrain modes; Classic keeps its ordinary cliff edges unchanged. */
+    static BoardRoad painted(BoardScene scene, BoardScene.Tile tile, BoardRoad road, boolean columns) {
+        int ends = tile.roadCuts();
         List<Float> past = new ArrayList<>(List.of(0f, 0f, 0f, 0f, 0f, 0f));
+        if (columns) { return ends == 0 ? road : road.extended(past, ends); }
         for (int d = 0; d < 6; d++) {
-            if ((tile.roadExits() & 1 << d) != 0 && BoardRoadGrade.overDrop(tile, scene.neighbor(tile, d), d)) {
+            if ((tile.roadCuts() & 1 << d) == 0 && (tile.roadExits() & 1 << d) != 0 && BoardRoadGrade.overDrop(tile, scene.neighbor(tile, d), d)) {
                 ends |= 1 << d;
                 past.set(d, BoardRelief.metres(CRUMBLE) / BoardGeometry.hexScale());
             }
@@ -491,7 +504,17 @@ final class GpuRoads {
                   -BoardGeometry.centerX(tile.coords()) / scale, -BoardGeometry.centerY(tile.coords()) / scale));
             patches.add(new Patch(base, "concrete-ground", Color.WHITE, 1, CAST_LIFT, null));
         }
-        return painted == road ? patches : bare(patches, painted, paved(tile.road()));
+        var result = painted == road ? patches : bare(patches, painted, paved(tile.road()));
+        if (tile.roadCuts() == 0) { return result; }
+        result = result.stream().map(p -> p.fade() != null && p.fade().landing() && p.fade().join() == null
+              ? new Patch(p.shape(), p.texture(), p.tint(), p.repeat(), p.lift(), p.fade().withCuts(tile.roadCuts())) : p).toList();
+        Area scorch = painted.footprint(BoardRoad.SHOULDER * 2);
+        scorch.intersect(painted.endZone(14));
+        result = new ArrayList<>(result);
+        result.add(new Patch(scorch, "ground-scorch", new Color(.22f, .19f, .17f, 1), 1,
+              slabs(tile, false) ? SLAB_RISE + .01f : .08f,
+              new Fade(0, 0, 14, false, null, 0, false, false, false, false, tile.roadCuts())));
+        return result;
     }
 
     /** A cast base's lift: over the loose verge, under the carriageway's own paint. */
@@ -1339,6 +1362,7 @@ final class GpuRoads {
     static float coverage(BoardRoad road, Patch patch, float x, float y) {
         Fade fade = patch.fade();
         if (fade == null) { return 1; }
+        if (fade.cuts() != 0 && patch.texture().equals("ground-scorch")) { return scorch(fade.cuts(), x, y); }
         // Faint, on the paved road's wheel paths, thinning out away from the loose road.
         if (carried(patch)) { return .55f * road.runOn(x, y, carry()) * road.pavedWheels(x, y); }
         if (spill(patch)) { return Math.clamp(1 - road.pavedDepth(x, y) / spill(), 0, 1); }
@@ -1346,6 +1370,9 @@ final class GpuRoads {
         if (track(patch) && fade.join() != null) { return Math.min(1, 2 * materialCoverage(patch, x, y)); }
         if (fade.landing()) {
             float t = Math.clamp((-road.endDistance(x, y) - fade.setback()) / fade.end(), 0, 1);
+            float damaged = cutDepth(fade.cuts(), x, y);
+            // Damage has a short, ragged break; a bridge's long gravel landing would hide the scorched asphalt.
+            if (damaged < BoardBridgeFooting.apronLength() + 1) { t = Math.clamp(damaged / 6, 0, 1); }
             float metre = BoardRelief.metres(1) / BoardGeometry.hexScale();
             float wx = (x + BoardGeometry.centerX(road.coords()) / BoardGeometry.hexScale()) / metre;
             float wy = (y + BoardGeometry.centerY(road.coords()) / BoardGeometry.hexScale()) / metre;
@@ -1384,6 +1411,39 @@ final class GpuRoads {
         BoardRoad.Join join = patch.fade().join();
         float cover = join.coverage(x, y);
         return patch.texture().equals(texture(join.kind())) ? cover : 1 - cover;
+    }
+
+    /** Persistent soot around a destroyed border, feathered into the remaining road and exposed ground. */
+    private static float cutDepth(int cuts, float x, float y) {
+        float depth = Float.POSITIVE_INFINITY;
+        for (int d = 0; d < 6; d++) {
+            if ((cuts & 1 << d) == 0) { continue; }
+            float[] edge = RailRoute.border(d);
+            float length = (float) Math.hypot(edge[0], edge[1]);
+            float along = length - (x * edge[0] + y * edge[1]) / length;
+            if (along >= 0 && Math.abs(x * edge[1] - y * edge[0]) / length < BoardRoad.Kind.PAVED.halfWidth + BoardRoad.SHOULDER * 2) {
+                depth = Math.min(depth, along);
+            }
+        }
+        return depth;
+    }
+
+    /** The same soot envelope tints the surviving asphalt and the ground coating beneath its chipped edge. */
+    private static float scorch(int cuts, float x, float y) {
+        float cover = 0;
+        for (int d = 0; d < 6; d++) {
+            if ((cuts & 1 << d) == 0) { continue; }
+            float[] edge = RailRoute.border(d);
+            float length = (float) Math.hypot(edge[0], edge[1]);
+            float nx = edge[0] / length, ny = edge[1] / length;
+            float depth = length - x * nx - y * ny;
+            float across = Math.abs(x * ny - y * nx);
+            float wear = .8f + .2f * BoardRelief.noise(x * .7f, y * .7f);
+            float along = BoardRelief.smooth(depth / 1.2f) * (1 - BoardRelief.smooth((depth - 2) / (14 * wear - 2)));
+            float side = 1 - BoardRelief.smooth((across - 4) / (BoardRoad.Kind.PAVED.halfWidth + BoardRoad.SHOULDER * 2 - 4));
+            cover = Math.max(cover, along * side * wear);
+        }
+        return cover;
     }
 
     private static Color color(BoardRoad road, Patch patch, float x, float y, Color tint) {
@@ -1436,6 +1496,11 @@ final class GpuRoads {
             tint.r = Math.round(128 + direction.x * 127 * length) / 255f;
             tint.g = Math.round(128 - direction.y * 127 * length) / 255f;
             tint.b = wear.across();
+        }
+        if (patch.fade() != null && patch.fade().landing() && patch.fade().cuts() != 0
+              && !patch.fade().wheels() && patch.fade().join() == null && !slab(patch)) {
+            float soot = 1 - .92f * scorch(patch.fade().cuts(), x, y);
+            tint.mul(soot, soot, soot, 1);
         }
         return tint;
     }

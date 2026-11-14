@@ -216,7 +216,7 @@ class BoardInfrastructureModeTest {
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 var at = new Coords(x, y);
-                var artwork = new BoardArtwork.HexImage(at, null, null, List.of(), Map.of(), null);
+                var artwork = new BoardArtwork.HexImage(at, List.of(), Map.of(), null);
                 tiles.add(BoardScene.captureTile(hexes.get(at), artwork, null, pixels, hexes::get));
             }
         }

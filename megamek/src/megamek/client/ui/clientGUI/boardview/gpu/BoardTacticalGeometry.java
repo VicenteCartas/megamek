@@ -50,16 +50,16 @@ final class BoardTacticalGeometry {
     record Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes,
           List<BoardSurface.Face> faces, List<BoardSurface.Face> water, List<BoardSurface.Face> walls,
           List<BoardSurface.Side> waterfalls, List<GpuFrozenWaterfall.Geometry> frozenFalls, float highestTop,
-          BoardVegetation.Ground vegetation) {
+          List<BoardSurface.Face> ground) {
         Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes, List<BoardSurface.Face> faces,
               List<BoardSurface.Face> water, List<BoardSurface.Face> walls, List<BoardSurface.Side> waterfalls) {
-            this(top, slopes, faces, water, walls, waterfalls, List.of(), highest(top), null);
+            this(top, slopes, faces, water, walls, waterfalls, List.of(), highest(top));
         }
 
         Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes, List<BoardSurface.Face> faces,
               List<BoardSurface.Face> water, List<BoardSurface.Face> walls, List<BoardSurface.Side> waterfalls,
               List<GpuFrozenWaterfall.Geometry> frozenFalls, float highestTop) {
-            this(top, slopes, faces, water, walls, waterfalls, frozenFalls, highestTop, null);
+            this(top, slopes, faces, water, walls, waterfalls, frozenFalls, highestTop, faces);
         }
 
         /** Derived once with this immutable finished-surface snapshot; raised border endpoints reuse it. */
@@ -71,27 +71,15 @@ final class BoardTacticalGeometry {
             return z;
         }
 
-        static Surface of(BoardSurface surface, BoardScene scene, float floor) {
-            var sources = BoardVegetation.prepare(scene, List.of(surface.tile), surface.lod(), floor,
-                  Map.of(surface.tile.coords(), surface));
-            return of(surface, scene, floor, sources);
-        }
-
         /**
-         * The finished shape alone, for readers that take no ground cover support (vegetation), such as picking and
-         * draping. Its walls borrow only the neighbours' edges, which their plain tops share with their sculpted ones,
-         * so they match {@link #of}'s; preparing that support built up to six sculpted neighbours and their walls.
+         * A hex's finished shape built alone. Its walls borrow only the neighbours' edges, which their plain tops share
+         * with their sculpted ones, so they match those built with the neighbours' surfaces.
          */
-        static Surface shape(BoardSurface surface, BoardScene scene, float floor) {
-            return of(surface, scene, floor, Map.of(surface.tile.coords(), surface), false);
+        static Surface of(BoardSurface surface, BoardScene scene, float floor) {
+            return of(surface, scene, floor, Map.of(surface.tile.coords(), surface));
         }
 
         static Surface of(BoardSurface surface, BoardScene scene, float floor, Map<Coords, BoardSurface> sources) {
-            return of(surface, scene, floor, sources, true);
-        }
-
-        private static Surface of(BoardSurface surface, BoardScene scene, float floor,
-              Map<Coords, BoardSurface> sources, boolean cover) {
             List<BoardSurface.Face> top = new ArrayList<>();
             for (BoardSurface.Face face : surface.faces) {
                 if (surface.tile.frozen() && surface.tile.water() ? face.finish() == BoardSurface.Finish.ICE
@@ -101,10 +89,11 @@ final class BoardTacticalGeometry {
             }
             if (!surface.tile.frozen()) { top.addAll(surface.waterFaces); }
             List<BoardSurface.Face> walls = new Faces(surface.walls(scene, floor, sources));
+            List<BoardSurface.Face> faces = new Faces(surface.faces);
             return new Surface(List.copyOf(top), BoardGeometry.tuning().stepsBetweenTops() ? lying(walls) : List.of(),
-                  new Faces(surface.faces), new Faces(surface.waterFaces), walls, List.copyOf(surface.waterfalls),
+                  faces, new Faces(surface.waterFaces), walls, List.copyOf(surface.waterfalls),
                   surface.frozenFalls(), highest(top),
-                  cover ? BoardVegetation.ground(scene, surface, floor, sources) : null);
+                  surface.groundFaces().size() == surface.faces.size() ? faces : new Faces(surface.groundFaces()));
         }
     }
     /**

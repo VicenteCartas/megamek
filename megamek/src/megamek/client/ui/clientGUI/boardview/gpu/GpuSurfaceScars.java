@@ -78,7 +78,8 @@ final class GpuSurfaceScars implements Disposable {
 
     static VertexAttributes attributes(VertexAttributes source) {
         List<VertexAttribute> attributes = new ArrayList<>();
-        source.forEach(attribute -> attributes.add(attribute.copy()));
+        // By index: a layout's iterator is shared, and a program made while a caller walks this layout must not nest it.
+        for (int i = 0; i < source.size(); i++) { attributes.add(source.get(i).copy()); }
         attributes.add(new VertexAttribute(VertexAttributes.Usage.Generic, 3, UV, 9));
         return new VertexAttributes(attributes.toArray(VertexAttribute[]::new));
     }
@@ -324,7 +325,8 @@ final class GpuSurfaceScars implements Disposable {
             int group = at.getX() / span * ((boardRows + span - 1) / span) + at.getY() / span;
             batches.add(page.parts, group, camera.frustum.boundsInFrustum(page.bounds) && shown.test(page.key.receiver()));
         }
-        batches.render(batch, environment, deadline);
+        batches.advance(deadline);
+        batches.render(batch, environment);
     }
 
     private final class Page {

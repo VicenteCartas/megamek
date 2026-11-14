@@ -43,8 +43,7 @@ class GpuTerrainLodSmokeTest {
                         for (int y = 0; y < 4; y++) {
                             var feature = new BoardScene.Feature(x % 2 == 0 ? "vegetation/pine" : "vegetation/tree",
                                   0, 0, x * 37 + y * 23, 1, 1 + (x + y) % 3, 0, BoardScene.FeatureKind.TREE);
-                            tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
-                                  null, List.of(feature), List.of()));
+                            tiles.add(BoardScenes.newTile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, List.of(feature), List.of()));
                         }
                     }
                     BoardScene scene = new BoardScene(0, 4, 4, tiles, List.of(), List.of(), -1, "", List.of());
@@ -185,9 +184,9 @@ class GpuTerrainLodSmokeTest {
                     assertTrue(GpuTestSupport.field(terrain, "detailJob") != null);
                     List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
                     BoardScene.Tile before = scene.tile(at);
-                    tiles.set(tiles.indexOf(before), new BoardScene.Tile(at, before.elevation() + 2, -1, false, 0,
-                          before.surface(), null, null, List.of(), List.of(),
-                          BoardLiquid.NONE, null, true));
+                    tiles.set(tiles.indexOf(before), BoardScenes.newTile(at, before.elevation() + 2, -1, false, 0,
+                          before.surface(), List.of(), List.of(),
+                          BoardLiquid.NONE, null));
                     BoardScene edited = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
                     var displayed = terrain.tacticalSurface(at);
                     terrain.update(edited, camera.camera);
@@ -231,7 +230,7 @@ class GpuTerrainLodSmokeTest {
                     // installation, and coalesce to the latest scale rather than losing its terrain update.
                     List<BoardScene.Tile> limbTiles = new ArrayList<>(edited.tiles());
                     BoardScene.Tile limbTile = edited.tile(at);
-                    limbTiles.set(limbTiles.indexOf(limbTile), limbTile.withFeatures(List.of(new BoardScene.Feature(
+                    limbTiles.set(limbTiles.indexOf(limbTile), limbTile.withStanding(List.of(new BoardScene.Feature(
                           "salvage/arm", 0, 0, 0, 1, 1, 0, BoardScene.FeatureKind.LIMB))));
                     BoardScene withLimb = edited.withTiles(limbTiles);
                     terrain.update(withLimb, camera.camera);
@@ -280,8 +279,7 @@ class GpuTerrainLodSmokeTest {
                     List<BoardScene.Tile> tiles = new ArrayList<>();
                     for (int x = 0; x < 40; x++) {
                         for (int y = 0; y < 24; y++) {
-                            tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
-                                  null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                            tiles.add(BoardScenes.newTile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, List.of(), List.of(), BoardLiquid.NONE, null));
                         }
                     }
                     BoardScene scene = new BoardScene(0, 40, 24, tiles, List.of(), List.of(), -1, "", List.of());

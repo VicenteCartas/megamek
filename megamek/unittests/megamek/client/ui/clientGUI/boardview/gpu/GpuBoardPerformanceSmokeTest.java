@@ -1007,7 +1007,7 @@ class GpuBoardPerformanceSmokeTest {
         String stage = "";
         terrain.update(scene, null);
         while (terrain.busy()) {
-            terrain.refine(null, true);
+            terrain.refine(null);
             String current = terrain.buildDetails().stream()
                   .map(status -> status.section() + ":" + status.step().task()).collect(Collectors.joining(" "));
             if (!current.equals(stage)) {

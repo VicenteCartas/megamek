@@ -68,7 +68,7 @@ class GpuBiomeZoomSmokeTest {
                             var grass = (GpuGroundCover) GpuTestSupport.field(terrain, "groundCover");
                             try (var timings = new GpuStageTimings()) {
                                 for (int pass = 0; pass < 3; pass++) {
-                                    long uploads = plants.uploads(), grassUploads = grass.uploads();
+                                    long uploads = plants.uploads(), grassUploads = grass.redraws();
                                     for (int step = 0; step < 180; step++) {
                                         float t = (step < 90 ? step : 179 - step) / 89f;
                                         float pixels = (float) (24 * Math.pow(560.0 / 24, t));
@@ -87,7 +87,7 @@ class GpuBiomeZoomSmokeTest {
                                     }
                                     report.append(kind).append(" pass ").append(pass).append(": plant uploads=")
                                           .append(plants.uploads() - uploads).append(", grass uploads=")
-                                          .append(grass.uploads() - grassUploads).append('\n');
+                                          .append(grass.redraws() - grassUploads).append('\n');
                                     timings.appendReport(report, kind + " zoom " + pass);
                                     Files.writeString(new File(output, "timings.txt").toPath(), report.toString());
                                 }

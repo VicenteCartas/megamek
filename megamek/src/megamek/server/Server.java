@@ -533,6 +533,9 @@ public class Server implements Runnable {
         packetPumpThread.interrupt();
         packetPumpThread = null;
 
+        // Complete queued saves and local-save deliveries before closing their client connections.
+        gameManager.shutdown();
+
         // close socket
         try {
             serverSocket.close();

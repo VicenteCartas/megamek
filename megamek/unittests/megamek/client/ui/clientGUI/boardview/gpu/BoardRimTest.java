@@ -174,9 +174,9 @@ class BoardRimTest {
                 Coords coords = new Coords(x, y);
                 boolean paved = road && coords.equals(CENTER);
                 // Road exits make a road only with a kind of road (BoardRoad.rendered).
-                tiles.add(new BoardScene.Tile(coords, coords.equals(low) ? neighborElevation : 2, -1, false,
-                      paved ? 1 << direction : 0, BoardScene.Surface.GRASS, null, null, List.of(), List.of(),
-                      BoardLiquid.NONE, null, false, paved ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE));
+                tiles.add(BoardScenes.newTile(coords, coords.equals(low) ? neighborElevation : 2, -1, false,
+                      paved ? 1 << direction : 0, BoardScene.Surface.GRASS, List.of(), List.of(),
+                      BoardLiquid.NONE, null, paved ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -186,9 +186,8 @@ class BoardRimTest {
     private static BoardScene cliffTop(BoardScene scene, int direction) {
         BoardScene.Tile t = scene.tile(CENTER);
         List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
-        tiles.set(CENTER.getX() * scene.height() + CENTER.getY(), new BoardScene.Tile(t.coords(), t.elevation(),
-              t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.decals(),
-              t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(), t.detailedGround(),
+        tiles.set(CENTER.getX() * scene.height() + CENTER.getY(), BoardScenes.newTile(t.coords(), t.elevation(),
+              t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.features(), t.text(), t.liquid(), t.tileset(),
               t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), 1 << direction));
         return scene.withTiles(tiles);
     }

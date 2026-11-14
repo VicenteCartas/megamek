@@ -33,8 +33,6 @@ class GpuRoughCaptureTest {
                 fixture.game.getBoard().setHex(coords, rough);
                 fixture.source.refresh();
                 var rocky = fixture.source.takeFrame().scene().tile(coords);
-                assertEquals(clear.decals(), rocky.decals(), "Rough is not duplicated as a decal");
-                assertTrue(rocky.detailedGround(), "Dry roads and Rough both support detailed ground");
                 assertEquals(exits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED, rocky.road(),
                       "Adding Rough preserves the road type");
                 assertEquals(exits, rocky.roadExits(), "Adding Rough preserves the road exits");
@@ -52,7 +50,6 @@ class GpuRoughCaptureTest {
                     fixture.source.refresh();
                     var edited = fixture.source.takeFrame().scene().tile(coords);
                     assertFalse(rocky.sameGeometry(edited), "Changing only fluff rebuilds visible geometry and support");
-                    assertEquals(rocky.decals(), edited.decals());
                 }
             });
         }

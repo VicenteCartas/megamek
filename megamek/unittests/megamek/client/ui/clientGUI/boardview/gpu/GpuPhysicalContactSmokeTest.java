@@ -143,9 +143,7 @@ class GpuPhysicalContactSmokeTest {
                                             if (scale == .7f && facing == 0 && frame % 2 == 0) {
                                                 for (boolean top : List.of(false, true)) {
                                                 renderer.topView = top;
-                                                renderer.frame(List.of(source, target), origin.cpy().lerp(BoardGeometry.center(end, 0), .5f), null,
-                                                      "contact-" + model.rigs().getFirst().type() + "-" + kind.name().toLowerCase(java.util.Locale.ROOT)
-                                                            + "-turn-" + offset + (hit ? "-hit" : "-dodge") + (top ? "-top" : "-iso"), frame);
+                                                renderer.frame(List.of(source, target), origin.cpy().lerp(BoardGeometry.center(end, 0), .5f), null);
                                                 }
                                             }
                                         }

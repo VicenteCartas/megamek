@@ -461,7 +461,6 @@ class GpuBoardSourceTest {
                 fixture.source.refresh();
                 var tile = fixture.source.takeFrame().scene().tile(coords);
                 assertEquals(3, tile.features().size());
-                assertTrue(tile.detailedGround(), "Modeled structures must preserve native ground in theme: " + theme);
                 assertTrue(tile.features().stream().anyMatch(feature -> HARDENED_KIT.equals(feature.asset())
                       && feature.height() == 4 && feature.kind() == BoardScene.FeatureKind.BUILDING));
                 assertTrue(tile.features().stream().anyMatch(feature -> feature.asset().equals("buildings/fuel_tanks/fuel_tank_medium")
@@ -954,7 +953,6 @@ class GpuBoardSourceTest {
             BoardScene scene = fixture.source.takeFrame().scene();
             assertTrue(scene.tile(cliff).features().stream()
                   .allMatch(feature -> feature.kind() == BoardScene.FeatureKind.SCATTER));
-            assertFalse(hasOpaque(scene.tile(cliff).decals()), "Painted slopes must not duplicate the 3D faces");
             assertTrue(scene.tile(building).features().stream()
                   .allMatch(feature -> feature.asset().startsWith("building") && feature.height() == 3));
             assertTrue(scene.tile(woods).features().size() >= 4);

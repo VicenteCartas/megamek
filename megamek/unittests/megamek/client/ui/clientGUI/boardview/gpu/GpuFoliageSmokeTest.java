@@ -143,8 +143,8 @@ class GpuFoliageSmokeTest {
                   ? List.of(new BoardScene.Feature(names.get(index) + (snow ? "-snow" : ""), 0, 0, 20, 1.1f, 2, 0,
                         BoardScene.FeatureKind.TREE))
                   : List.of();
-            tiles.add(new BoardScene.Tile(new Coords(index / 5, index % 5), 0, -1, false, 0,
-                  snow ? BoardScene.Surface.SNOW : BoardScene.Surface.GRASS, null, tree, List.of()));
+            tiles.add(BoardScenes.newTile(new Coords(index / 5, index % 5), 0, -1, false, 0,
+                  snow ? BoardScene.Surface.SNOW : BoardScene.Surface.GRASS, tree, List.of()));
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));
     }
@@ -157,9 +157,8 @@ class GpuFoliageSmokeTest {
                 String cover = x == 0 || x == 11 || y == 0 || y == 9 || x == 6 ? ""
                       : "woods:" + (y < 5 ? 1 : 2) + ";foliage_elev:2";
                 var hex = new Hex(0, cover + (x == 6 ? ";road:1:9" : ""), "", coords);
-                tiles.add(new BoardScene.Tile(coords, 0, -1, false, x == 6 ? 9 : 0, BoardScene.Surface.GRASS, null,
-                      null, BoardTreeDistributionTest.capture(hex, coords, natural),
-                      List.of(), BoardLiquid.NONE, null, true, BoardRoad.capture(hex)));
+                tiles.add(BoardScenes.newTile(coords, 0, -1, false, x == 6 ? 9 : 0, BoardScene.Surface.GRASS, BoardTreeDistributionTest.capture(hex, coords, natural),
+                      List.of(), BoardLiquid.NONE, null, BoardRoad.capture(hex)));
             }
         }
         return new BoardScene(0, 12, 10, tiles, List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));

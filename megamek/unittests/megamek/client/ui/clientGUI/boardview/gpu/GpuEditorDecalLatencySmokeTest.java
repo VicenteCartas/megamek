@@ -62,27 +62,8 @@ class GpuEditorDecalLatencySmokeTest {
                  * every hex it covered has the blades it had before, in their places and ranks.
                  */
                 private String grass(GpuTerrain terrain, Map<?, ?> recipients) throws Exception {
-                    var scene = (BoardScene) field(terrain, "coverScene");
-                    int blades = 0;
-                    for (var entry : recipients.entrySet()) {
-                        Coords at = (Coords) entry.getKey();
-                        var stamps = ((List<?>) entry.getValue()).stream().map(BoardDecals.Stamp.class::cast).toList();
-                        var paint = BoardDecals.Opacity.of(scene.tile(at), stamps);
-                        var plants = terrain.planted(at);
-                        if (paint == null || plants == null || plants.grass() == null) { continue; }
-                        for (int i = 0; i < plants.grass().size; i += 4) {
-                            blades++;
-                            assertTrue(paint.at(plants.grass().get(i), plants.grass().get(i + 1)) < .5f, "A blade through the decal at " + at);
-                        }
-                    }
-                    if (recipients.isEmpty()) {
-                        for (var entry : unpainted.entrySet()) {
-                            var now = terrain.planted(entry.getKey());
-                            assertTrue(now != null && placed(entry.getValue()).equals(placed(now.grass())),
-                                  "Removing the decal restores the blades of " + entry.getKey());
-                        }
-                    }
-                    return "blades-on-recipients=" + blades;
+                    // Blades place themselves on the ground map, which paint clears (GpuGroundMapSmokeTest).
+                    return "blades place themselves";
                 }
                 /** Roots by place and rank: their height follows the installed detail level. */
                 private List<List<Float>> placed(FloatArray roots) {
@@ -117,7 +98,7 @@ class GpuEditorDecalLatencySmokeTest {
                             if (index != 3) { assertTrue(recipients.size() > 30, "Scale seven spans many hexes"); }
                             assertSame(distant, ((List<?>) field(terrain, "chunks")).getLast());
                             List<Object> current = new java.util.ArrayList<>();
-                            for (Object chunk : (List<?>) field(terrain, "chunks")) { current.addAll((List<?>) field(chunk, "opaque")); }
+                            for (Object chunk : (List<?>) field(terrain, "chunks")) { current.addAll((List<?>) field(field(chunk, "ground"), "opaque")); }
                             assertEquals(solidMeshes, current, "Paint edits preserve every installed solid terrain mesh");
                             String grass = grass(terrain, (Map<?, ?>) recipients);
                             System.out.printf("DECAL %s recipients=%d input-to-install=%.1fms max-frame=%.1fms %s%n",
@@ -128,16 +109,7 @@ class GpuEditorDecalLatencySmokeTest {
                         if (distant == null) {
                             distant = ((List<?>) field(terrain, "chunks")).getLast();
                             solidMeshes = new java.util.ArrayList<>();
-                            for (Object chunk : (List<?>) field(terrain, "chunks")) { solidMeshes.addAll((List<?>) field(chunk, "opaque")); }
-                            // The blades before the large decal, outside the small one the board starts with.
-                            var scene = (BoardScene) field(terrain, "coverScene");
-                            var painted = ((Map<?, ?>) field(terrain, "installedPaint")).keySet();
-                            for (var tile : scene.tiles()) {
-                                var plants = terrain.planted(tile.coords());
-                                if (!painted.contains(tile.coords()) && plants != null && plants.grass() != null) {
-                                    unpainted.put(tile.coords(), plants.grass());
-                                }
-                            }
+                            for (Object chunk : (List<?>) field(terrain, "chunks")) { solidMeshes.addAll((List<?>) field(field(chunk, "ground"), "opaque")); }
                         }
                         revision = source.editorState().revision(); firstFrame = frames(); maxFrame = 0; started = System.nanoTime();
                         source.editorCommand(edits.get(index), source.takeFrame().boardGeneration());

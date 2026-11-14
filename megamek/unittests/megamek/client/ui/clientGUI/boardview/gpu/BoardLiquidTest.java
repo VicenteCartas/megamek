@@ -74,14 +74,12 @@ class BoardLiquidTest {
                 assertEquals(2, tile.elevation());
                 assertEquals(level == 2, tile.liquid().present());
                 assertEquals(level > 0, tile.liquid().volcanic());
-                assertTrue(tile.detailedGround());
                 assertEquals(level == 2, !new BoardSurface(scene, tile).waterFaces.isEmpty());
                 assertEquals(2 * BoardGeometry.level() - (level == 2 ? BoardGeometry.hexScale() : 0),
                       BoardGeometry.surfaceZ(tile), .001);
                 Vector3 above = BoardGeometry.center(coords, 2).add(0, 0, 100);
                 assertEquals(coords, BoardGeometry.pick(scene, new Ray(above, new Vector3(0, 0, -1))));
                 if (level > 0) {
-                    assertNull(tile.decals(), "Legacy magma art must not cover the new material");
                     assertFalse(BoardSurfaceBlend.natural(tile), "Ordinary soil/grass cannot blend across hot crust");
                 }
             }
@@ -94,8 +92,8 @@ class BoardLiquidTest {
         var pixels = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
         for (BoardLiquid.Kind kind : List.of(BoardLiquid.Kind.WATER, BoardLiquid.Kind.HAZARDOUS, BoardLiquid.Kind.MAGMA)) {
             BoardScene scene = BoardScenes.scene(c -> c.equals(pool)
-                  ? new BoardScene.Tile(pool, 0, -1, false, 0, BoardScene.Surface.ROCK, null, null, List.of(),
-                        List.of(), new BoardLiquid(kind, "", 0), null, true)
+                  ? BoardScenes.newTile(pool, 0, -1, false, 0, BoardScene.Surface.ROCK, List.of(),
+                        List.of(), new BoardLiquid(kind, "", 0), null)
                   : BoardScenes.tile(c, BoardScene.Surface.GRASS, 1, -1, 0));
             assertVisiblePool(scene, pool);
         }
@@ -167,7 +165,6 @@ class BoardLiquidTest {
             assertEquals(2, first.waterDepth());
             assertEquals(BoardLiquid.Kind.HAZARDOUS, first.liquid().kind());
             assertEquals(2, first.liquid().rapids());
-            assertNull(first.decals(), "Static 2D hazardous and rapids overlays must not cover the animated surface");
             SwingUtilities.invokeAndWait(() -> {
                 fixture.source.setVisibleArea(new Rectangle(0, 0, 1, 1));
                 fixture.source.refresh();
@@ -245,8 +242,8 @@ class BoardLiquidTest {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
                 BoardLiquid liquid = coords.equals(high) || coords.equals(low) ? new BoardLiquid(kind, "", 0) : BoardLiquid.NONE;
-                tiles.add(new BoardScene.Tile(coords, coords.equals(high) ? drop : 0, -1, false, 0,
-                      BoardScene.Surface.ROCK, null, null, List.of(), List.of(), liquid, null, true));
+                tiles.add(BoardScenes.newTile(coords, coords.equals(high) ? drop : 0, -1, false, 0,
+                      BoardScene.Surface.ROCK, List.of(), List.of(), liquid, null));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -255,9 +252,9 @@ class BoardLiquidTest {
     private static BoardScene scene(BoardLiquid high, BoardLiquid low, int depth) {
         BoardScene.Pixels pixels = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
         return new BoardScene(0, 1, 2, List.of(
-              new BoardScene.Tile(new Coords(0, 0), 2, depth, false, 0, BoardScene.Surface.ROCK, null, null, List.of(),
+              BoardScenes.newTile(new Coords(0, 0), 2, depth, false, 0, BoardScene.Surface.ROCK, List.of(),
                     List.of(), high),
-              new BoardScene.Tile(new Coords(0, 1), 0, depth, false, 0, BoardScene.Surface.ROCK, null, null, List.of(),
+              BoardScenes.newTile(new Coords(0, 1), 0, depth, false, 0, BoardScene.Surface.ROCK, List.of(),
                     List.of(), low)),
               List.of(), List.of(), -1, "", List.of());
     }

@@ -30,11 +30,28 @@ import megamek.common.board.SingleLane;
 final class BoardSurface {
     /** GL-view-owned geometry. Artwork snapshots retain surfaces; shape changes are checked once per generation. */
     static final class Cache {
+        private java.util.function.Function<Coords, BoardTacticalGeometry.Surface> installed;
+
+        void installed(java.util.function.Function<Coords, BoardTacticalGeometry.Surface> source) {
+            installed = source;
+            clear();
+        }
+
+        BoardTacticalGeometry.Surface installed(Coords at) { return installed == null ? null : installed.apply(at); }
+
+        float height(BoardScene scene, BoardScene.Tile tile, float x, float y) {
+            var support = installed(tile.coords());
+            return support == null ? get(scene, tile).height(x, y)
+                  : sampleHeight(support.faces(), x, y, BoardGeometry.groundZ(tile));
+        }
         private static final int CAPACITY = 256;
         private static final class Entry {
             final Key key;
             final BoardSurface surface;
             long generation;
+            // The lying faces of its walls over lyingFloor, once asked for (lying).
+            List<Face> lying;
+            float lyingFloor;
 
             Entry(Key key, BoardSurface surface, long generation) {
                 this.key = key;
@@ -53,6 +70,8 @@ final class BoardSurface {
         private final Map<Coords, Entry> surfaces = new LinkedHashMap<>(32, .75f, true);
 
         BoardSurface get(BoardScene scene, BoardScene.Tile tile) {
+            scene = scene.groundScene();
+            tile = scene.tile(tile.coords());
             if (boardId != scene.boardId() || width != scene.width() || height != scene.height()
                   || revision != BoardGeometry.revision()) {
                 clear();
@@ -80,6 +99,17 @@ final class BoardSurface {
             return entry.surface;
         }
 
+        /** The lying faces of the hex's walls over {@code floor} ({@link BoardTacticalGeometry#lying}), kept with its surface. */
+        List<Face> lying(BoardScene scene, BoardScene.Tile tile, float floor) {
+            BoardSurface surface = get(scene, tile);
+            Entry entry = surfaces.get(tile.coords());
+            if (entry.lying == null || entry.lyingFloor != floor) {
+                entry.lying = BoardTacticalGeometry.lying(surface.walls(scene, floor));
+                entry.lyingFloor = floor;
+            }
+            return entry.lying;
+        }
+
         /** The owning view switches this at its installed graphics-mode boundary. */
         void columns(boolean value) {
             if (columns != value) { columns = value; clear(); }
@@ -90,14 +120,14 @@ final class BoardSurface {
 
     /** Only inputs that alter topology; the ramp mask also captures second-ring road/bridge approaches. */
     record Geometry(int elevation, int waterDepth, boolean frozen, int roadExits, BoardScene.Surface surface,
-          BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps,
+          BoardLiquid liquid, List<BoardScene.Feature> features, int ramps,
           List<ConcreteFit.Shift> coast, BoardRoad.Kind road, BoardScene.Biome biome, int cliffTopExits, boolean bare,
           boolean barren, BoardSurfaceBlend.Cover groundCover, boolean ultraSublevel, boolean naturalBridge,
           RailRoute.Corridor corridor, RailRoute.Corridor deckCorridor, BoardBackdrop backdrop, int pavementSides,
-          boolean singleLane, int laneInbound, Long laneExitFrom) { }
+          boolean singleLane, int laneInbound, Long laneExitFrom, int roadCuts) { }
 
     /** What of a hex further out can reach a hex's shape: through the water's shore, its level, liquid and ground. */
-    record Shape(int elevation, int waterDepth, boolean frozen, BoardLiquid liquid, boolean detailedGround, BoardScene.Surface surface,
+    record Shape(int elevation, int waterDepth, boolean frozen, BoardLiquid liquid, BoardScene.Surface surface,
           int roadExits, BoardRoad.Kind road, int cliffTopExits, boolean ultraSublevel, BoardBackdrop backdrop) { }
 
     /** A hex's own geometry and its six neighbours', and the shapes of the hexes out to {@link #SHORE_RINGS}. */
@@ -154,13 +184,13 @@ final class BoardSurface {
 
     /** The hex's shape as a hex further out reads it, with the given water depth. */
     static Shape shape(BoardScene.Tile tile, int waterDepth) {
-        return new Shape(tile.elevation(), waterDepth, tile.frozen(), tile.liquid(), tile.detailedGround(), tile.surface(),
+        return new Shape(tile.elevation(), waterDepth, tile.frozen(), tile.liquid(), tile.surface(),
               tile.wayExits(), tile.road(), tile.cliffTopExits(), tile.ultraSublevel(), tile.backdrop());
     }
 
     private static Geometry geometry(BoardScene scene, BoardScene.Tile tile) {
         return tile == null ? null : new Geometry(tile.elevation(), tile.waterDepth(), tile.frozen(), tile.wayExits(),
-              tile.surface(), tile.liquid(), tile.detailedGround(), tile.features(), ramps(scene, tile),
+              tile.surface(), tile.liquid(), tile.features(), ramps(scene, tile),
               BoardConcrete.of(scene).corners(tile.coords()), tile.road(), tile.biome(), tile.cliffTopExits(), tile.bare(),
               tile.barren(), tile.groundCover(), tile.ultraSublevel(),
               BoardBridge.feature(tile) != null && BoardBridge.family(tile) == BoardBridge.Family.NATURAL,
@@ -168,7 +198,7 @@ final class BoardSurface {
               // A two-lane road reserves its turns into an exit by the exit's way, as derived from the roads beyond it, and by
               // the approaches it lets take it.
               BoardRoad.singleLane(tile) ? SingleLane.inbound(BoardRoad.lanes(scene), tile.coords()) : 0,
-              HexAppearance.exitFrom(tile.appearance(), SingleLane.OWNER));
+              HexAppearance.exitFrom(tile.appearance(), SingleLane.OWNER), tile.roadCuts());
     }
 
     /** The edges this hex's carriageway ramps down to (see {@link BoardRoadGrade#ramps}). */
@@ -431,6 +461,8 @@ final class BoardSurface {
     /** A canal deck's ramps, which cut into its concrete. */
     private List<RampCut> deckCuts = List.of();
     private boolean gradedWater;
+    /** Finished sloping-water triangles, indexed once after construction; construction itself still samples directly. */
+    private GpuBiomeVegetation.Support waterSupport;
     /** The faces of a sculpted bed that stay clear of the hex outline, as a range of {@link #faces}. */
     private int interiorFrom, interiorTo;
     /**
@@ -526,6 +558,7 @@ final class BoardSurface {
         waterline = geometry.waterline();
         crestLine = geometry.crestLine();
         shoreCorners = geometry.shoreCorners();
+        if (gradedWater) { waterSupport = new GpuBiomeVegetation.Support(waterFaces); }
     }
 
     BoardSurface(BoardScene scene, BoardScene.Tile tile) {
@@ -550,6 +583,8 @@ final class BoardSurface {
     }
 
     private BoardSurface(BoardScene scene, BoardScene.Tile tile, boolean detailed, TerrainLod lod, boolean columns) {
+        scene = scene.groundScene();
+        tile = scene.tile(tile.coords());
         this.lod = lod;
         this.columns = columns;
         this.scene = scene;
@@ -621,6 +656,7 @@ final class BoardSurface {
             roughModels = BoardRough.place(this);
             rough.addAll(faces.subList(roughStart, faces.size()));
         }
+        if (gradedWater) { waterSupport = new GpuBiomeVegetation.Support(waterFaces); }
     }
 
     /**
@@ -1392,7 +1428,7 @@ final class BoardSurface {
     float waterHeight(float x, float y) {
         float height = BoardGeometry.waterZ(tile);
         if (!gradedWater) { return height; }
-        float drawn = sampleHeight(waterFaces, x, y, Float.NaN);
+        float drawn = waterSupport == null ? sampleHeight(waterFaces, x, y, Float.NaN) : waterSupport.height(x, y);
         if (Float.isFinite(drawn)) { return drawn; }
         // Bank vertices lie outside the water mesh. Extend the nearest shore's height for their wetness and bed
         // tint; reverting to the hex's level painted dry banks beside a descending stream as deep water.
@@ -1562,7 +1598,7 @@ final class BoardSurface {
             }
         }
         Vector3[] ring = new Vector3[count];
-        boolean shallow = tile.waterDepth() == 0 && tile.detailedGround() && !tile.frozen() && !tile.liquid().molten();
+        boolean shallow = tile.waterDepth() == 0 && !tile.frozen() && !tile.liquid().molten();
         float[] bank = new float[count];
         for (int i = 0; i < count; i++) {
             int edge = i / SHORE_SEGMENTS;
@@ -3219,19 +3255,24 @@ final class BoardSurface {
 
     /** Solid contact may include ice; placement's existing ground-only queries retain their original behavior. */
     static float sampleHeight(List<Face> geometry, float x, float y, float fallback, boolean includeIce) {
-        float height = Float.NEGATIVE_INFINITY, nearby = Float.NEGATIVE_INFINITY;
-        // One query shares one settings snapshot; avoid a thread-local lookup for every rejected triangle.
-        float tolerance = .001f * BoardGeometry.hexScale();
+        float height = Float.NEGATIVE_INFINITY;
         for (Face face : geometry) {
             if ((includeIce || face.finish() != Finish.ICE) && face.finish() != Finish.DRESSING) {
                 float exact = face.height(x, y, 0);
                 if (Float.isFinite(exact)) { height = Math.max(height, exact); }
-                else { nearby = Math.max(nearby, face.height(x, y, tolerance)); }
             }
         }
         // Border tolerance recovers rounding gaps, but must not choose the higher of two neighbouring slopes
-        // when one triangle actually contains the contact. Road overlays use that same triangle plane.
-        return Float.isFinite(height) ? height : Float.isFinite(nearby) ? nearby : fallback;
+        // when one triangle actually contains the contact. Most queries hit ground exactly: only a miss needs
+        // the tolerant pass, rather than testing every rejected triangle a second time on every query.
+        if (Float.isFinite(height)) { return height; }
+        float tolerance = .001f * BoardGeometry.hexScale();
+        for (Face face : geometry) {
+            if ((includeIce || face.finish() != Finish.ICE) && face.finish() != Finish.DRESSING) {
+                height = Math.max(height, face.height(x, y, tolerance));
+            }
+        }
+        return Float.isFinite(height) ? height : fallback;
     }
 
     /**
@@ -3318,7 +3359,7 @@ final class BoardSurface {
             for (int x = at.getX() - ring; x <= at.getX() + ring; x++) {
                 for (int y = at.getY() - ring - 1; y <= at.getY() + ring + 1; y++) {
                     BoardScene.Tile other = at.distance(x, y) == ring ? scene.tile(new Coords(x, y)) : null;
-                    if (other != null && !other.liquid().present() && other.detailedGround()
+                    if (other != null && !other.liquid().present()
                           && other.surface() != BoardScene.Surface.CONCRETE) { return other.surface(); }
                 }
             }

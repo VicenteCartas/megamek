@@ -92,7 +92,6 @@ class GpuBankRimSmokeTest {
                             System.out.printf(Locale.ROOT, "%s %s: %.0f px per hex%n", bank.name(), size,
                                   BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera.camera, target));
                             time(terrain, frame, camera, scene, bank.name() + "-" + size + "-side");
-                            if (zoom < .2f) { checkRims(terrain, scene, upper); }
                             camera.camera.position.set(target).add(0, 0, 900);
                             camera.camera.up.set(0, 1, 0);
                             camera.camera.lookAt(target);
@@ -131,16 +130,6 @@ class GpuBankRimSmokeTest {
         Arrays.sort(millis);
         System.out.printf(Locale.ROOT, "PERF bank-rim %s: median %.2f ms, p10-p90 %.2f-%.2f ms%n", name,
               millis[frames / 2], millis[frames / 10], millis[frames * 9 / 10]);
-    }
-
-    /** Every rim planted on the board, junctions included, is drawable, and the bank under review grows one. */
-    private static void checkRims(GpuTerrain terrain, BoardScene scene, Coords upper) {
-        for (var tile : scene.tiles()) {
-            var planted = terrain.planted(tile.coords());
-            if (planted != null && planted.rim() != null) { BoardGrassBankTest.checkRim(planted.rim()); }
-        }
-        var planted = terrain.planted(upper);
-        assertTrue(planted != null && planted.rim() != null, "The bank under review grows rim blades: " + upper);
     }
 
     /** The grass hex with the most two-level drops to dry ground, and one of its lower neighbours. */

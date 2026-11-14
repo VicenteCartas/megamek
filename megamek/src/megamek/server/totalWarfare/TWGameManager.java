@@ -173,6 +173,8 @@ public class TWGameManager extends AbstractGameManager {
     private Game game = new Game();
     private TWDamageManager damager = null;
     private final ThreadLocal<AttackAnimationCapture> attackAnimationCapture = new ThreadLocal<>();
+    /** A blast's terrain damage installs and sends its final hexes together. */
+    private final ThreadLocal<Map<BoardLocation, Hex>> blastHexChanges = new ThreadLocal<>();
 
     @Override
     public void send(Packet packet) {
@@ -12243,7 +12245,7 @@ public class TWGameManager extends AbstractGameManager {
         if ((rail != null) && (rail.getLevel() > 0) && RailRoute.rules(game)) {
             int tf = rail.getTerrainFactor() - nDamage;
             if (tf <= 0) {
-                h.addTerrain(new Terrain(Terrains.RAIL, 0, true, rail.getExits()));
+                RailRoute.destroyGround(h);
                 r = new Report(3094, reportType);
                 r.subject = entityId;
                 vPhaseReport.add(r);
@@ -20259,8 +20261,8 @@ public class TWGameManager extends AbstractGameManager {
                                   message,
                                   SpecialHexDisplay.SHD_VISIBLE_TO_ALL));
             }
-            sendChangedHex(coord);
         }
+        sendSpecialHexDisplayPackets();
     }
 
     /**
@@ -20283,8 +20285,8 @@ public class TWGameManager extends AbstractGameManager {
                               // cause a NullPointerError
                               Messages.getString("OrbitalBombardment.hitOnRound", getGame().getRoundCount()),
                               SpecialHexDisplay.SHD_VISIBLE_TO_ALL));
-            sendChangedHex(coord);
         }
+        sendSpecialHexDisplayPackets();
     }
 
     public void drawNukeHitOnBoard(Coords coord) {
@@ -20386,7 +20388,7 @@ public class TWGameManager extends AbstractGameManager {
                               Messages.getString("Nuke.exploded"),
                               SpecialHexDisplay.SHD_VISIBLE_TO_ALL,
                               imageSignature));
-            sendChangedHex(coord);
+            // Special hex displays are sent by the phase boundary; the terrain itself did not change.
         }
     }
 
@@ -20407,7 +20409,7 @@ public class TWGameManager extends AbstractGameManager {
                               // cause a NullPointerError
                               Messages.getString("Nuke.hitOnRound", getGame().getRoundCount()),
                               SpecialHexDisplay.SHD_VISIBLE_TO_ALL));
-            sendChangedHex(coord);
+            // Special hex displays are sent by the phase boundary; the terrain itself did not change.
         }
     }
 
@@ -20442,6 +20444,10 @@ public class TWGameManager extends AbstractGameManager {
      * @param radius   the radius which the damage will hit
      */
     public void doOrbitalBombardment(Coords position, int damage, int radius) {
+        batchBlastHexes(() -> resolveOrbitalBombardment(position, damage, radius));
+    }
+
+    private void resolveOrbitalBombardment(Coords position, int damage, int radius) {
         Report report = new Report(1300, Report.PUBLIC);
         report.indent();
         report.add(position.getBoardNum(), true);
@@ -20469,6 +20475,28 @@ public class TWGameManager extends AbstractGameManager {
      * @param vDesc           a vector that contains the output report
      */
     public void doNuclearExplosion(Coords position, int baseDamage, int degradation, int secondaryRadius,
+          int craterDepth, Vector<Report> vDesc) {
+        batchBlastHexes(() -> resolveNuclearExplosion(position, baseDamage, degradation, secondaryRadius, craterDepth, vDesc));
+    }
+
+    /** The resolved footprint, once: per-hex packets made a large orbital strike repeatedly recapture the board. */
+    private void batchBlastHexes(Runnable resolution) {
+        if (blastHexChanges.get() != null) { resolution.run(); return; }
+        Map<BoardLocation, Hex> changed = new HashMap<>();
+        blastHexChanges.set(changed);
+        try {
+            resolution.run();
+        } finally {
+            blastHexChanges.remove();
+            // Derive roads and cliffs once from the complete blast, on both server and clients.
+            if (!changed.isEmpty()) {
+                game.getBoards().values().forEach(board -> board.setHexes(changed));
+                send(new Packet(PacketCommand.CHANGE_HEXES, changed));
+            }
+        }
+    }
+
+    private void resolveNuclearExplosion(Coords position, int baseDamage, int degradation, int secondaryRadius,
           int craterDepth, Vector<Report> vDesc) {
         // Just in case.
         if (vDesc == null) {
@@ -20499,6 +20527,7 @@ public class TWGameManager extends AbstractGameManager {
 
                 Hex myHex = game.getBoard().getHex(myHexCoords);
                 // In each hex, first, sink the terrain if necessary.
+                int originalLevel = myHex.getLevel();
                 myHex.setLevel((myHex.getLevel() - curDepth));
 
                 // Then, remove ANY terrains here.
@@ -20507,6 +20536,8 @@ public class TWGameManager extends AbstractGameManager {
                 if (myHex.containsTerrain(Terrains.WATER)) {
                     myHex.setLevel(myHex.floor());
                 }
+                myHex.destroyRoad(game.getBoard()::getHex);
+                RailRoute.destroyAll(myHex, originalLevel);
                 myHex.removeAllTerrains();
                 myHex.clearExits();
 
@@ -20595,10 +20626,14 @@ public class TWGameManager extends AbstractGameManager {
             tmpB.setCurrentCF(0, position);
         }
         Hex gzHex = game.getBoard().getHex(position);
+        int originalGroundZeroLevel = gzHex.getLevel();
         if (gzHex.containsTerrain(Terrains.WATER)) {
             gzHex.setLevel(gzHex.floor());
         }
+        gzHex.destroyRoad(game.getBoard()::getHex);
+        RailRoute.destroyAll(gzHex, originalGroundZeroLevel);
         gzHex.removeAllTerrains();
+        sendChangedHex(position);
 
         // Next, for whatever's left, do terrain effects
         // such as clearing, roughing, and boiling off water.
@@ -20618,6 +20653,7 @@ public class TWGameManager extends AbstractGameManager {
                     }
 
                     Hex myHex = game.getBoard().getHex(myHexCoords);
+                    int originalLevel = myHex.getLevel();
 
                     // For each 3000 damage, water level is reduced by 1.
                     if ((damageAtRange >= 3000) && (myHex.containsTerrain(Terrains.WATER))) {
@@ -20634,6 +20670,8 @@ public class TWGameManager extends AbstractGameManager {
 
                     // ANY non-water hex that takes 200 becomes rough.
                     if ((damageAtRange >= 200) && (!myHex.containsTerrain(Terrains.WATER))) {
+                        myHex.destroyRoad(game.getBoard()::getHex);
+                        RailRoute.destroyAll(myHex, originalLevel);
                         myHex.removeAllTerrains();
                         myHex.clearExits();
                         myHex.addTerrain(new Terrain(Terrains.ROUGH, 1));
@@ -28236,7 +28274,9 @@ public class TWGameManager extends AbstractGameManager {
 
     public void sendChangedHex(Coords coords, int boardId) {
         if (game.hasBoardLocation(coords, boardId)) {
-            send(createHexChangePacket(coords, boardId, game.getHex(coords, boardId)));
+            var changed = blastHexChanges.get();
+            if (changed != null) { changed.put(BoardLocation.of(coords, boardId), game.getHex(coords, boardId)); }
+            else { send(createHexChangePacket(coords, boardId, game.getHex(coords, boardId))); }
         } else {
             IGame.LOGGER.error("Trying to send a hex update for a non-existent hex!");
         }

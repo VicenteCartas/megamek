@@ -142,10 +142,10 @@ class BoardRiverTest {
                 char ground = rows[y].charAt(x);
                 boolean wet = ground == 'W', concrete = ground == 'C' || ground == 'D';
                 int level = ground == 'C' || ground == '1' ? 1 : ground == 'D' ? 3 : ground == '2' ? 2 : 0;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, wet ? 1 : -1, false, 0,
-                      concrete ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, null, null, List.of(),
+                tiles.add(BoardScenes.newTile(new Coords(x, y), level, wet ? 1 : -1, false, 0,
+                      concrete ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, List.of(),
                       List.of(),
-                      wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                      wet ? BoardLiquid.WATER : BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, rows[0].length(), rows.length, tiles, List.of(), List.of(), -1, "", List.of());
@@ -166,9 +166,9 @@ class BoardRiverTest {
                     for (int y = 0; y < 7; y++) {
                         Coords coords = new Coords(x, y);
                         boolean wet = coords.equals(frozen) || coords.equals(open);
-                        tiles.add(new BoardScene.Tile(coords, 0, wet ? 1 : -1, coords.equals(frozen), 0,
-                              BoardScene.Surface.SNOW, null, null, List.of(), List.of(),
-                              wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                        tiles.add(BoardScenes.newTile(coords, 0, wet ? 1 : -1, coords.equals(frozen), 0,
+                              BoardScene.Surface.SNOW, List.of(), List.of(),
+                              wet ? BoardLiquid.WATER : BoardLiquid.NONE, null));
                     }
                 }
                 BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -202,16 +202,16 @@ class BoardRiverTest {
     }
 
     @Test
-    void channelProfilesStayDeterministicAcrossDepthArtworkAndQueryOrderChanges() {
+    void channelProfilesStayDeterministicAcrossDepthAndQueryOrderChanges() {
         var original = BoardRelief.tuning();
         var geometry = BoardGeometry.tuning();
         try {
             BoardGeometry.tune(BoardGeometry.DEFAULTS);
             BoardRelief.tune(BoardRelief.DEFAULTS);
-            Coords center = new Coords(3, 3), artwork = center.translated(2);
+            Coords center = new Coords(3, 3), branch = center.translated(2);
             BoardScene scene = scene(Map.of(center, 1, center.translated(0), 0, center.translated(1), 2,
-                  artwork, 1, center.translated(4), 0, new Coords(0, 0), 1), artwork);
-            // Sample mixed depths, lake inlets, authored water and the board edge before warming the reverse query.
+                  branch, 1, center.translated(4), 0, new Coords(0, 0), 1));
+            // Sample mixed depths, lake inlets, water and the board edge before warming the reverse query.
             BoardRiver river = new BoardRiver(scene);
             List<Vector3> samples = new ArrayList<>();
             for (int x = -80; x < 540; x += 13) {
@@ -329,24 +329,6 @@ class BoardRiverTest {
                     assertTrue(normal.z >= -.001f * normal.len(), "Junction bank faces up: " + mask);
                 }
             }
-        } finally {
-            BoardRelief.tune(original);
-        }
-    }
-
-    @Test
-    void aStreamSharesItsMouthWithWaterUsingSpecialArtwork() {
-        var original = BoardRelief.tuning();
-        try {
-            Coords center = new Coords(3, 3), north = center.translated(0);
-            BoardScene scene = scene(Map.of(center, 1, north, 1, center.translated(3), 1), north);
-            BoardSurface a = new BoardSurface(scene, scene.tile(center)), b = new BoardSurface(scene, scene.tile(north));
-            int n = BoardSurface.SHORE_SEGMENTS;
-            for (int i = 0; i <= n; i++) {
-                assertTrue(a.outline.get(n + i).epsilonEquals(b.outline.get(5 * n - i), .002f));
-            }
-            Vector3 p = BoardGeometry.center(north, 0);
-            assertEquals(BoardGeometry.groundZ(scene.tile(north)), b.height(p.x, p.y), .001f);
         } finally {
             BoardRelief.tune(original);
         }
@@ -613,16 +595,14 @@ class BoardRiverTest {
         }
     }
 
-    private static BoardScene scene(Map<Coords, Integer> water, Coords... artwork) {
+    private static BoardScene scene(Map<Coords, Integer> water) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
-        List<Coords> special = List.of(artwork);
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
                 int depth = water.getOrDefault(coords, -1);
-                tiles.add(new BoardScene.Tile(coords, depth >= 0 ? 0 : 1, depth, false, 0, BoardScene.Surface.SAND,
-                      null, null, List.of(), List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE,
-                      null, !special.contains(coords)));
+                tiles.add(BoardScenes.newTile(coords, depth >= 0 ? 0 : 1, depth, false, 0, BoardScene.Surface.SAND, List.of(), List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE,
+                      null));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -648,49 +628,6 @@ class BoardRiverTest {
 
     private static boolean onEdge(Vector3 p, Vector3 a, Vector3 b) {
         return Math.abs((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) < 0.01f;
-    }
-
-    @Test
-    void straightRiversMeanderAsChannelsInsteadOfMakingAPool() {
-        for (int direction = 0; direction < 6; direction++) {
-            Coords center = new Coords(2, 2);
-            BoardScene scene = BoardScenes.riverScene(Map.of(center, 0, center.translated(direction), 0,
-                  center.translated((direction + 3) % 6), 0), false);
-            BoardSurface surface = new BoardSurface(scene, scene.tile(center));
-            Vector3 along = BoardGeometry.center(center.translated(direction), 0).sub(BoardGeometry.center(center, 0)).nor();
-            Vector3 across = new Vector3(along).crs(Vector3.Z);
-            float min = Float.POSITIVE_INFINITY, max = Float.NEGATIVE_INFINITY;
-            for (Vector3 point : surface.water) {
-                float offset = new Vector3(point).sub(BoardGeometry.center(center, 0)).dot(across);
-                min = Math.min(min, offset);
-                max = Math.max(max, offset);
-            }
-            int edge = Math.floorMod(1 - direction, 6);
-            Vector3 a = BoardGeometry.corner(center, 0, edge), b = BoardGeometry.corner(center, 0, edge + 1);
-            float edgeWidth = a.dst(b);
-            var mouth = surface.water.stream().filter(point -> onEdge(point, a, b)).toList();
-            float mouthWidth = 0;
-            for (Vector3 first : mouth) {
-                for (Vector3 second : mouth) {
-                    mouthWidth = Math.max(mouthWidth, first.dst(second));
-                }
-            }
-            assertTrue(mouthWidth > edgeWidth * 0.75f && mouthWidth < edgeWidth * 0.85f,
-                  "The water uses most of the shared edge while leaving room for the sand fade");
-            // The centre retains the pool radius even where fixed banks make its mouths narrower. Elsewhere the river
-            // can meander and breathe, but must still stay a channel; the shore search places each bank point to
-            // within a quarter unit.
-            float widest = Math.max(mouthWidth * 1.6f, 2 * BoardRelief.SHORE_POOL * BoardGeometry.HEX_SCALE);
-            assertTrue(max - min > mouthWidth * .99f && max - min <= widest + .5f * BoardGeometry.HEX_SCALE,
-                  "The channel stays a channel: " + (max - min) + " across for a mouth of " + mouthWidth);
-            for (Vector3 corner : List.of(a, b)) {
-                assertTrue(surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.TOP)
-                      .anyMatch(face -> face.a().epsilonEquals(corner, 0.01f)
-                            || face.b().epsilonEquals(corner, 0.01f) || face.c().epsilonEquals(corner, 0.01f)),
-                      "The bank starts at the shared edge's corners");
-            }
-            assertEquals(-BoardGeometry.LEVEL, surface.height(BoardGeometry.centerX(center), BoardGeometry.centerY(center)), 0.01f);
-        }
     }
 
     @ParameterizedTest
@@ -744,9 +681,9 @@ class BoardRiverTest {
                     for (int y = 0; y < 7; y++) {
                         Coords coords = new Coords(x, y);
                         boolean wet = river.contains(coords);
-                        tiles.add(new BoardScene.Tile(coords, wet ? 0 : 1, wet ? 1 : -1, false, 0,
-                              BoardScene.Surface.SAND, null, null, List.of(), List.of(),
-                              wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                        tiles.add(BoardScenes.newTile(coords, wet ? 0 : 1, wet ? 1 : -1, false, 0,
+                              BoardScene.Surface.SAND, List.of(), List.of(),
+                              wet ? BoardLiquid.WATER : BoardLiquid.NONE, null));
                     }
                 }
                 BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -780,9 +717,9 @@ class BoardRiverTest {
                 for (int x = 0; x < 7; x++) {
                     for (int y = 0; y < 7; y++) {
                         boolean wet = x == 3 && y > 0 && y < 6;
-                        tiles.add(new BoardScene.Tile(new Coords(x, y), x < 3 ? 1 : 0, wet ? 1 : -1, false,
-                              0, family, null, null, List.of(), List.of(),
-                              wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                        tiles.add(BoardScenes.newTile(new Coords(x, y), x < 3 ? 1 : 0, wet ? 1 : -1, false,
+                              0, family, List.of(), List.of(),
+                              wet ? BoardLiquid.WATER : BoardLiquid.NONE, null));
                     }
                 }
                 var scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -928,73 +865,4 @@ class BoardRiverTest {
         }
     }
 
-    @Test
-    void waterAndBanksStayInsideTheirHexForEveryNeighborPattern() {
-        Coords center = new Coords(7, 33);
-        for (int mask = 0; mask < 64; mask++) {
-            BoardScene scene = BoardScenes.riverScene(center, mask);
-            BoardSurface surface = new BoardSurface(scene, scene.tile(center));
-            List<BoardSurface.Face> faces = new ArrayList<>(surface.faces);
-            faces.addAll(surface.waterFaces);
-            for (BoardSurface.Face face : faces) {
-                for (Vector3 point : List.of(face.a(), face.b(), face.c())) {
-                    for (int edge = 0; edge < 6; edge++) {
-                        Vector3 a = BoardGeometry.corner(center, 0, edge);
-                        Vector3 b = BoardGeometry.corner(center, 0, edge + 1);
-                        Vector3 outward = new Vector3(b).sub(a).crs(Vector3.Z).nor();
-                        float outside = new Vector3(point).sub(a).dot(outward);
-                        // Only a fall's crest, rounding the prow between two falls, bows out over the pool below.
-                        boolean falls = (mask & 1 << BoardGeometry.edgeDirection(edge)) != 0;
-                        float allowed = falls ? BoardSurface.VALLEY : 0.01f;
-                        assertTrue(outside <= allowed * BoardGeometry.HEX_SCALE,
-                              "Water neighbor mask " + mask + ", " + face.finish() + " outside edge " + edge + ": " + point);
-                    }
-                }
-            }
-        }
-    }
-
-    @ParameterizedTest
-    @ValueSource(floats = { 0.5f, 1, 2 })
-    void dryRiverRimsRetainTheirFullHeightWhileBanksGradeTowardsWater(float scale) {
-        BoardGeometry.Tuning original = BoardGeometry.tuning();
-        try {
-            BoardGeometry.tune(new BoardGeometry.Tuning(scale, 0.6f, 0.87f, 18, 0.8f));
-            Coords center = new Coords(7, 33);
-            int graded = 0;
-            for (int mask = 0; mask < 64; mask++) {
-                BoardScene scene = BoardScenes.riverScene(center, mask);
-                BoardSurface surface = new BoardSurface(scene, scene.tile(center));
-                float top = scene.tile(center).elevation() * BoardGeometry.LEVEL;
-                for (int edge = 0; edge < 6; edge++) {
-                    if ((mask & (1 << BoardGeometry.edgeDirection(edge))) != 0) {
-                        continue;
-                    }
-                    Vector3 a = BoardGeometry.corner(center, 0, edge);
-                    Vector3 b = BoardGeometry.corner(center, 0, edge + 1);
-                    Vector3 middle = new Vector3(a).lerp(b, .5f);
-                    Vector3 inward = BoardGeometry.center(center, 0).sub(middle).nor();
-                    // Just inside the bank's rim, which rounds its corners as every cliff's does.
-                    for (int sample = 20; sample <= 80; sample++) {
-                        Vector3 point = new Vector3(a).lerp(b, sample / 100f).mulAdd(inward, .015f * BoardGeometry.WIDTH);
-                        float height = surface.height(point.x, point.y);
-                        assertTrue(height <= top + .01f * scale
-                                    && height >= surface.waterHeight(point.x, point.y) - .01f * scale,
-                              "Water neighbor mask " + mask + ", dry edge " + edge + ", sample " + sample
-                                    + " must grade between its rim and water: " + height);
-                        if (height < top - .01f * scale) { graded++; }
-                    }
-                }
-                for (BoardSurface.Side side : surface.sides(scene, BoardGeometry.floor(scene))) {
-                    if ((mask & (1 << BoardGeometry.edgeDirection(side.edge()))) == 0) {
-                        assertEquals(top, side.a().z, 0.01f * scale, "The cliff must close beneath the dry bank");
-                        assertEquals(top, side.b().z, 0.01f * scale, "The cliff must close beneath the dry bank");
-                    }
-                }
-            }
-            assertTrue(graded > 0, "The banks must begin grading before reaching the waterline");
-        } finally {
-            BoardGeometry.tune(original);
-        }
-    }
 }

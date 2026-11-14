@@ -138,8 +138,8 @@ class GpuElevationGradeSmokeTest {
                 var hex = new Hex(level);
                 if (coords.equals(CENTER)) { hex.addTerrain(new Terrain(Terrains.ROUGH, 1)); }
                 var base = BoardScenes.tile(coords, BoardScene.Surface.GRASS, level, -1, 0);
-                tiles.add(new BoardScene.Tile(coords, level, -1, false, 0, base.surface(), null, null,
-                      BoardFeatures.capture(hex, coords, Map.of()), List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(coords, level, -1, false, 0, base.surface(),
+                      BoardFeatures.capture(hex, coords, Map.of()), List.of(), BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());

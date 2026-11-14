@@ -21,8 +21,7 @@ class GpuLavaLightingTest {
         var lights = new GpuLavaLighting(null);
         var fixture = new GpuLavaLighting.Source(0, new Vector3(0, 0, 27), 1.8f, new Vector3(.8f, .9f, 1), 40);
         lights.setBuildings(List.of(fixture));
-        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.ROCK, null,
-              null, List.of(), List.of(), BoardLiquid.NONE);
+        var tile = BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.ROCK, List.of(), List.of(), BoardLiquid.NONE);
         var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
         lights.update(scene, false, 0);
         assertEquals(List.of(), GpuTestSupport.field(lights, "binned"), "Daylight switches floodlights off");
@@ -46,8 +45,7 @@ class GpuLavaLightingTest {
         var point = new GpuLavaLighting.Source(-1, new Vector3(4 * hex, -2 * hex, 5), .8f, new Vector3(1, 1, 1), size);
         var lights = new GpuLavaLighting(null);
         lights.setEffects(List.of(beam, point));
-        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.ROCK, null,
-              null, List.of(), List.of(), BoardLiquid.NONE);
+        var tile = BoardScenes.newTile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.ROCK, List.of(), List.of(), BoardLiquid.NONE);
         lights.update(new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of()));
 
         float[] list = (float[]) GpuTestSupport.field(lights, "list");

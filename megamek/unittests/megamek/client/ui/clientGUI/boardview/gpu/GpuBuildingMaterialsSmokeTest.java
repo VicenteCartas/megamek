@@ -179,7 +179,6 @@ class GpuBuildingMaterialsSmokeTest {
             for (var tile : scene.tiles()) {
                 for (var feature : tile.features()) {
                     if (!feature.asset().startsWith("buildings/")) { continue; }
-                    assertTrue(tile.detailedGround(), "Structures must not replace the native ground: " + tile.coords());
                     assertEquals(BoardScene.Surface.GRASS, tile.surface());
                     if (BoardIndustrial.supports(feature)) {
                         // A generator key is not a standalone GLB: inspect the actual generated plant.

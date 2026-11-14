@@ -195,7 +195,8 @@ class GpuTerrainPagesSmokeTest {
         }
         batch.begin(camera.camera);
         // No wall clock: a settled page merges within the frame.
-        pages.render(batch, null, Long.MAX_VALUE, materials);
+        pages.advance(Long.MAX_VALUE);
+        pages.render(batch, null, materials);
         batch.end();
     }
 

@@ -247,7 +247,6 @@ class BoardWallTest {
         assertEquals("buildings/wall-37", wall.asset());
         assertEquals(BoardScene.FeatureKind.BUILDING, wall.kind());
         assertEquals(3, wall.height());
-        assertTrue(BoardFeatures.detailedGround(hex, models));
     }
 
     @Test
@@ -263,7 +262,6 @@ class BoardWallTest {
         assertEquals(7, feature.height());
         assertTrue(BoardWall.building(BoardScene.Cover.capture(hex, null, CENTER), feature),
               "A supplied model on a wall must not introduce occupiable storeys or hollow-building cutaways");
-        assertTrue(BoardFeatures.detailedGround(hex, models));
     }
 
     static BoardScene scene(Map<Coords, Integer> walls, int height, int elevation) {
@@ -271,8 +269,8 @@ class BoardWallTest {
             var tile = BoardScenes.tile(coords, BoardScene.Surface.GRASS, elevation, -1, 0);
             var features = walls.containsKey(coords) ? List.of(new BoardScene.Feature(
                   "buildings/wall-" + walls.get(coords), 0, 0, 0, 1, height, 0, BoardScene.FeatureKind.BUILDING)) : List.<BoardScene.Feature>of();
-            return new BoardScene.Tile(coords, elevation, -1, false, 0, tile.surface(), null, null, features, List.of(),
-                  BoardLiquid.NONE, null, true);
+            return BoardScenes.newTile(coords, elevation, -1, false, 0, tile.surface(), features, List.of(),
+                  BoardLiquid.NONE, null);
         });
     }
 

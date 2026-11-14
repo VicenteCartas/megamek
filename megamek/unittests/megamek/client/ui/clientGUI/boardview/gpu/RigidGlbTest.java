@@ -878,9 +878,10 @@ class RigidGlbTest {
             }
         }
         assertTrue(tinted, "The bare crown is tinted");
-        // The distant cards: everything they show is snow, so all of it takes light as a hard surface (green 1).
+        // The impostor: everything it shows is snow, so all of it takes light as a hard surface (green 1). Green is the
+        // solid share measured over the impostor's rendered texels (prepare_tree_lods.py), a hair under 1 at their edges.
         for (int vertex = 0; vertex < snow.get(3).meshes.first().vertices.length / RigidGlb.STRIDE; vertex++) {
-            assertEquals(1, snow.get(3).meshes.first().vertices[vertex * RigidGlb.STRIDE + 7], 1e-4f);
+            assertEquals(1, snow.get(3).meshes.first().vertices[vertex * RigidGlb.STRIDE + 7], 1e-3f);
         }
     }
 }

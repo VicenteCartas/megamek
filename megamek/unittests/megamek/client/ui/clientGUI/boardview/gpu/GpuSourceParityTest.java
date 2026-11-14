@@ -99,7 +99,6 @@ class GpuSourceParityTest {
         // Batch 10: the helipad art is its pad decal and landing light, in both views; no sprite is painted.
         assertTrue(tile(game, gameTiles, HELIPAD).features().stream().anyMatch(f -> f.decoration() != null
               && f.decoration().asset().equals("decal/landing-pads/heli-pad")), "The helipad is its decal");
-        assertEquals(null, tile(game, gameTiles, HELIPAD).tilesetDecals(), "The Tactical View paints no helipad sprite");
         assertEquals("gravel", tile(game, gameTiles, STYLED_ROAD).appearance().get("road").material(),
               "The authored road material survives the game's tactical repaint");
     }

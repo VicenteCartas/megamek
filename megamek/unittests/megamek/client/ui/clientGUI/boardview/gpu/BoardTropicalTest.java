@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -38,8 +37,6 @@ class BoardTropicalTest {
             if (!"tropical".equals(hex.getTheme())) { continue; }
             tropical++;
             assertEquals(BoardScene.Surface.TROPICAL, tile.surface());
-            assertTrue(tile.detailedGround(), "Native terrain at " + tile.coords());
-            assertNull(tile.decals(), "Legacy transition artwork cannot hide the tropical material");
             assertEquals(.5f, tile.groundCover().tropical(), .00001f);
             assertEquals(.5f, tile.groundCover().desert(), .00001f);
             assertEquals(0, tile.groundCover().grass());

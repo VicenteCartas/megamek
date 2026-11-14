@@ -12,7 +12,7 @@ final class BoardBiome {
     private BoardBiome() { }
 
     static BoardScene.Biome kind(BoardScene.Tile tile) {
-        return tile != null && tile.detailedGround() && !tile.frozen() && !tile.liquid().present()
+        return tile != null && !tile.frozen() && !tile.liquid().present()
               && !tile.slab()
               ? tile.biome() : BoardScene.Biome.NONE;
     }
@@ -21,7 +21,7 @@ final class BoardBiome {
     static BoardScene.Biome plantKind(BoardScene scene, BoardScene.Tile tile) {
         var own = kind(tile);
         if (own != BoardScene.Biome.NONE) { return own; }
-        if (tile == null || !tile.detailedGround() || tile.frozen() || tile.liquid().volcanic()
+        if (tile == null || tile.frozen() || tile.liquid().volcanic()
               || tile.surface() == BoardScene.Surface.CONCRETE
               || tile.slab()) {
             return BoardScene.Biome.NONE;
@@ -41,27 +41,6 @@ final class BoardBiome {
         float py = y + 1.3f * (BoardRelief.noise(x / 4, y / 4 - 23) - .5f);
         return .55f * BoardRelief.noise(px / 5.7f, py / 5.7f)
               + .30f * BoardRelief.noise(px / 2 + 19, py / 2 - 7) + .15f * BoardRelief.noise(px / .65f, py / .65f);
-    }
-
-    /** Whether tundra over this ground is earth's: its carpets, its sward and its tussocks. Fungal mats and mineral crust grow none. */
-    static boolean earthTundra(BoardScene.Surface surface) {
-        return switch (surface) {
-            case FUNGUS, MARS, LUNAR, VOLCANO, CONCRETE -> false;
-            default -> true;
-        };
-    }
-
-    /**
-     * Earth tundra's grass sward at a point in metres, 0 to 1: it covers most of the carpet and leaves openings of
-     * lichen, moss and gravel some metres across. Same field as tundraSward in terrain-tundra.glsl, where the ground
-     * takes the sward's colour under the roots this plants.
-     */
-    static float sward(float x, float y) {
-        float px = x + 6 * (BoardRelief.noise(x / 19 + 7, y / 19 - 3) - .5f);
-        float py = y + 6 * (BoardRelief.noise(x / 19 - 13, y / 19 + 5) - .5f);
-        float field = .65f * BoardRelief.noise(px / 13 + 3, py / 13 + 11)
-              + .35f * BoardRelief.noise(px / 4.1f - 17, py / 4.1f + 23);
-        return BoardRelief.smooth((field - .18f) / .32f);
     }
 
     /** How fully ground at height {@code z} belongs to a biome floor at {@code floor}; banks and steps fade it out. */
@@ -172,4 +151,5 @@ final class BoardBiome {
             return result;
         }
     }
+
 }

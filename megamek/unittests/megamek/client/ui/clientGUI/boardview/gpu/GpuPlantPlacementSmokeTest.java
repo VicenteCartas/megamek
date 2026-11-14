@@ -40,7 +40,7 @@ class GpuPlantPlacementSmokeTest {
                 try {
                     var seed = new Coords(19, 14);
                     var hex = new Hex(0, "woods:3;foliage_elev:2", "mars", seed);
-                    var plants = BoardFeatures.capture(hex, seed, Map.of(), Set.of(), c -> null,
+                    var plants = BoardFeatures.capture(hex, seed, Map.of(), c -> null,
                           TilesetScenery.Scenery.EMPTY, true).stream()
                           .filter(f -> f.kind() == BoardScene.FeatureKind.TREE).toList();
                     assertTrue(plants.stream().anyMatch(p -> p.stretch().x() < 1), "Exercise reduced-width colonies");
@@ -48,8 +48,7 @@ class GpuPlantPlacementSmokeTest {
                     for (int x = 0; x < 7; x++) {
                         for (int y = 0; y < 7; y++) {
                             var at = new Coords(x, y);
-                            tiles.add(new BoardScene.Tile(at, 0, -1, false, 0, BoardScene.Surface.MARS,
-                                  null, null, at.equals(AT) ? plants : List.of(), List.of(), BoardLiquid.NONE, null, true));
+                            tiles.add(BoardScenes.newTile(at, 0, -1, false, 0, BoardScene.Surface.MARS, at.equals(AT) ? plants : List.of(), List.of(), BoardLiquid.NONE, null));
                         }
                     }
                     var scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -153,10 +152,9 @@ class GpuPlantPlacementSmokeTest {
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 var at = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(at, at.equals(AT) ? elevation : 0, -1, false, 0,
-                      asset.startsWith("fungus/") ? BoardScene.Surface.FUNGUS : BoardScene.Surface.GRASS,
-                      null, null, at.equals(AT) ? List.of(plant) : List.of(),
-                      List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(at, at.equals(AT) ? elevation : 0, -1, false, 0,
+                      asset.startsWith("fungus/") ? BoardScene.Surface.FUNGUS : BoardScene.Surface.GRASS, at.equals(AT) ? List.of(plant) : List.of(),
+                      List.of(), BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

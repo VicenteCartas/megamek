@@ -926,7 +926,7 @@ final class GpuShaderWarmup {
                 if (current == Step.EFFECTS) {
                     ready = effects.linked();
                 } else {
-                    terrain.refine(null, true);
+                    terrain.refine(null);
                     ready = !terrain.busy() && !terrain.familiesPending();
                 }
                 if (ready) {

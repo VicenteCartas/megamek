@@ -163,25 +163,6 @@ class GpuDecalReviewSmokeTest {
         return board;
     }
 
-    /** The installed blades of every painted hex (placed decals and untranslated paint) stay off the paint. */
-    private static void noBladeThroughPaint(String view, GpuTerrain terrain, BoardScene scene) {
-        var index = BoardDecals.index(scene);
-        int hexes = 0, roots = 0;
-        for (var tile : scene.tiles()) {
-            var paint = BoardDecals.Opacity.of(tile, index.getOrDefault(tile.coords(), List.of()));
-            var plants = terrain.planted(tile.coords());
-            if (paint == null || plants == null || plants.grass() == null) { continue; }
-            hexes++;
-            for (int i = 0; i < plants.grass().size; i += 4) {
-                roots++;
-                assertTrue(paint.at(plants.grass().get(i), plants.grass().get(i + 1)) < .5f, view + ": a blade through paint at "
-                      + tile.coords());
-            }
-        }
-        System.out.printf("DECALS %s: %d painted grass hexes, %d blades, none through paint%n", view, hexes, roots);
-        assertTrue(hexes > 0, view + " plants grass on painted hexes");
-    }
-
     /** The full mip chain of an RGBA8 texture, in bytes. */
     private static long mipBytes(int width, int height) {
         long bytes = 0;
@@ -333,7 +314,6 @@ class GpuDecalReviewSmokeTest {
                                 }
                                 GpuReviewFrame.save(new File(OUTPUT, entry.getKey() + "-" + shot.name() + ".png"));
                             }
-                            if (entry.getKey().startsWith("grass")) { noBladeThroughPaint(entry.getKey(), terrain, scene); }
                         } finally { terrain.dispose(); }
                     }
                     System.out.printf("DECALS 39 emblem decals add %d draw calls%n", draws.get("emblems") - draws.get("emblems-bare"));

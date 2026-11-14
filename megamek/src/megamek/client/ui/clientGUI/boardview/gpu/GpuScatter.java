@@ -24,14 +24,6 @@ final class GpuScatter {
 
     private GpuScatter() { }
 
-    /** Decorative vegetation only; rocks and the game's woods/jungle are not scorch presentation. */
-    static boolean vegetation(BoardScene.Feature feature) {
-        return feature.kind() == BoardScene.FeatureKind.SCATTER && switch (feature.asset()) {
-            case "scatter-grass", "scatter-dry-grass", "scatter-plant" -> true;
-            default -> false;
-        };
-    }
-
     /** The atlas's materials, read by their owner: one definition per swatch, null where the board data has none. */
     static GodotMaterial[] materials(GpuAssets assets) {
         var definitions = new GodotMaterial[MATERIALS.length];
@@ -128,7 +120,7 @@ final class GpuScatter {
               } : 3;
         BoardShape shape;
         switch (feature.asset()) {
-            case "scatter-grass", "scatter-dry-grass" -> {
+            case "scatter-dry-grass" -> {
                 shape = BoardScatter.shape("grass");
             }
             case "scatter-plant" -> {
@@ -166,10 +158,6 @@ final class GpuScatter {
     private static Color color(BoardScene.Surface surface, String asset) {
         if (asset.equals("scatter-dry-grass")) {
             return GpuColor.linear(.88f, .71f, .24f);
-        }
-        if (asset.equals("scatter-grass")) {
-            return surface == BoardScene.Surface.SAND ? GpuColor.linear(.28f, .60f, .20f)
-                  : GpuColor.linear(.39f, .56f, .20f);
         }
         // Stone maps supply their final pigment; white is the neutral texture multiplier.
         return new Color(Color.WHITE);

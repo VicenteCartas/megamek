@@ -33,18 +33,15 @@
 
 package megamek.server;
 
-import java.io.File;
-import java.nio.file.Paths;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
-import java.util.stream.Collectors;
 
-import jakarta.annotation.Nullable;
 import megamek.MMConstants;
-import megamek.codeUtilities.StringUtility;
 import megamek.common.options.OptionsConstants;
 import megamek.common.preference.PreferenceManager;
 import megamek.logging.MMLogger;
@@ -59,67 +56,43 @@ public record AutosaveService(AbstractGameManager gameManager) {
               .intOption(OptionsConstants.BASE_MAX_NUMBER_ROUND_SAVES);
         if (maxNumberAutoSaves > 0) {
             try {
-                final String fileName = getAutosaveFilename();
-                if (!StringUtility.isNullOrBlank(fileName)) {
-                    gameManager.saveGame(fileName,
-                          gameManager.getGame().getOptions().booleanOption(OptionsConstants.BASE_AUTOSAVE_MSG));
-                } else {
-                    LOGGER.error("Unable to perform an autosave because of a null or empty file name");
-                }
+                String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern(
+                      PreferenceManager.getClientPreferences().getStampFormat()));
+                String fileName = String.format(FILENAME_FORMAT, gameManager.getGame().getCurrentRound(), stamp);
+                gameManager.saveHandler.saveRollingGame(fileName, maxNumberAutoSaves,
+                      gameManager.getGame().getOptions().booleanOption(OptionsConstants.BASE_AUTOSAVE_MSG));
             } catch (Exception ex) {
                 LOGGER.error("", ex);
             }
         }
     }
 
-    private @Nullable String getAutosaveFilename() {
-        // Get all autosave files in ascending order of date creation
-        final String savesDirectoryPath = MMConstants.SAVEGAME_DIR;
-        final File folder = new File(savesDirectoryPath);
-        final File[] files = folder.listFiles();
-        if (files != null) {
-            final List<File> autosaveFiles = Arrays.stream(files)
-                  .filter(f -> f.getName().startsWith("Round-"))
-                  .sorted(Comparator.comparing(File::lastModified))
-                  .collect(Collectors.toList());
-
-            // Delete older autosave files if needed
-            final int maxNumberAutoSaves = gameManager.getGame().getOptions()
-                  .intOption(OptionsConstants.BASE_MAX_NUMBER_ROUND_SAVES);
-
-            int index = 0;
-            while ((autosaveFiles.size() >= maxNumberAutoSaves) && (autosaveFiles.size() > index)) {
-                if (autosaveFiles.get(index).delete()) {
-                    autosaveFiles.remove(index);
-                } else {
-                    LOGGER.error("Unable to delete file {}", autosaveFiles.get(index).getName());
-                    index++;
-                }
-            }
-
-            // Find a unique name for this autosave
-            String fileName = null;
-
-            boolean repeatedName = true;
-            String localDateTime = LocalDateTime.now().format(DateTimeFormatter.ofPattern(
-                  PreferenceManager.getClientPreferences().getStampFormat()));
-            while (repeatedName) {
-                fileName = String.format(
-                      FILENAME_FORMAT,
-                      gameManager.getGame().getCurrentRound(),
-                      localDateTime);
-
-                repeatedName = false;
-                for (final File file : autosaveFiles) {
-                    if (file.getName().compareToIgnoreCase(fileName) == 0) {
-                        repeatedName = true;
-                        break;
-                    }
-                }
-            }
-            // Don't prepend the save dir as we're going to let saveGame handle that.
-            return Paths.get(fileName).toString();
+    /** Runs on the save writer, so earlier queued saves already exist when resolving timestamp collisions. */
+    static Path uniquePath(Path requested) {
+        Path candidate = requested;
+        String name = requested.getFileName().toString();
+        String stem = name.substring(0, name.length() - MMConstants.SAVE_FILE_GZ_EXT.length());
+        for (int suffix = 1; Files.exists(candidate); suffix++) {
+            candidate = requested.resolveSibling(stem + "-" + suffix + MMConstants.SAVE_FILE_GZ_EXT);
         }
-        return null;
+        return candidate;
+    }
+
+    /** Only remove old recovery points after the replacement save has been committed successfully. */
+    static void prune(Path newest, int maximumSaves) {
+        try (var entries = Files.list(newest.getParent())) {
+            List<Path> older = entries.filter(Files::isRegularFile)
+                  .filter(path -> path.getFileName().toString().startsWith("Round-") && !path.equals(newest))
+                  .sorted(Comparator.comparingLong(path -> path.toFile().lastModified())).toList();
+            for (int i = 0; i <= older.size() - maximumSaves; i++) {
+                try {
+                    Files.delete(older.get(i));
+                } catch (IOException failure) {
+                    LOGGER.error(failure, "Unable to delete old autosave {}", older.get(i));
+                }
+            }
+        } catch (IOException failure) {
+            LOGGER.error(failure, "Unable to prune autosaves after saving {}", newest);
+        }
     }
 }

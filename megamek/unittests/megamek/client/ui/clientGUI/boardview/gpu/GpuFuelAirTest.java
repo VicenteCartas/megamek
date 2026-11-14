@@ -94,7 +94,7 @@ class GpuFuelAirTest {
         var attacker = UnitPlaybackFixture.unit(1, 0);
         var target = UnitPlaybackFixture.unit(2, 4);
         var before = UnitPlaybackFixture.scene(attacker, target);
-        var tile = new BoardScene.Tile(new Coords(0, 0), 3, -1, false, 0, null, null, List.of(), List.of());
+        var tile = BoardScenes.newTile(new Coords(0, 0), 3, -1, false, 0, null, List.of(), List.of());
         var after = new BoardScene(0, 1, 1, List.of(tile), List.of(attacker, target), List.of(), -1, "OFFBOARD",
               List.of());
         var result = new ResolvedAttack(UUID.randomUUID(), ResolvedAttack.Kind.SHOT,

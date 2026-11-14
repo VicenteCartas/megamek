@@ -4,45 +4,48 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
-import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.IntArray;
 
 /**
- * Instanced mesh that can draw part of its uploaded instances: a prefix, or several ranges. Ground cover and trees
- * keep a whole chunk's, or the whole board's, instances uploaded and select per frame, so changing density or view
- * never uploads again. Instance attributes must be disabled before unbinding the VAO in a core GL context.
+ * Instanced mesh that can draw a prefix of its uploaded instances, or runs of instances that place themselves (ground
+ * cover). Instance attributes must be disabled before unbinding the VAO in a core GL context. It also names what moves a
+ * falling piece in its record of the GPU-driven path (#piece, GpuIndirectInstances).
  */
 final class GpuInstancedMesh extends Mesh {
-    // Instances to draw, or -1 for all uploaded ones; ignored while ranges are set.
+    // Instances to draw, or -1 for all uploaded ones.
     int drawInstances = -1;
-    // (first instance, count) pairs to draw instead, with one bind for all of them.
-    private IntArray ranges;
     /**
-     * Every instance is a mirror image, whose reflection reverses the winding of its triangles: draws take the
-     * clockwise winding as the front, so each pass's culling keeps the faces it keeps for the model unmirrored.
+     * Runs of instances of a mesh that uploads none: each instance places itself by its index in its run
+     * (gl_InstanceID), as ground cover's blades do (terrain-grass.glsl). Per run, the three floats of the vertex stage's
+     * uniform named here, and its instances. Null for every other mesh.
      */
-    boolean mirrored;
+    private String runUniform;
+    private FloatArray runValues;
+    private IntArray runInstances;
     /**
-     * What moves the batch's instances (tree-instances.glsl): for a kit's falling pieces (GpuDestruction) the centre and
-     * half size of their node's box in the model's frame, about which each turns, then {@link #PIECES}; for trees zeros,
-     * then {@link #FELLED} or {@link #STANDING}. Null for every other batch, which nothing moves.
+     * What moves an instance of the GPU-driven path (tree-instances.glsl), the last of its piece's floats ({@link #piece}):
+     * a kit's falling piece (GpuDestruction) turns about the centre of its node's box, rubble rises, a tree falls or
+     * stands.
      */
-    float[] piece;
     static final float PIECES = 1, FELLED = 2, STANDING = 3, RISES = 4;
     /** A piece's userData that makes it rubble rising out of the ground under its hex's pile ({@link #RISES}). */
     static final Object RUBBLE = new Object();
     /** The floats of {@link #piece} before a broken part's fragments' table (KitFragments). */
     static final int PIECE = 7;
-
     /**
      * A falling part's fragments ({@link KitFragments}), carried in its renderable's userData: per fragment its box's
-     * centre and its first vertex in the batch's copy of the part, then its half size and 0.
+     * centre and its first vertex in the pools' copy of the part, then its half size and its turn about the vertical,
+     * in radians.
      */
     record Fragments(float[] table) { }
 
-    /** A falling piece's {@link #piece}: its node's box, {@link #PIECES}, then its fragments' table where it broke. */
+    /**
+     * A falling piece's floats: its node's box in the model's frame (centre, half size), {@link #PIECES} or
+     * {@link #RISES}, then its fragments' table where it broke.
+     */
     static float[] piece(com.badlogic.gdx.graphics.g3d.Renderable sample) {
         var part = sample.meshPart;
         float[] table = sample.userData instanceof Fragments fragments ? fragments.table() : new float[0];
@@ -72,58 +75,36 @@ final class GpuInstancedMesh extends Mesh {
         setIndices(indexData);
     }
 
-    /** Draw only these (first instance, count) ranges of the uploaded instances. */
-    void drawRanges(IntArray ranges) { this.ranges = ranges; }
-
-    /** Back to drawing every uploaded instance, or the prefix in {@link #drawInstances}. */
-    void clearRanges() { ranges = null; }
+    /** Draw these runs of self-placed instances: {@code values} holds three floats a run for {@code uniform}. */
+    void drawRuns(String uniform, FloatArray values, IntArray instances) {
+        runUniform = uniform;
+        runValues = values;
+        runInstances = instances;
+    }
 
     @Override
     public void render(ShaderProgram shader, int primitiveType, int offset, int count, boolean autoBind) {
-        if (!mirrored) {
-            draw(shader, primitiveType, offset, count, autoBind);
+        if (runInstances != null) {
+            if (count == 0 || runInstances.size == 0) { return; }
+            if (autoBind) { bind(shader); }
+            int location = shader.fetchUniformLocation(runUniform, false);
+            for (int run = 0; run < runInstances.size; run++) {
+                Gdx.gl.glUniform3f(location, runValues.items[run * 3], runValues.items[run * 3 + 1], runValues.items[run * 3 + 2]);
+                Gdx.gl30.glDrawElementsInstanced(primitiveType, count, GL20.GL_UNSIGNED_SHORT, offset * 2,
+                      runInstances.items[run]);
+            }
+            if (autoBind) { unbind(shader); }
             return;
         }
-        Gdx.gl.glFrontFace(GL20.GL_CW);
-        try {
-            draw(shader, primitiveType, offset, count, autoBind);
-        } finally { Gdx.gl.glFrontFace(GL20.GL_CCW); }
-    }
-
-    private void draw(ShaderProgram shader, int primitiveType, int offset, int count, boolean autoBind) {
-        if (ranges == null && (drawInstances < 0 || !isInstanced)) {
+        if (drawInstances < 0 || !isInstanced) {
             super.render(shader, primitiveType, offset, count, autoBind);
             return;
         }
-        if (count == 0 || ranges == null && drawInstances == 0) { return; }
+        if (count == 0 || drawInstances == 0) { return; }
         if (autoBind) { bind(shader); }
-        if (ranges != null) {
-            // The bind left the instance buffer bound and its attributes pointed at instance 0. Pointing them at
-            // each range's first instance draws that range alone, with plain instanced draws on any OpenGL 3.3.
-            VertexAttributes attributes = instances.getAttributes();
-            int stride = attributes.vertexSize;
-            int[] locations = new int[attributes.size()];
-            for (int i = 0; i < locations.length; i++) { locations[i] = shader.getAttributeLocation(attributes.get(i).alias); }
-            for (int r = 0; r < ranges.size; r += 2) {
-                if (ranges.items[r + 1] <= 0) { continue; }
-                point(attributes, locations, ranges.items[r] * stride);
-                Gdx.gl30.glDrawElementsInstanced(primitiveType, count, GL20.GL_UNSIGNED_SHORT, offset * 2, ranges.items[r + 1]);
-            }
-            point(attributes, locations, 0);
-        } else {
-            Gdx.gl30.glDrawElementsInstanced(primitiveType, count, GL20.GL_UNSIGNED_SHORT, offset * 2,
-                  Math.min(drawInstances, instances.getNumInstances()));
-        }
+        Gdx.gl30.glDrawElementsInstanced(primitiveType, count, GL20.GL_UNSIGNED_SHORT, offset * 2,
+              Math.min(drawInstances, instances.getNumInstances()));
         if (autoBind) { unbind(shader); }
-    }
-
-    private static void point(VertexAttributes attributes, int[] locations, int bytes) {
-        for (int i = 0; i < locations.length; i++) {
-            if (locations[i] < 0) { continue; }
-            VertexAttribute attribute = attributes.get(i);
-            Gdx.gl30.glVertexAttribPointer(locations[i], attribute.numComponents, attribute.type, attribute.normalized,
-                  attributes.vertexSize, attribute.offset + bytes);
-        }
     }
 
     @Override

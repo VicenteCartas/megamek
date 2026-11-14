@@ -34,10 +34,10 @@ import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.event.GameNuclearDetonationEvent;
+import megamek.common.interfaces.IEntityRemovalConditions;
 import megamek.common.net.enums.PacketCommand;
 import megamek.common.net.packets.Packet;
 import megamek.common.options.OptionsConstants;
-import megamek.common.interfaces.IEntityRemovalConditions;
 import megamek.common.units.Terrains;
 import megamek.server.Server;
 import megamek.server.totalWarfare.TWGameManager;
@@ -88,12 +88,6 @@ class GpuNuclearCollapseSmokeTest {
         server.getGame().setBoard(board());
         server.getGame().addPlayer(0, new Player(0, "Nuclear review"));
         server.getGame().initializeRulesManager(OptionsConstants.RULES_CORE);
-        if (orbital) {
-            server.addScheduledOrbitalBombardment(new megamek.server.props.OrbitalBombardment.Builder()
-                  .x(groundZero.getX()).y(groundZero.getY()).radius(10).damage(1_000_000).build());
-        } else if (!explosion) {
-            server.addScheduledNuke(new int[] { groundZero.getX(), groundZero.getY(), 2 });
-        }
         Map<BoardLocation, megamek.common.Hex> strike, phaseEnd;
         // The rules' packets go through the server's animation capture, which names on the strike's completion what it
         // brought down; only the transport records them.
@@ -105,6 +99,13 @@ class GpuNuclearCollapseSmokeTest {
         });
         try (var servers = mockStatic(Server.class)) {
             servers.when(Server::getServerInstance).thenReturn(transport);
+            // Scheduling itself publishes incoming markers, so it needs the same transport as resolution.
+            if (orbital) {
+                server.addScheduledOrbitalBombardment(new megamek.server.props.OrbitalBombardment.Builder()
+                      .x(groundZero.getX()).y(groundZero.getY()).radius(10).damage(1_000_000).build());
+            } else if (!explosion) {
+                server.addScheduledNuke(new int[] { groundZero.getX(), groundZero.getY(), 2 });
+            }
             if (explosion) {
                 // A hit bursts the tank, outside any attack: its explosion is a capture of its own.
                 server.damageBuilding(server.getGame().getBoard().getBuildingAt(groundZero), 10_000, groundZero);
@@ -156,6 +157,13 @@ class GpuNuclearCollapseSmokeTest {
                 private String slowest = "", takeStages = "";
                 /** At the flash: the falling parts, and how many of them fall in fragments. */
                 private int[] fallParts = { 0, 0 };
+                /** The most native bytes the fragment meshes held at once. */
+                private long fragmentPeak;
+                /** Parts placed for pieces before this frame, how many falls lay taken, and those the take frames placed. */
+                private int batchesBefore, takeBatches;
+                private long takenBefore;
+                /** Each frame that took falls: its number after the flash, the falls it took and the parts it placed. */
+                private final List<String> takeFrames = new ArrayList<>();
                 private double slowestMs;
                 /** Programs linked after loading: at the flash, before this frame, and over the wave. */
                 private int linksAtFlash = -1, linksBefore;
@@ -265,6 +273,14 @@ class GpuNuclearCollapseSmokeTest {
                             if (terrain.fallTaken(at) && cause.containsKey(at)) { takes.putIfAbsent(cause.get(at).id(), frames); }
                         }
                         felledHexes = Math.max(felledHexes, terrain.felledHexes());
+                        fragmentPeak = Math.max(fragmentPeak, terrain.fragmentBytes());
+                        long taken = falls.stream().filter(terrain::fallTaken).count();
+                        if (taken > takenBefore) {
+                            takeBatches += terrain.fallBatchesBuilt() - batchesBefore;
+                            takeFrames.add((contact < 0 ? 0 : frames - contact) + ": " + (taken - takenBefore) + " falls, "
+                                  + (terrain.fallBatchesBuilt() - batchesBefore) + " batches");
+                        }
+                        takenBefore = taken;
                         if (contact >= 0 && frames > contact && frames - contact <= CAPTURES[CAPTURES.length - 1]) {
                             waveMs.add(ms);
                             if (ms > slowestMs) {
@@ -284,6 +300,7 @@ class GpuNuclearCollapseSmokeTest {
                         }
                     }
                     last = now;
+                    batchesBefore = terrain.fallBatchesBuilt();
                     linksBefore = GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading();
                     stageNames.clear();
                     stageTimes.clear();
@@ -358,8 +375,18 @@ class GpuNuclearCollapseSmokeTest {
                           + takeStages);
                     report.add("the slowest wave frame's stages over 2 ms: " + slowest);
                     report.add("hexes whose trees the strike felled: " + felledHexes);
-                    report.add("falling parts: " + fallParts[0] + ", in fragments: " + fallParts[1] + "; fragment meshes "
-                          + ((GpuTerrain) field(this, "terrain")).fragmentBytes() / 1024 + " KiB");
+                    var terrain = (GpuTerrain) field(this, "terrain");
+                    report.add("falling parts: " + fallParts[0] + ", in fragments: " + fallParts[1] + "; nodes that fell whole, "
+                          + "their cut not in: " + terrain.lateCuts() + "; fragment meshes at their most " + fragmentPeak / 1024
+                          + " KiB, at the end " + terrain.fragmentBytes() / 1024 + " KiB; parts placed for pieces "
+                          + terrain.fallBatchesBuilt() + ", in the frames that took falls " + takeBatches + " "
+                          + (takeFrames.size() > 12 ? takeFrames.subList(0, 12) + "..." : takeFrames));
+                    // A strike on the whole city going off as it is named has half a second for thousands of batches: it
+                    // builds the rest as it takes them, and reports how many.
+                    if (explosion) {
+                        assertEquals(0, takeBatches, "A frame that takes falls builds no batch: they were built as the falls were named");
+                    }
+                    assertTrue(2 * fragmentPeak <= KitFragments.Cuts.BYTES, "The fragment meshes stay within their budget");
                     report.add("programs linked from the flash on: "
                           + (GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading() - linksAtFlash));
                 }

@@ -81,7 +81,6 @@ class GpuBuildingProfileSmokeTest {
                         }
                         var control = GpuBoardTestUi.stage().getRoot().findActor("editor-building-profile");
                         GpuTerrain terrain = (GpuTerrain) field(this, GpuBattleView.class, "terrain");
-                        if (step == 0) { inspectBatches(terrain); }
                         long generation = source.takeFrame().boardGeneration();
                         if (step == 2) {
                             assertNull(control, "The shorter hex has no upper-floor choice");
@@ -143,28 +142,5 @@ class GpuBuildingProfileSmokeTest {
 
     private static void command(GpuMapSource source, Command command, long generation) throws Exception {
         SwingUtilities.invokeAndWait(() -> source.editorCommand(command, generation));
-    }
-
-    private static void inspectBatches(GpuTerrain terrain) throws Exception {
-        Object trees = field(terrain, terrain.getClass(), "trees");
-        var batches = (java.util.Map<?, ?>) field(trees, trees.getClass(), "sharedParts");
-        for (var entry : batches.entrySet()) {
-            for (Object batch : (Object[]) entry.getValue()) {
-                if (batch == null) { continue; }
-                var mesh = (com.badlogic.gdx.graphics.Mesh) field(batch, batch.getClass(), "mesh");
-                var box = mesh.calculateBoundingBox();
-                short[] indices = new short[mesh.getNumIndices()]; mesh.getIndices(indices);
-                for (short index : indices) {
-                    assertTrue(Short.toUnsignedInt(index) < mesh.getNumVertices(), "Instanced index outside its vertex buffer");
-                }
-                for (Object value : (List<?>) field(batch, batch.getClass(), "parts")) {
-                    var part = ((com.badlogic.gdx.graphics.g3d.Renderable) value).meshPart;
-                    assertTrue(part.offset + part.size <= mesh.getNumIndices(), "Instanced draw outside its index buffer");
-                }
-                if (Math.abs(box.min.x) > 60 || Math.abs(box.max.x) > 60 || Math.abs(box.min.y) > 60 || Math.abs(box.max.y) > 60) {
-                    throw new AssertionError("Corrupt instanced part " + entry.getKey() + " bounds " + box);
-                }
-            }
-        }
     }
 }

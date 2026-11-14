@@ -726,8 +726,8 @@ class GpuContextMenuSmokeTest {
     /** A scene of board 0 whose hexes are at level 0, with the firing display's called-shot command. */
     private static BoardScene called(boolean enabled) {
         BoardScene scene = mock(BoardScene.class);
-        when(scene.tile(any())).thenAnswer(call -> new BoardScene.Tile(call.getArgument(0), 0, -1, false, 0,
-              BoardScene.Surface.GRASS, null, null, List.of(), List.of()));
+        when(scene.tile(any())).thenAnswer(call -> BoardScenes.newTile(call.getArgument(0), 0, -1, false, 0,
+              BoardScene.Surface.GRASS, List.of(), List.of()));
         when(scene.commands()).thenReturn(List.of(new BoardScene.Command(FiringCommand.FIRE_CALLED.getCmd(),
               "Called shot", "", enabled, false, List.of(), () -> { })));
         return scene;

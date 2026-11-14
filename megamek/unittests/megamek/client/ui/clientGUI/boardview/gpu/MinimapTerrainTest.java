@@ -81,7 +81,7 @@ class MinimapTerrainTest {
         Coords at = new Coords(0, 0);
         Hex hex = new Hex(0, "building:1:0;bldg_cf:15;bldg_elev:1", "", at);
         hex.setAppearance(Map.of("building", new HexAppearance(null, "buildings/missing", null, null)));
-        var art = new BoardArtwork.HexImage(at, null, null, List.of(), Map.of(), null);
+        var art = new BoardArtwork.HexImage(at, List.of(), Map.of(), null);
         var tile = BoardScene.captureTile(hex, art, null, new BoardScene.PixelPool(), coords -> null);
         assertFalse(tile.building(), "The scene has no resolved building model");
         assertEquals(0xB0ADA6FF, GpuMinimap.colour(tile), "Map terrain still identifies the building");

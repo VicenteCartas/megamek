@@ -432,7 +432,8 @@ public final class BoardSceneryLayouts {
      * its bridge exits written out ({@link #bridgeExits}) and every decodable scenery token decoded
      * ({@link #convert(Board, Collection)} over all its hexes); every untyped bridge of any board gets its type; then the
      * board is native. So converting a converted board only types bridges that lack a type. Returns the issues of the
-     * decode.
+     * decode. Art without a 3D version is no issue of the decode: its token stays like the others, and the board itself
+     * reports it wherever a 3D view shows it ({@link #droppedArt}).
      */
     public static List<HexIssue> convert(Board board) {
         List<Coords> hexes = new ArrayList<>();
@@ -1478,7 +1479,12 @@ public final class BoardSceneryLayouts {
         /** A hex design draws it ({@link #designs}). */
         DESIGN,
         /** It draws nothing: the tileset's transparent wildcard, or building art no design stands for. */
-        DROP
+        DROP,
+        /**
+         * Its artwork has no 3D version ({@link #untranslated}): it is dropped like the others, and the board's 3D
+         * views tell the player ({@link #droppedArt}).
+         */
+        UNTRANSLATED
     }
 
     /** Terrains that are legacy art and nothing else: the tokens the conversion takes ({@link #takenTokens}). */
@@ -1520,9 +1526,11 @@ public final class BoardSceneryLayouts {
      *     <li>{@link Taken#DESIGN}: a hex design draws exactly its art ({@link #designs}); {@link #convert} writes it
      *     unless the owner has a design by then, which wins, the token still being taken;</li>
      *     <li>{@link Taken#DROP}: it draws nothing, every layer that matched it being the transparent wildcard
-     *     ({@link TilesetScenery.Layer#blank}); or it is building art that no design stands for.</li>
+     *     ({@link TilesetScenery.Layer#blank}); or it is building art that no design stands for;</li>
+     *     <li>{@link Taken#UNTRANSLATED}: a layer that matched it is flat art nothing in the 3D views draws
+     *     ({@link #untranslated}). A ground transition never gets here: its ground blend is its design.</li>
      * </ol>
-     * Any other token is kept: on the shipped boards none.
+     * Any other token is kept: on the shipped boards none, and none is untranslated.
      */
     public static Map<Integer, Taken> takenTokens(Hex hex) {
         if (tokens(hex).isEmpty()) { return Map.of(); }
@@ -1550,9 +1558,52 @@ public final class BoardSceneryLayouts {
             List<TilesetScenery.Layer> drawn = layers.stream().filter(layer -> layer.terrains().contains(token)).toList();
             if (token == Terrains.BLDG_FLUFF || !drawn.isEmpty() && drawn.stream().allMatch(TilesetScenery.Layer::blank)) {
                 result.putIfAbsent(token, Taken.DROP);
+            } else if (drawn.stream().anyMatch(BoardSceneryLayouts::untranslated)) {
+                result.putIfAbsent(token, Taken.UNTRANSLATED);
             }
         }
         return result;
+    }
+
+    /**
+     * Whether {@code layer} is flat art without a 3D version: painted ({@link TilesetScenery.Kind#PAINT}), not the
+     * transparent wildcard, and no legacy decal the conversion takes. No model, road, structure or quay wall stands
+     * for it.
+     */
+    private static boolean untranslated(TilesetScenery.Layer layer) {
+        return layer.kind() == TilesetScenery.Kind.PAINT && !layer.taken() && !layer.blank();
+    }
+
+    /**
+     * A legacy art token nothing in the 3D views stands for ({@link Taken#UNTRANSLATED}): its hex, the token as a board
+     * file writes it, and the art it selected.
+     */
+    public record DroppedArt(Coords coords, String token, String art) { }
+
+    /**
+     * The art tokens of {@code board} that nothing in the 3D views stands for ({@link Taken#UNTRANSLATED}), row by row:
+     * what a 3D view of the board tells its player it dropped. Read from the tokens the board holds, not stored: a game
+     * or preview of a loaded {@code .board} keeps them, flipped and joined with their sheets and sent to every client,
+     * so each view reports exactly what it does not draw. The editor asks before its document drops them.
+     */
+    public static List<DroppedArt> droppedArt(Board board) {
+        List<DroppedArt> result = new ArrayList<>();
+        for (int y = 0; y < board.getHeight(); y++) {
+            for (int x = 0; x < board.getWidth(); x++) {
+                Coords coords = new Coords(x, y);
+                Hex hex = board.getHex(coords);
+                if (tokens(hex).isEmpty()) { continue; }
+                List<TilesetScenery.Layer> layers = layers(hex);
+                taken(hex, layers, designs(hex, layers)).forEach((token, taken) -> {
+                    if (taken != Taken.UNTRANSLATED) { return; }
+                    List<String> art = layers.stream()
+                          .filter(layer -> layer.terrains().contains(token) && untranslated(layer))
+                          .map(TilesetScenery.Layer::file).distinct().toList();
+                    result.add(new DroppedArt(coords, hex.getTerrain(token).toString(), String.join(", ", art)));
+                });
+            }
+        }
+        return List.copyOf(result);
     }
 
     /**
@@ -1581,7 +1632,8 @@ public final class BoardSceneryLayouts {
 
     /**
      * {@code hex} as a {@code .board2} holds it: without the legacy art tokens the conversion took
-     * ({@link #takenTokens}), whose objects and designs stand for them; it adds nothing. Returns {@code hex} itself when
+     * ({@link #takenTokens}), whose objects and designs stand for them (nothing stands for one that drew nothing or has
+     * no 3D version, {@link #droppedArt}); it adds nothing. Returns {@code hex} itself when
      * it holds no taken token, else a changed copy; {@code hex} is never changed. Games and previews of a loaded
      * {@code .board} keep the tokens in memory, so their 2D views draw the old sprites; the {@code .board2} writer
      * ({@link BoardFile#write}) and the 3D editor's document drop them, so a {@code .board2} never holds one; and every 3D

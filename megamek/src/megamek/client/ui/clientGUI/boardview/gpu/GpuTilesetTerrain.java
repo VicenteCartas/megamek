@@ -205,7 +205,7 @@ final class GpuTilesetTerrain {
             int next = (edge + 1) % 6, direction = BoardGeometry.edgeDirection(edge);
             var neighbor = scene.neighbor(tile, direction);
             Vector3 a = corners[edge], b = corners[next];
-            triangle(tops, center, a, b, BoardSurface.Finish.TOP);
+            triangle(tops, center, a, b, tile.frozen() && tile.water() ? BoardSurface.Finish.ICE : BoardSurface.Finish.TOP);
             wall(walls, tile, direction, a, b, solidTop, neighbor == null ? floor : solidZ(neighbor));
             if (open(tile, neighbor) && neighbor != null && !tile.frozen() && neighbor.elevation() < tile.elevation()) {
                 float across = surfaceZ(neighbor);

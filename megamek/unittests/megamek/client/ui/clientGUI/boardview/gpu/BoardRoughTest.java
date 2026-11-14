@@ -36,11 +36,9 @@ class BoardRoughTest {
                         : Set.of("rough/felled-trunk", "rough/charred-stump", "rough/fallen-stump"),
                   new HashSet<>(features.stream().map(BoardScene.Feature::asset).toList()));
             assertEquals(features, BoardFeatures.capture(hex, coords, Map.of()));
-            assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
             if (fluff == 1) { staggeredSpacing(features); }
             hex.removeTerrain(Terrains.ROUGH);
             assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream().noneMatch(f -> f.kind() == BoardScene.FeatureKind.ROUGH));
-            assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Unrelated fluff keeps its original artwork");
         }
     }
 
@@ -249,9 +247,9 @@ class BoardRoughTest {
             for (int y = 0; y < 5; y++) {
                 Coords coords = new Coords(x, y);
                 Hex hex = x == 2 && y == 2 ? centre : new Hex(0);
-                tiles.add(new BoardScene.Tile(coords, x > 2 ? step : 0, water ? 1 : -1, false, 0,
-                      family, null, null,
-                      BoardFeatures.capture(hex, coords, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(coords, x > 2 ? step : 0, water ? 1 : -1, false, 0,
+                      family,
+                      BoardFeatures.capture(hex, coords, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());
@@ -264,7 +262,6 @@ class BoardRoughTest {
             Hex hex = BoardScenes.roughHex(family, 1);
             assertEquals(family == BoardScene.Surface.SAND ? BoardScene.Surface.GRASS : family,
                   BoardFeatures.surface(hex), "Gameplay sand is cover over its theme, not a replacement geology");
-            assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "Rough artwork is replaced by the terrain engine");
             var features = BoardFeatures.capture(hex, coords, Map.of());
             assertEquals(9, features.size());
             assertTrue(features.stream().allMatch(f -> f.kind() == BoardScene.FeatureKind.BOULDER));

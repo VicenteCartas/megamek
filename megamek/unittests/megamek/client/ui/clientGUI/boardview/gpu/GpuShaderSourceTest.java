@@ -46,8 +46,11 @@ class GpuShaderSourceTest {
                 // Included modules may replace main (terrain-ice.glsl), inheriting the enclosing stage's header.
                 if (!file.toString().endsWith(".glsl") && source.contains("void main(")) {
                     assertTrue(source.stripLeading().startsWith("#version 330 core"), "Standalone stage version: " + file);
-                    // A depth-only stage with an empty main (water-depth.frag) writes no colour and declares no output.
-                    if (file.toString().endsWith(".frag") && !source.matches("(?s).*void main\\(\\)\\s*\\{\\s*\\}.*")) {
+                    // A depth-only stage writes no colour and declares no output: an empty main (water-depth.frag), or
+                    // one that writes the depth alone (shadow-levels.frag).
+                    boolean depthOnly = source.matches("(?s).*void main\\(\\)\\s*\\{\\s*\\}.*")
+                          || source.contains("gl_FragDepth") && !source.contains("fragColor");
+                    if (file.toString().endsWith(".frag") && !depthOnly) {
                         assertTrue(source.matches("(?s).*\\blayout\\s*\\(\\s*location\\s*=\\s*0\\s*\\)"
                               + "\\s*out\\s+vec[234]\\s+fragColor\\s*;.*"), "Explicit output: " + file);
                     }

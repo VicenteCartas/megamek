@@ -10,7 +10,6 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.utils.GdxNativesLoader;
@@ -35,7 +34,7 @@ class BoardCrystalTest {
     }
 
     static List<BoardScene.Feature> crystals(Hex hex, Coords at) {
-        return BoardFeatures.capture(hex, at, Map.of(), Set.of(), c -> null, TilesetScenery.Scenery.EMPTY, true)
+        return BoardFeatures.capture(hex, at, Map.of(), c -> null, TilesetScenery.Scenery.EMPTY, true)
               .stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE).toList();
     }
 

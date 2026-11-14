@@ -90,7 +90,6 @@ class GpuTerrainReliefSmokeTest {
                         checkMaterialToggle(outputFrame, terrain, camera);
                         if (family == BoardScene.Surface.GRASS) {
                             checkWind(outputFrame, terrain, camera);
-                            checkCoverCache(scene);
                         }
                         camera.setIsometric(false);
                         camera.center(BoardGeometry.center(new Coords(4, 4), 3));
@@ -198,72 +197,6 @@ class GpuTerrainReliefSmokeTest {
         } finally { pixels.dispose(); }
     }
 
-    private static void checkCoverCache(BoardScene source) {
-        BoardCamera camera = new BoardCamera();
-        camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        camera.camera.zoom = .26f;
-        camera.center(BoardGeometry.center(new Coords(0, 0), 0));
-        GpuGroundCover cover = new GpuGroundCover();
-        try {
-            BoardScene first = coverScene(0);
-            var plants = plants(first);
-            var model = prepareCover(cover, first, camera, plants).getFirst();
-            long uploads = cover.uploads();
-            BoardScene tactical = coverScene(0), edited = coverScene(1);
-            assertSame(model, prepareCover(cover, tactical, camera, plants).getFirst(),
-                  "Tactical-only snapshot replacement must retain grass GPU resources");
-            assertEquals(uploads, cover.uploads(), "Unchanged ground must not upload grass instances again");
-            assertSame(model, prepareCover(cover, tactical, camera, plants(first)).getFirst(),
-                  "Replanted roots keep the shared blade mesh");
-            assertEquals(uploads, cover.uploads(), "Equal roots planted again must not upload again");
-            uploads = cover.uploads();
-            assertSame(model, prepareCover(cover, edited, camera, plants(edited)).getFirst());
-            assertTrue(cover.uploads() > uploads, "A height edit must replace grass roots");
-            var editedPlants = plants(edited);
-            prepareCover(cover, edited, camera, editedPlants);
-            uploads = cover.uploads();
-            for (int i = 0; i < 60; i++) { cover.visible(edited, camera.camera, edited.tiles(), editedPlants); }
-            assertEquals(uploads, cover.uploads(), "A stationary camera must not rebuild or upload cover");
-            // A cached submission must still follow visibility, projection and installed plant changes.
-            camera.pan(10000, 0);
-            assertTrue(prepareCover(cover, edited, camera, editedPlants).isEmpty(), "Panning away removes the blades");
-            camera.center(BoardGeometry.center(new Coords(0, 0), 1));
-            assertTrue(!prepareCover(cover, edited, camera, editedPlants).isEmpty());
-            camera.zoom(4);
-            assertTrue(prepareCover(cover, edited, camera, editedPlants).isEmpty(), "Distant grass uses ground coverage");
-            camera.zoom(.25f);
-            camera.setPerspective(true);
-            assertTrue(!prepareCover(cover, edited, camera, editedPlants).isEmpty());
-            assertTrue(cover.visible(edited, camera.camera, List.of(), editedPlants).isEmpty(),
-                  "A changed candidate list cannot reuse old submissions");
-            prepareCover(cover, edited, camera, editedPlants);
-            uploads = cover.uploads();
-            prepareCover(cover, edited, camera, plants(coverScene(2)));
-            assertTrue(cover.uploads() > uploads, "New support at the same camera and scene must replace grass roots");
-        } finally { cover.dispose(); }
-    }
-
-    /** Roots planted on each hex's full-detail support, as a terrain worker installs them. */
-    private static Function<Coords, BoardPlants> plants(BoardScene scene) {
-        var surfaces = BoardTacticalGeometry.surfaces(scene);
-        var cache = new HashMap<Coords, BoardPlants>();
-        return coords -> cache.computeIfAbsent(coords,
-              key -> BoardPlants.plant(scene, scene.tile(key), surfaces.apply(key), TerrainLod.FULL, List.of()));
-    }
-
-    private static List<ModelInstance> prepareCover(GpuGroundCover cover, BoardScene scene, BoardCamera camera,
-          Function<Coords, BoardPlants> plants) {
-        List<ModelInstance> instances = cover.visible(scene, camera.camera, scene.tiles(), plants);
-        assertTrue(instances.size() <= 1, "One blade template per terrain chunk, never a batch per hex");
-        return instances;
-    }
-
-    private static BoardScene coverScene(int elevation) {
-        var tile = new BoardScene.Tile(new Coords(0, 0), elevation, -1, false, 0, BoardScene.Surface.GRASS, null, null,
-              List.of(), List.of(), BoardLiquid.NONE, null, true);
-        return new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
-    }
-
     static BoardScene scene(BoardScene.Surface family) {
         BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < 72; y++) {
@@ -277,8 +210,8 @@ class GpuTerrainReliefSmokeTest {
                 boolean water = (x >= 6 && y >= 4) || y >= 6;
                 if (water) { level = 0; }
                 int depth = water ? x >= 7 ? 2 : 1 : -1;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, family, null, null, List.of(),
-                      List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), level, depth, false, 0, family, List.of(),
+                      List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());

@@ -51,14 +51,14 @@ class BoardSurfaceCacheTest {
 
     @Test
     void artworkAndTacticalSnapshotsReuseTerrainAndItsCachedWalls() {
-        BoardScene scene = scene(0, 7, 7, true);
+        BoardScene scene = scene(0, 7, 7);
         BoardSurface.Cache cache = new BoardSurface.Cache();
         BoardSurface first = cache.get(scene, scene.tile(CENTER));
         var walls = first.walls(scene, BoardGeometry.floor(scene));
         BoardScene.Pixels paint = pixels(0xff123456);
-        List<BoardScene.Tile> painted = scene.tiles().stream().map(t -> new BoardScene.Tile(t.coords(), t.elevation(),
-              t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), paint, paint,
-              t.features(), t.text(), t.liquid(), paint, t.detailedGround())).toList();
+        List<BoardScene.Tile> painted = scene.tiles().stream().map(t -> BoardScenes.newTile(t.coords(), t.elevation(),
+              t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
+              t.features(), t.text(), t.liquid(), paint)).toList();
         BoardScene next = new BoardScene(0, 7, 7, painted, List.of(), List.of(), -1, "", List.of());
 
         assertNotSame(scene.tiles(), next.tiles());
@@ -69,7 +69,7 @@ class BoardSurfaceCacheTest {
 
     @Test
     void neighborMaterialEditUpdatesTheSharedLandformEdge() {
-        BoardScene scene = scene(0, 7, 7, true);
+        BoardScene scene = scene(0, 7, 7);
         BoardSurface.Cache cache = new BoardSurface.Cache();
         BoardSurface first = cache.get(scene, scene.tile(CENTER));
         Vector3 edge = sharedEdge();
@@ -104,7 +104,7 @@ class BoardSurfaceCacheTest {
 
     @Test
     void secondRingRoadApproachInvalidatesAnOtherwiseUnchangedNeighborJoin() {
-        BoardScene scene = scene(0, 7, 7, true);
+        BoardScene scene = scene(0, 7, 7);
         Coords neighbor = CENTER.translated(1);
         Coords road = neighbor.translated(1);
         scene = replace(scene, shape(scene.tile(road), 1, 0, BoardScene.Surface.GRASS));
@@ -128,7 +128,7 @@ class BoardSurfaceCacheTest {
 
     @Test
     void aSecondRingExitChangeRebuildsTheTerminalEvenWhenTheRampMaskStaysTheSame() {
-        BoardScene scene = scene(0, 7, 7, true);
+        BoardScene scene = scene(0, 7, 7);
         Coords neighbor = CENTER.translated(0), distant = neighbor.translated(0);
         scene = replace(scene, shape(scene.tile(CENTER), 3, 1, BoardScene.Surface.GRASS));
         scene = replace(scene, shape(scene.tile(neighbor), 2, 9, BoardScene.Surface.GRASS));
@@ -149,7 +149,7 @@ class BoardSurfaceCacheTest {
 
     @Test
     void ownElevationChangesSupportWhileDistantEditsKeepItCached() {
-        BoardScene scene = scene(0, 15, 15, true);
+        BoardScene scene = scene(0, 15, 15);
         BoardSurface.Cache cache = new BoardSurface.Cache();
         BoardSurface first = cache.get(scene, scene.tile(CENTER));
         Coords distant = new Coords(14, 14);
@@ -166,19 +166,19 @@ class BoardSurfaceCacheTest {
 
     @Test
     void boardIdentityAndDimensionsInvalidateDerivedSurfaces() {
-        BoardScene scene = scene(0, 7, 7, false);
+        BoardScene scene = scene(0, 7, 7);
         BoardSurface.Cache cache = new BoardSurface.Cache();
         BoardSurface first = cache.get(scene, scene.tile(CENTER));
         BoardScene other = new BoardScene(1, 7, 7, scene.tiles(), List.of(), List.of(), -1, "", List.of());
         BoardSurface switched = cache.get(other, other.tile(CENTER));
         assertNotSame(first, switched);
-        BoardScene resized = scene(1, 8, 7, false);
+        BoardScene resized = scene(1, 8, 7);
         assertNotSame(switched, cache.get(resized, resized.tile(CENTER)));
     }
 
     @Test
     void boundedCacheRetainsRecentlyUsedTerrain() {
-        BoardScene scene = scene(0, 17, 17, false);
+        BoardScene scene = scene(0, 17, 17);
         BoardSurface.Cache cache = new BoardSurface.Cache();
         BoardSurface first = cache.get(scene, scene.tiles().get(0));
         BoardSurface second = cache.get(scene, scene.tiles().get(1));
@@ -195,9 +195,7 @@ class BoardSurfaceCacheTest {
 
     /** Road exits make a road only with a kind of road (BoardRoad.rendered): a paved one. */
     private static BoardScene.Tile shape(BoardScene.Tile t, int elevation, int roadExits, BoardScene.Surface surface) {
-        return new BoardScene.Tile(t.coords(), elevation, t.waterDepth(), t.frozen(), roadExits, surface, t.decals(),
-              t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
-              t.detailedGround(), roadExits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED);
+        return BoardScenes.newTile(t.coords(), elevation, t.waterDepth(), t.frozen(), roadExits, surface, t.features(), t.text(), t.liquid(), t.tileset(), roadExits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED);
     }
 
     private static BoardScene replace(BoardScene scene, BoardScene.Tile tile) {
@@ -206,12 +204,12 @@ class BoardSurfaceCacheTest {
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
     }
 
-    private static BoardScene scene(int boardId, int width, int height, boolean detailed) {
+    private static BoardScene scene(int boardId, int width, int height) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null, null,
-                      List.of(), List.of(), BoardLiquid.NONE, null, detailed));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
+                      List.of(), List.of(), BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(boardId, width, height, tiles, List.of(), List.of(), -1, "", List.of());

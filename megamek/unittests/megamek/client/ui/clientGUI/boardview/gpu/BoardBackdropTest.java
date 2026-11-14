@@ -31,13 +31,11 @@ class BoardBackdropTest {
                 BoardScene scene = scene(at -> hex);
                 BoardScene.Tile tile = scene.tile(CENTER);
                 assertEquals(terrain.startsWith("space") ? BoardBackdrop.SPACE : BoardBackdrop.SKY, tile.backdrop());
-                assertTrue(tile.detailedGround());
                 assertEquals(-2, hex.getLevel());
                 assertEquals(-2, tile.elevation());
                 assertTrue(tile.features().isEmpty());
                 assertFalse(BoardSurfaceBlend.natural(tile));
                 assertFalse(BoardScatter.allowed(tile));
-                assertFalse(GpuGroundCover.grows(scene, tile));
                 for (TerrainLod lod : TerrainLod.values()) {
                     var surface = new BoardSurface(scene, tile, lod);
                     assertFalse(surface.relief.sculpted());
@@ -80,7 +78,6 @@ class BoardBackdropTest {
         var tile = scene.tile(CENTER);
         assertEquals(BoardBackdrop.SPACE, tile.backdrop());
         assertTrue(tile.features().stream().anyMatch(feature -> feature.asset().equals("bridge")));
-        assertTrue(tile.detailedGround());
         assertEquals(BoardBackdrop.NONE, BoardBackdrop.capture(new Hex(0, "space:1;pavement:1", "lunar")));
         assertEquals(BoardBackdrop.NONE, BoardBackdrop.capture(new Hex(0, "sky:1;water:1", "")));
         assertEquals(BoardBackdrop.NONE, BoardBackdrop.capture(new Hex(0, "", "lunar")));
@@ -99,7 +96,7 @@ class BoardBackdropTest {
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
                 Coords at = new Coords(x, y);
-                var artwork = new BoardArtwork.HexImage(at, null, null, List.of(), Map.of(), null);
+                var artwork = new BoardArtwork.HexImage(at, List.of(), Map.of(), null);
                 tiles.add(BoardScene.captureTile(source.apply(at), artwork, null, pool,
                       c -> c.getX() < 0 || c.getY() < 0 || c.getX() >= 5 || c.getY() >= 5 ? null : source.apply(c)));
             }
@@ -152,7 +149,7 @@ class BoardBackdropTest {
                 var at = new Coords(x, y);
                 boolean solid = at.equals(CENTER) || solidNorth && at.equals(CENTER.translated(0));
                 var hex = new Hex(solid ? 1 : emptyElevation, solid ? "pavement:1" : backdrop, "lunar");
-                var artwork = new BoardArtwork.HexImage(at, null, null, List.of(), Map.of(), null);
+                var artwork = new BoardArtwork.HexImage(at, List.of(), Map.of(), null);
                 tiles.add(BoardScene.captureTile(hex, artwork, null, pool, ignored -> null));
             }
         }

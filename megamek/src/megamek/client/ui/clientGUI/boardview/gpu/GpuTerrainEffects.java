@@ -90,7 +90,7 @@ final class GpuTerrainEffects implements Disposable {
             Volume volume = previous.get(tile.coords());
             if (volume == null) { volume = new Volume(); }
             float x = BoardGeometry.centerX(tile.coords()), y = BoardGeometry.centerY(tile.coords());
-            volume.origin.set(x, y, tile.liquid().present() ? BoardGeometry.surfaceZ(tile) : surfaces.get(scene, tile).height(x, y));
+            volume.origin.set(x, y, tile.liquid().present() ? BoardGeometry.surfaceZ(tile) : surfaces.height(scene, tile, x, y));
             volume.effect = tile.fireSmoke();
             // Ground sources overlap at shared edges/corners; smoke spreads farther as it rises.
             volume.radius = BoardGeometry.width() * .6f;

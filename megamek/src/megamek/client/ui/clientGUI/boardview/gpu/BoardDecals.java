@@ -29,7 +29,7 @@ final class BoardDecals {
     /** Each decal image's alpha ({@link Opacity}), read once per id on any thread, headless too. */
     private static final Map<String, BoardKit<Alpha>> ALPHA = new ConcurrentHashMap<>();
 
-    private record Receiver(BoardSurface.Face face, Vector3 normal, Area footprint, Rectangle2D bounds, boolean ground) {
+    private record Receiver(BoardSurface.Face face, Vector3 normal, Area footprint, Rectangle2D bounds) {
         float height(Vector3 point) {
             Vector3 a = face.a();
             return a.z - (normal.x * (point.x - a.x) + normal.y * (point.y - a.y)) / normal.z;
@@ -37,9 +37,9 @@ final class BoardDecals {
     }
 
     /** Weld coincident corners across material/normal seams, without joining vertically separated levels. */
-    private record Corner(int x, int y, int z, boolean ground) {
-        Corner(Vector3 point, boolean ground) {
-            this(Math.round(point.x * 1000), Math.round(point.y * 1000), Math.round(point.z * 1000), ground);
+    private record Corner(int x, int y, int z) {
+        Corner(Vector3 point) {
+            this(Math.round(point.x * 1000), Math.round(point.y * 1000), Math.round(point.z * 1000));
         }
     }
 
@@ -186,14 +186,6 @@ final class BoardDecals {
               (float) object.y() * BoardGeometry.height(), 0);
     }
 
-    /**
-     * The legacy paint overlay the full 3D render draws on a hex (its layer of legacy emblems, rubble paths, gravel,
-     * deposits and transitions): without the limbs where the scene draws those as models.
-     */
-    static BoardScene.Pixels legacyPaint(BoardScene.Tile tile) {
-        return tile.decalsWithoutLimbs() != null ? tile.decalsWithoutLimbs() : tile.decals();
-    }
-
     /** Drop the decal images' alpha with the other board kits on an asset reload. */
     static void reload() { ALPHA.clear(); }
 
@@ -226,52 +218,35 @@ final class BoardDecals {
 
     /**
      * How opaque the paint on one hex's ground is at a world point: the placed decals that paint its ground (each
-     * image's alpha at its drawn transform, so a round emblem leaves no square patch) and the hex's legacy paint overlay,
-     * composited. Every 3D view's ground cover grows by one minus this ({@link BoardPlants}), so nothing grows through
+     * image's alpha at its drawn transform, so a round emblem leaves no square patch), composited. Every 3D view's
+     * ground cover grows by one minus this ({@link BoardPlants}), so nothing grows through
      * paint. Each paint counts with its largest alpha within one model px of the point, the margin cover keeps from a
      * road's shoulder. Built once per hex on the terrain worker; roofs, decks, industrial tops, fuel tanks and ice grow
      * no cover, so only paint on the ground counts.
      */
     static final class Opacity {
-        /** One paint's alpha (0..1) at a world point, and whether a point lies within its reach plus the margin. */
-        private interface Paint {
-            float alpha(float x, float y);
-
-            default boolean near(float x, float y) { return true; }
-        }
-
         /** A placed decal at its drawn transform ({@link #paintUv}); {@code du}, {@code dv} are the margin in u and v. */
         private record Placed(BoardDecoration object, Coords owner, float x, float y, PaintUv uv, float du, float dv,
-              Alpha image) implements Paint {
-            @Override public boolean near(float px, float py) {
+              Alpha image) {
+            boolean near(float px, float py) {
                 float u = uv.u(px - x, py - y), v = uv.v(px - x, py - y);
                 return u >= -du && u <= 1 + du && v >= -dv && v <= 1 + dv;
             }
 
-            @Override public float alpha(float px, float py) {
+            float alpha(float px, float py) {
                 if (object.clipToHex() && !BoardGeometry.contains(owner, px, py)) { return 0; }
                 return image.at(uv.u(px - x, py - y), uv.v(px - x, py - y));
             }
         }
 
-        /** The legacy overlay, mapped as the ground's top vertices map it ({@code GpuTerrain.topVertex}). */
-        private record Legacy(Coords coords, BoardScene.Pixels pixels) implements Paint {
-            @Override public float alpha(float x, float y) {
-                float u = .5f + (x - BoardGeometry.centerX(coords)) / BoardGeometry.width() * BoardRim.GROUND_UV_SCALE;
-                float v = .5f - (y - BoardGeometry.centerY(coords)) / BoardGeometry.height() * BoardRim.GROUND_UV_SCALE;
-                if (!(u >= 0 && u < 1 && v >= 0 && v < 1)) { return 0; }
-                return (pixels.rgba((int) (v * pixels.height()) * pixels.width() + (int) (u * pixels.width())) & 255) / 255f;
-            }
-        }
+        private final List<Placed> paints;
 
-        private final List<Paint> paints;
+        private Opacity(List<Placed> paints) { this.paints = paints; }
 
-        private Opacity(List<Paint> paints) { this.paints = paints; }
-
-        /** The paint on {@code tile}'s ground from its stamps ({@link #index}), or null when nothing paints it. */
-        static Opacity of(BoardScene.Tile tile, List<Stamp> stamps) {
+        /** Ground paint from the receiving hex's stamps ({@link #index}), or null when nothing paints it. */
+        static Opacity of(List<Stamp> stamps) {
             float margin = BoardGeometry.hexScale();
-            List<Paint> paints = new ArrayList<>();
+            List<Placed> paints = new ArrayList<>();
             for (Stamp stamp : stamps) {
                 var object = stamp.object();
                 var receiver = object.placement().receiver();
@@ -283,15 +258,13 @@ final class BoardDecals {
                 paints.add(new Placed(object, stamp.owner(), anchor.x, anchor.y, uv,
                       (float) Math.hypot(uv.ux(), uv.uy()) * margin, (float) Math.hypot(uv.vx(), uv.vy()) * margin, image));
             }
-            BoardScene.Pixels legacy = legacyPaint(tile);
-            if (legacy != null) { paints.add(new Legacy(tile.coords(), legacy)); }
             return paints.isEmpty() ? null : new Opacity(List.copyOf(paints));
         }
 
         /** The paint's opacity (0..1) at world (x, y): each paint's largest alpha within the margin, composited. */
         float at(float x, float y) {
             float margin = BoardGeometry.hexScale(), clear = 1;
-            for (Paint paint : paints) {
+            for (Placed paint : paints) {
                 // Most roots lie outside a decal and its margin: one transform and a bounds test.
                 if (!paint.near(x, y)) { continue; }
                 float largest = paint.alpha(x, y);
@@ -303,19 +276,6 @@ final class BoardDecals {
             }
             return 1 - clear;
         }
-    }
-
-    /** Finished ground is a height field; roofs and decks can overlap it and each other. Liquids are never supplied. */
-    static List<BoardSurface.Face> project(Coords coords, List<BoardSurface.Face> ground, List<BoardSurface.Face> raised) {
-        List<Vector3> corners = new ArrayList<>();
-        for (int i = 0; i < 6; i++) { corners.add(BoardGeometry.corner(coords, 0, i)); }
-        return project(BoardGeometry.center(coords, 0), area(corners), ground, raised);
-    }
-
-    /** Historical callers project on the owning hex. */
-    static List<BoardSurface.Face> project(Coords coords, List<BoardSurface.Face> raised,
-          BoardDecoration object) {
-        return project(coords, coords, raised, object);
     }
 
     /** Each recipient owns its triangles. UVs still use the owner's transform, so chunk seams stay continuous. */
@@ -333,7 +293,7 @@ final class BoardDecals {
             return List.of();
         }
         // Unbounded paint drapes on the explicitly chosen surface in every recipient, including lower ground.
-        return project(object.clipToHex() ? anchor : null, clip, List.of(), raised);
+        return project(object.clipToHex() ? anchor : null, clip, raised);
     }
 
     /** Ground is a height field: its triangles do not occlude each other. Clip each once, without pairwise Areas. */
@@ -355,36 +315,33 @@ final class BoardDecals {
         return result;
     }
 
-    private static List<BoardSurface.Face> project(Vector3 anchor, Area hex, List<BoardSurface.Face> ground,
-          List<BoardSurface.Face> raised) {
+    private static List<BoardSurface.Face> project(Vector3 anchor, Area hex, List<BoardSurface.Face> faces) {
         List<Receiver> receivers = new ArrayList<>();
         var reach = hex.getBounds2D();
-        for (var faces : List.of(raised, ground)) {
-            for (var face : faces) {
-                Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
-                if (normal.z <= EPSILON) { continue; }
-                // A face whose bounds lie apart from the clip's shares no area with it: most of a roof, under a small decal.
-                Vector3 a = face.a(), b = face.b(), c = face.c();
-                if (Math.max(a.x, Math.max(b.x, c.x)) < reach.getMinX() || Math.min(a.x, Math.min(b.x, c.x)) > reach.getMaxX()
-                      || Math.max(a.y, Math.max(b.y, c.y)) < reach.getMinY() || Math.min(a.y, Math.min(b.y, c.y)) > reach.getMaxY()) {
-                    continue;
-                }
-                Area footprint = area(List.of(face.a(), face.b(), face.c()));
-                footprint.intersect(hex);
-                if (!footprint.isEmpty()) {
-                    receivers.add(new Receiver(face, normal, footprint, footprint.getBounds2D(), faces == ground));
-                }
+        for (var face : faces) {
+            Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+            if (normal.z <= EPSILON) { continue; }
+            // A face whose bounds lie apart from the clip's shares no area with it: most of a roof, under a small decal.
+            Vector3 a = face.a(), b = face.b(), c = face.c();
+            if (Math.max(a.x, Math.max(b.x, c.x)) < reach.getMinX() || Math.min(a.x, Math.min(b.x, c.x)) > reach.getMaxX()
+                  || Math.max(a.y, Math.max(b.y, c.y)) < reach.getMinY() || Math.min(a.y, Math.min(b.y, c.y)) > reach.getMaxY()) {
+                continue;
+            }
+            Area footprint = area(List.of(face.a(), face.b(), face.c()));
+            footprint.intersect(hex);
+            if (!footprint.isEmpty()) {
+                receivers.add(new Receiver(face, normal, footprint, footprint.getBounds2D()));
             }
         }
         if (anchor != null) { receivers = supportLevel(anchor, receivers); }
-        if (raised.isEmpty()) { return receivers.stream().map(Receiver::face).toList(); }
         List<BoardSurface.Face> result = new ArrayList<>();
         for (int i = 0; i < receivers.size(); i++) {
             Receiver receiver = receivers.get(i);
             Area visible = new Area(receiver.footprint());
             for (int j = 0; j < receivers.size() && !visible.isEmpty(); j++) {
                 Receiver other = receivers.get(j);
-                if (i == j || receiver.ground() && other.ground() || !receiver.bounds().intersects(other.bounds())) { continue; }
+                if (i == j || !receiver.bounds().intersects(other.bounds())
+                      || separated(receiver.face(), other.face()) || separated(other.face(), receiver.face())) { continue; }
                 // Clip at the planes' intersection too: sorting by average height fails on sloped roofs/decks.
                 List<Vector3> above = above(other.face(), receiver, j < i ? -EPSILON : EPSILON);
                 if (above.size() >= 3) { visible.subtract(area(above)); }
@@ -396,6 +353,22 @@ final class BoardDecals {
             }
         }
         return result;
+    }
+
+    /**
+     * Upward triangles are counter-clockwise in XY. A triangle wholly outside one edge shares no interior with it,
+     * even when their bounding boxes overlap. Neighbouring roof triangles must not enter the expensive Area boolean
+     * operations merely because they share an edge; coincident and crossing faces still need the height test.
+     */
+    private static boolean separated(BoardSurface.Face a, BoardSurface.Face b) {
+        return outside(a.a(), a.b(), b) || outside(a.b(), a.c(), b) || outside(a.c(), a.a(), b);
+    }
+
+    private static boolean outside(Vector3 from, Vector3 to, BoardSurface.Face face) {
+        double x = (double) to.x - from.x, y = (double) to.y - from.y;
+        return x * ((double) face.a().y - from.y) - y * ((double) face.a().x - from.x) <= 0
+              && x * ((double) face.b().y - from.y) - y * ((double) face.b().x - from.x) <= 0
+              && x * ((double) face.c().y - from.y) - y * ((double) face.c().x - from.x) <= 0;
     }
 
     /**
@@ -412,7 +385,7 @@ final class BoardDecals {
             var face = receivers.get(i).face();
             height = Math.max(height, face.height(anchor.x, anchor.y));
             for (Vector3 point : List.of(face.a(), face.b(), face.c())) {
-                Integer previous = corners.putIfAbsent(new Corner(point, receivers.get(i).ground()), i);
+                Integer previous = corners.putIfAbsent(new Corner(point), i);
                 if (previous != null) { parents[root(parents, i)] = root(parents, previous); }
             }
         }

@@ -121,7 +121,8 @@ class GpuBuildingConnectionsSmokeTest {
                             camera.setIsometric(true); camera.camera.zoom = .17f; camera.center(BoardGeometry.center(AT, 1));
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, "interior-walls.png"));
-                            insideWalls(assembly);
+                            // The light kit's far level is a closed hull (BayKit.Spec#hull): a unit inside sees the near one.
+                            insideWalls(assembly, 1);
                         }
                     }
                     terrain.update(tall.getFirst());
@@ -177,16 +178,20 @@ class GpuBuildingConnectionsSmokeTest {
                     try {
                         var isolated = assets.building(design, 2, new int[6], 0, false);
                         assertNotNull(isolated, design);
+                        // A kit whose far levels are closed outer hulls (BayKit.Spec#hull) has walls of one face there:
+                        // its near level alone is enterable, its far ones closed from outside.
+                        int enterable = hull(design) ? 1 : isolated.lodCount();
                         if (TilesetScenery.generatedKit(design)) {
                             compact(isolated, footprint == HexAppearance.Footprint.SQUARE);
                             // The generic hangars' roofs are vaults of sheeting (BayKit.Vault), no slab.
-                            thickness(isolated, design.contains("/hangar_") ? .3f : .99f);
+                            thickness(isolated, design.contains("/hangar_") ? .3f : .99f, enterable);
+                            closedHull(isolated, enterable);
                         }
-                        insideWalls(isolated);
+                        insideWalls(isolated, enterable);
                         if (!TilesetScenery.singleHexBuilding(design)) {
                             var connected = assets.building(design, 2, new int[] { 0, 2, 2, 0, 0, 0 }, 0, true);
                             assertNotNull(connected);
-                            insideWalls(connected);
+                            insideWalls(connected, enterable);
                             Vector3 floor = frontHit(GpuTerrain.triangles(connected.interior().getNode("floors")),
                                   new Ray(new Vector3(0, 1, 30), new Vector3(0, 0, -1)));
                             assertNotNull(floor, "A connected room needs a floor across its interior, not just its wall strips");
@@ -211,10 +216,29 @@ class GpuBuildingConnectionsSmokeTest {
         } finally { assets.dispose(); }
     }
 
-    private static void insideWalls(GpuBuilding.Assembly assembly) {
+    /** Whether the kit file of {@code design} says its far levels are closed outer hulls (BayKit.Spec#hull). */
+    private static boolean hull(String design) {
+        File file = TilesetScenery.customBuildingFile(design);
+        if (!file.getName().endsWith(".json")) { return false; }
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().readTree(file).path("shared").path("hull").asBoolean();
+        } catch (java.io.IOException error) { throw new IllegalStateException(error); }
+    }
+
+    /** Past its {@code enterable} levels a far hull is closed: its west wall and its roof are hit from outside. */
+    private static void closedHull(GpuBuilding.Assembly assembly, int enterable) {
+        for (int lod = enterable; lod < assembly.lodCount(); lod++) {
+            List<Vector3> triangles = new ArrayList<>();
+            for (var node : assembly.instance(lod).nodes) { triangles.addAll(GpuTerrain.triangles(node)); }
+            assertNotNull(frontHit(triangles, new Ray(new Vector3(-100, 1, 9), new Vector3(1, 0, 0))), "Far hull's wall at LOD " + lod);
+            assertNotNull(frontHit(triangles, new Ray(new Vector3(0, 1, 100), new Vector3(0, 0, -1))), "Far hull's roof at LOD " + lod);
+        }
+    }
+
+    private static void insideWalls(GpuBuilding.Assembly assembly, int enterable) {
         // Shoot from inside towards the closed west wall, respecting the renderer's front-face culling.
         Ray ray = new Ray(new Vector3(0, 1, 9), new Vector3(-1, 0, 0));
-        for (int lod = 0; lod < assembly.lodCount(); lod++) {
+        for (int lod = 0; lod < enterable; lod++) {
             List<Vector3> triangles = new ArrayList<>();
             for (var node : assembly.instance(lod).nodes) { triangles.addAll(GpuTerrain.triangles(node)); }
             boolean hit = false;
@@ -227,8 +251,8 @@ class GpuBuildingConnectionsSmokeTest {
         }
     }
 
-    private static void thickness(GpuBuilding.Assembly assembly, float roofThickness) {
-        for (int lod = 0; lod < assembly.lodCount(); lod++) {
+    private static void thickness(GpuBuilding.Assembly assembly, float roofThickness, int enterable) {
+        for (int lod = 0; lod < enterable; lod++) {
             List<Vector3> triangles = new ArrayList<>();
             for (var node : assembly.instance(lod).nodes) { triangles.addAll(GpuTerrain.triangles(node)); }
             Vector3 inside = frontHit(triangles, new Ray(new Vector3(0, 1, 9), new Vector3(-1, 0, 0)));

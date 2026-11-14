@@ -26,8 +26,7 @@ class BoardDecalsTest {
 
     @Test
     void roofArtworkStopsAtTheEdgeInsteadOfRepeatingOnTheGroundBelow() {
-        var ground = ground(-20);
-        var projected = BoardDecals.project(COORDS, ground, roof(10, 10));
+        var projected = projectClipped(roof(10, 10));
         assertEquals(10, height(projected, 0, 0), .001f);
         assertEquals(Float.NEGATIVE_INFINITY, height(projected, 20, 0), "The part past the drop is truncated");
         assertEquals(24 * 24, area(projected), .01, "Only the roof receives the artwork");
@@ -40,20 +39,12 @@ class BoardDecalsTest {
     void continuousRoofSlopesKeepTheirArtworkButADisconnectedLowerShelfDoesNot() {
         var roofs = new ArrayList<>(roof(4, 16));
         roofs.addAll(rectangle(12, 24, 8, 8));
-        var projected = BoardDecals.project(COORDS, ground(-20), roofs);
+        var projected = projectClipped(roofs);
         for (float x : new float[] { -10, -5, 0, 5, 10 }) {
             assertEquals(10 + x / 2, height(projected, x, 0), .002f, "A slope is a continuous support");
         }
         assertEquals(Float.NEGATIVE_INFINITY, height(projected, 20, 0), "The lower shelf cannot resume the text");
         assertEquals(24 * 24, area(projected), .02);
-    }
-
-    @Test
-    void aRoofMeetingTheGroundDoesNotExtendItsArtworkOntoThatLowerSurface() {
-        var projected = BoardDecals.project(COORDS, rectangle(-24, -12, 0, 0), roof(0, 20));
-        assertEquals(10, height(projected, 0, 0), .001f);
-        assertEquals(Float.NEGATIVE_INFINITY, height(projected, -20, 0), "A shared eave must not join roof and ground artwork");
-        assertEquals(24 * 24, area(projected), .01);
     }
 
     @Test
@@ -64,7 +55,7 @@ class BoardDecalsTest {
         terraces.add(new BoardSurface.Face(new Vector3(center.x + 12, center.y - 12, 10),
               new Vector3(center.x + 12, center.y - 12, 0), new Vector3(center.x + 12, center.y + 12, 0),
               BoardSurface.Finish.WALL));
-        var projected = BoardDecals.project(COORDS, terraces, List.of());
+        var projected = projectClipped(terraces);
         assertEquals(24 * 24, area(projected), .01);
         assertEquals(Float.NEGATIVE_INFINITY, height(projected, 20, 0));
     }
@@ -72,7 +63,7 @@ class BoardDecalsTest {
     @Test
     void anUnobstructedLakebedRetainsTheWholeDecal() {
         var bed = ground(-20);
-        var projected = BoardDecals.project(COORDS, bed, List.of());
+        var projected = projectClipped(bed);
         assertEquals(area(bed), area(projected), .01);
         assertTrue(projected.stream().allMatch(face -> face.a().z == -20 && face.b().z == -20 && face.c().z == -20));
     }
@@ -81,8 +72,7 @@ class BoardDecalsTest {
     void intersectingSlopesUseTheHigherPlaneAtEveryPoint() {
         var roofs = new ArrayList<>(roof(4, 16));
         roofs.addAll(roof(16, 4));
-        var ground = ground(-20);
-        var projected = BoardDecals.project(COORDS, ground, roofs);
+        var projected = projectClipped(roofs);
         for (float x : new float[] { -10, -5, 0, 5, 10 }) {
             assertEquals(10 + Math.abs(x) / 2, height(projected, x, 0), .002f);
         }
@@ -93,8 +83,36 @@ class BoardDecalsTest {
     void repeatedCoplanarFacesDoNotDoubleTheDecal() {
         var roofs = new ArrayList<>(roof(10, 10));
         roofs.addAll(roof(10, 10));
-        var ground = ground(0);
-        assertEquals(24 * 24, area(BoardDecals.project(COORDS, ground, roofs)), .01);
+        assertEquals(24 * 24, area(projectClipped(roofs)), .01);
+    }
+
+    @Test
+    void denselyTessellatedRoofHasNoGapsOrDoublePaintAlongSharedEdges() {
+        var faces = new ArrayList<BoardSurface.Face>();
+        Vector3 center = BoardGeometry.center(COORDS, 0);
+        for (int x = -12; x < 12; x++) {
+            for (int y = -12; y < 12; y++) {
+                var a = new Vector3(center.x + x, center.y + y, 10);
+                var b = new Vector3(center.x + x + 1, center.y + y, 10);
+                var c = new Vector3(center.x + x + 1, center.y + y + 1, 10);
+                var d = new Vector3(center.x + x, center.y + y + 1, 10);
+                faces.add(new BoardSurface.Face(a, b, c, BoardSurface.Finish.TOP));
+                faces.add(new BoardSurface.Face(a, c, d, BoardSurface.Finish.TOP));
+            }
+        }
+        // Exact overlap still needs removing; shared edges alone do not.
+        faces.addAll(roof(10, 10));
+        var projected = projectClipped(faces);
+        assertEquals(24 * 24, area(projected), .01);
+        for (float x : new float[] { -11.5f, -.25f, 0, .25f, 11.5f }) {
+            assertEquals(10, height(projected, x, x), .001f);
+        }
+    }
+
+    private static List<BoardSurface.Face> projectClipped(List<BoardSurface.Face> receivers) {
+        var paint = new BoardDecoration("paint", "decal", "marking", null,
+              0, 0, 0, false, 2, Placement.ground(), 0, true);
+        return BoardDecals.project(COORDS, COORDS, receivers, paint);
     }
 
     private static List<BoardSurface.Face> ground(float z) {
@@ -137,7 +155,7 @@ class BoardDecalsTest {
     void translatedPaintClipsToItsHexAndCannotFallBackFromAMissingReceiver() {
         var paint = new megamek.common.board.BoardDecoration("paint", "decal", "marking", null,
               .2, 0, 35, true, 1, megamek.common.board.BoardDecoration.Placement.surface("bridge", "deck", 0), 2);
-        var projected = BoardDecals.project(COORDS, ground(40), paint);
+        var projected = BoardDecals.project(COORDS, COORDS, ground(40), paint);
         assertTrue(area(projected) > 0 && area(projected) < area(ground(40)));
         assertEquals(40, height(projected, 0, 0), .001f);
         for (var face : projected) {
@@ -145,21 +163,15 @@ class BoardDecalsTest {
                 assertEquals(40, vertex.z, .001f);
             }
         }
-        assertTrue(BoardDecals.project(COORDS, List.of(), paint).isEmpty());
+        assertTrue(BoardDecals.project(COORDS, COORDS, List.of(), paint).isEmpty());
         var outside = paint.transform(.45, 0, 0, false, 1, paint.placement());
-        assertTrue(BoardDecals.project(COORDS, roof(40, 40), outside).isEmpty(), "Paint outside the deck must not land underneath it");
+        assertTrue(BoardDecals.project(COORDS, COORDS, roof(40, 40), outside).isEmpty(), "Paint outside the deck must not land underneath it");
     }
 
     private static final String CROSS = "decal/emblems/red-cross";
 
-    /** A grass hex at {@link #COORDS}, with a legacy paint overlay or none. */
-    private static BoardScene.Tile grass(BoardScene.Pixels overlay) {
-        return new BoardScene.Tile(COORDS, 0, -1, false, 0, BoardScene.Surface.GRASS, overlay, null,
-              List.of(), List.of(), BoardLiquid.NONE, null, true);
-    }
-
     private static BoardDecals.Opacity paint(BoardDecoration object) {
-        return BoardDecals.Opacity.of(grass(null), List.of(new BoardDecals.Stamp(COORDS, object)));
+        return BoardDecals.Opacity.of(List.of(new BoardDecals.Stamp(COORDS, object)));
     }
 
     /** The world point that {@code object}, owned by {@link #COORDS}, paints with texture coordinates (u, v). */
@@ -222,22 +234,7 @@ class BoardDecalsTest {
         for (var support : List.of("building", "bridge", "ice")) {
             assertNull(paint(new BoardDecoration("cross", "decal", CROSS, null, 0, 0, 0, false, 1, Placement.on(support, 0), 0, true)));
         }
-        assertNull(BoardDecals.Opacity.of(grass(null), List.of()), "Nothing paints a plain hex");
-    }
-
-    @Test
-    void theLegacyOverlayCountsWhereTheGroundsTopVerticesDrawIt() {
-        // Its north-west quarter opaque.
-        var image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < 36; y++) {
-            for (int x = 0; x < 42; x++) { image.setRGB(x, y, 0xff808080); }
-        }
-        var paint = BoardDecals.Opacity.of(grass(new BoardScene.Pixels(image)), List.of());
-        float x = BoardGeometry.centerX(COORDS), y = BoardGeometry.centerY(COORDS);
-        float dx = BoardGeometry.width() / 5, dy = BoardGeometry.height() / 4;
-        assertEquals(1, paint.at(x - dx, y + dy), "North-west");
-        assertEquals(0, paint.at(x + dx, y + dy), "North-east");
-        assertEquals(0, paint.at(x - dx, y - dy), "South-west");
+        assertNull(BoardDecals.Opacity.of(List.of()), "Nothing paints a plain hex");
     }
 
     private static List<BoardSurface.Face> roof(float left, float right) {

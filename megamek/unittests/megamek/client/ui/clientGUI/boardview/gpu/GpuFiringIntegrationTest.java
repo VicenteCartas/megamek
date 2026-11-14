@@ -119,8 +119,7 @@ class GpuFiringIntegrationTest {
                 }
                 previous = rotation;
                 effects.update(playback.attacks(), library, instances);
-                renderer.frame(models, BoardGeometry.center(new Coords(4, 3), 0), effects,
-                      turret ? "firing-turret-five-targets" : "firing-five-targets", frame);
+                renderer.frame(models, BoardGeometry.center(new Coords(4, 3), 0), effects);
                 for (var shot : playback.attacks()) {
                     if (shot.seconds < UnitAttack.ANTICIPATION_SECONDS || shot.seconds >= shot.contactSeconds) { continue; }
                     var binding = model.equipment().stream().filter(shot::fires).findFirst().orElseThrow();
@@ -211,7 +210,7 @@ class GpuFiringIntegrationTest {
             assertEquals("ppc", mixed.effect(source.id(), guns.get(1).getEquipmentNum()));
             assertEquals("flame", mixed.effect(source.id(), guns.get(2).getEquipmentNum()));
             effects.update(mixed, null, Map.of(source.id() + ":-1", placed, target.id() + ":-1", victim));
-            renderer.frame(List.of(placed, victim), BoardGeometry.center(new Coords(2, 2), 0), effects, "firing-mesh-free-mixed", 0);
+            renderer.frame(List.of(placed, victim), BoardGeometry.center(new Coords(2, 2), 0), effects);
             assertEquals(20, effects.missileCount(), "A missile fallback must not suppress the other guns in its bay");
             assertEquals(3, effects.emissions(mixed).size());
             assertEquals(2, effects.emissions(mixed).stream().filter(trace -> !trace.impact()).count(), "Missed beams without landscape have no fake impact");

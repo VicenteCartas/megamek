@@ -194,7 +194,7 @@ class GpuGroundDamageTilesSmokeTest {
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null,
+                tiles.add(BoardScenes.newTile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
                       List.of(), List.of()));
             }
         }

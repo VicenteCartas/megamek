@@ -42,28 +42,6 @@ vec3 biomeSoilNormal(MaterialProjection p, vec3 face, float mixer) {
     return normalize(mix(steep, upNormal(biomePlanar(u_biomeSoilLayer + 1.0, p, mixer, true).rgb, face), p.lying));
 }
 
-// BoardFields in GLSL: the field code of the parcel at p (metres), and the metres from p to that parcel's nearest edge.
-float fieldStripEdge(int strip) { return 90.0 * (float(strip) + .5 * (biomeHash(ivec2(strip * 7 + 3, 41)) - .5)); }
-float fieldCutEdge(int strip, int cut, float spacing) {
-    return spacing * (float(cut) + .5 * (biomeHash(ivec2(strip * 5 + 2, cut * 3 - 7)) - .5));
-}
-int fieldParcel(vec2 p, out float edge) {
-    int strip = int(floor(p.x / 90.0));
-    if (p.x < fieldStripEdge(strip)) strip--;
-    else if (p.x >= fieldStripEdge(strip + 1)) strip++;
-    float normalX = biomeHash(ivec2(strip * 5 - 2, 17)) < .5 ? -.5 : .5;
-    float spacing = 75.0 * (.75 + .5 * biomeHash(ivec2(strip * 3 - 1, 9)));
-    float c = p.x * normalX + p.y * .8660254;
-    int cut = int(floor(c / spacing));
-    if (c < fieldCutEdge(strip, cut, spacing)) cut--;
-    else if (c >= fieldCutEdge(strip, cut + 1, spacing)) cut++;
-    edge = min(min(p.x - fieldStripEdge(strip), fieldStripEdge(strip + 1) - p.x),
-          min(c - fieldCutEdge(strip, cut, spacing), fieldCutEdge(strip, cut + 1, spacing) - c));
-    float pick = biomeHash(ivec2(strip * 13 + 1, cut * 7 - 3));
-    int crop = pick < .5 ? 0 : 1;
-    return crop | (biomeHash(ivec2(strip * 3 + 11, cut * 5 + 1)) < .5 ? 0 : normalX > 0.0 ? 1 : 2) << 1;
-}
-
 // The biome cover at a face (biomeCoverage) as the stage lays it, gated by slope and water: cover where crops and pools
 // stand, fringe the broader deposits round them.
 void biomeCover(vec3 world, vec3 face, bool shore, float above, float foot, float footprint, out vec4 cover,

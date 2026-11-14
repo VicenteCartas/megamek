@@ -282,7 +282,7 @@ class BoardCliffTest {
     }
 
     private static BoardScene.Tile capture(Hex hex, Coords at) {
-        var artwork = new BoardArtwork.HexImage(at, null, null, List.of(), Map.of(), null);
+        var artwork = new BoardArtwork.HexImage(at, List.of(), Map.of(), null);
         return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool(), neighbour -> null);
     }
 
@@ -435,8 +435,8 @@ class BoardCliffTest {
                     for (int x = 0; x < 7; x++) {
                         for (int y = 0; y < 7; y++) {
                             Coords at = new Coords(x, y);
-                            tiles.add(new BoardScene.Tile(at, at.equals(start) || at.equals(end) ? 8 : 0, -1,
-                                  false, 0, family, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                            tiles.add(BoardScenes.newTile(at, at.equals(start) || at.equals(end) ? 8 : 0, -1,
+                                  false, 0, family, List.of(), List.of(), BoardLiquid.NONE, null));
                         }
                     }
                     var scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

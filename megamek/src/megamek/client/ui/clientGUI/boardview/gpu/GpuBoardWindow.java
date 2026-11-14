@@ -20,6 +20,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -27,8 +28,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -78,8 +81,11 @@ import megamek.common.Player;
 import megamek.common.SpecialHexDisplay;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.event.GameListenerAdapter;
+import megamek.common.event.board.GameBoardNewEvent;
 import megamek.common.game.Game;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.units.Entity;
@@ -184,6 +190,10 @@ public final class GpuBoardWindow {
      * {@link #approved} names the kept ones. Everything else is native.
      */
     private static final List<Class<? extends Dialog>> SWING_DIALOGS = List.of();
+    /** How many pieces of dropped artwork a message lists ({@link #tellDroppedArt}); the log lists every one. */
+    private static final int DROPPED_ART_LINES = 12;
+    /** EDT: the boards whose dropped artwork was told ({@link #tellDroppedArt}), so each board is told once. */
+    private static final Set<Board> DROPPED_ART_TOLD = Collections.newSetFromMap(new WeakHashMap<>());
     private final ClientGUI gui;
     private final BoardClientState initialView;
     private final Supplier<JComponent> panel;
@@ -269,6 +279,21 @@ public final class GpuBoardWindow {
     private Runnable afterClose;
     /** EDT: opens the board of a game that started while this editor held the window; null for none. */
     private Runnable waitingBoard;
+    /** EDT: the game whose boards this window shows, once its source exists; it holds {@link #droppedArtListener}. */
+    private Game shownGame;
+    /**
+     * Whether a board of this window is not checked for dropped artwork yet: its first board, and each board that
+     * replaces one (a preview's next map, the editor's Open, a game's board). The next frame that draws the board
+     * checks it ({@link #tellDroppedArt}): the message's card belongs to the HUD, which the loading screen hides and
+     * which does not exist before the first board is attached.
+     */
+    private volatile boolean droppedArtDue;
+    private final GameListenerAdapter droppedArtListener = new GameListenerAdapter() {
+        @Override
+        public void gameBoardNew(GameBoardNewEvent event) {
+            droppedArtDue = true;
+        }
+    };
 
     private GpuBoardWindow(ClientGUI gui, BoardClientState view, Supplier<JComponent> panel) {
         this(gui, view, panel, null, null, null);
@@ -754,7 +779,14 @@ public final class GpuBoardWindow {
                         sourceAttached = true;
                     }
                     setLoadingMessage(loadingMessage);
+                    // Read before the frame takes its board: a frame that then draws a board draws the one due.
+                    boolean tell = droppedArtDue;
+                    long drawn = frames();
                     super.render();
+                    if (tell && frames() > drawn) {
+                        droppedArtDue = false;
+                        SwingUtilities.invokeLater(GpuBoardWindow.this::tellDroppedArt);
+                    }
                     if (!presentationRequested) {
                         presentationRequested = true;
                         SwingUtilities.invokeLater(GpuBoardWindow.this::present);
@@ -972,10 +1004,70 @@ public final class GpuBoardWindow {
             Game shown = mapGame == null ? view.getGame() : mapGame;
             GpuShaderWarmup.prepare(mapGame == null ? view.getBoard() : mapGame.getBoard(), editor != null,
                   shown.getPlanetaryConditions());
+            shownGame = shown;
+            shown.addGameListener(droppedArtListener);
+            droppedArtDue = true;
         } catch (RuntimeException | LinkageError failure) {
             startupFailure = failure;
             close(false);
         }
+    }
+
+    /**
+     * EDT: tells the user, once for each board this window shows, which of its old artwork has no 3D version and was
+     * dropped ({@link BoardSceneryLayouts#droppedArt}). The editor's document holds none any more, so its session hands
+     * over what its conversion dropped. The scene asks for it with a frame that draws the board
+     * ({@link #droppedArtDue}).
+     */
+    private void tellDroppedArt() {
+        if (closing || shownGame == null) { return; }
+        // Over this window's scene, else in Swing. The scene's wider card (its error card) holds a hex, its terrain and
+        // its art file on one line.
+        BiConsumer<String, String> show = (title, text) -> {
+            if (!notice(title, text, true)) {
+                JOptionPane.showMessageDialog(swingWindow, text, title, JOptionPane.WARNING_MESSAGE);
+            }
+        };
+        if (editor != null) {
+            // The document's board has no name of its own: the editor's title names the opened file.
+            tellDroppedArt(editor.title(), editor.takeDroppedArt(), show);
+            return;
+        }
+        shownGame.getBoards().values().forEach(board -> tellDroppedArt(board, show));
+    }
+
+    /**
+     * EDT: the one telling of a board's dropped artwork, for every 3D view that opens a board: {@code show} gets the
+     * message's title and text when {@code board} holds old artwork without a 3D version
+     * ({@link BoardSceneryLayouts#droppedArt}) and no view told it before. So each board is told once, by the view that
+     * shows it first: this window over its scene, the lobby's map setup (whose inspection is a 3D view without this
+     * window) over the lobby.
+     */
+    static void tellDroppedArt(Board board, BiConsumer<String, String> show) {
+        if (DROPPED_ART_TOLD.add(board)) {
+            tellDroppedArt(board.getBoardName(), BoardSceneryLayouts.droppedArt(board), show);
+        }
+    }
+
+    /** EDT: hands the message to {@code show} when anything was dropped; the log lists every piece. */
+    private static void tellDroppedArt(String map, List<BoardSceneryLayouts.DroppedArt> dropped,
+          BiConsumer<String, String> show) {
+        if (dropped.isEmpty()) { return; }
+        LOGGER.warn("The map {} uses old artwork without a 3D version, which was removed: {}", map, dropped);
+        show.accept(Messages.getString("GpuBoard.droppedArt.title"), droppedArtText(map, dropped));
+    }
+
+    /**
+     * What {@link #tellDroppedArt} says: the map, how many pieces were dropped, and the first
+     * {@link #DROPPED_ART_LINES} of them, each with its hex, its terrain as the board file writes it and its art file.
+     */
+    static String droppedArtText(String map, List<BoardSceneryLayouts.DroppedArt> dropped) {
+        String listed = String.join("\n", dropped.stream().limit(DROPPED_ART_LINES).map(art -> Messages.getString(
+              "GpuBoard.droppedArt.line", art.coords().getBoardNum(), art.token(), art.art())).toList());
+        if (dropped.size() > DROPPED_ART_LINES) {
+            listed += "\n" + Messages.getString("GpuBoard.droppedArt.more", dropped.size() - DROPPED_ART_LINES);
+        }
+        return Messages.getString("GpuBoard.droppedArt.text", map, dropped.size(), listed);
     }
 
     /**
@@ -1161,6 +1253,7 @@ public final class GpuBoardWindow {
 
     private void finish(Throwable failure) {
         startupTimer.stop();
+        if (shownGame != null) { shownGame.removeGameListener(droppedArtListener); }
         // The editor's 2D Preview shows this editor's document: it closes with the editor, whichever way it closes.
         if (preview2D != null) {
             preview2D.dispose();

@@ -130,6 +130,9 @@ class GpuSamplerBudgetSmokeTest {
             assertTrue(used.keySet().stream().anyMatch(program -> program.contains(feature)),
                   "Reach the material-array consumer: " + feature);
         }
+        // The pose rows are the instanced vertex stages' own sampler (tree-instances.glsl): its programs are counted too.
+        assertTrue(used.keySet().stream().anyMatch(program -> program.contains("u_poses")),
+              "Reach the instanced programs that read the pose rows: " + used.keySet());
         // Individual ice and volcanic shaders are insufficient: this actual material must link both together.
         var combined = used.entrySet().stream().filter(program -> program.getKey().contains("iceFlag")
               && program.getKey().contains("volcanicFlag") && program.getKey().contains("u_terrainData")).toList();

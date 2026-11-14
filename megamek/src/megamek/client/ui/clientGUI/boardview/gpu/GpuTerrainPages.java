@@ -82,20 +82,25 @@ final class GpuTerrainPages implements Disposable {
         Material of(int region, Material material);
     }
 
-    /** Pages merge until {@code deadline} (System.nanoTime); meanwhile their sources draw as GpuMeshPage describes. */
-    void render(ModelBatch batch, Environment environment, long deadline) {
-        render(batch, environment, deadline, null);
+    /** Advance geometry preparation before submitting draws, so a busy batch cannot consume the merge budget. */
+    void advance(long deadline) {
+        if (active) {
+            for (GpuMeshPage page : pages.values()) { if (page.advance(deadline)) { rebuilds++; } }
+        }
+    }
+
+    void render(ModelBatch batch, Environment environment) {
+        render(batch, environment, null);
     }
 
     /**
      * As render, each source region uses the selected material. Equal adjacent ranges remain merged; mixed coverage
      * splits draws in the existing buffers. Unmerged and oversized sources make the same selection.
      */
-    void render(ModelBatch batch, Environment environment, long deadline, Materials materials) {
+    void render(ModelBatch batch, Environment environment, Materials materials) {
         if (active) {
             for (var entry : pages.entrySet()) {
                 GpuMeshPage page = entry.getValue();
-                if (page.advance(deadline)) { rebuilds++; }
                 int id = entry.getKey();
                 page.forEachVisible((part, material) -> submit(batch, environment, part, material), materials == null
                       ? null : (source, material) -> materials.of(regions.getOrDefault(source, id), material));

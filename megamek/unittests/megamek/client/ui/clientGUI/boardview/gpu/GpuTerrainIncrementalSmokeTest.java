@@ -37,6 +37,7 @@ class GpuTerrainIncrementalSmokeTest {
             @Override
             public void create() {
                 GpuTerrain incremental = new GpuTerrain();
+                incremental.setEditable(true);
                 try {
                     BoardScene scene = dryScene();
                     incremental.update(scene);
@@ -52,10 +53,9 @@ class GpuTerrainIncrementalSmokeTest {
                         var at = new Coords(8, 8);
                         var tile = scene.tile(at);
                         var tiles = new ArrayList<>(scene.tiles());
-                        tiles.set(at.getX() * scene.height() + at.getY(), new BoardScene.Tile(at, tile.elevation(),
-                              tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(),
-                              tile.decals(), tile.decalsWithoutLimbs(), tile.features(), tile.text(),
-                              tile.liquid(), tile.tileset(), tile.detailedGround(), tile.road(), tile.fireSmoke(), tile.biome(),
+                        tiles.set(at.getX() * scene.height() + at.getY(), BoardScenes.newTile(at, tile.elevation(),
+                              tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.features(), tile.text(),
+                              tile.liquid(), tile.tileset(), tile.road(), tile.fireSmoke(), tile.biome(),
                               tile.impassable(), tile.blackIce(), exits));
                         scene = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
                         incremental.update(scene);
@@ -94,12 +94,11 @@ class GpuTerrainIncrementalSmokeTest {
 
     private static void compareFresh(GpuTerrain incremental, BoardScene scene) throws Exception {
         GpuTerrain fresh = new GpuTerrain();
+        fresh.setEditable(true);
         try {
             fresh.update(scene);
-            // A hex its preparation gave no support holds the shape alone; ground cover compares as planted.
             for (var tile : scene.tiles()) {
-                assertEquals(BoardGrassBankTest.shape(fresh.tacticalSurface(tile.coords())),
-                      BoardGrassBankTest.shape(incremental.tacticalSurface(tile.coords())),
+                assertEquals(fresh.tacticalSurface(tile.coords()), incremental.tacticalSurface(tile.coords()),
                       "Support geometry differs at " + tile.coords());
                 assertEquals(fresh.planted(tile.coords()), incremental.planted(tile.coords()),
                       "Ground cover differs at " + tile.coords());
@@ -128,7 +127,7 @@ class GpuTerrainIncrementalSmokeTest {
                     int stride = mesh.getVertexSize() / Float.BYTES;
                     var normal = mesh.getVertexAttributes().findByUsage(VertexAttributes.Usage.Normal);
                     for (int i = 0; i < indices.size; i += 3) {
-                        long hash = (int) GpuTestSupport.field(range, "layer") + 1;
+                        long hash = ((GpuTerrain.Layer) GpuTestSupport.field(range, "layer")).ordinal() + 1;
                         for (int j = 0; j < 3; j++) {
                             int start = Short.toUnsignedInt(indices.get(i + j)) * stride;
                             for (int n = 0; n < 3; n++) { hash = hash * 31 + Math.round(points.get(start + n) * 10000); }
@@ -151,8 +150,7 @@ class GpuTerrainIncrementalSmokeTest {
 
     private static BoardScene edit(BoardScene scene, Coords at, int level, int depth, BoardScene.Surface family) {
         var tiles = new ArrayList<>(scene.tiles());
-        tiles.set(at.getX() * scene.height() + at.getY(), new BoardScene.Tile(at, level, depth, false, 0, family, null,
-              null, List.of(), List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
+        tiles.set(at.getX() * scene.height() + at.getY(), BoardScenes.newTile(at, level, depth, false, 0, family, List.of(), List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null));
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
     }
 
@@ -160,8 +158,8 @@ class GpuTerrainIncrementalSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 17; x++) {
             for (int y = 0; y < 16; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null, null,
-                      List.of(), List.of(), BoardLiquid.NONE, null, true));
+                tiles.add(BoardScenes.newTile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
+                      List.of(), List.of(), BoardLiquid.NONE, null));
             }
         }
         return new BoardScene(0, 17, 16, tiles, List.of(), List.of(), -1, "", List.of());

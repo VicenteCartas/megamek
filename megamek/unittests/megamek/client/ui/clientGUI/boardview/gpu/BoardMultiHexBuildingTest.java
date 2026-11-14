@@ -944,9 +944,9 @@ class BoardMultiHexBuildingTest {
                     }
                 }
             }
-            return new BoardScene.Tile(coords, elevations.getOrDefault(coords, 0), -1, false, roads.getOrDefault(coords, 0), base.surface(), null, null, features, List.of(),
-                  BoardLiquid.NONE, null, true, base.road(), base.fireSmoke(), base.biome(), false, false, 0, false,
-                  base.groundCover(), false, null, null, Map.of(), cover, false, BoardRoad.Kind.NONE, 0, false, rail);
+            return BoardScenes.newTile(coords, elevations.getOrDefault(coords, 0), -1, false, roads.getOrDefault(coords, 0), base.surface(), features, List.of(),
+                  BoardLiquid.NONE, null, base.road(), base.fireSmoke(), base.biome(), false, false, 0, false,
+                  base.groundCover(), false, null, Map.of(), cover, false, BoardRoad.Kind.NONE, 0, false, rail);
         });
     }
 

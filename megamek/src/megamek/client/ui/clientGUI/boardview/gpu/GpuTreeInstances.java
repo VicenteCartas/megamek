@@ -4,66 +4,68 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.WeakHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
-import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Attribute;
+import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.Renderable;
-import com.badlogic.gdx.graphics.g3d.RenderableProvider;
 import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.model.MeshPart;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
-import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.g3d.utils.DepthShaderProvider;
-import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.math.Matrix4;
-import com.badlogic.gdx.utils.Array;
-import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
-import com.badlogic.gdx.utils.IntArray;
-import com.badlogic.gdx.utils.Pool;
 import com.badlogic.gdx.utils.ShortArray;
 
 /**
- * Trees, modular building parts and placed objects drawn with OpenGL instancing. Each model at each detail level is
- * held once; a placement adds only its place, turn, size and mirror, so the geometry in memory does not grow with the
- * number of trees.
- * Each species and detail level keeps one buffer of the trees at that level, in board order; each pass draws the ranges
- * of the chunks it sees, so panning uploads nothing, and a zoom uploads only the buffers whose trees changed level. A
- * chunk's trees upload again when the chunk is replaced with different trees. Building and object parts still gather
- * per pass.
+ * The board's instancing: the instance format every instanced program reads ({@link #STRIDE} floats a placement,
+ * tree-instances.glsl), the instanced vertex stages and depth providers, and the tree stands ({@link Stand}): a chunk's
+ * trees by species, each at its own detail level, dissolving between levels, which GpuIndirectInstances draws as lists
+ * ({@link #list}). Each model at each level is held once in its pools; a placement adds only its place, turn, size and
+ * mirror. Render thread.
  */
-final class GpuTreeInstances implements RenderableProvider, Disposable {
+final class GpuTreeInstances {
     /** Marks the materials of instanced renderables, so the shader providers pick the instanced shaders. */
     static final class Instanced extends Attribute {
         static final long TYPE = register("boardInstanced");
+        /**
+         * Its program discards the pixels of a level that another one keeps while its instances dissolve between them
+         * (level-dissolve.glsl): a kit structure's parts in their dissolve's lists (GpuTerrain.Chunk#shareProps). A
+         * value, not an attribute type of its own (libGDX's 64 types are all taken): the terrain's programs tell the two
+         * apart (GpuTerrain.TerrainShaders). A tree's foliage program always dissolves.
+         */
+        final boolean dissolve;
 
-        Instanced() { super(TYPE); }
+        Instanced() { this(false); }
+
+        Instanced(boolean dissolve) {
+            super(TYPE);
+            this.dissolve = dissolve;
+        }
 
         @Override
-        public Attribute copy() { return new Instanced(); }
+        public Attribute copy() { return new Instanced(dissolve); }
 
         @Override
-        public int compareTo(Attribute other) { return Long.compare(type, other.type); }
+        public int compareTo(Attribute other) {
+            return type != other.type ? Long.compare(type, other.type) : Boolean.compare(dissolve, ((Instanced) other).dissolve);
+        }
+
+        @Override
+        public int hashCode() { return 31 * super.hashCode() + (dissolve ? 1 : 0); }
     }
-
-    /** The draw passes that gather building parts; each keeps its own part buffers, as its parts differ. */
-    enum Pass { COLOUR, DEPTH, SHADOW, FADE }
 
     /**
      * Floats per tree: x, y, z and the horizontal scale, negative for a mirror image (its model's y axis reversed before
@@ -74,82 +76,6 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     static final int STRIDE = 8;
     private static final int DISSOLVE = 7;
     private static final String MAIN = "void main() {";
-
-    /** One model or module part: an instanced copy of its mesh, a renderable per part and the instance buffer. */
-    private final class Batch implements Disposable {
-        final GpuInstancedMesh mesh;
-        final List<Renderable> parts = new ArrayList<>();
-        /** A tree model's parts that fade, as Pass.FADE draws them. */
-        final List<Renderable> fades = new ArrayList<>();
-        final FloatArray data = new FloatArray();
-        /** What the instance buffer holds. */
-        final FloatArray uploaded = new FloatArray();
-        /** Floats per instance: {@link #STRIDE}, and a recolourable model's four slot colours after them. */
-        final int stride;
-        int capacity = 64;
-
-        Batch(Model model) {
-            mesh = new GpuInstancedMesh(model.meshes.first());
-            // A stand's trees sway in a blast's wind; a felled stand's fall (tree-instances.glsl).
-            mesh.piece = new float[] { 0, 0, 0, 0, 0, 0, felled ? GpuInstancedMesh.FELLED : GpuInstancedMesh.STANDING };
-            stride = STRIDE;
-            mesh.enableInstancedRendering(false, capacity, attributes(false));
-            forEachPart(model.nodes, part -> {
-                Renderable renderable = new Renderable();
-                renderable.meshPart.set(part.meshPart);
-                renderable.meshPart.mesh = mesh;
-                renderable.material = instancedMaterial(part.material);
-                parts.add(renderable);
-                if (GpuCutoutFade.fades(renderable.material)) {
-                    Renderable fade = new Renderable();
-                    fade.meshPart.set(renderable.meshPart);
-                    fade.material = GpuCutoutFade.fadeMaterial(renderable.material);
-                    fades.add(fade);
-                }
-            });
-        }
-
-        /**
-         * A shared building module or object part; only this indexed range needs an instanced vertex buffer. A batch of
-         * mirror images ({@code mirrored}) takes the clockwise winding as the front ({@link GpuInstancedMesh#mirrored}).
-         */
-        Batch(Renderable source, boolean mirrored) {
-            MeshBuilder builder = compacted(source.meshPart);
-            mesh = new GpuInstancedMesh(builder.getNumVertices(), builder.getNumIndices(), builder.getAttributes());
-            mesh.mirrored = mirrored;
-            builder.end(mesh);
-            boolean colours = RigidGlb.colourSlotted(mesh.getVertexAttributes());
-            stride = colours ? STRIDE + 4 : STRIDE;
-            mesh.enableInstancedRendering(false, capacity, attributes(colours));
-            Renderable part = new Renderable();
-            part.meshPart.set(source.meshPart);
-            part.meshPart.mesh = mesh;
-            part.meshPart.offset = 0;
-            part.material = instancedMaterial(source.material);
-            parts.add(part);
-        }
-
-        void upload() {
-            if (data.equals(uploaded)) { return; }
-            upload(data);
-            uploaded.clear();
-            uploaded.addAll(data);
-        }
-
-        void upload(FloatArray instances) {
-            int count = instances.size / stride;
-            if (count > capacity) {
-                capacity = Math.max(count, capacity * 2);
-                mesh.disableInstancedRendering();
-                mesh.enableInstancedRendering(false, capacity, attributes(stride > STRIDE));
-            }
-            mesh.setInstanceData(instances.items, 0, instances.size);
-            uploads++;
-        }
-
-        @Override
-        public void dispose() { mesh.dispose(); }
-    }
 
     /**
      * libGDX tells a mesh's attributes apart by usage and unit, and adds the unit to the shader location, so the
@@ -163,14 +89,30 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
               : new VertexAttribute[] { place, turn };
     }
 
-    /** A part's material in a batch: its own copy, marked so the shader providers pick the instanced shaders. */
+    /** A part's material in an instanced group: its own copy, marked so the shader providers pick the instanced shaders. */
     static Material instancedMaterial(Material material) {
         Material result = new Material(material);
         result.set(new Instanced());
         return result;
     }
 
-    /** Each node part of these nodes and their children, in the order a batch draws them. */
+    /**
+     * An instanced material's copy whose program dissolves between levels ({@link Instanced#dissolve}), or, with
+     * {@code dissolve} false, the one it draws with at rest.
+     */
+    static Material dissolving(Material instanced, boolean dissolve) {
+        Material result = new Material(instanced);
+        result.set(new Instanced(dissolve));
+        return result;
+    }
+
+    /** Whether the material's program dissolves between levels ({@link #dissolving}). */
+    static boolean dissolves(Attributes material) {
+        var instanced = material.get(Instanced.class, Instanced.TYPE);
+        return instanced != null && instanced.dissolve;
+    }
+
+    /** Each node part of these nodes and their children, in the order a stand's list draws them. */
     private static void forEachPart(Iterable<Node> nodes, Consumer<NodePart> action) {
         for (Node node : nodes) {
             for (NodePart part : node.parts) { action.accept(part); }
@@ -179,18 +121,106 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     /**
-     * The parts a stand of this species draws at every detail level, each as its batch's material and vertex layout,
-     * for programs built before the stand first draws (GpuTerrain's warm-up, with the depth pre-pass).
+     * The records of a GPU-driven tree list's runs (GpuIndirectInstances#trees): what moves the trees, as a stand's
+     * mode names it (GpuInstancedMesh#STANDING, their sway in a blast; #FELLED, their fall).
+     */
+    private static final GpuIndirectInstances.Pieces STANDING = moved(GpuInstancedMesh.STANDING),
+          FELLED = moved(GpuInstancedMesh.FELLED);
+
+    private static GpuIndirectInstances.Pieces moved(float mode) {
+        return new GpuIndirectInstances.Pieces() {
+            @Override
+            public float[] record(Renderable sample) {
+                float[] record = new float[GpuIndirectInstances.RECORD_FLOATS];
+                record[3] = mode;
+                return record;
+            }
+
+            @Override
+            public void released(Renderable sample, float[] record) { }
+        };
+    }
+
+    /** Each species' parts at each level, then those that fade, for the GPU-driven path's lists ({@link #runs}). */
+    private final Map<String, Renderable[][]> standParts = new HashMap<>();
+
+    /**
+     * A stand as a GPU-driven snapshot (GpuIndirectInstances#trees), in place of {@code current}: each tree at the level
+     * it takes, its dissolve riding in its instance ({@code level} -1: the colour and depth passes'), or all of them at
+     * {@code level} (the shadow map's); with {@code fades} only the parts that fade (the fade pass's). Written again when the
+     * stand's trees, or its levels' runs, changed; its runs' records say what moves its trees (standing or felled).
+     */
+    GpuIndirectInstances.Instances list(GpuIndirectInstances indirect, GpuIndirectInstances.Instances current, Stand stand,
+          int level, boolean fades) {
+        // The runs, or the trees and the level: what a list of each kind was written for. A species not split since its
+        // trees changed splits first, which counts among the runs: the revision read after it is the one written.
+        if (level < 0) { stand.trees.keySet().forEach(stand::levels); }
+        int revision = level < 0 ? stand.runs : stand.contents * TreeLod.LEVELS + level;
+        if (GpuIndirectInstances.holds(current, stand, revision)) { return current; }
+        List<Renderable[]> parts = new ArrayList<>();
+        List<FloatArray> runs = new ArrayList<>();
+        runs(stand, level, fades, parts, runs);
+        return indirect.trees(current, stand, revision, parts, runs, felled ? FELLED : STANDING);
+    }
+
+    /**
+     * A stand's runs (#list): each species' trees at each level with trees, and the parts of that level's model that
+     * draw them, or with {@code fades} those that fade.
+     */
+    private void runs(Stand stand, int level, boolean fades, List<Renderable[]> parts, List<FloatArray> runs) {
+        for (String name : stand.trees.keySet()) {
+            for (int lod = 0; lod < TreeLod.LEVELS; lod++) {
+                FloatArray run = level < 0 ? stand.levels(name)[lod] : lod == level ? stand.trees.get(name) : null;
+                if (run == null || run.size == 0) { continue; }
+                Renderable[] drawn = standParts(name, lod, fades);
+                if (drawn.length == 0) { continue; }
+                parts.add(drawn);
+                runs.add(run);
+            }
+        }
+    }
+
+    private Renderable[] standParts(String name, int lod, boolean fades) {
+        Renderable[][] known = standParts.computeIfAbsent(name, key -> new Renderable[TreeLod.LEVELS * 2][]);
+        int at = lod * 2 + (fades ? 1 : 0);
+        if (known[at] == null) {
+            List<Renderable> result = new ArrayList<>();
+            forEachPart(models.apply(name, lod).nodes, part -> {
+                if (fades && !GpuCutoutFade.fades(part.material)) { return; }
+                Renderable renderable = new Renderable();
+                renderable.meshPart.set(part.meshPart);
+                renderable.material = fades ? GpuCutoutFade.fadeMaterial(part.material) : part.material;
+                result.add(renderable);
+            });
+            known[at] = result.toArray(Renderable[]::new);
+        }
+        return known[at];
+    }
+
+    /** The meshes of the stands' parts listed so far (#list): the pools keep their geometry (GpuIndirectInstances#retain). */
+    void meshes(java.util.Set<com.badlogic.gdx.graphics.Mesh> out) {
+        for (Renderable[][] levels : standParts.values()) {
+            for (Renderable[] parts : levels) {
+                if (parts == null) { continue; }
+                for (Renderable part : parts) { out.add(part.meshPart.mesh); }
+            }
+        }
+    }
+
+    /**
+     * The parts a stand of this species draws at every detail level, each as its own material and vertex layout, for
+     * programs built before the stand first draws (GpuTerrain's warm-up, which picks the instanced program a part's list
+     * draws with).
      */
     void speciesParts(String species, BiConsumer<Material, VertexAttributes> action) {
         for (int level = 0; level < TreeLod.LEVELS; level++) {
             Model model = models.apply(species, level);
             VertexAttributes layout = model.meshes.first().getVertexAttributes();
-            forEachPart(model.nodes, part -> action.accept(instancedMaterial(part.material), layout));
+            forEachPart(model.nodes, part -> action.accept(part.material, layout));
         }
     }
 
-    /** A batch's actual instance layout, including colour slots when its vertex layout addresses them. */
+    /** A part's instance layout, including colour slots when its vertex layout addresses them. */
     static VertexAttributes instanceAttributes(VertexAttributes layout) {
         return new VertexAttributes(attributes(RigidGlb.colourSlotted(layout)));
     }
@@ -220,6 +250,11 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         private int splitForced = -1;
         /** Each tree's level in a split, reused. */
         private int[] own = new int[0];
+        /**
+         * Counts changes of its trees (added, cleared) and, in {@code runs}, of its levels' runs too: what the GPU-driven
+         * path's lists of it were written for (GpuTerrain#standList).
+         */
+        int contents, runs;
 
         /** A species' trees between two levels: the level each leaves (-1: none) and when it began to (clock seconds). */
         private static final class Dissolve {
@@ -251,6 +286,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             placed.insertRange(at * STRIDE, STRIDE);
             System.arraycopy(tree.items, 0, placed.items, at * STRIDE, STRIDE);
             levels.remove(species);
+            contents++;
+            runs++;
         }
 
         /** No trees; the scale stays for the next ones (GpuTerrain.Chunk#restand). */
@@ -260,6 +297,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             starts.clear();
             levels.clear();
             dissolves.clear();
+            contents++;
+            runs++;
         }
 
         /**
@@ -371,6 +410,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             }
             starts.put(species, next);
             levels.put(species, result);
+            if (old == null || !Arrays.equals(old, result)) { runs++; }
             return result;
         }
 
@@ -381,250 +421,52 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     /**
-     * One species at one detail level: every chunk's trees of that species in one buffer, in board order, and the
-     * ranges of the chunks a pass draws at this level.
+     * A part's indexed range compacted into {@code packed} and {@code indices} (both replaced), its vertices numbered as
+     * its indices first reach them: what GpuIndirectInstances places in its pools.
      */
-    private final class Species implements Disposable {
-        final Batch batch;
-        // Chunk arrays are replaced, never edited: identity, then contents, identify an unchanged chunk.
-        final List<FloatArray> current = new ArrayList<>(), previous = new ArrayList<>();
-        final IntArray drawn = new IntArray(), starts = new IntArray(), ranges = new IntArray();
-        final FloatArray data = new FloatArray();
-        boolean gathered;
-
-        Species(Model model) { batch = new Batch(model); }
-
-        void begin() { current.clear(); drawn.clear(); gathered = false; }
-
-        void add(FloatArray trees, boolean visible) {
-            current.add(trees);
-            drawn.add(visible ? 1 : 0);
+    static void compact(MeshPart part, FloatArray packed, ShortArray indices) {
+        GpuPropBatch.copyVertices(part.mesh, part.offset, part.size, packed, indices);
+        int stride = part.mesh.getVertexSize() / Float.BYTES;
+        // Fragment meshes are already packed in first-use order by KitFragments. Preserve that output directly:
+        // copying and renumbering it again made the first frame of a mass collapse pay for every fragment twice.
+        int next = 0;
+        for (int i = 0; i < indices.size; i++) {
+            int vertex = Short.toUnsignedInt(indices.items[i]);
+            if (vertex > next) { next = -1; break; }
+            if (vertex == next) { next++; }
         }
-
-        boolean upload() {
-            boolean changed = current.size() != previous.size();
-            for (int i = 0; !changed && i < current.size(); i++) {
-                changed = current.get(i) != previous.get(i) && !current.get(i).equals(previous.get(i));
+        if (next == packed.size / stride) { return; }
+        FloatArray vertices = new FloatArray(packed);
+        int[] remap = new int[vertices.size / stride];
+        Arrays.fill(remap, -1);
+        packed.clear();
+        for (int i = 0; i < indices.size; i++) {
+            int original = Short.toUnsignedInt(indices.items[i]);
+            if (remap[original] < 0) {
+                remap[original] = packed.size / stride;
+                packed.addAll(vertices.items, original * stride, stride);
             }
-            previous.clear(); previous.addAll(current);
-            if (changed) {
-                data.clear();
-                starts.clear();
-                for (FloatArray trees : current) {
-                    starts.add(data.size / STRIDE);
-                    data.addAll(trees);
-                }
-                starts.add(data.size / STRIDE);
-                // A level no tree takes draws nothing: its buffer keeps what it held.
-                if (data.size > 0) { batch.upload(data); }
-            }
-            // Chunks lie in board order, so a column of visible chunks is one contiguous range and one draw.
-            ranges.clear();
-            int count = 0;
-            for (int i = 0; i < current.size(); i++) {
-                int size = starts.get(i + 1) - starts.get(i);
-                if (drawn.get(i) == 0 || size == 0) { continue; }
-                if (ranges.size > 0 && ranges.get(ranges.size - 2) + ranges.get(ranges.size - 1) == starts.get(i)) {
-                    ranges.incr(ranges.size - 1, size);
-                } else {
-                    ranges.add(starts.get(i), size);
-                }
-                count += size;
-            }
-            batch.mesh.drawRanges(ranges);
-            return count > 0;
+            indices.items[i] = (short) remap[original];
         }
-
-        @Override
-        public void dispose() { batch.dispose(); }
-    }
-
-    /**
-     * A part's own copy, built but not ended: its indexed range compacted, as parts share a GLB vertex buffer. Its
-     * vertices are numbered as its indices first reach them, which a broken part's fragments' table counts on
-     * (KitFragments).
-     */
-    static MeshBuilder compacted(MeshPart part) {
-        FloatArray vertices = new FloatArray();
-        ShortArray indices = new ShortArray();
-        GpuPropBatch.copyVertices(part.mesh, part.offset, part.size, vertices, indices);
-        MeshBuilder builder = new MeshBuilder();
-        builder.begin(part.mesh.getVertexAttributes(), part.primitiveType);
-        builder.addMesh(vertices.items, indices.items, 0, indices.size);
-        return builder;
     }
 
     private final BiFunction<String, Integer, Model> models;
     /** Whether its trees are felled ones (GpuDestruction), whose instances name their slots instead of a dissolve. */
     private final boolean felled;
-    /** Whether every pass gathers the same placements (GpuDestruction's pieces): a part's passes share one batch. */
-    private final boolean samePasses;
-    private final Map<String, Species[]> species = new HashMap<>();
-    private final List<Species> stands = new ArrayList<>();
-    /** A part's batch key: mirror images draw in their own batch, whose front face is flipped. */
-    private record Part(Mesh mesh, int offset, int size, Material material, boolean mirrored) { }
-    private final Map<Part, Batch[]> sharedParts = new HashMap<>();
-    // Persistent chunk snapshots need no per-frame material/range keys; values do not retain their weak keys.
-    private final Map<Renderable, Batch[]> sharedLookups = new WeakHashMap<>();
-    private final List<Batch> gathered = new ArrayList<>();
-    private Pass pass = Pass.COLOUR;
-    private long uploads;
-
-    /** models: loads a tree model, already marked for the foliage shader, by asset name. */
-    GpuTreeInstances(BiFunction<String, Integer, Model> models) { this(models, false); }
-
-    /** With {@code felled} its trees fall (GpuDestruction): their stands never dissolve between levels. */
-    GpuTreeInstances(BiFunction<String, Integer, Model> models, boolean felled) { this(models, felled, false); }
 
     /**
-     * With {@code samePasses} every pass gathers the same placements, and a part keeps one batch for them all: one copy
-     * of its mesh, built once, and one upload of its instances.
+     * {@code models}: loads a tree model, already marked for the foliage shader, by asset name and level; with
+     * {@code felled} its trees fall (GpuDestruction): their stands never dissolve between levels.
      */
-    GpuTreeInstances(BiFunction<String, Integer, Model> models, boolean felled, boolean samePasses) {
+    GpuTreeInstances(BiFunction<String, Integer, Model> models, boolean felled) {
         this.models = models;
         this.felled = felled;
-        this.samePasses = samePasses;
-    }
-
-    /** Starts gathering one pass's trees and building parts. */
-    void begin(Pass next) {
-        for (Batch batch : gathered) { batch.data.clear(); }
-        gathered.clear();
-        for (Species stand : stands) { stand.begin(); }
-        stands.clear();
-        pass = next;
-    }
-
-    /**
-     * Adds a chunk's trees, each at its own detail level ({@link Stand#detail}), in board order, whether the pass sees
-     * the chunk or not: a chunk's place in each level's buffer stays fixed while its trees there are unchanged, and only
-     * the visible chunks draw.
-     */
-    void add(Stand stand, boolean visible) {
-        for (String name : stand.trees.keySet()) {
-            FloatArray[] runs = stand.levels(name);
-            Species[] levels = species.computeIfAbsent(name, key -> new Species[TreeLod.LEVELS]);
-            for (int lod = 0; lod < levels.length; lod++) {
-                if (levels[lod] == null) {
-                    if (!visible || runs[lod].size == 0) { continue; }
-                    levels[lod] = new Species(models.apply(name, lod));
-                }
-                gather(levels[lod]);
-                levels[lod].add(runs[lod], visible);
-            }
-        }
-    }
-
-    /** Adds all of a chunk's trees at one detail level: the shadow map's, chosen from its texel (GpuTerrain#renderDepth). */
-    void add(Stand stand, int level, boolean visible) {
-        for (Map.Entry<String, FloatArray> entry : stand.trees.entrySet()) {
-            Species[] levels = species.computeIfAbsent(entry.getKey(), key -> new Species[TreeLod.LEVELS]);
-            for (int lod = 0; lod < levels.length; lod++) {
-                if (levels[lod] == null) {
-                    if (!visible || lod != level) { continue; }
-                    levels[lod] = new Species(models.apply(entry.getKey(), lod));
-                }
-                gather(levels[lod]);
-                levels[lod].add(lod == level ? entry.getValue() : NONE, visible && lod == level);
-            }
-        }
-    }
-
-    private static final FloatArray NONE = new FloatArray(1);
-
-    private void gather(Species level) {
-        if (!level.gathered) { level.gathered = true; stands.add(level); }
-    }
-
-    /**
-     * Building module ranges and object parts borrow their meshes; placements add only transforms, using the same draw
-     * path as trees. Each transform must be {@link #instanceable}.
-     */
-    void add(Array<Renderable> parts) {
-        for (Renderable source : parts) { add(source); }
-    }
-
-    /**
-     * A chunk's parts with their instance data, by batch: what {@link #add(Renderable)} finds for each part every pass,
-     * ready until the chunk snapshots its parts again.
-     */
-    static final class Placements {
-        private final List<Renderable> samples = new ArrayList<>();
-        private final List<Batch[]> batches = new ArrayList<>();
-        private final List<FloatArray> data = new ArrayList<>();
-        /** Whether each batch's parts are falling pieces, which turn about their sample's box. */
-        private final List<Boolean> pieces = new ArrayList<>();
-    }
-
-    Placements placements(Array<Renderable> parts) { return placements(parts, null); }
-
-    /**
-     * Falling pieces ({@link GpuDestruction}) with their hexes' slots + 1 ({@code owners}), which their instances carry
-     * (a_instance1.w); a piece's mesh part's box is its node's, about which it turns.
-     */
-    Placements placements(Array<Renderable> parts, IntArray owners) {
-        Placements result = new Placements();
-        Map<Batch[], FloatArray> data = new IdentityHashMap<>();
-        for (int i = 0; i < parts.size; i++) {
-            Renderable source = parts.get(i);
-            int owner = owners == null ? 0 : owners.get(i);
-            // Looked up once, here: the weak lookups hold only the parts gathered one by one every pass (#add).
-            Batch[] passes = part(source);
-            FloatArray instances = data.get(passes);
-            if (instances == null) {
-                data.put(passes, instances = new FloatArray());
-                result.samples.add(source);
-                result.batches.add(passes);
-                result.data.add(instances);
-                result.pieces.add(owner > 0);
-            }
-            append(instances, source.worldTransform, owner);
-            if (RigidGlb.colourSlotted(source.meshPart.mesh.getVertexAttributes())) {
-                instances.addAll(RigidGlb.slotColours(source.userData));
-            }
-        }
-        return result;
-    }
-
-    /** These placements, in this pass. */
-    void add(Placements placed) {
-        for (int i = 0; i < placed.batches.size(); i++) {
-            Batch batch = batch(placed.batches.get(i), placed.samples.get(i));
-            if (batch.data.isEmpty()) { gathered.add(batch); }
-            if (placed.pieces.get(i) && batch.mesh.piece == null) { batch.mesh.piece = GpuInstancedMesh.piece(placed.samples.get(i)); }
-            batch.data.addAll(placed.data.get(i));
-        }
-    }
-
-    private Batch[] batches(Renderable source) { return sharedLookups.computeIfAbsent(source, this::part); }
-
-    /** A part's batches by its key: its mesh range, its material and whether it is a mirror image. */
-    private Batch[] part(Renderable value) {
-        return sharedParts.computeIfAbsent(new Part(value.meshPart.mesh, value.meshPart.offset, value.meshPart.size,
-              value.material, mirrored(value.worldTransform)), ignored -> new Batch[Pass.values().length]);
-    }
-
-    /** This pass's batch among a part's. */
-    private Batch batch(Batch[] passes, Renderable source) {
-        int index = samePasses ? 0 : pass.ordinal();
-        Batch batch = passes[index];
-        if (batch == null) { passes[index] = batch = new Batch(source, mirrored(source.worldTransform)); }
-        return batch;
-    }
-
-    /** One part's placement; a part that gathers no placement in a pass costs no draw. */
-    void add(Renderable source) {
-        Batch batch = batch(batches(source), source);
-        if (batch.data.isEmpty()) { gathered.add(batch); }
-        append(batch.data, source.worldTransform, 0);
-        // Every colouring of a recolourable model shares this batch: each placement adds its colours.
-        if (batch.stride > STRIDE) { batch.data.addAll(RigidGlb.slotColours(source.userData)); }
     }
 
     /**
      * Whether a tree's instance data can hold this transform: a place, a turn about z, one positive scale along x and y
      * and a positive vertical scale. Tilted, mirrored, sheared or unevenly stretched placements cannot be instanced in a
-     * stand, whose species batches keep the counter-clockwise front face.
+     * stand, whose lists keep the counter-clockwise front face.
      */
     static boolean placeable(Matrix4 transform) {
         return placeable(transform, false);
@@ -632,8 +474,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
 
     /**
      * Whether an object or module part's instance data can hold this transform: a {@link #placeable} one or its mirror
-     * image, which {@link #add} draws in a batch of its own with the front face flipped. Tilted, sheared or unevenly
-     * stretched placements cannot be instanced.
+     * image, which GpuIndirectInstances draws in a group of its own with the front face flipped. Tilted, sheared or
+     * unevenly stretched placements cannot be instanced.
      */
     static boolean instanceable(Matrix4 transform) {
         return placeable(transform, true);
@@ -660,9 +502,9 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
 
     /**
      * The x column gives the turn and the horizontal scale; a mirror image's y column is the turned y axis reversed,
-     * which the scale's sign carries. A falling piece's last float names its hex's slot + 1 ({@code owner}).
+     * which the scale's sign carries. A falling piece's last float names what moves it ({@code owner}).
      */
-    private static void append(FloatArray data, Matrix4 transform, int owner) {
+    static void append(FloatArray data, Matrix4 transform, int owner) {
         float[] m = transform.val;
         float horizontal = (float) Math.hypot(m[Matrix4.M00], m[Matrix4.M10]);
         // Two four-float adds: the varargs addAll would allocate an array per instance, every pass.
@@ -671,120 +513,42 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     /**
-     * A debris batch's piece for the draw (tree-instances.glsl: u_piece, u_pieceHalf, whose w counts a broken part's
-     * fragments, and their table u_fragments); 0 for every other batch.
+     * The units of the instanced vertex stages' samplers: the pose rows (GpuPoses) and the GPU-driven path's piece
+     * records (GpuIndirectInstances), which only these stages read.
      */
     static void registerPiece(BaseShader shader) {
-        shader.register("u_piece", new BaseShader.LocalSetter() {
+        // The pose rows stay on a unit of their own, which only this vertex stage reads (GpuPoses), and so do the
+        // GPU-driven path's piece records (GpuIndirectInstances); from GLSL 4.20 on their bindings are explicit too.
+        shader.register("u_poses", new BaseShader.GlobalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                float[] piece = piece(renderable);
-                if (piece == null) { target.set(id, 0f, 0f, 0f, 0f); } else { target.set(id, piece[0], piece[1], piece[2], piece[6]); }
+                target.set(id, GpuPoses.UNIT);
             }
         });
-        shader.register("u_pieceHalf", new BaseShader.LocalSetter() {
+        shader.register("u_pieceRecords", new BaseShader.GlobalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                float[] piece = piece(renderable);
-                if (piece != null) {
-                    target.set(id, piece[3], piece[4], piece[5], (piece.length - GpuInstancedMesh.PIECE) / 8f);
-                }
+                target.set(id, GpuIndirectInstances.RECORDS_UNIT);
             }
         });
-        shader.register("u_fragments", new BaseShader.LocalSetter() {
-            @Override
-            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                float[] piece = piece(renderable);
-                if (piece != null && piece.length > GpuInstancedMesh.PIECE && target.has(id)) {
-                    target.program.setUniform4fv(target.loc(id), piece, GpuInstancedMesh.PIECE, piece.length - GpuInstancedMesh.PIECE);
-                }
-            }
-        });
-    }
-
-    private static float[] piece(Renderable renderable) {
-        return renderable.meshPart.mesh instanceof GpuInstancedMesh instanced ? instanced.piece : null;
-    }
-
-    /** Evict buffers for retired building interiors/modules at the scene commit boundary. */
-    void retainParts(Set<Mesh> live) {
-        Set<Batch[]> evicted = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
-        Set<Batch> disposed = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
-        sharedParts.entrySet().removeIf(entry -> {
-            if (live.contains(entry.getKey().mesh())) { return false; }
-            for (Batch batch : entry.getValue()) {
-                if (batch != null && disposed.add(batch)) { batch.dispose(); }
-            }
-            evicted.add(entry.getValue());
-            return true;
-        });
-        if (evicted.isEmpty()) { return; }
-        // One search of the gathered batches for all of them, and only the evicted parts' lookups go: every other
-        // snapshot would pay its materials' hashes again next frame.
-        gathered.removeIf(disposed::contains);
-        sharedLookups.values().removeIf(evicted::contains);
-    }
-
-    /** Uploads what changed and supplies one renderable per part of every model this pass draws. */
-    @Override
-    public void getRenderables(Array<Renderable> renderables, Pool<Renderable> pool) {
-        for (Species stand : stands) {
-            if (pass == Pass.FADE && stand.batch.fades.isEmpty()) { continue; }
-            if (stand.upload()) { parts(pass == Pass.FADE ? stand.batch.fades : stand.batch.parts, renderables); }
-        }
-        for (Batch batch : gathered) {
-            batch.upload();
-            parts(batch.parts, renderables);
-        }
-    }
-
-    private static void parts(List<Renderable> parts, Array<Renderable> renderables) {
-        for (Renderable part : parts) {
-            // Each pass picks its own shader; a depth shader must never be suggested to the colour pass.
-            part.shader = null;
-            part.environment = null;
-            renderables.add(part);
-        }
-    }
-
-    /** Instance buffer uploads so far; unchanged chunks and unchanged building parts add none. */
-    long uploads() { return uploads; }
-
-    /** Bytes of the shared tree/building meshes and of their instance buffers. */
-    long bytes() {
-        long total = 0;
-        List<Batch> all = new ArrayList<>();
-        for (Species[] levels : species.values()) { for (Species level : levels) { if (level != null) { all.add(level.batch); } } }
-        for (Batch[] passes : sharedParts.values()) { for (Batch batch : passes) { if (batch != null) { all.add(batch); } } }
-        for (Batch batch : all) {
-            total += (long) batch.mesh.getNumVertices() * batch.mesh.getVertexSize()
-                  + (long) batch.mesh.getNumIndices() * Short.BYTES + (long) batch.capacity * batch.stride * Float.BYTES;
-        }
-        return total;
-    }
-
-    @Override
-    public void dispose() {
-        for (Species[] levels : species.values()) {
-            for (Species level : levels) { if (level != null) { level.dispose(); } }
-        }
-        retainParts(Set.of());
-        species.clear();
-        stands.clear();
-        gathered.clear();
     }
 
     static boolean instanced(Renderable renderable) {
         return renderable.material != null && renderable.material.has(Instanced.TYPE);
     }
 
+    /** The instanced vertex stages' inputs and functions: an instance's placement, then the rest (tree-instances.glsl). */
+    private static String instanceSource() {
+        return GpuShaderSource.read("instance-place.glsl") + "\n" + GpuShaderSource.read("tree-instances.glsl");
+    }
+
     /** The scene vertex shader, placing each vertex by its tree's instance data instead of the world transform. */
     static String vertex(String source) {
-        source = insert(source, MAIN, GpuDestruction.defines() + GpuShaderSource.read("tree-instances.glsl") + "\n" + MAIN);
+        source = insert(source, MAIN, GpuDestruction.defines() + instanceSource() + "\n" + MAIN);
         source = insert(source, "vec4 pos = u_worldTrans * vec4(a_position, 1.0);",
               "fallBegin();\n#ifdef impostorFlag\nvec4 pos = vec4(impostorPosition(a_position), 1.0);\n#else\n"
                     + "vec4 pos = vec4(instancePosition(a_position), 1.0);\n#endif\n"
-                    + "#ifdef treeDissolveFlag\nv_treeDissolve = instanceDissolve();\n#endif\n");
+                    + "#ifdef levelDissolveFlag\nv_levelDissolve = instanceDissolve();\n#endif\n");
         // A recolourable model's placement passes its colours in the instance data instead of the uniform.
         source = insert(source, "slotColour(a_color.rgb, a_colourSlot, u_slotColours)", "slotColour(a_color.rgb, a_colourSlot, a_instance2)");
         // An impostor's quad stands where it shows, at the depth of its plant's front (tree-instances.glsl).
@@ -846,7 +610,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
 
     private static String depthVertex(String source) {
         source = insert(source, MAIN, "uniform mat4 u_projViewTrans;\n" + GpuDestruction.defines()
-              + GpuShaderSource.read("tree-instances.glsl") + "\n" + MAIN);
+              + instanceSource() + "\n" + MAIN);
         return insert(source, "vec4 pos = u_projViewWorldTrans * vec4(a_position, 1.0);",
               "\nfallBegin();\n#ifdef impostorFlag\nvec4 pos = u_projViewTrans * vec4(impostorPosition(a_position), 1.0);\n#else\n"
                     + "vec4 pos = u_projViewTrans * vec4(instancePosition(a_position), 1.0);\n#endif\n");

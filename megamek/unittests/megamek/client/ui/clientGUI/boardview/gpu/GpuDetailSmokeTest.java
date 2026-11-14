@@ -79,14 +79,24 @@ class GpuDetailSmokeTest {
             for (float zoom : new float[] { .1f, 1.5f, 10, .1f }) {
                 camera.camera.zoom = zoom;
                 camera.update();
-                drawTrees(terrain, camera);
+                // Until the view's pages have merged (GpuMeshPage, a few frames after a view settles): their meshes go up
+                // here, not in the frames counted below.
+                for (int frame = 0; frame == 0 || terrain.pagesMerging() && frame < 10 * GpuMeshPage.SETTLE_FRAMES; frame++) {
+                    drawTrees(terrain, camera);
+                }
             }
-            // A repeated frame uploads nothing, not even tree placements.
+            // The frame logic once, as every shown frame runs it: its first run makes what it keeps (the falls' pose rows).
+            terrain.animate(0, List.of());
+            drawTrees(terrain, camera);
+            // A repeated frame uploads nothing, not even tree placements: it writes no instanced list either.
             int idle = audit.uploads;
+            long idleWrites = terrain.treeInstanceUploads();
             drawTrees(terrain, camera);
             assertEquals(idle, audit.uploads, "An unchanged frame must not upload anything");
+            assertEquals(idleWrites, terrain.treeInstanceUploads(), "An unchanged frame must not write any instanced list");
             int uploads = audit.uploads, buffers = audit.buffers.size();
-            long instanceUploads = terrain.treeInstanceUploads();
+            GpuIndirectInstances indirect = GpuTestSupport.indirect(terrain);
+            int geometries = GpuTestSupport.field(indirect, "nextGeometry");
             long cachedBytes = audit.bufferBytes.values().stream().mapToLong(Integer::longValue).sum();
             // A pure forest must never inspect unit bounds for obsolete occupancy fading.
             List<ModelInstance> unreadUnits = new java.util.AbstractList<>() {
@@ -102,9 +112,12 @@ class GpuDetailSmokeTest {
                 terrain.animate(0, unreadUnits);
                 drawTrees(terrain, camera);
             }
-            // Each pass places the trees it draws; changing the view changes only those placements.
-            assertEquals(uploads, audit.uploads - (terrain.treeInstanceUploads() - instanceUploads),
-                  "Cached tree LoD and unit-only tuning must not upload geometry or textures");
+            // Each pass places the trees it draws; changing the view changes only those placements (lists and their
+            // passes' data), never the parts' geometry in the pools.
+            assertEquals(uploads, audit.uploads, () -> "Cached tree LoD and unit-only tuning must not upload geometry or textures: "
+                  + audit.calls.subList(uploads, audit.calls.size()));
+            assertEquals(geometries, (int) GpuTestSupport.field(indirect, "nextGeometry"),
+                  "Cached tree LoD and unit-only tuning must not place geometry in the pools again");
             assertEquals(buffers, audit.buffers.size(), "Crossing tree thresholds must reuse the same buffers");
             System.out.println("Forest: 256 heavy-woods hexes, repeated three-level zoom and unit-scale changes: zero uploads after warmup.");
             System.out.println("Forest GPU buffers: initial " + initialBytes / 1048576.0 + " MiB; all levels cached "
@@ -133,7 +146,7 @@ class GpuDetailSmokeTest {
                 hex.addTerrain(new Terrain(Terrains.WOODS, 2));
                 hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
                 var coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, null,
+                tiles.add(BoardScenes.newTile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS,
                       BoardFeatures.capture(hex, coords, Map.of()), List.of()));
             }
         }
@@ -399,12 +412,34 @@ class GpuDetailSmokeTest {
         final Set<Integer> buffers = new HashSet<>(), textures = new HashSet<>();
         final Map<Integer, Integer> boundBuffers = new HashMap<>(), bufferBytes = new HashMap<>();
         int uploads;
+        /** Each upload counted, its call, target and caller, in order: an unexpected one names itself. */
+        final List<String> calls = new ArrayList<>();
+
+        /** The board code that made the call. */
+        private static String caller() {
+            for (StackTraceElement frame : new Throwable().getStackTrace()) {
+                String type = frame.getClassName();
+                if (type.startsWith("megamek.client.ui.clientGUI.boardview.gpu.") && !type.contains("GpuDetailSmokeTest")
+                      && !type.contains("GpuGlWatch")) {
+                    return type.substring(type.lastIndexOf('.') + 1) + "." + frame.getMethodName();
+                }
+            }
+            return "?";
+        }
         private final GpuGlWatch watch;
 
         Uploads() {
             watch = new GpuGlWatch((proxy, method, args) -> {
-                      if (method.getName().contains("BufferData") || method.getName().contains("BufferSubData")
-                            || method.getName().contains("TexImage") || method.getName().contains("TexSubImage")) { uploads++; }
+                      // The GPU-driven path's pass data (its jobs and parts, GpuIndirectInstances#upload) go up through the
+                      // copy-write binding, which no geometry or texture takes: placements, not uploads.
+                      boolean passData = method.getName().equals("glBufferData")
+                            && Integer.valueOf(GL30.GL_COPY_WRITE_BUFFER).equals(args[0]);
+                      if (!passData && (method.getName().contains("BufferData") || method.getName().contains("BufferSubData")
+                            || method.getName().contains("TexImage") || method.getName().contains("TexSubImage"))) {
+                          uploads++;
+                          calls.add(method.getName() + (args != null && args.length > 0 ? " " + args[0] : "") + " from "
+                                + caller());
+                      }
                       try {
                           Object result = method.invoke(original, args);
                           switch (method.getName()) {

@@ -78,16 +78,28 @@ final class GpuAuthoredBuilding {
     private record Geometry(ModelData source, GeneratedMesh mesh) { }
     private record Whole(List<Geometry> levels, List<BuildingVolumes.Solid> solids, Map<Double, Area> roofs,
           Map<Double, Area> sections, AtomicInteger sliced) { }
-    /** Derived CPU geometry shared by workers of one immutable tile snapshot; never owns GPU resources. */
+    /**
+     * One immutable tile snapshot's buildings by member, the whole placements its workers are cutting, and the layouts it
+     * asked for ({@link #SLICES}); never owns GPU resources.
+     */
     private record Cached(WeakReference<List<BoardScene.Tile>> tiles, int width, int height,
-          Map<String, List<Coords>> members, Map<Placement, Whole> placements, Map<Layout, Prepared> slices) { }
-    // Keep the current and previous snapshots: route previews compare both. Do not retain every intermediate drag.
+          Map<String, List<Coords>> members, Map<Placement, Whole> placements, java.util.Set<Layout> used) { }
+    /**
+     * The snapshots in use: a game reads its live tiles, its ground's as made and its original planting's by turns, and
+     * route previews compare two. Not every intermediate drag.
+     */
+    private static final int SNAPSHOTS = 4;
     private static final List<Cached> SCENES = new ArrayList<>();
+    /**
+     * Every share cut, by its layout, which says all that shapes it: a snapshot that names a layout another one cut
+     * takes that cut. Kept while a snapshot in {@link #SCENES} uses the layout.
+     */
+    private static final Map<Layout, Prepared> SLICES = new ConcurrentHashMap<>();
     private static final GeometryCache<String> FILES = new GeometryCache<>();
     private static final Map<String, List<RigidGlb.NightLight>> LIGHTS = new ConcurrentHashMap<>();
     private static final GeometryCache<Assembly> ASSEMBLIES = new GeometryCache<>();
 
-    static synchronized void reload() { FILES.clear(); LIGHTS.clear(); ASSEMBLIES.clear(); SCENES.clear(); }
+    static synchronized void reload() { FILES.clear(); LIGHTS.clear(); ASSEMBLIES.clear(); SCENES.clear(); SLICES.clear(); }
 
     /**
      * Source and assembled models, least recently used first, within a heap budget: a modular kit has a model per module
@@ -158,7 +170,7 @@ final class GpuAuthoredBuilding {
     }
 
     private static synchronized Cached cached(BoardScene scene) {
-        SCENES.removeIf(cache -> cache.tiles().get() == null);
+        boolean dropped = SCENES.removeIf(cache -> cache.tiles().get() == null);
         for (var cache : SCENES) {
             if (cache.tiles().get() == scene.tiles() && cache.width() == scene.width() && cache.height() == scene.height()) { return cache; }
         }
@@ -169,9 +181,13 @@ final class GpuAuthoredBuilding {
         }
         members.replaceAll((id, coords) -> List.copyOf(coords));
         var cache = new Cached(new WeakReference<>(scene.tiles()), scene.width(), scene.height(), Map.copyOf(members),
-              new ConcurrentHashMap<>(), new ConcurrentHashMap<>());
-        if (SCENES.size() == 2) { SCENES.removeFirst(); }
+              new ConcurrentHashMap<>(), ConcurrentHashMap.newKeySet());
+        if (SCENES.size() == SNAPSHOTS) {
+            SCENES.removeFirst();
+            dropped = true;
+        }
         SCENES.add(cache);
+        if (dropped) { SLICES.keySet().removeIf(layout -> SCENES.stream().noneMatch(kept -> kept.used().contains(layout))); }
         return cache;
     }
 
@@ -183,11 +199,13 @@ final class GpuAuthoredBuilding {
                 if (!supports(feature)) { continue; }
                 Layout layout = layout(scene, tile, feature);
                 var key = new Placement(layout.anchor(), layout.object(), layout.base(), scene.width(), scene.height());
-                Prepared prepared = cache.slices().get(layout);
+                // Named before it is cut, so dropping another snapshot leaves it.
+                cache.used().add(layout);
+                Prepared prepared = SLICES.get(layout);
                 if (prepared == null) {
                     var whole = cache.placements().computeIfAbsent(key, ignored -> placement(layout,
                           FILES.get(feature.asset(), () -> load(feature.asset()))));
-                    prepared = cache.slices().computeIfAbsent(layout, ignored -> slice(layout, whole));
+                    prepared = SLICES.computeIfAbsent(layout, ignored -> slice(layout, whole));
                     // Every share cut: the whole placement's copy of its geometry has done its work in this snapshot.
                     int sliced = whole.sliced().incrementAndGet();
                     if (sliced >= layout.members().size()) { cache.placements().remove(key); }

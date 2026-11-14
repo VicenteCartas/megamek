@@ -45,67 +45,24 @@ class BoardPaintCoverTest {
           false, 1, BoardDecoration.Placement.ground(), 0, false).withStretch(new BoardDecoration.Stretch(1.6, 10, 1));
 
     @Test
-    void bladesStayOffAnEmblemYetGrowInItsTransparentCornersAndKeepTheirPlacesElsewhere() {
-        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
-        var tile = scene.tile(AT);
-        var cross = new BoardDecoration("cross", "decal", "decal/emblems/red-cross", null, .05, 0, 20, false, .5,
-              BoardDecoration.Placement.ground(), 0, false);
-        var paint = BoardDecals.Opacity.of(tile, stamp(cross));
-        var bare = roots(GpuGroundCover.plant(scene, tile, support(scene), null));
-        var painted = roots(GpuGroundCover.plant(scene, tile, support(scene), paint));
-        assertTrue(bare.containsAll(painted), "Paint only removes roots: the others keep their places and ranks");
-        var uv = BoardDecals.paintUv(cross);
-        float x0 = BoardGeometry.centerX(AT) + (float) cross.x() * BoardGeometry.width(), y0 = BoardGeometry.centerY(AT);
-        int corners = 0;
-        for (var root : bare) {
-            float opacity = paint.at(root.get(0), root.get(1));
-            if (painted.contains(root)) {
-                assertTrue(opacity < .5f, "No blade through the emblem");
-                float u = uv.u(root.get(0) - x0, root.get(1) - y0), v = uv.v(root.get(0) - x0, root.get(1) - y0);
-                if (u > 0 && u < 1 && v > 0 && v < 1) { corners++; }
-            } else {
-                assertTrue(opacity > 0, "A root outside the paint and its margin stays");
-            }
-        }
-        assertTrue(painted.size() < bare.size() - 200, "The emblem clears its grass: " + painted.size() + " of " + bare.size());
-        assertTrue(corners > 50, "Grass grows inside the emblem's square where its image is transparent: " + corners);
+    void reedsLoseTheirRootsUnderOpaquePaint() {
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.MARSH, 0));
+        var biome = scene.tile(AT);
+        var covered = BoardDecals.Opacity.of(stamp(COVER, AT));
+        assertTrue(GpuBiomeVegetation.plantReeds(scene, biome, support(scene), 1, null).size > 0, "The marsh grows reeds");
+        assertEquals(0, GpuBiomeVegetation.plantReeds(scene, biome, support(scene), 1, covered).size);
     }
 
     @Test
-    void bankRimsReedsAndCropsLoseTheirRootsUnderOpaquePaint() {
-        var bank = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, c.getX() < 5 ? 2 : 0, -1, 0));
-        var tile = bank.tile(AT);
-        var paint = BoardDecals.Opacity.of(tile, stamp(COVER));
-        assertTrue(GpuGroundCover.plantRim(bank, tile, support(bank), null).size > 0, "The bank's rim grows blades");
-        assertNull(GpuGroundCover.plantRim(bank, tile, support(bank), paint));
-        for (var kind : List.of(BoardScene.Biome.MARSH, BoardScene.Biome.FIELD)) {
-            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, kind, 0));
-            // Crops stand only in a field of wheat or maize.
-            var at = kind == BoardScene.Biome.FIELD ? BoardScenes.CROPS : AT;
-            var biome = scene.tile(at);
-            var covered = BoardDecals.Opacity.of(biome, stamp(COVER, at));
-            if (kind == BoardScene.Biome.MARSH) {
-                assertTrue(GpuBiomeVegetation.plantReeds(scene, biome, support(scene), 1, null).size > 0, "The marsh grows reeds");
-                assertEquals(0, GpuBiomeVegetation.plantReeds(scene, biome, support(scene), 1, covered).size);
-            } else {
-                assertTrue(BoardScenes.cropPlants(scene, biome, support(scene, at), null).size > 0, "The field grows crops");
-                assertEquals(0, BoardScenes.cropPlants(scene, biome, support(scene, at), covered).size);
-            }
-        }
-    }
-
-    @Test
-    void reedsAndCropsAvoidPlacedObjects() {
+    void reedsAvoidPlacedObjects() {
         var fountain = new BoardDecoration("fountain", "prop", "scenery/parks/fountain", null, 0, 0, 0, false, 1,
               BoardDecoration.Placement.ground(), 0);
         var feature = new BoardScene.Feature(fountain.asset(), 0, 0, 0, 1, 1, 0, BoardScene.FeatureKind.PROP, 0, false, fountain);
-        for (var kind : List.of(BoardScene.Biome.MARSH, BoardScene.Biome.FIELD)) {
-            // Crops stand only in a field of wheat or maize.
-            var at = kind == BoardScene.Biome.FIELD ? BoardScenes.CROPS : AT;
+        for (var kind : List.of(BoardScene.Biome.MARSH)) {
+            var at = AT;
             var plain = BoardScenes.scene(c -> BoardScenes.tile(c, kind, 0));
             var base = plain.tile(at);
-            var placed = BoardScenes.replace(plain, new BoardScene.Tile(at, 0, -1, false, 0, base.surface(),
-                  null, null, List.of(feature), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE,
+            var placed = BoardScenes.replace(plain, BoardScenes.newTile(at, 0, -1, false, 0, base.surface(), List.of(feature), List.of(), BoardLiquid.NONE, null, BoardRoad.Kind.NONE,
                   BoardFireSmoke.NONE, kind));
             var obstacles = new BoardObstacles(placed, placed.tile(at));
             FloatArray bare = plantRoots(plain, kind, at), around = plantRoots(placed, kind, at);
@@ -125,7 +82,6 @@ class BoardPaintCoverTest {
     }
 
     private static FloatArray plantRoots(BoardScene scene, BoardScene.Biome kind, Coords at) {
-        return kind == BoardScene.Biome.MARSH ? GpuBiomeVegetation.plantReeds(scene, scene.tile(at), support(scene, at), 1, null)
-              : BoardScenes.cropPlants(scene, scene.tile(at), support(scene, at), null);
+        return GpuBiomeVegetation.plantReeds(scene, scene.tile(at), support(scene, at), 1, null);
     }
 }

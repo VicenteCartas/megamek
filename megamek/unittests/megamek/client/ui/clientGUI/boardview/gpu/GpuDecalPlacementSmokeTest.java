@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -36,7 +37,6 @@ class GpuDecalPlacementSmokeTest {
           sample("bridge-decal", 0, "water:2", "bridge:1:9;bridge_elev:2;bridge_cf:90", "fluff:14:0", false),
           sample("bridge-fluff", 0, "water:2", "bridge:1:9;bridge_elev:2;bridge_cf:90", "fluff:6:0", false),
           sample("tank-decal", 0, "pavement:1", "fuel_tank:1;fuel_tank_elev:2;fuel_tank_cf:50;fuel_tank_magn:100", "fluff:14:0", false),
-          sample("industrial-decal", 1, "pavement:1", "heavy_industrial:2", "fluff:14:0", false),
           sample("ice-decal", -1, "water:2;ice:1", "", "fluff:14:0", false),
           sample("raised-decal", 3, "pavement:1", "", "fluff:14:0", false));
 
@@ -72,10 +72,12 @@ class GpuDecalPlacementSmokeTest {
                     for (int i = 0; i < SAMPLES.size(); i++) {
                         var sample = SAMPLES.get(i);
                         BoardScene control = controls.get(i), scene = decorated.get(i);
+                        camera.fit(control);
                         Vector3 center = BoardGeometry.center(CENTER, 0);
                         var ray = new Ray(new Vector3(center.x, center.y, 1000), new Vector3(0, 0, -1));
                         frame.prepare(terrain, camera, control);
                         terrain.update(control);
+                        GpuReviewFrame.settle(terrain, null, control, camera);
                         var hit = terrain.selectionHit(control, ray);
                         assertNotNull(hit, sample.name());
                         float support = sample.lakebed() ? BoardGeometry.groundZ(control.tile(CENTER))
@@ -83,16 +85,21 @@ class GpuDecalPlacementSmokeTest {
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
                         for (boolean tactical : new boolean[] { false, true, false }) {
-                            // The tileset decals are the Classic graphics': a build of their own.
+                            // Both graphics project the converted decal objects onto their receiving surfaces.
                             terrain.setColumns(tactical);
                             terrain.update(scene);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             float expected = support;
                             // Paint and terrain-owned sprites are overlays; art the conversion turned into placed
                             // objects (the skylights) draws in 3D in both views (GpuSceneryPlacementSmokeTest).
                             var tile = scene.tile(CENTER);
-                            if (tactical ? tile.tilesetDecals() != null || tile.tilesetScenery() != null : tile.decals() != null) {
-                                assertEquals(expected + BoardDecals.LIFT * BoardGeometry.hexScale(),
-                                      overlayHeight(terrain, tactical, ray), .003f, sample.name() + " tactical=" + tactical);
+                            boolean paint = tile.features().stream().anyMatch(feature -> feature.decoration() != null
+                                  && feature.decoration().kind().equals("decal"));
+                            if (paint || tactical && tile.tilesetScenery() != null) {
+                                float lift = (BoardDecals.LIFT + (paint ? .02f : 0)) * BoardGeometry.hexScale();
+                                String context = sample.name() + " tactical=" + tactical;
+                                float actual = assertDoesNotThrow(() -> overlayHeight(terrain, tactical, ray), context);
+                                assertEquals(expected + lift, actual, .003f, context);
                             }
                             if (sample.name().equals("roof-decal")) {
                                 assertTrue(overlayTriangles(terrain, tactical).stream()
@@ -132,9 +139,13 @@ class GpuDecalPlacementSmokeTest {
     private static List<Vector3> overlayTriangles(GpuTerrain terrain, boolean tactical) throws Exception {
         List<Vector3> triangles = new ArrayList<>();
         for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
-            for (Object object : (List<?>) GpuTestSupport.field(chunk, tactical ? "tilesetDecals" : "surfaceDecals")) {
+            var overlays = new ArrayList<Object>((List<?>) GpuTestSupport.field(chunk, "authoredPaint"));
+            if (tactical) {
+                overlays.addAll((List<?>) GpuTestSupport.field(GpuTestSupport.field(chunk, "ground"), "tilesetScenery"));
+            }
+            for (Object object : overlays) {
                 var instance = (ModelInstance) object;
-                triangles.addAll(GpuTerrain.triangles(instance.model));
+                triangles.addAll(GpuTerrain.triangles(instance.model.nodes, part -> part.meshPart.size > 0));
             }
         }
         return triangles;

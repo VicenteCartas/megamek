@@ -103,7 +103,8 @@ public interface IGameManager {
     }
 
     /**
-     * Saves the game server-side. Will announce the save (or error) in chat if the given sendChat is true.
+     * Captures the game server-side and queues its save. Writing and the optional chat announcement finish
+     * asynchronously.
      *
      * @param fileName The filename to use
      * @param sendChat When true, the saving (or error) is announced in chat
@@ -118,6 +119,9 @@ public interface IGameManager {
      * @param localPath The path to the file to be used on the client
      */
     void sendSaveGame(int connId, String fileName, String localPath);
+
+    /** Finishes outstanding persistence work when the server shuts down. */
+    default void shutdown() { }
 
     void removeAllEntitiesOwnedBy(Player player);
 

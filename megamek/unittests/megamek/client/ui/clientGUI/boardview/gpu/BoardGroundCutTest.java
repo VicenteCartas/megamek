@@ -63,12 +63,14 @@ class BoardGroundCutTest {
         BoardScene all = scene(0, false);
         var holes = new BoardSurface(all, all.tile(TRENCH)).stands();
         BoardScene.Tile tile = BoardFeatures.withTrench(all.tile(TRENCH).withFeatures(List.of()), FOUR_HOLES);
-        BoardSurface surface = new BoardSurface(all, tile);
+        BoardSurface surface = surfaceWith(all, tile);
+        BoardSurface undug = surfaceWith(all, tile.withFeatures(List.of()));
         float cx = BoardGeometry.centerX(TRENCH), cy = BoardGeometry.centerY(TRENCH), ground = BoardGeometry.groundZ(tile);
         assertEquals(List.of(0, 1, 3, 4), surface.stands().stream().map(BoardGroundCut.Stand::number).toList());
         for (var hole : holes) {
             float floor = (surface.height(cx + hole.x(), cy + hole.y()) - ground) / BoardRelief.metres(1);
-            assertEquals(BoardGroundCut.shown(hole.number(), FOUR_HOLES) ? -HOLE : 0, floor, .01f,
+            float original = (undug.height(cx + hole.x(), cy + hole.y()) - ground) / BoardRelief.metres(1);
+            assertEquals(BoardGroundCut.shown(hole.number(), FOUR_HOLES) ? -HOLE : original, floor, .01f,
                   "Only a figure's slot is dug: " + hole);
         }
     }
@@ -114,10 +116,10 @@ class BoardGroundCutTest {
 
     @Test
     void aPavedFortifiedHexsSandbagsDigNothingAndHoldItsUnits() {
-        BoardScene level = scene(0, false);
+        BoardScene level = scene(0, false, BoardScene.Surface.CONCRETE);
         BoardScene.Tile tile = level.tile(TRENCH).withFeatures(List.of(new BoardScene.Feature(BoardFeatures.SANDBAGS, 0, 0,
               0, 1, 1, 0, BoardScene.FeatureKind.SCENERY, 0, true)));
-        BoardSurface surface = new BoardSurface(level, tile);
+        BoardSurface surface = surfaceWith(level, tile);
         assertFalse(surface.dug(), "Pavement is not dug");
         assertEquals(5, kind(surface, BoardGroundCut.Kind.TROOP).size(), "A stand behind each firing notch");
         assertEquals(2, kind(surface, BoardGroundCut.Kind.VEHICLE).size(), "Two transports in the revetment");
@@ -204,10 +206,16 @@ class BoardGroundCutTest {
               && Math.abs(expected.getBlue() - actual.getBlue()) <= 12, message + ": " + expected + " " + actual);
     }
 
+    /** Install an edit in the scene's ground snapshot before asking for its surface. */
+    private static BoardSurface surfaceWith(BoardScene scene, BoardScene.Tile tile) {
+        var edited = scene.withTiles(scene.tiles().stream().map(t -> t.coords().equals(tile.coords()) ? tile : t).toList());
+        return new BoardSurface(edited, edited.tile(tile.coords()));
+    }
+
     /** A level dry tile of {@code surface}, its ground cover {@code cover}, or its surface's alone when null. */
     private static BoardScene.Tile tile(BoardScene.Surface surface, BoardSurfaceBlend.Cover cover) {
-        return new BoardScene.Tile(TRENCH, 0, -1, false, 0, surface, null, null, List.of(), List.of(),
-              BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE, BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false,
+        return BoardScenes.newTile(TRENCH, 0, -1, false, 0, surface, List.of(), List.of(),
+              BoardLiquid.NONE, null, BoardRoad.Kind.NONE, BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false,
               0, false, cover == null ? BoardSurfaceBlend.solid(surface) : cover);
     }
 
@@ -221,13 +229,17 @@ class BoardGroundCutTest {
      * of it a hex {@code cliff} levels up.
      */
     private static BoardScene scene(int cliff, boolean fortified) {
+        return scene(cliff, fortified, BoardScene.Surface.GRASS);
+    }
+
+    private static BoardScene scene(int cliff, boolean fortified, BoardScene.Surface ground) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
                 Coords coords = new Coords(x, y);
                 int level = coords.equals(TRENCH.translated(0)) ? cliff : 0;
-                var tile = new BoardScene.Tile(coords, level, -1, false, 0, BoardScene.Surface.GRASS, null, null,
-                      BoardFeatures.capture(new Hex(level), coords, Map.of()), List.of(), BoardLiquid.NONE, null, true);
+                var tile = BoardScenes.newTile(coords, level, -1, false, 0, ground,
+                      BoardFeatures.capture(new Hex(level), coords, Map.of()), List.of(), BoardLiquid.NONE, null);
                 if (coords.equals(TRENCH)) {
                     if (fortified) {
                         List<BoardScene.Feature> features = new ArrayList<>(tile.features());

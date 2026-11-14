@@ -330,8 +330,13 @@ class GpuCollapseCauseTest {
         playback.accept(frames.initial().timeline(), frames.initial().scene(), ignored -> false);
         playback.accept(events, frames.moved().scene(), ignored -> false);
         com.badlogic.gdx.math.Vector3 atCollapse = null;
+        boolean arrived = false;
         for (int tick = 0; tick < 2000 && playback.busy(); tick++) {
             playback.advance(.02, UnitMotion.Speed.NORMAL);
+            // Its checkpoint comes after the collapse and the fall: it is never shown back where it started meanwhile.
+            boolean there = shown(playback, frames.moved().scene()).coords().equals(at);
+            assertTrue(there || !arrived, "Once on the structure it stays there");
+            arrived |= there;
             if (atCollapse == null && playback.transition() == transition) {
                 atCollapse = new com.badlogic.gdx.math.Vector3(playback.motions.get(MOVER).position());
             }

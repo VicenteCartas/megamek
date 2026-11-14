@@ -64,13 +64,7 @@ uniform float u_mirrored;
 // normal variance, as antialiasedRoughness adds it). Leaves facing every way over the outward hemisphere are the
 // cosine-weighted facet distribution, which is GGX at alpha^2 = 1 (projected variance 1/2).
 const float CROWN_NORMAL_VARIANCE = 1.0;
-#ifdef treeDissolveFlag
-// A tree changing detail level draws at both for TREE_DISSOLVE seconds of u_treeClock from when it began
-// (v_treeDissolve, tree-instances.glsl): the level it takes keeps the pixels of one screen pattern under its progress,
-// the one it leaves the others, so each pixel shows one of them and its depth twin keeps the same.
-flat in float v_treeDissolve;
-uniform float u_treeClock;
-#endif
+// LEVEL_DISSOLVE
 #ifdef impostorFlag
 // IMPOSTOR_SAMPLE
 uniform mat4 u_projViewTrans;
@@ -167,13 +161,8 @@ void main() {
 #elif defined(blendedFlag) && defined(alphaTestFlag)
     if (opacity <= v_alphaTest) discard;
 #endif
-#ifdef treeDissolveFlag
-    if (v_treeDissolve != 0.0) {
-        float progress = clamp((u_treeClock - abs(v_treeDissolve)) * (1.0 / TREE_DISSOLVE), 0.0, 1.0);
-        // Interleaved gradient noise: an even spread of thresholds at every scale.
-        float pattern = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(.06711056, .00583715))));
-        if (v_treeDissolve > 0.0 ? pattern >= progress : pattern < progress) discard;
-    }
+#ifdef levelDissolveFlag
+    levelDissolve();
 #endif
 #ifdef depthPrepassFlag
     // The depth twin keeps exactly these texels and writes their depth alone.
