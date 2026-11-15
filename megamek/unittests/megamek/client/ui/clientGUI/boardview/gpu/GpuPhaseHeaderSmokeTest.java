@@ -113,12 +113,12 @@ class GpuPhaseHeaderSmokeTest {
                 shot.dispose();
                 // Shot 02: the local movement turn of the Atlas, first of ten activations.
                 render(hud, state, header, conditions, card, moving, CONDITIONS, "g1-movement").dispose();
-                assertEquals(List.of("ROUND 03", "MOVEMENT", upper("GpuBoard.hud.phase.yourTurn")),
+                assertEquals(List.of("MOVEMENT", upper("GpuBoard.hud.phase.yourTurn")),
                       GpuBoardTestUi.texts(header.actor()), "Your turn, without the unit's name");
                 // Shot 04: the opponent's turn names its player, not its unit; the first activation is done.
                 render(hud, state, header, conditions, card, status(GamePhase.MOVEMENT, false, Entity.NONE,
                       opponent, 1, List.of()), List.of(), "g1-opponent").dispose();
-                assertEquals(List.of("ROUND 03", "MOVEMENT",
+                assertEquals(List.of("MOVEMENT",
                             UiTheme.upper(Messages.getString("GpuBoard.hud.phase.playerTurn", second.playerName()))),
                       GpuBoardTestUi.texts(header.actor()));
                 // A turn without its player's name is the opponent's.
@@ -147,12 +147,12 @@ class GpuPhaseHeaderSmokeTest {
                       false, moving.localPlayerId(), Entity.NONE, deployment, 0, moving.units(), List.of(), false),
                       List.of(), "g1-deployment").dispose();
                 assertEquals(List.of("DEPLOYMENT", UiTheme.upper(Messages.getString("GpuBoard.hud.phase.playerTurn",
-                      turns.get(1).playerName()))), GpuBoardTestUi.texts(header.actor()), "No round before the first");
+                      turns.get(1).playerName()))), GpuBoardTestUi.texts(header.actor()));
                 // Shot 15 at 1280 x 720: declaring attacks with five own units pending, narrow metrics.
                 hud.size(1280, 720);
                 render(hud, state, header, conditions, card, status(GamePhase.FIRING, true,
                       GpuHudFixtures.ATLAS, turns, 0, List.of()), List.of(), "g1-firing-1280x720").dispose();
-                assertEquals(List.of("ROUND 03", upper("GpuBoard.hud.phase.firing"),
+                assertEquals(List.of(upper("GpuBoard.hud.phase.firing"),
                       upper("GpuBoard.hud.phase.yourTurn")), GpuBoardTestUi.texts(header.actor()));
             } finally {
                 header.dispose();

@@ -493,18 +493,18 @@ class GpuLogPanelSmokeTest {
                 assertEquals(List.of("ROUND 01 \u00B7 COMBAT LOG"), texts(panel.find("log-header")));
                 hud.capture("log-round-deployment").dispose();
                 showRound(hud, panel, slot, phase(deployed, GamePhase.INITIATIVE_REPORT, 1), header, card);
-                assertEquals(List.of("ROUND 01", "INITIATIVE", "TURN ORDER"), texts(header.actor()));
+                assertEquals(List.of("INITIATIVE", "TURN ORDER"), texts(header.actor()));
                 assertEquals("ROUND 1 \u00B7 INITIATIVE", texts(card.actor()).getFirst());
                 showRound(hud, panel, slot, phase(deployed, GamePhase.MOVEMENT, 0), header);
-                assertEquals(List.of("ROUND 01", "MOVEMENT"), texts(header.actor()));
+                assertEquals(List.of("MOVEMENT"), texts(header.actor()));
                 assertEquals(List.of("ROUND 01 \u00B7 COMBAT LOG"), texts(panel.find("log-header")));
 
                 showRound(hud, panel, slot, phase(placed, GamePhase.MOVEMENT, 0), header);
-                assertEquals(List.of("ROUND 01", "MOVEMENT"), texts(header.actor()), "MegaMek's round 0");
-                assertEquals(List.of("ROUND 01 \u00B7 COMBAT LOG"), texts(panel.find("log-header")));
+                assertEquals(List.of("ROUND 01 \u00B7 COMBAT LOG"), texts(panel.find("log-header")),
+                      "MegaMek's round 0");
                 showRound(hud, panel, slot, phase(placed, GamePhase.MOVEMENT, 1), header);
-                assertEquals(List.of("ROUND 02", "MOVEMENT"), texts(header.actor()), "MegaMek's round 1");
-                assertEquals(List.of("ROUND 02 \u00B7 COMBAT LOG", "Round 2"), texts(panel.find("log-header")));
+                assertEquals(List.of("ROUND 02 \u00B7 COMBAT LOG", "Round 2"), texts(panel.find("log-header")),
+                      "MegaMek's round 1");
                 hud.capture("log-round-second").dispose();
                 click(hud, panel.find("log-round"));
                 ArgumentCaptor<List<String>> rounds = ArgumentCaptor.forClass(List.class);
@@ -514,7 +514,7 @@ class GpuLogPanelSmokeTest {
                 choose.getValue().accept(1);
                 showRound(hud, panel, slot, phase(placed, GamePhase.MOVEMENT, 1), header);
                 assertEquals(List.of("ROUND 01 \u00B7 BATTLE REPORT", "Round 1"), texts(panel.find("log-header")));
-                assertEquals(List.of("ROUND 02", "MOVEMENT"), texts(header.actor()));
+                assertEquals(List.of("MOVEMENT"), texts(header.actor()));
             } finally {
                 header.dispose();
                 card.dispose();

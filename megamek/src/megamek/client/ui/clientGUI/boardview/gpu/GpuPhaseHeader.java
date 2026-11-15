@@ -8,7 +8,6 @@ import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
-import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.Widget;
@@ -18,8 +17,8 @@ import megamek.client.ui.gdx.UiTheme;
 import megamek.common.enums.GamePhase;
 
 /**
- * The phase header, top centre over the board as text without a frame, in every phase: the round and the phase, the
- * turn order as one block per turn in its side's colour (the current one framed in white), and whose turn it is. Each
+ * The phase header, top centre over the board as text without a frame, in every phase: the phase, the turn order
+ * as one block per turn in its side's colour (the current one framed in white), and whose turn it is. Each
  * block is {@link #BLOCK_MIN} to {@link #BLOCK_MAX} units wide; an order longer than its room scrolls to keep the
  * current block in view and fades out at a side where it goes on. Presses pass through to the board.
  */
@@ -45,11 +44,9 @@ final class GpuPhaseHeader implements GpuHud.Component {
 
     private final UiKit ui;
     private final Table root = new Table();
-    private final Label round;
     private final Label name;
     private final Label who;
     private final Order order = new Order();
-    private final Cell<Label> roundCell;
     private final float nameScale;
     private boolean narrow;
     private GamePhase shownPhase;
@@ -59,8 +56,6 @@ final class GpuPhaseHeader implements GpuHud.Component {
         root.setName("phase-header");
         // Text over the board: presses on it and around it reach the board.
         root.setTouchable(Touchable.disabled);
-        round = label("hud-caption", 12, UiTheme.MUTED);
-        round.setName("phase-round");
         name = label("hud-phase", NAME_SIZE, UiTheme.TEXT);
         name.setName("phase-name");
         nameScale = name.getFontScaleX();
@@ -70,10 +65,7 @@ final class GpuPhaseHeader implements GpuHud.Component {
         // A name or who line longer than the header's room ends in an ellipsis.
         name.setEllipsis(true);
         who.setEllipsis(true);
-        Table line = new Table();
-        roundCell = line.add(round).bottom().padBottom(4);
-        line.add(name).height(24).bottom().minWidth(0);
-        root.add(line).minWidth(0).row();
+        root.add(name).height(24).minWidth(0).row();
         // The order keeps its row while it has no turns, so the lines never move.
         root.add(order).growX().height(BLOCK_HEIGHT).padTop(8).padBottom(8).row();
         root.add(who).height(14).minWidth(0);
@@ -111,10 +103,6 @@ final class GpuPhaseHeader implements GpuHud.Component {
             narrow = inputs.metrics().narrow();
             name.setFontScale(nameScale * (narrow ? NARROW_NAME_SIZE / NAME_SIZE : 1));
         }
-        // No number before the first combat round (the start-of-game deployment and the setup phases before it).
-        round.setText(status.round() > 0
-              ? UiTheme.upper(Messages.getString("GpuBoard.hud.phase.round", status.round())) : "");
-        roundCell.padRight(status.round() > 0 ? 10 : 0);
         name.setText(UiTheme.upper(name(status)));
         GpuBattleStatus.Slot current = status.turnIndex() >= 0 && status.turnIndex() < status.turns().size()
               ? status.turns().get(status.turnIndex()) : null;
