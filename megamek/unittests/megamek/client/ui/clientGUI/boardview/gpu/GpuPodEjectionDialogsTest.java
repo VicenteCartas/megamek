@@ -41,6 +41,7 @@ import megamek.common.actions.TriggerBPodAction;
 import megamek.common.board.Coords;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.Mounted;
+import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.units.Entity;
 import megamek.common.units.Infantry;
 import megamek.common.units.Mek;
@@ -148,8 +149,8 @@ class GpuPodEjectionDialogsTest {
             List<Entity> units = List.of(atlas, archer);
             AutomaticEjectionDialog dialog = onSwing(() -> new AutomaticEjectionDialog(declaring.frame, declaring.gui,
                   units, "vacuum"));
-            assertEquals(List.of("Atlas AS7-D", "No kit", "[x] Eject automatically", "Archer ARC-2R", "No kit",
-                  "[ ] Eject automatically", "[ ] Stop asking me this"), onSwing(() -> texts(dialog)).subList(4, 11));
+            assertEquals(List.of("Atlas AS7-D", "No kit", "[x] ", "Archer ARC-2R", "No kit", "[ ] ",
+                  "[ ] Stop asking me this"), onSwing(() -> texts(dialog)).subList(4, 11));
             onSwing(() -> {
                 List<JCheckBox> boxes = components(dialog.getContentPane(), JCheckBox.class);
                 boxes.get(0).setSelected(false);
@@ -269,6 +270,7 @@ class GpuPodEjectionDialogsTest {
                 ((Mek) atlas).setAutoEject(true);
                 ((Mek) archer).setAutoEject(false);
                 preferences.setNagForAutoEject(true);
+                declaring.fixture.game.getPlanetaryConditions().setAtmosphere(Atmosphere.VACUUM);
                 return null;
             });
             List<Entity> units = List.of(atlas, archer);
@@ -282,12 +284,14 @@ class GpuPodEjectionDialogsTest {
             DialogRequest request = asked.request();
             assertEquals(DialogKind.MULTI, request.kind());
             assertEquals("Ejection will kill unprotected crews", request.title());
-            assertTrue(request.message().startsWith("Anyone who ejects into vacuum out there will die"),
+            assertTrue(request.message().contains("Ejecting into vacuum will kill any crew not protected against it"),
                   request.message());
             assertEquals(List.of("Atlas AS7-D", "Archer ARC-2R"), labels(request));
             assertEquals(List.of("No kit", "No kit"), request.rows().stream().map(DialogRow::detail).toList(),
                   "Each row names what its crew is wearing, as the Swing crew column does");
             assertEquals(List.of(0), request.initiallySelected(), "Ticked as each unit is set to eject");
+            assertEquals("Turn off for unprotected crews", request.clearRows().label());
+            assertEquals(List.of(0, 1), request.clearRows().rows(), "The crews that would die, as the Swing button");
             assertEquals("Stop asking me this", request.checkbox());
             assertEquals(List.of("Deploy", "Cancel"), request.buttons());
             assertEquals(-1, request.cancelButton(), "Esc is the close box");

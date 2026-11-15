@@ -63,6 +63,7 @@ import javax.swing.KeyStroke;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.ClearRows;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.util.UIUtil;
@@ -359,8 +360,9 @@ public class AutomaticEjectionDialog extends JDialog implements ActionListener {
 
     /**
      * Showing the dialog asks in the client's native battle window instead when that draws dialogs: the units to tick
-     * for automatic ejection, each starting as it is set, and the "stop asking me this" box. Deploy and Cancel act as
-     * they do here; Esc, like the close box, cancels the deployment and keeps asking.
+     * for automatic ejection, each starting as it is set, the button that unticks the crews that would die, when there
+     * are any, and the "stop asking me this" box. Deploy and Cancel act as they do here; Esc, like the close box,
+     * cancels the deployment and keeps asking.
      */
     @Override
     public void setVisible(boolean visible) {
@@ -372,14 +374,20 @@ public class AutomaticEjectionDialog extends JDialog implements ActionListener {
     private boolean answeredNatively() {
         List<DialogRow> rows = new ArrayList<>();
         List<Integer> ejecting = new ArrayList<>();
+        List<Integer> unprotected = new ArrayList<>();
         for (Entity entity : unitsWithEjectionSystems) {
             if (settingsOnOpening.get(entity.getId())) {
                 ejecting.add(rows.size());
             }
+            if (unitsWhoseCrewDies.contains(entity.getId())) {
+                unprotected.add(rows.size());
+            }
             rows.add(new DialogRow(entity.getShortName(), crewStatus(entity), null, true));
         }
+        ClearRows turnOffUnprotected = unprotected.isEmpty() ? null : new ClearRows(turnOffUnprotectedButton.getText(),
+              turnOffUnprotectedButton.getToolTipText(), unprotected);
         DialogAnswer answer = clientGUI.askRows(Messages.getString("AutomaticEjectionDialog.instructions",
-              lethalCondition), getTitle(), rows, true, ejecting, null, dontAskAgain,
+              lethalCondition), getTitle(), rows, true, ejecting, null, dontAskAgain, turnOffUnprotected,
               List.of(deployButton.getText(), cancelButton.getText()), -1);
         if (answer == null) {
             return false;

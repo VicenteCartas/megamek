@@ -52,6 +52,7 @@ import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.ClearRows;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
@@ -531,6 +532,24 @@ class GpuChatToastModalSmokeTest {
                 click(hud.hud.stage, button(modal, "CLEAR ALL"));
                 hud.key(Input.Keys.ENTER, KeyEvent.VK_ENTER);
                 answered(hud.source, 32, new DialogAnswer(0, List.of(), null, false, List.of()));
+
+                // A MULTI's own button clears the ticks of its rows alone, and is spent once none of them is ticked.
+                DialogRequest own = new DialogRequest(33, DialogKind.MULTI, "Load unit",
+                      "Which unit do you want to load?", false, List.of("OK", "Cancel"), 0, 1, bays, List.of(0, 1, 2),
+                      "", false, null, null, null, List.of(), null,
+                      new ClearRows("Leave the heavy units", "", List.of(0, 1)));
+                hud.show(frame, own);
+                hud.show(frame, own);
+                UiTestStage.assertTexts(modal);
+                UiTestStage.capture("modal-multi-own-button", harness.width(), harness.height()).dispose();
+                UiButton leave = button(modal, "LEAVE THE HEAVY UNITS");
+                assertFalse(leave.isDisabled());
+                click(hud.hud.stage, leave);
+                rows = rows(modal);
+                assertTrue(!ticked(rows.get(0)) && !ticked(rows.get(1)) && ticked(rows.get(2)), "only its own rows");
+                assertTrue(leave.isDisabled(), "none of its rows is ticked");
+                click(hud.hud.stage, button(modal, "OK"));
+                answered(hud.source, 33, new DialogAnswer(0, List.of(2), null, false, List.of()));
             }
         });
     }

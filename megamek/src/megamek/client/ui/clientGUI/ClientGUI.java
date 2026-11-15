@@ -95,6 +95,7 @@ import megamek.client.ui.clientGUI.boardview.CollapseWarning;
 import megamek.client.ui.clientGUI.boardview.IBoardView;
 import megamek.client.ui.clientGUI.boardview.RulerDialog;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.ClearRows;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
@@ -2913,13 +2914,25 @@ public class ClientGUI extends AbstractClientGUI
     public @Nullable DialogAnswer askRows(@Nullable String message, String title, List<DialogRow> rows, boolean multi,
           List<Integer> initiallySelected, @Nullable Integer max, @Nullable JCheckBox checkBox, List<String> buttons,
           int cancelButton) {
+        return askRows(message, title, rows, multi, initiallySelected, max, checkBox, null, buttons, cancelButton);
+    }
+
+    /**
+     * {@link #askRows(String, String, List, boolean, List, Integer, JCheckBox, List, int)} for a MULTI with
+     * {@code clearRows}, when given, as a button under the rows: it clears the ticks of its rows and the dialog stays
+     * open.
+     */
+    public @Nullable DialogAnswer askRows(@Nullable String message, String title, List<DialogRow> rows, boolean multi,
+          List<Integer> initiallySelected, @Nullable Integer max, @Nullable JCheckBox checkBox,
+          @Nullable ClearRows clearRows, List<String> buttons, int cancelButton) {
         List<DialogRow> shown = rows.stream()
               .map(row -> new DialogRow(promptText(row.label()), promptText(row.detail()), row.icon(), row.enabled()))
               .toList();
         DialogRequest request = new DialogRequest(0, multi ? DialogKind.MULTI : DialogKind.CHOICE, title,
               promptText(message), false, buttons, 0, cancelButton, shown, initiallySelected,
               (checkBox == null) ? "" : promptText(checkBox.getText()), (checkBox != null) && checkBox.isSelected(),
-              null, null, max, List.of());
+              null, null, max, List.of(), null, (clearRows == null) ? null
+              : new ClearRows(promptText(clearRows.label()), promptText(clearRows.tip()), clearRows.rows()));
         DialogAnswer answer = GpuBoardWindow.route(this, request);
         if (answer == null) {
             return null;

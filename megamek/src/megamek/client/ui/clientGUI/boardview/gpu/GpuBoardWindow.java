@@ -132,12 +132,12 @@ public final class GpuBoardWindow {
      * without a default button. A {@code cancelButton} of -1 means Esc closes the dialog without pressing a button, as
      * a JOptionPane's close box does: its answer's button is then -1, and it still carries the checkbox as the player
      * left it. A MESSAGE may show an {@code image} beside its text: an image file's bytes (PNG, JPEG or BMP), base64
-     * encoded; null for none.
+     * encoded; null for none. A MULTI may carry a button of its own, {@code clearRows}; null for none.
      */
     public record DialogRequest(long id, DialogKind kind, String title, String message, boolean monospace,
           List<String> buttons, int defaultButton, int cancelButton, List<DialogRow> rows,
           List<Integer> initiallySelected, String checkbox, boolean checkboxInitial, String initialText,
-          Integer min, Integer max, List<DialogField> fields, String image) {
+          Integer min, Integer max, List<DialogField> fields, String image, ClearRows clearRows) {
         public DialogRequest {
             buttons = List.copyOf(buttons);
             rows = List.copyOf(rows);
@@ -145,18 +145,38 @@ public final class GpuBoardWindow {
             fields = List.copyOf(fields);
         }
 
-        /** A request without an image. */
+        /** A request without a button of its own. */
+        public DialogRequest(long id, DialogKind kind, String title, String message, boolean monospace,
+              List<String> buttons, int defaultButton, int cancelButton, List<DialogRow> rows,
+              List<Integer> initiallySelected, String checkbox, boolean checkboxInitial, String initialText,
+              Integer min, Integer max, List<DialogField> fields, String image) {
+            this(id, kind, title, message, monospace, buttons, defaultButton, cancelButton, rows, initiallySelected,
+                  checkbox, checkboxInitial, initialText, min, max, fields, image, null);
+        }
+
+        /** A request without an image or a button of its own. */
         public DialogRequest(long id, DialogKind kind, String title, String message, boolean monospace,
               List<String> buttons, int defaultButton, int cancelButton, List<DialogRow> rows,
               List<Integer> initiallySelected, String checkbox, boolean checkboxInitial, String initialText,
               Integer min, Integer max, List<DialogField> fields) {
             this(id, kind, title, message, monospace, buttons, defaultButton, cancelButton, rows, initiallySelected,
-                  checkbox, checkboxInitial, initialText, min, max, fields, null);
+                  checkbox, checkboxInitial, initialText, min, max, fields, null, null);
         }
 
         DialogRequest withId(long shownId) {
             return new DialogRequest(shownId, kind, title, message, monospace, buttons, defaultButton, cancelButton,
-                  rows, initiallySelected, checkbox, checkboxInitial, initialText, min, max, fields, image);
+                  rows, initiallySelected, checkbox, checkboxInitial, initialText, min, max, fields, image,
+                  clearRows);
+        }
+    }
+
+    /**
+     * A MULTI's own button, under its list: it clears the ticks of {@code rows} and leaves the dialog open, as Clear
+     * All does for every row. An empty {@code tip} means none.
+     */
+    public record ClearRows(String label, String tip, List<Integer> rows) {
+        public ClearRows {
+            rows = List.copyOf(rows);
         }
     }
 

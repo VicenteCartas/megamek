@@ -48,8 +48,9 @@ import megamek.logging.MMLogger;
  * bridge ({@link GpuBoardSource#dialog()}) on the HUD's top layer, which needs no board. The prototype's dialog (.dlg)
  * shows the request's title and message and a body by kind: MESSAGE the text alone, or with its image on the left (a
  * story dialog's); CHOICE a list whose highlighted row is the choice (a double click confirms it); MULTI a list of
- * ticks, at most {@code max}, with Select All and Clear All; INPUT a text field, which takes only an integer of its
- * range, shown beside it, when it is bounded; FORM one control per field. An optional checkbox follows. Enter presses
+ * ticks, at most {@code max}, with Select All and Clear All and, under the list, the request's own button, which
+ * clears the ticks of its rows; INPUT a text field, which takes only an integer of its range, shown beside it, when
+ * it is bounded; FORM one control per field. An optional checkbox follows. Enter presses
  * the default button, and Esc and the close button the cancel button (-1: the close box); button 0 confirms the
  * selection, the text or the values. A FORM answers one value per field: the text of an INTEGER or TEXT field, the
  * chosen text of a CHOICE field (it starts on the field's initial text, else on its first choice), "true" or "false"
@@ -183,6 +184,9 @@ final class GpuModalDialog implements GpuHud.Component {
         private UiMenuList list;
         private ScrollPane listScroll;
         private UiButton selectAll;
+        /** MULTI: the request's own button and the rows whose ticks it clears; null and empty without one. */
+        private UiButton clearRows;
+        private List<Integer> ownRows = List.of();
         /** INPUT and FORM: the text fields in order, the bounded ones, and each FORM field's value. */
         private final List<TextField> fields = new ArrayList<>();
         private final List<Bounded> bounded = new ArrayList<>();
@@ -288,6 +292,18 @@ final class GpuModalDialog implements GpuHud.Component {
                 rows.add(item);
             }
             listScroll = body(list).getActor();
+            if (multi && request.clearRows() != null) {
+                ownRows = request.clearRows().rows().stream().filter(row -> row >= 0 && row < ticks.length).toList();
+                clearRows = ui.button("hud-mini", null, plain(request.clearRows().label()), null);
+                if (!request.clearRows().tip().isEmpty()) {
+                    ui.tip(clearRows).getActor().setText(plain(request.clearRows().tip()));
+                }
+                UiKit.onChange(clearRows, () -> {
+                    ownRows.forEach(row -> ticks[row] = false);
+                    check();
+                });
+                dialog.add(clearRows).left().padTop(8).row();
+            }
             if (!multi && !request.initiallySelected().isEmpty()) {
                 int row = request.initiallySelected().getFirst();
                 if (row >= 0 && row < rows.size()) {
@@ -474,6 +490,9 @@ final class GpuModalDialog implements GpuHud.Component {
             }
             if (selectAll != null) {
                 selectAll.setDisabled(request.max() != null && request.max() < enabled);
+            }
+            if (clearRows != null) {
+                clearRows.setDisabled(ownRows.stream().noneMatch(row -> ticks[row]));
             }
             boolean valid = true;
             for (Bounded field : bounded) {
