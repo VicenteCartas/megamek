@@ -52,13 +52,14 @@ final class GpuEditorModelPreviews implements Disposable {
     private GpuCutoutFade cutoutFade;
     private GpuSceneDisplay display;
     private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
+    private BoardSwitches switches = BoardSwitches.BASE;
 
     private Environment lighting() {
         var lighting = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
         Environment light = new Environment();
         environmentLighting.set(lighting);
         light.set(environmentLighting);
-        GpuEnvironmentLighting.applyAntialiasing(light);
+        GpuEnvironmentLighting.applySwitches(light, switches);
         light.set(ColorAttribute.createAmbientLight(lighting.ambient()));
         light.add(new DirectionalLight().set(lighting.direct(), lighting.direction()));
         return light;
@@ -83,7 +84,9 @@ final class GpuEditorModelPreviews implements Disposable {
     /** Borrowed: the preview drawn for {@code target}; null while there is none (GpuEditorThumbnail). */
     FrameBuffer drawn(Image target) { return images.get(target); }
 
-    void update() {
+    /** Each frame; {@code switches}: the editor terrain's, which the previews' programs take (their lighting's key). */
+    void update(BoardSwitches switches) {
+        this.switches = switches;
         queue.removeIf(request -> request.target().getStage() == null);
         images.entrySet().removeIf(entry -> {
             if (entry.getKey().getStage() != null) { return false; }

@@ -228,8 +228,11 @@ final class GpuShaderManager {
         });
     }
 
-    /** The board has finished its passes; the sample restores its framebuffer and viewport before returning. */
-    void renderPreview() {
+    /**
+     * The board has finished its passes; the sample restores its framebuffer and viewport before returning. {@code switches}:
+     * the board's, whose programs the sample draws with.
+     */
+    void renderPreview(BoardSwitches switches) {
         var panel = previewPanel;
         if (closed || panel == null) { return; }
         var settings = panel.settings().withInputs(inputValues.sample());
@@ -237,7 +240,7 @@ final class GpuShaderManager {
             if (!settings.visible()) { return; }
             objectPreview = new GpuShaderPreview();
         }
-        var frame = objectPreview.render(settings, System.nanoTime(), revision + inputValues.revision());
+        var frame = objectPreview.render(settings, switches, System.nanoTime(), revision + inputValues.revision());
         if (frame != null) { panel.receive(frame); }
         publishInputs();
     }

@@ -7,8 +7,13 @@ import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
-/** Immutable presentation settings shared by a terrain build and the frames displaying its result. */
-record TerrainSettings(BoardGeometry.Tuning geometry, BoardRelief.Tuning relief, int revision, int terrainRevision) {
+/**
+ * Immutable presentation settings shared by a terrain build and the frames displaying its result. {@code switches}: the
+ * quality switches of the terrain that asked for the build, which its detail reads (TerrainLod#formations); a change of
+ * them rebuilds nothing (GpuTerrain.sameSettings leaves them out).
+ */
+record TerrainSettings(BoardGeometry.Tuning geometry, BoardRelief.Tuning relief, int revision, int terrainRevision,
+      BoardSwitches switches) {
     private static final ThreadLocal<TerrainSettings> CURRENT = new ThreadLocal<>();
     private static final AtomicInteger WORKERS = new AtomicInteger();
 
@@ -41,12 +46,24 @@ record TerrainSettings(BoardGeometry.Tuning geometry, BoardRelief.Tuning relief,
         return new ForkJoinPool(parallelism, Worker::new, null, false);
     }
 
-    /** Capture the controls, even when the caller is displaying an older, completed terrain revision. */
-    static TerrainSettings capture() {
+    /**
+     * Capture the controls, even when the caller is displaying an older, completed terrain revision, with the asking
+     * terrain's switches.
+     */
+    static TerrainSettings capture(BoardSwitches switches) {
         try (Scope ignored = use(null)) {
             return new TerrainSettings(BoardGeometry.tuning(), BoardRelief.tuning(), BoardGeometry.revision(),
-                  BoardGeometry.terrainRevision());
+                  BoardGeometry.terrainRevision(), switches);
         }
+    }
+
+    /** As {@link #capture(BoardSwitches)} for a build no terrain asks for: the switches of a terrain given none. */
+    static TerrainSettings capture() { return capture(BoardSwitches.BASE); }
+
+    /** The switches of the build in this thread's scope, or of a terrain given none outside any build. */
+    static BoardSwitches switchesInScope() {
+        TerrainSettings settings = current();
+        return settings == null ? BoardSwitches.BASE : settings.switches();
     }
 
     static Scope use(TerrainSettings settings) { return new Scope(settings); }

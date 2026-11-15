@@ -223,7 +223,7 @@ class GpuFamilyProgramsSmokeTest {
                 int capacity = GpuFamilyPrograms.capacity;
                 GpuFamilyPrograms.capacity = 3;
                 GpuGlsl.Preparation.sharedContext = true;
-                boolean antialiasing = GpuEnvironmentLighting.specularAntialiasing;
+                boolean antialiasing = BoardSwitches.BASE.on(BoardSwitch.SPECULAR_ANTI_ALIASING);
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
                 try {
@@ -236,7 +236,7 @@ class GpuFamilyProgramsSmokeTest {
                     long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(10);
                     while (terrain.refine(camera.camera) | terrain.busy() || terrain.familyPrograms().pending() > 0) {
                         if (!night && terrain.familyPrograms().building()) {
-                            GpuEnvironmentLighting.specularAntialiasing = !antialiasing;
+                            terrain.setSwitches(terrain.switches().with(BoardSwitch.SPECULAR_ANTI_ALIASING, !antialiasing));
                             frame.configure(NIGHT);
                             frame.prepare(terrain, camera, scene);
                             night = true;
@@ -251,7 +251,7 @@ class GpuFamilyProgramsSmokeTest {
                     // AA really changes the program configuration, retaining the in-flight/capacity regression.
                     assertEquals(3, terrain.familyPrograms().ready().size(),
                           "The changed AA configuration has its own family programs");
-                    GpuEnvironmentLighting.specularAntialiasing = antialiasing;
+                    terrain.setSwitches(terrain.switches().with(BoardSwitch.SPECULAR_ANTI_ALIASING, antialiasing));
                     frame.configure(BoardAtmosphere.DEFAULTS);
                     frame.prepare(terrain, camera, scene);
                     while (terrain.refine(camera.camera) | terrain.busy() || terrain.familyPrograms().pending() > 0) {
@@ -278,7 +278,8 @@ class GpuFamilyProgramsSmokeTest {
                         });
                         terrain.update(fixture.source.takeFrame().scene(), camera.camera);
                         for (var settings : List.of(NIGHT, BoardAtmosphere.DEFAULTS)) {
-                            GpuEnvironmentLighting.specularAntialiasing = settings == NIGHT ? !antialiasing : antialiasing;
+                            terrain.setSwitches(terrain.switches().with(BoardSwitch.SPECULAR_ANTI_ALIASING,
+                                  settings == NIGHT ? !antialiasing : antialiasing));
                             frame.configure(settings);
                             frame.prepare(terrain, camera, scene);
                             while (terrain.refine(camera.camera) | terrain.busy()
@@ -294,7 +295,6 @@ class GpuFamilyProgramsSmokeTest {
                     assertEquals(0, unfinishedLinks(terrain), "and leave no link behind");
                 } finally {
                     GpuFamilyPrograms.capacity = capacity;
-                    GpuEnvironmentLighting.specularAntialiasing = antialiasing;
                     GpuGlsl.Preparation.sharedContext = false;
                     frame.dispose();
                     terrain.dispose();
@@ -399,7 +399,7 @@ class GpuFamilyProgramsSmokeTest {
             run("return", report, () -> {
                 GpuGlsl.programCache = GpuProgramCache.open(directory.resolve("cache"));
                 int capacity = GpuFamilyPrograms.capacity;
-                boolean antialiasing = GpuEnvironmentLighting.specularAntialiasing;
+                boolean antialiasing = BoardSwitches.BASE.on(BoardSwitch.SPECULAR_ANTI_ALIASING);
                 GpuFamilyPrograms.capacity = 3;
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
@@ -409,12 +409,12 @@ class GpuFamilyProgramsSmokeTest {
                     int day = terrain.familyPrograms().ready().size();
                     // The opposite AA configuration builds none, so returning must recover the earlier markers.
                     GpuFamilyPrograms.capacity = 0;
-                    GpuEnvironmentLighting.specularAntialiasing = !antialiasing;
+                    terrain.setSwitches(terrain.switches().with(BoardSwitch.SPECULAR_ANTI_ALIASING, !antialiasing));
                     frame.configure(NIGHT);
                     settle(terrain, frame, camera, scene);
                     int night = terrain.familyPrograms().ready().size();
                     GpuFamilyPrograms.capacity = 3;
-                    GpuEnvironmentLighting.specularAntialiasing = antialiasing;
+                    terrain.setSwitches(terrain.switches().with(BoardSwitch.SPECULAR_ANTI_ALIASING, antialiasing));
                     frame.configure(BoardAtmosphere.DEFAULTS);
                     frame.prepare(terrain, camera, scene);
                     // The day's programs are in the provider: taking them back links nothing.
@@ -430,7 +430,6 @@ class GpuFamilyProgramsSmokeTest {
                     assertEquals(day, terrain.familyPrograms().ready().size(), "The day takes its programs back");
                 } finally {
                     GpuFamilyPrograms.capacity = capacity;
-                    GpuEnvironmentLighting.specularAntialiasing = antialiasing;
                     frame.dispose();
                     terrain.dispose();
                 }
@@ -456,7 +455,7 @@ class GpuFamilyProgramsSmokeTest {
             run("churn", report, () -> {
                 GpuGlsl.programCache = GpuProgramCache.open(directory.resolve("cache"));
                 int capacity = GpuFamilyPrograms.capacity;
-                boolean antialiasing = GpuEnvironmentLighting.specularAntialiasing;
+                boolean antialiasing = BoardSwitches.BASE.on(BoardSwitch.SPECULAR_ANTI_ALIASING);
                 GpuFamilyPrograms.capacity = 3;
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
@@ -470,7 +469,7 @@ class GpuFamilyProgramsSmokeTest {
                     Set<Shader> dayPrograms = Set.of();
                     for (int step = 0; step < expected.length; step++) {
                         boolean on = step < 2 || step > 3, night = step % 2 == 1;
-                        GpuEnvironmentLighting.specularAntialiasing = on;
+                        terrain.setSwitches(terrain.switches().with(BoardSwitch.SPECULAR_ANTI_ALIASING, on));
                         frame.configure(night ? nights.get(step / 2) : BoardAtmosphere.DEFAULTS);
                         settle(terrain, frame, camera, scene);
                         int ready = terrain.familyPrograms().ready().size(), built = terrain.familyPrograms().programs();
@@ -493,7 +492,6 @@ class GpuFamilyProgramsSmokeTest {
                     }
                 } finally {
                     GpuFamilyPrograms.capacity = capacity;
-                    GpuEnvironmentLighting.specularAntialiasing = antialiasing;
                     frame.dispose();
                     terrain.dispose();
                 }

@@ -217,12 +217,12 @@ class GpuShaderLoadSmokeTest {
         Watch watch = new Watch("tessellated game");
         var fixture = GpuBoardFixture.create(BoardFile.loadSheet(new File("data/boards/AGoAC Maps/16x17 Grassland 2.board"),
               false, true));
-        boolean saved = GUIPreferences.getInstance().getBoardTessellation();
+        String savedSwitches = GUIPreferences.getInstance().getBoardQualitySwitches();
         String savedAntiAliasing = GUIPreferences.getInstance().getBoardAntiAliasing();
         float savedResolution = GUIPreferences.getInstance().getBoardRenderResolution();
         String savedQuality = GUIPreferences.getInstance().getBoardQuality();
-        GUIPreferences.getInstance().setBoardQuality("HIGH");
-        GUIPreferences.getInstance().setBoardTessellation(true);
+        BoardSwitches.save(GUIPreferences.getInstance(),
+              BoardSwitches.of(BoardSwitches.Preset.HIGH).with(BoardSwitch.TESSELLATION, true), null);
         GUIPreferences.getInstance().setBoardAntiAliasing("SMAA");
         GUIPreferences.getInstance().setBoardRenderResolution(.75f);
         try {
@@ -278,10 +278,10 @@ class GpuShaderLoadSmokeTest {
                 }
             }, window());
         } finally {
-            GUIPreferences.getInstance().setBoardTessellation(saved);
             GUIPreferences.getInstance().setBoardAntiAliasing(savedAntiAliasing);
             GUIPreferences.getInstance().setBoardRenderResolution(savedResolution);
             GUIPreferences.getInstance().setBoardQuality(savedQuality);
+            GUIPreferences.getInstance().setBoardQualitySwitches(savedSwitches);
             BoardCamera.renderScale = 1;
             SwingUtilities.invokeAndWait(fixture.view::close);
         }
@@ -444,8 +444,8 @@ class GpuShaderLoadSmokeTest {
                             assertTrue(output.isDirectory() || output.mkdirs());
                             GpuBoardTestUi.capture(new File(output, "editor-scorch-gallery.png"));
                             watch.check();
-                            SelectBox<BoardQuality> quality = GpuBoardTestUi.tuning(this, "tuning-quality");
-                            quality.setSelected(BoardQuality.HIGH);
+                            SelectBox<BoardSwitches.Preset> quality = GpuBoardTestUi.tuning(this, "tuning-quality");
+                            quality.setSelected(BoardSwitches.Preset.HIGH);
                             changedLighting = true;
                             relightStarted = System.nanoTime();
                         } else if (seconds - stepAt > 60) {

@@ -326,7 +326,7 @@ class GpuImpostorCalibrationSmokeTest {
     /** A settled terrain of the scene, sharing the lender's models when there is one. */
     private static GpuTerrain terrain(GpuTerrain lender, BoardScene scene, GpuReviewFrame frame) {
         var terrain = lender == null ? new GpuTerrain() : new GpuTerrain(lender);
-        terrain.setQuality(BoardQuality.MEDIUM);
+        terrain.setSwitches(BoardSwitches.of(BoardSwitches.Preset.MEDIUM));
         terrain.setMaterialCache(false);
         terrain.setAtmosphere(frame.lighting());
         terrain.setWind(BoardAtmosphere.Effects.NONE);

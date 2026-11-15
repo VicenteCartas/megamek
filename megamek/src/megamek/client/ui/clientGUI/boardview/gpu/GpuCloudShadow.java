@@ -40,11 +40,20 @@ final class GpuCloudShadow {
               + (lighting != null ? "#define environmentLightingFlag\n" : "")
               + (lighting != null && lighting.crystals != null ? "#define crystalTransmissionFlag\n" : "")
               + (lighting != null && lighting.cloudShadow != null ? "#define cloudShadowFlag\n" : "")
-              + (lighting != null && lighting.antialiasing ? "#define specularAntialiasingFlag\n" : "")
-              + (lighting != null && lighting.cheaperShading ? "#define mediumQualityFlag\n" : "")
+              + switchDefines(lighting)
               // The sun's map's coarser levels, which High's widest penumbrae read (contactShadow).
               + "#define SHADOW_LEVELS " + GpuShadowLight.LEVELS + "\n"
               + GpuAmbientOcclusion.prefix(renderable) + GpuSkyVisibility.prefix(renderable);
+    }
+
+    /** The defines of the lighting's switches that are on, in the switches' order (BoardSwitch). */
+    private static String switchDefines(GpuEnvironmentLighting lighting) {
+        if (lighting == null) { return ""; }
+        StringBuilder defines = new StringBuilder();
+        for (BoardSwitch s : BoardSwitch.values()) {
+            if (s.define != null && lighting.has(s)) { defines.append("#define ").append(s.define).append('\n'); }
+        }
+        return defines.toString();
     }
 
     static void register(DefaultShader shader) {

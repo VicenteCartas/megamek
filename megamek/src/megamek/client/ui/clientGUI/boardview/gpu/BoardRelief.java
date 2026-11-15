@@ -292,6 +292,8 @@ final class BoardRelief {
     private final Map<Long, Corner> corners = new HashMap<>();
     private final Edge[] edges = new Edge[6];
     private final Map<Vector3, Shade> shades = new IdentityHashMap<>();
+    /** The height field's moved rows, where its rocks stand (#fieldRocks); null where today's edges hold them. */
+    private float[][][] fieldRows;
     /** This hex's rim samples per edge, including the closing corner; cliffs reuse them as their top row. */
     private final Vector3[][] rims = new Vector3[6][];
     /** The shared top boundary, also used to keep a bank inside the actual relief beside a cliff. */
@@ -847,6 +849,17 @@ final class BoardRelief {
     int family() { return self.family(); }
 
     Shade shade(Vector3 vertex) { return shades.get(vertex); }
+
+    /** The height field's shading of one of its vertices ({@link TerrainField}). */
+    void fieldShade(Vector3 vertex, Shade shade) { shades.put(vertex, shade); }
+
+    /**
+     * A natural cliff's rock relief ({@link #profile}, as a transition's band carries it: joints, columns, fractures,
+     * its caprock and its scree foot), for the height field's wall rows.
+     */
+    static float wallRelief(float px, float py, float z, float bottom, float top, float drop, int family) {
+        return profile(px, py, z, bottom, top, drop, family, false, false, true);
+    }
 
     /** A vertex cut inside a face takes the face's shading at its barycentric weights. */
     void interpolateShade(Vector3 a, Vector3 b, Vector3 c, float wa, float wb, float wc, Vector3 p) {
@@ -3183,8 +3196,13 @@ final class BoardRelief {
 
     /** Hardness in [0, 1] of the bed holding a world point: the colour of the same bed whose ledge stands out. */
     static float bed(Vector3 p, int family) {
+        return bed(p.x, p.y, p.z, family);
+    }
+
+    /** {@link #bed(Vector3, int)} at (x, y, z). */
+    static float bed(float x, float y, float z, int family) {
         float m = metres(1);
-        return hash((int) Math.floor(bedding(p.x / m, p.y / m, p.z / m, ROCKS[family].bedding())) * 17 + 3, 91);
+        return hash((int) Math.floor(bedding(x / m, y / m, z / m, ROCKS[family].bedding())) * 17 + 3, 91);
     }
 
     /** Bounds a wall's relief smoothly; a transition's clefts may cut two metres deeper. */
@@ -3986,6 +4004,35 @@ final class BoardRelief {
      * rise. Picking keeps overhanging rim rocks with the cliff; fallen blocks at its foot follow the lower hex's
      * footprint. These formations never enter the unit anchor.
      */
+    /**
+     * The height field's rim and talus rocks ({@link TerrainField}): as {@link #rocks}, along the field's moved rows
+     * ({@code rows[e]}: its edge e's samples, x and y, from corner e to corner e + 1) instead of today's edges.
+     */
+    void fieldRocks(List<BoardSurface.Face> destination, Vector3 anchor, float[][][] rows) {
+        fieldRows = rows;
+        rocks(destination, anchor);
+    }
+
+    /**
+     * A rock's point on edge e at its parameter t and height z: on the field's moved row where the field draws, and
+     * never below the field's own ground there (its talus stands higher at the row than today's foot).
+     */
+    private Vector3 rockPoint(Edge edge, int e, float t, float z, List<BoardSurface.Face> destination) {
+        if (fieldRows == null) { return edgePoint(edge, t, z); }
+        var c0 = BoardGeometry.corner(tile.coords(), 0, e);
+        var c1 = BoardGeometry.corner(tile.coords(), 0, e + 1);
+        float qx = lerp(edge.a.x, edge.b.x, t), qy = lerp(edge.a.y, edge.b.y, t);
+        float ex = c1.x - c0.x, ey = c1.y - c0.y;
+        float u = Math.clamp(((qx - c0.x) * ex + (qy - c0.y) * ey) / (ex * ex + ey * ey), 0, 1);
+        float[][] row = fieldRows[e];
+        float at = u * (row.length - 1);
+        int i = Math.min((int) at, row.length - 2);
+        float f = at - i;
+        float x = lerp(row[i][0], row[i + 1][0], f), y = lerp(row[i][1], row[i + 1][1], f);
+        float ground = topHeight(destination, x, y);
+        return new Vector3(x, y, Float.isFinite(ground) ? Math.max(z, ground) : z);
+    }
+
     private void rocks(List<BoardSurface.Face> destination, Vector3 anchor) {
         // Geological rim and fallen rocks belong on banks and riverbeds, including positive-depth water.
         // Cosmetic field scatter has its own stricter water rule; coarse tiers carry these only on a late level.
@@ -4036,7 +4083,7 @@ final class BoardRelief {
                 Vector3 base;
                 if (rim) {
                     // Standing on the rim, set back by part of its width, its root inside the caprock.
-                    Vector3 p = edgePoint(edge, t, top);
+                    Vector3 p = rockPoint(edge, e, t, top, destination);
                     float back = width * (.05f + .5f * random.nextFloat());
                     base = new Vector3(p.x - edge.nx * back, p.y - edge.ny * back, top - height * (.35f + .35f * random.nextFloat()));
                     height = Math.min(height, (headroom(tile) * .9f + top - base.z));
@@ -4058,7 +4105,7 @@ final class BoardRelief {
                     // On the talus apron; paved ground beyond it stays clear.
                     float h = talusHeight(drop, lerp(edge.a.x, edge.b.x, t), lerp(edge.a.y, edge.b.y, t))
                           * .45f * random.nextFloat();
-                    Vector3 p = edgePoint(edge, t, bottom + h);
+                    Vector3 p = rockPoint(edge, e, t, bottom + h, destination);
                     base = new Vector3(p.x + edge.nx * width * .2f, p.y + edge.ny * width * .2f, p.z - height * (.3f + .15f * random.nextFloat()));
                 } else {
                     // Rolled out onto the ground beyond the apron: smaller.
@@ -4066,7 +4113,7 @@ final class BoardRelief {
                     length *= .6f;
                     width *= .6f;
                     height *= .6f;
-                    Vector3 p = edgePoint(edge, t, bottom);
+                    Vector3 p = rockPoint(edge, e, t, bottom, destination);
                     float out = m * (.3f + 2.4f * random.nextFloat());
                     base = new Vector3(p.x + edge.nx * out, p.y + edge.ny * out, 0);
                     base.z = topHeight(destination, base.x, base.y) - height * (.3f + .15f * random.nextFloat());

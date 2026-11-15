@@ -634,7 +634,7 @@ class GpuBattleView extends ApplicationAdapter {
     public void render() {
         shaderEdits.run(() -> {
             renderBoard();
-            shaderEdits.renderPreview();
+            shaderEdits.renderPreview(terrain == null ? BoardSwitches.BASE : terrain.switches());
         });
     }
 
@@ -4336,8 +4336,6 @@ class GpuBattleView extends ApplicationAdapter {
 
     private void disposeView() {
         disposed = true;
-        // The open view's choice (BoardDisplaySettings.apply): nothing drawn without a view inherits it.
-        BoardQuality.current = BoardQuality.HIGH;
         GpuGlsl.presenting(false);
         if (loadingStage != null) {
             pace(false);

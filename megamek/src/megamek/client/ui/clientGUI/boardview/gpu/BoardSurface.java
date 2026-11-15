@@ -451,6 +451,8 @@ final class BoardSurface {
     private final List<Face> edgeTopography = new ArrayList<>();
     private List<Face> wallFaces;
     private float wallFloor = Float.NaN;
+    /** A height-field hex's step faces and walls, from its block ({@link ChunkField}); null where today's draws it. */
+    private List<Face> fieldWalls;
     /**
      * Open mouths by edge: connected liquid continues there, so no bank rises across that edge and a wall exposed
      * on it starts at the bed rather than at the hex's own top.
@@ -583,6 +585,19 @@ final class BoardSurface {
     }
 
     private BoardSurface(BoardScene scene, BoardScene.Tile tile, boolean detailed, TerrainLod lod, boolean columns) {
+        this(scene, tile, detailed, lod, columns, null);
+    }
+
+    /**
+     * The adapter of a height-field hex ({@link TerrainField}): its faces, walls and shading from the hex's block of its
+     * chunk's {@link ChunkField}, for support, picking and the passes that run on faces.
+     */
+    BoardSurface(BoardScene scene, BoardScene.Tile tile, TerrainLod lod, ChunkField.Block block) {
+        this(scene, tile, true, lod, false, block);
+    }
+
+    private BoardSurface(BoardScene scene, BoardScene.Tile tile, boolean detailed, TerrainLod lod, boolean columns,
+          ChunkField.Block block) {
         scene = scene.groundScene();
         tile = scene.tile(tile.coords());
         this.lod = lod;
@@ -621,6 +636,9 @@ final class BoardSurface {
             fan(corners, center.z, Finish.TOP);
         } else if (tile.liquid().present()) {
             river(scene);
+        } else if (block != null) {
+            // The height field's hex: its tops here, its step faces and walls in walls().
+            fieldFaces(block);
         } else {
             // As the shore moves its corners, which a flat top stands in for when its neighbours seek their walls.
             Vector3[] outline = new Vector3[6];
@@ -635,7 +653,7 @@ final class BoardSurface {
             int falls = 0;
             for (int edge = 0; edge < 6; edge++) { falls |= crests[edge] == null ? 0 : 1 << edge; }
             // Banks meet the actual ground rim, including emerged shallow bars, while the water keeps its level.
-            relief.top(faces, bedOutline, openMouths, crestLine, falls);
+            if (fieldWalls == null) { relief.top(faces, bedOutline, openMouths, crestLine, falls); }
             if (canal) {
                 List<Face> cuts = cutRamps();
                 relief.lining(faces);
@@ -657,6 +675,42 @@ final class BoardSurface {
             rough.addAll(faces.subList(roughStart, faces.size()));
         }
         if (gradedWater) { waterSupport = new GpuBiomeVegetation.Support(waterFaces); }
+    }
+
+    /** A height-field hex's faces from its block: tops here, step faces and walls for walls(); shading into the relief. */
+    private void fieldFaces(ChunkField.Block block) {
+        Vector3[] cover = new Vector3[block.size()], face = new Vector3[block.size()];
+        fieldWalls = new ArrayList<>();
+        for (int[] list : List.of(block.levelTops(), block.ground())) {
+            for (int i = 0; i < list.length; i += 3) {
+                faces.add(new Face(fieldVertex(block, list[i], cover, false), fieldVertex(block, list[i + 1], cover, false),
+                      fieldVertex(block, list[i + 2], cover, false), Finish.TOP));
+            }
+        }
+        for (int[] list : List.of(block.faces(), block.walls())) {
+            for (int i = 0; i < list.length; i += 3) {
+                fieldWalls.add(new Face(fieldVertex(block, list[i], face, true), fieldVertex(block, list[i + 1], face, true),
+                      fieldVertex(block, list[i + 2], face, true), Finish.WALL, block.edge(list, i)));
+            }
+        }
+        // Today's rim and talus rocks, along the field's moved rows.
+        float[][][] rows = new float[6][][];
+        for (int e = 0; e < 6; e++) { rows[e] = block.row(e); }
+        relief.fieldRocks(faces, center, rows);
+    }
+
+    /** A block sample as a vertex of one kind, top cover or step face, with today's shading data. */
+    private Vector3 fieldVertex(ChunkField.Block block, int v, Vector3[] written, boolean step) {
+        if (written[v] != null) { return written[v]; }
+        Vector3 p = new Vector3(block.x()[v], block.y()[v], block.z()[v]);
+        Vector3 normal = new Vector3(block.nx()[v], block.ny()[v], block.nz()[v]);
+        relief.fieldShade(p, step
+              ? new BoardRelief.Shade(normal, BoardRelief.Kind.CLIFF, block.faceOcclusion(v), block.rock()[v], block.faceRim()[v],
+                    block.faceFoot()[v], block.bed(v), block.projection()[v])
+              : new BoardRelief.Shade(normal, BoardRelief.Kind.GROUND, block.occlusion(v), block.level(),
+                    block.rimMetres(v), block.footMetres(v), block.coverTint(v)));
+        written[v] = p;
+        return p;
     }
 
     /**
@@ -3465,6 +3519,9 @@ final class BoardSurface {
         if (wallFaces == null || wallFloor != floor) {
             if (columns || BoardFeatures.shaft(tile)) {
                 wallFaces = straightWalls(sides(scene, floor, neighbors));
+            } else if (fieldWalls != null) {
+                // The height field's step faces and walls, its cut down to the floor where the board ends included.
+                wallFaces = new ArrayList<>(fieldWalls);
             } else { wallFaces = reserveWalls(relief.walls(sides(scene, floor, neighbors), neighbors), floor); }
             if (canal) { wallFaces = openRamps(wallFaces); }
             wallFaces.addAll(retainingWalls);

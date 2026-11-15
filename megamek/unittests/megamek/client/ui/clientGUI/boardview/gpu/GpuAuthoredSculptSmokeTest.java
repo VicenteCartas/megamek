@@ -79,7 +79,7 @@ class GpuAuthoredSculptSmokeTest {
         var environment = new Environment();
         environment.set(ColorAttribute.createAmbientLight(.24f, .25f, .27f, 1), environmentLight);
         environment.add(new DirectionalLight().set(1, .96f, .90f, -.4f, .6f, -1));
-        GpuEnvironmentLighting.applyAntialiasing(environment);
+        GpuEnvironmentLighting.applySwitches(environment, BoardSwitches.BASE);
         try (var output = new GpuSceneTestOutput(SIZE, SIZE)) {
             BoardScenes.tune(1, true);
             BoardRelief.tune(BoardRelief.DEFAULTS);

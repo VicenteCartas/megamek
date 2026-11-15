@@ -117,18 +117,21 @@ final class GpuBiomeVegetation implements Disposable {
     static String cropSource() {
         return "#define CROP_HEIGHT " + CROP_HEIGHT + "\n#define CROP_HEX_METRES "
               + BoardGeometry.width() / BoardRelief.metres(1) + "\n#define CROP_KEEP " + pair(CROP_KEEP)
-              + "\n#define CROP_FADE " + pair(CROP_FADE) + "\n#define CROP_MEDIUM_SCALE " + BoardQuality.MEDIUM.detailScale
-              + "\n" + GpuShaderSource.read("terrain-crops.glsl");
+              + "\n#define CROP_FADE " + pair(CROP_FADE) + "\n" + GpuShaderSource.read("terrain-crops.glsl");
     }
 
     private static String pair(float[] values) { return "vec2(" + values[0] + ", " + values[1] + ")"; }
 
-    /** The share of a crop's plants by rank that stands at this projected size, as terrain-crops.glsl draws them. */
-    static float cropDensity(BoardFields.Crop crop, float pixels) {
-        BoardQuality quality = BoardQuality.current;
-        // Plants stand on the detail levels their quality takes at larger hexes (TerrainLod.select): they fade there.
-        float fade = Math.clamp((pixels / quality.detailScale - CROP_FADE[0]) / (CROP_FADE[1] - CROP_FADE[0]), 0, 1);
-        return quality.cropShare * Math.clamp(pixels / CROP_KEEP[crop.ordinal()], .001f, 1) * fade * fade * (3 - 2 * fade);
+    /**
+     * The share of a crop's plants by rank that stands at this projected size under these switches, as terrain-crops.glsl
+     * draws them.
+     */
+    static float cropDensity(BoardFields.Crop crop, float pixels, BoardSwitches switches) {
+        // Plants stand on the detail levels the detail scale takes at larger hexes (TerrainLod.select): they fade there.
+        float fade = Math.clamp((pixels / switches.get(BoardSwitch.DETAIL_SCALE) - CROP_FADE[0])
+              / (CROP_FADE[1] - CROP_FADE[0]), 0, 1);
+        return switches.get(BoardSwitch.CROP_SHARE) * Math.clamp(pixels / CROP_KEEP[crop.ordinal()], .001f, 1)
+              * fade * fade * (3 - 2 * fade);
     }
 
     /** Plant a marsh hex's reeds up to the share of the lattice its chunk's detail draws, as (x, y, z, seed). */

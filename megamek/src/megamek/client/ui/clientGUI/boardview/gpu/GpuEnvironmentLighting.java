@@ -29,14 +29,10 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     static final int HEIGHT = SIZE + 1;
     /** Physical apparent solar radius; the moon uses the same angular source footprint. */
     static final float SOURCE_RADIUS_SINE = (float) Math.sin(Math.toRadians(.266));
-    /**
-     * Geometric specular anti-aliasing (light-model.glsl); the tuning's Display page sets it for the window. It is
-     * compiled in: a lighting takes it as {@link #antialiasing} when its environment applies it (applyAntialiasing).
-     */
-    static boolean specularAntialiasing = true;
-    /** The {@link #flags} bits: the features below. */
-    static final int CLOUD_SHADOW = 1, AMBIENT_OCCLUSION = 2, LAVA_LIGHTING = 4, BIOMES = 8, ANTIALIASING = 16,
-          CRYSTAL_TRANSMISSION = 32, NORMAL_QUALITY = 64;
+    /** The {@link #flags} bits: the features below, then the program key of the switches ({@link #SWITCH_SHIFT}). */
+    static final int CLOUD_SHADOW = 1, AMBIENT_OCCLUSION = 2, LAVA_LIGHTING = 4, BIOMES = 8, CRYSTAL_TRANSMISSION = 32;
+    /** The switches' program key takes the int's top bits (BoardSwitches.KEY_BITS); the features stay below them. */
+    private static final int SWITCH_SHIFT = Integer.SIZE - BoardSwitches.KEY_BITS;
     private final Color sky = new Color(), horizon = new Color();
     private Texture texture;
     private GpuLightingEnvironment image;
@@ -61,19 +57,23 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     GpuCrystalTransmission crystals;
     /** The board has biomes (GpuBiomeSurface.mark): biomeMaskFlag. */
     boolean biomes;
-    /** Specular anti-aliasing as last applied (applyAntialiasing): specularAntialiasingFlag. */
-    boolean antialiasing;
-    /** {@link BoardQuality#cheaperShading} as last applied (applyAntialiasing): mediumQualityFlag. */
-    boolean cheaperShading;
+    /**
+     * The program key of the switches its owner last applied (applySwitches, BoardSwitches#programKey): their defines
+     * (GpuCloudShadow.prefix) and the programs their draws take.
+     */
+    int switches;
 
     GpuEnvironmentLighting() { super(TYPE); }
 
     /** The features this lighting carries, as a program key's part beside its environment's mask. */
     int flags() {
         return (cloudShadow != null ? CLOUD_SHADOW : 0) | (ambientOcclusion != null ? AMBIENT_OCCLUSION : 0)
-              | (lavaLighting != null ? LAVA_LIGHTING : 0) | (biomes ? BIOMES : 0) | (antialiasing ? ANTIALIASING : 0)
-              | (crystals != null ? CRYSTAL_TRANSMISSION : 0) | (cheaperShading ? NORMAL_QUALITY : 0);
+              | (lavaLighting != null ? LAVA_LIGHTING : 0) | (biomes ? BIOMES : 0)
+              | (crystals != null ? CRYSTAL_TRANSMISSION : 0) | switches << SWITCH_SHIFT;
     }
+
+    /** Whether the switch is on in the set last applied: for a {@link BoardSwitch#keyed} switch, as the programs have it. */
+    boolean has(BoardSwitch s) { return (switches >> BoardSwitches.keyBit(s) & 1) != 0; }
 
     /** An environment's (or a draw's combined attributes') lighting, or null. */
     static GpuEnvironmentLighting of(Attributes attributes) {
@@ -129,17 +129,14 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     }
 
     /**
-     * Brings the lit programs of an environment with this lighting in line with the settings
-     * (specularAntialiasingFlag and mediumQualityFlag, GpuCloudShadow.prefix). They are a program key's features
-     * (flags), so a switch is a lighting change: shader selection, the terrain's material readiness and its family
-     * programs follow it, and the terrain rebuilds behind its loading stage.
+     * Brings the lit programs of an environment with this lighting in line with its owner's switches: their defines
+     * (GpuCloudShadow.prefix) and the programs their draws take are a program key's features (flags), so a change is a
+     * lighting change: shader selection, the terrain's material readiness and its family programs follow it, and the
+     * terrain rebuilds behind its loading stage.
      */
-    static void applyAntialiasing(Environment environment) {
+    static void applySwitches(Environment environment, BoardSwitches switches) {
         var lighting = of(environment);
-        if (lighting != null) {
-            lighting.antialiasing = specularAntialiasing;
-            lighting.cheaperShading = BoardQuality.current.cheaperShading;
-        }
+        if (lighting != null) { lighting.switches = switches.programKey(); }
     }
 
     void set(BoardAtmosphere.Lighting lighting) {
@@ -287,7 +284,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
         copy.original = original != null ? original : this;
         copy.cloudShadow = cloudShadow; copy.ambientOcclusion = ambientOcclusion; copy.lavaLighting = lavaLighting;
         copy.crystals = crystals;
-        copy.biomes = biomes; copy.antialiasing = antialiasing; copy.cheaperShading = cheaperShading;
+        copy.biomes = biomes; copy.switches = switches;
         return copy;
     }
     @Override public int hashCode() { return 31 * super.hashCode() + flags(); }

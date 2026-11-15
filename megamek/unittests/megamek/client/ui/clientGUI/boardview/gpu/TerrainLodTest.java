@@ -167,15 +167,15 @@ class TerrainLodTest {
 
     @Test
     void screenSizeSelectsDetailWithHysteresis() {
-        assertEquals(TerrainLod.FULL, TerrainLod.select(200, null));
-        assertEquals(TerrainLod.MEDIUM, TerrainLod.select(40, null));
-        assertEquals(TerrainLod.COARSE, TerrainLod.select(10, null));
-        assertEquals(TerrainLod.DISTANT, TerrainLod.select(3, null));
-        assertEquals(TerrainLod.FULL, TerrainLod.select(60, TerrainLod.FULL));
-        assertEquals(TerrainLod.MEDIUM, TerrainLod.select(68, TerrainLod.MEDIUM));
-        assertEquals(TerrainLod.FULL, TerrainLod.select(72, TerrainLod.MEDIUM));
-        assertEquals(TerrainLod.MEDIUM, TerrainLod.select(55, TerrainLod.FULL));
-        assertEquals(TerrainLod.FULL, TerrainLod.select(200, TerrainLod.DISTANT));
-        assertEquals(TerrainLod.DISTANT, TerrainLod.select(3, TerrainLod.FULL));
+        assertEquals(TerrainLod.FULL, TerrainLod.select(200, null, 1));
+        assertEquals(TerrainLod.MEDIUM, TerrainLod.select(40, null, 1));
+        assertEquals(TerrainLod.COARSE, TerrainLod.select(10, null, 1));
+        assertEquals(TerrainLod.DISTANT, TerrainLod.select(3, null, 1));
+        assertEquals(TerrainLod.FULL, TerrainLod.select(60, TerrainLod.FULL, 1));
+        assertEquals(TerrainLod.MEDIUM, TerrainLod.select(68, TerrainLod.MEDIUM, 1));
+        assertEquals(TerrainLod.FULL, TerrainLod.select(72, TerrainLod.MEDIUM, 1));
+        assertEquals(TerrainLod.MEDIUM, TerrainLod.select(55, TerrainLod.FULL, 1));
+        assertEquals(TerrainLod.FULL, TerrainLod.select(200, TerrainLod.DISTANT, 1));
+        assertEquals(TerrainLod.DISTANT, TerrainLod.select(3, TerrainLod.FULL, 1));
     }
 }

@@ -75,7 +75,6 @@ class GpuSpecularAntialiasingSmokeTest {
         double[][] highlights = new double[ANGLES.length][2];
         StringBuilder report = new StringBuilder("angle,fittedOff,fittedOn,middleOff,middleOn,closeTopOff,closeTopOn\n");
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        boolean saved = GpuEnvironmentLighting.specularAntialiasing;
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 800);
         try {
@@ -120,7 +119,7 @@ class GpuSpecularAntialiasingSmokeTest {
                 }
             }, config);
         } finally {
-            GpuEnvironmentLighting.specularAntialiasing = saved;
+            // The switches are the terrain's own: nothing to restore.
         }
         if (failure.get() != null) { throw new AssertionError("Specular anti-aliasing review", failure.get()); }
         System.out.print("Flicker: mean squared luminance change per pan step; close-up: mean of the brightest 1% "
@@ -133,7 +132,7 @@ class GpuSpecularAntialiasingSmokeTest {
     }
 
     /**
-     * A switch is a lighting change (GpuEnvironmentLighting.antialiasing): the terrain stops being ready, so the view
+     * A switch is a lighting change (GpuEnvironmentLighting#applySwitches): the terrain stops being ready, so the view
      * shows its loading stage while the terrain's material and family programs build, and the first frame after draws
      * with the setting. Each lighting configuration builds its own family programs, within twice the capacity over
      * all (GpuFamilyPrograms): the switched one has as many as the load. Switching back finds the first setting's
@@ -145,15 +144,14 @@ class GpuSpecularAntialiasingSmokeTest {
         BoardScene scene = scene();
         StringBuilder report = new StringBuilder("switch,rebuildMs,longestLoadingFrameMs,firstFrameMs,familyPrograms\n");
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        boolean saved = GpuEnvironmentLighting.specularAntialiasing;
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 800);
-        GpuEnvironmentLighting.specularAntialiasing = false;
         try {
             new Lwjgl3Application(new ApplicationAdapter() {
                 @Override
                 public void create() {
                     var terrain = new GpuTerrain();
+                    terrain.setSwitches(terrain.switches().with(BoardSwitch.SPECULAR_ANTI_ALIASING, false));
                     var frame = new GpuReviewFrame(RAIN);
                     try {
                         load(terrain, frame, scene);
@@ -165,7 +163,7 @@ class GpuSpecularAntialiasingSmokeTest {
                         report.append(String.format(Locale.ROOT, "load off,,,,%d%n", loaded));
                         assertTrue(loaded > 0, "The board builds family programs");
                         for (boolean enabled : new boolean[] { true, false }) {
-                            GpuEnvironmentLighting.specularAntialiasing = enabled;
+                            terrain.setSwitches(terrain.switches().with(BoardSwitch.SPECULAR_ANTI_ALIASING, enabled));
                             long start = System.nanoTime(), longest = 0;
                             frame.prepare(terrain, camera, scene);
                             assertFalse(terrain.ready(scene), "A switch must show the loading stage");
@@ -207,7 +205,7 @@ class GpuSpecularAntialiasingSmokeTest {
                 }
             }, config);
         } finally {
-            GpuEnvironmentLighting.specularAntialiasing = saved;
+            // The switches are the terrain's own: nothing to restore.
         }
         System.out.print("Specular anti-aliasing switches on the calibration board\n" + report);
         if (failure.get() != null) { throw new AssertionError("Specular anti-aliasing switch\n" + report, failure.get()); }
@@ -228,17 +226,16 @@ class GpuSpecularAntialiasingSmokeTest {
         BoardScene scene = scene();
         StringBuilder report = new StringBuilder();
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        boolean saved = GpuEnvironmentLighting.specularAntialiasing;
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1920, 1080);
         config.useVsync(false);
         config.setForegroundFPS(0);
-        GpuEnvironmentLighting.specularAntialiasing = enabled;
         try {
             new Lwjgl3Application(new ApplicationAdapter() {
                 @Override
                 public void create() {
                     var terrain = new GpuTerrain();
+                    terrain.setSwitches(terrain.switches().with(BoardSwitch.SPECULAR_ANTI_ALIASING, enabled));
                     var frame = new GpuReviewFrame(RAIN);
                     try {
                         load(terrain, frame, scene);
@@ -262,7 +259,7 @@ class GpuSpecularAntialiasingSmokeTest {
                 }
             }, config);
         } finally {
-            GpuEnvironmentLighting.specularAntialiasing = saved;
+            // The switches are the terrain's own: nothing to restore.
         }
         if (failure.get() != null) { throw new AssertionError("Specular anti-aliasing timings", failure.get()); }
         System.out.println(report);
@@ -320,11 +317,11 @@ class GpuSpecularAntialiasingSmokeTest {
 
     /**
      * Switches the setting and waits, as the loading stage does, until the terrain has rebuilt its programs for it: the
-     * switch is a lighting change (GpuEnvironmentLighting.antialiasing).
+     * switch is a lighting change (GpuEnvironmentLighting#applySwitches).
      */
     private static void setting(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene,
           boolean enabled) throws InterruptedException {
-        GpuEnvironmentLighting.specularAntialiasing = enabled;
+        terrain.setSwitches(terrain.switches().with(BoardSwitch.SPECULAR_ANTI_ALIASING, enabled));
         frame.prepare(terrain, camera, scene);
         settle(terrain, camera);
         draw(terrain, frame, camera, scene);

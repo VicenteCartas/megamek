@@ -365,7 +365,7 @@ class GpuBiomeSmokeTest {
         long triangles = 0;
         for (Object batch : batches(GpuTestSupport.field(terrain, "groundCover"))) {
             // Terrain skips grass at distant scales without clearing the reusable instance buffers.
-            if (!GpuGroundCover.visibleAtScale(camera.camera, true, false)) { break; }
+            if (!GpuGroundCover.visibleAtScale(camera.camera, true, false, terrain.switches())) { break; }
             if (((List<?>) GpuTestSupport.field(batch, "current")).isEmpty()) { continue; }
             var mesh = (GpuInstancedMesh) GpuTestSupport.field(batch, "mesh");
             if (mesh == null) { continue; }

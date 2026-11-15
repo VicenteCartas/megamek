@@ -100,7 +100,8 @@ final class GpuMaterialSwatches implements Disposable {
         Gdx.gl.glDepthMask(true);
         ScreenUtils.clear(GpuColor.linear(.055f) * backdrop, GpuColor.linear(.065f) * backdrop,
               GpuColor.linear(.085f) * backdrop, 1, true);
-        GpuEnvironmentLighting.applyAntialiasing(light);
+        // A catalogue of materials, whatever board is open: the base set's programs (High's).
+        GpuEnvironmentLighting.applySwitches(light, BoardSwitches.BASE);
         try {
             batch.begin(camera);
             try { batch.render(instance, light); } finally { batch.end(); }

@@ -872,11 +872,11 @@ class GpuTuningPanelSmokeTest {
                 hud.capture("tuning-board-edited");
 
                 // Defaults restores the Board page and preserves the saved Display choices.
-                boolean normalMaps = hud.tuning.normalMaps(), parallax = hud.tuning.terrainParallax();
+                boolean normalMaps = hud.tuning.normalMaps(), parallax = hud.tuning.switches().on(BoardSwitch.TERRAIN_PARALLAX);
                 hud.click("tuning-defaults");
                 assertEquals(1, BoardGeometry.tuning().hexScale(), NEAR);
                 assertEquals(normalMaps, hud.tuning.normalMaps());
-                assertEquals(parallax, hud.tuning.terrainParallax());
+                assertEquals(parallax, hud.tuning.switches().on(BoardSwitch.TERRAIN_PARALLAX));
                 for (UnitFamilyScale family : UnitFamilyScale.values()) {
                     assertEquals(family.defaultUnitScale, family.UNIT_SCALE, NEAR, family.label);
                 }

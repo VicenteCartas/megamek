@@ -78,10 +78,10 @@ class GpuSamplerBudgetSmokeTest {
         BoardScene ice = GpuIceSmokeTest.scene(2), volcanicIce = volcanicIceScene();
         var failure = new AtomicReference<Throwable>();
         var separable = new AtomicBoolean();
-        boolean savedOcclusion = GUIPreferences.getInstance().getBoardAmbientOcclusion();
         String savedQuality = GUIPreferences.getInstance().getBoardQuality();
+        String savedSwitches = GUIPreferences.getInstance().getBoardQualitySwitches();
         // High uses the most samplers: Medium only leaves reads out, and has no ambient occlusion.
-        GUIPreferences.getInstance().setBoardQuality("HIGH");
+        BoardSwitches.save(GUIPreferences.getInstance(), BoardSwitches.of(BoardSwitches.Preset.HIGH), null);
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
@@ -101,18 +101,20 @@ class GpuSamplerBudgetSmokeTest {
                     }
                     // Ambient occlusion off, then on: its sampler must fit too (GpuAmbientOcclusion.prefix).
                     for (boolean occlusion : new boolean[] { false, true }) {
-                        GUIPreferences.getInstance().setBoardAmbientOcclusion(occlusion);
+                        BoardSwitches.save(GUIPreferences.getInstance(),
+                              BoardSwitches.of(BoardSwitches.Preset.HIGH).with(BoardSwitch.AMBIENT_OCCLUSION, occlusion), null);
                         for (Scene scene : SCENES) { review(scene, used, over); }
                         reviewTerrain(ice, "GpuIceSmokeTest.scene(2)", occlusion, used, over);
                         reviewTerrain(volcanicIce, "cooled crust / rock / frozen land", occlusion, used, over);
                     }
-                    GUIPreferences.getInstance().setBoardAmbientOcclusion(true);
+                    BoardSwitches.save(GUIPreferences.getInstance(),
+                          BoardSwitches.of(BoardSwitches.Preset.HIGH).with(BoardSwitch.AMBIENT_OCCLUSION, true), null);
                     reviewEditor(used, over);
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
-                    GUIPreferences.getInstance().setBoardAmbientOcclusion(savedOcclusion);
                     GUIPreferences.getInstance().setBoardQuality(savedQuality);
+                    GUIPreferences.getInstance().setBoardQualitySwitches(savedSwitches);
                     Gdx.app.exit();
                 }
             }

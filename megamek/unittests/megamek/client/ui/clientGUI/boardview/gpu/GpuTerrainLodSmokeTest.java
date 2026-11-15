@@ -119,6 +119,8 @@ class GpuTerrainLodSmokeTest {
             @Override
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
+                // The tiers asserted below are High's: detail scale 1 (a test's switch override may say otherwise).
+                terrain.setSwitches(BoardSwitches.of(BoardSwitches.Preset.HIGH));
                 GpuTactical tactical = new GpuTactical(terrain::tacticalSurface);
                 var previousLod = TerrainLod.tuning();
                 var previousSettings = BoardGeometry.tuning();
@@ -273,6 +275,8 @@ class GpuTerrainLodSmokeTest {
             @Override
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
+                // The tiers asserted below are High's: detail scale 1 (a test's switch override may say otherwise).
+                terrain.setSwitches(BoardSwitches.of(BoardSwitches.Preset.HIGH));
                 var previousLod = TerrainLod.tuning();
                 try {
                     // Fifteen chunks of flat grass, all in view at medium detail.

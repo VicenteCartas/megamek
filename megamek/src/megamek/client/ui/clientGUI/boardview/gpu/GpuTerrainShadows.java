@@ -205,16 +205,17 @@ final class GpuTerrainShadows implements Disposable {
     /**
      * Redraws the map for this view and these units where they changed, from what it may reuse. {@code casterBounds}:
      * what casts, the board's terrain and objects; {@code bound}: the map is the environment's; {@code directLight}:
-     * the sun or moon lights the board at all.
+     * the sun or moon lights the board at all; {@code levels}: its programs read the map's coarser levels.
      */
-    void render(Camera view, List<ModelInstance> units, BoundingBox casterBounds, boolean bound, boolean directLight) {
+    void render(Camera view, List<ModelInstance> units, BoundingBox casterBounds, boolean bound, boolean directLight,
+          boolean levels) {
         if (shadow == null || !bound) {
             return;
         }
         draw(view, units, casterBounds, directLight);
-        // High's widest penumbrae read the map's coarser levels (contactShadow): written once a revision, from the map
-        // as this frame left it, whether drawn, copied from a cache or restored around moved units.
-        if (!BoardQuality.current.cheaperShading && !shadowEmpty && levelsRevision != revision) {
+        // The widest penumbrae read the map's coarser levels (contactShadow, without cheaper shading): written once a
+        // revision, from the map as this frame left it, whether drawn, copied from a cache or restored around moved units.
+        if (levels && !shadowEmpty && levelsRevision != revision) {
             shadow.levels();
             levelsRevision = revision;
         }

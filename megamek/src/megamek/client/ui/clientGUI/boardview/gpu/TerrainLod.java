@@ -40,9 +40,12 @@ enum TerrainLod {
         this.dressing = dressing;
     }
 
-    /** Whether the level asks for medium detail late ({@link BoardQuality#detailScale}): coarse carries what medium shows. */
+    /**
+     * Whether the build's switches ask for medium detail late ({@link BoardSwitch#DETAIL_SCALE}): coarse carries what
+     * medium shows. The build in this thread's scope (TerrainSettings).
+     */
     static boolean lateDetail() {
-        return BoardQuality.current.detailScale > 1;
+        return TerrainSettings.switchesInScope().get(BoardSwitch.DETAIL_SCALE) > 1;
     }
 
     /**
@@ -54,13 +57,41 @@ enum TerrainLod {
         return dressing || this == COARSE && lateDetail();
     }
 
-    /** Nearest-point projected hex width, with separate refinement/coarsening thresholds to avoid oscillation. */
-    static TerrainLod select(float pixels, TerrainLod current) {
-        pixels /= BoardQuality.current.detailScale;
+    /**
+     * Nearest-point projected hex width, with separate refinement/coarsening thresholds to avoid oscillation; each level
+     * taken at {@code detailScale} times the hex's size ({@link BoardSwitch#DETAIL_SCALE}).
+     */
+    static TerrainLod select(float pixels, TerrainLod current, float detailScale) {
+        pixels /= detailScale;
         int level = current == null ? 3 : current.ordinal();
         while (level > 0 && pixels >= tuning.threshold(level - 1) * (current == null ? 1 : 1.1f)) { level--; }
         while (level < 3 && pixels < tuning.threshold(level) * .9f) { level++; }
         return LEVELS[level];
+    }
+
+    /**
+     * Neighbouring chunks at most one level apart, as the height field's morph needs (TerrainField: a border vertex
+     * takes its coarser neighbour's weight): a chunk more than one level coarser than a neighbour refines.
+     * {@code levels} by chunk index, {@code rows} chunks a column.
+     */
+    static void restrict(TerrainLod[] levels, int rows) {
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (int i = 0; i < levels.length; i++) {
+                int cx = i / rows, cy = i % rows;
+                for (int dx = -1; dx <= 1; dx++) {
+                    for (int dy = -1; dy <= 1; dy++) {
+                        int x = cx + dx, y = cy + dy, j = x * rows + y;
+                        if (dx == 0 && dy == 0 || x < 0 || y < 0 || y >= rows || j >= levels.length) { continue; }
+                        if (levels[i].ordinal() > levels[j].ordinal() + 1) {
+                            levels[i] = LEVELS[levels[j].ordinal() + 1];
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     static boolean sameChunk(Coords a, Coords b) {

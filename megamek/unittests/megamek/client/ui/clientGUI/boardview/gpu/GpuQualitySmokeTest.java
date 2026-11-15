@@ -21,20 +21,22 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Quality choice through the real view: Medium's programs link and draw a real board, it takes the costly options out,
- * High brings back the player's own choices, and neither touches the render resolution.
+ * The Quality presets through the real view: Medium's programs link and draw a real board, Low shares them, a preset sets
+ * the switches, a switch changed makes the choice Custom and picking Custom brings that set back, and neither touches the
+ * render resolution.
  */
 @Tag("on-demand")
 class GpuQualitySmokeTest {
     @Test
-    void normalDrawsTheBoardAndHighBringsTheChoicesBack() throws Exception {
+    void presetsSetTheSwitchesAndASwitchMakesItCustom() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         GUIPreferences preferences = GUIPreferences.getInstance();
-        String savedQuality = preferences.getBoardQuality();
+        String savedQuality = preferences.getBoardQuality(), savedSwitches = preferences.getBoardQualitySwitches();
         float savedResolution = preferences.getBoardRenderResolution();
         boolean savedGrass = preferences.getBoardGrass();
         // What a new player starts with, whatever this machine has saved.
         preferences.setBoardQuality(preferences.getDefaultString(GUIPreferences.BOARD_QUALITY));
+        preferences.setBoardQualitySwitches(BoardSwitches.of(BoardSwitches.Preset.MEDIUM).format());
         preferences.setBoardRenderResolution(preferences.getDefaultFloat(GUIPreferences.BOARD_RENDER_RESOLUTION));
         preferences.setBoardGrass(preferences.getDefaultBoolean(GUIPreferences.BOARD_GRASS));
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
@@ -50,62 +52,62 @@ class GpuQualitySmokeTest {
                         view.boardCamera.setIsometric(true);
                         view.boardCamera.center(BoardGeometry.center(new Coords(5, 5), 0));
                         view.boardCamera.zoom(.3f);
-                        SelectBox<BoardQuality> quality = GpuBoardTestUi.tuning(view, "tuning-quality");
+                        SelectBox<BoardSwitches.Preset> quality = GpuBoardTestUi.tuning(view, "tuning-quality");
                         Slider resolution = GpuBoardTestUi.tuning(view, "tuning-render-resolution");
                         CheckBox occlusion = GpuBoardTestUi.tuning(view, "tuning-ambient-occlusion");
                         CheckBox grass = GpuBoardTestUi.tuning(view, "tuning-grass");
                         var tuning = GpuBoardTestUi.tuning(view);
-                        assertEquals(BoardQuality.MEDIUM, quality.getSelected(), "A new player starts in Medium");
+                        assertEquals(BoardSwitches.Preset.MEDIUM, quality.getSelected(), "A new player starts in Medium");
+                        assertEquals(BoardSwitches.of(BoardSwitches.Preset.MEDIUM), tuning.switches());
                         assertEquals(100, resolution.getValue(), "at the full render resolution");
                         assertEquals(1, BoardCamera.renderScale);
-                        assertTrue(occlusion.isDisabled(), "with what it leaves out disabled");
+                        assertFalse(occlusion.isChecked() || occlusion.isDisabled(), "Medium's switches show, enabled");
                         assertFalse(grass.isDisabled());
                         GpuCamouflageReview.renderReady(view);
-                        assertEquals(BoardQuality.MEDIUM, BoardQuality.current);
 
                         // Low keeps Medium's programs: its switch links nothing and needs no loading stage.
                         int links = GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading();
-                        quality.setSelected(BoardQuality.LOW);
+                        quality.setSelected(BoardSwitches.Preset.LOW);
                         for (int frame = 0; frame < 30; frame++) {
                             GpuBoardTestUi.present(view);
                             view.render();
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Low draws the board");
                             assertFalse(GpuBoardTestUi.loading(view), "Low shares Medium's programs");
                         }
-                        assertEquals(BoardQuality.LOW, BoardQuality.current);
+                        assertEquals(BoardSwitches.of(BoardSwitches.Preset.LOW), tuning.switches());
                         assertEquals(links, GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading());
-                        assertTrue(grass.isChecked() && grass.isDisabled(), "Low leaves grass out, keeping the choice");
+                        assertTrue(grass.isChecked() && grass.isDisabled(), "Low draws no meadow, keeping the choice");
 
-                        quality.setSelected(BoardQuality.HIGH);
+                        quality.setSelected(BoardSwitches.Preset.HIGH);
                         assertFalse(grass.isDisabled());
                         occlusion.setChecked(true);
                         resolution.setValue(70);
                         view.render();
-                        assertTrue(tuning.displaySettings().ambientOcclusion(), "High takes the player's choice");
+                        assertEquals(BoardSwitches.Preset.CUSTOM, quality.getSelected(), "A changed switch is Custom");
+                        assertEquals(BoardSwitches.of(BoardSwitches.Preset.HIGH).with(BoardSwitch.AMBIENT_OCCLUSION, true),
+                              tuning.displaySettings().switches());
 
-                        quality.setSelected(BoardQuality.MEDIUM);
+                        quality.setSelected(BoardSwitches.Preset.MEDIUM);
                         for (int frame = 0; frame < 30; frame++) {
                             GpuBoardTestUi.present(view);
                             view.render();
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Medium's programs draw the board");
                         }
-                        assertEquals(BoardQuality.MEDIUM, BoardQuality.current);
+                        assertEquals(BoardSwitches.of(BoardSwitches.Preset.MEDIUM), tuning.switches());
+                        assertFalse(occlusion.isChecked(), "Medium's set has no ambient occlusion");
                         assertEquals(70, resolution.getValue(), "Quality leaves the render resolution alone");
                         assertEquals(.7f, BoardCamera.renderScale, .001f);
-                        assertFalse(tuning.displaySettings().ambientOcclusion(), "Medium leaves it out");
-                        assertTrue(occlusion.isChecked() && occlusion.isDisabled(), "keeping the choice, disabled");
 
-                        quality.setSelected(BoardQuality.HIGH);
+                        quality.setSelected(BoardSwitches.Preset.CUSTOM);
                         for (int frame = 0; frame < 30; frame++) {
                             GpuBoardTestUi.present(view);
                             view.render();
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         }
-                        assertEquals(BoardQuality.HIGH, BoardQuality.current);
+                        assertTrue(occlusion.isChecked(), "Custom brings the last Custom set back");
+                        assertEquals(BoardSwitches.of(BoardSwitches.Preset.HIGH).with(BoardSwitch.AMBIENT_OCCLUSION, true),
+                              tuning.switches());
                         assertEquals(70, resolution.getValue());
-                        assertFalse(occlusion.isDisabled());
-                        assertTrue(tuning.displaySettings().ambientOcclusion(), "High brings the choice back");
-                        occlusion.setChecked(false);
                     } catch (Throwable error) {
                         failure.set(error);
                     } finally {
@@ -118,6 +120,7 @@ class GpuQualitySmokeTest {
             // On the Swing thread, after the panel's own queued saves.
             SwingUtilities.invokeAndWait(() -> {
                 preferences.setBoardQuality(savedQuality);
+                preferences.setBoardQualitySwitches(savedSwitches);
                 preferences.setBoardRenderResolution(savedResolution);
                 preferences.setBoardGrass(savedGrass);
             });

@@ -4,8 +4,10 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -106,7 +108,6 @@ final class GpuBoardTuning {
     private final CheckBox dramaticDeath;
     private final List<Control> cameraFieldOfView;
     private final CheckBox normalMaps;
-    private final CheckBox terrainParallax;
     private final CheckBox terrainCache;
     private final CheckBox terrainCacheDebug;
     private final Label terrainCacheLegend;
@@ -128,12 +129,14 @@ final class GpuBoardTuning {
     private final List<Control> uiScale;
     /** The UI scale last saved: the slider's value once no button is held (see {@link #saveUiScale()}). */
     private float uiScaleSaved;
-    private final SelectBox<BoardQuality> quality;
+    /** The quality preset the switches' values are (Custom for any other set); picking one sets the switches. */
+    private final SelectBox<BoardSwitches.Preset> quality;
     private final SelectBox<String> antiAliasing;
-    private final SelectBox<String> shadows;
-    private final CheckBox specularAntialiasing;
-    private final CheckBox tessellation;
-    private final CheckBox ambientOcclusion;
+    /** One control a quality switch, in BoardSwitch order: a check box for an on/off switch, a slider for a value. */
+    private final Map<BoardSwitch, CheckBox> switchBoxes = new EnumMap<>(BoardSwitch.class);
+    private final Map<BoardSwitch, Control> switchSliders = new EnumMap<>(BoardSwitch.class);
+    /** The set picking Custom restores: the last Custom set shown or saved, or null before there is one. */
+    private BoardSwitches custom;
     private final CheckBox depthCues;
     private final CheckBox vignette;
     /** The graphics card rows; null on computers without two cards to choose from. */
@@ -249,16 +252,13 @@ final class GpuBoardTuning {
         // The Display page: the window's output, from its mode to the graphics card.
         display = rows = new Table();
         rows.top().defaults().pad(0, 3, 0, 3);
-        quality = choice(skin, "Quality", "tuning-quality", BoardQuality.values(), this::applyQuality);
-        // The saved choice; like anti-aliasing, Defaults leaves it alone.
-        syncing = true;
-        quality.setSelected(BoardQuality.parse(GUIPreferences.getInstance().getBoardQuality()));
-        syncing = false;
-        quality.addListener(new TextTooltip("Medium shades the board with cheaper light and materials, coarser distant "
-              + "terrain and fewer grass blades, for a higher frame rate on a similar look. Low does the same with no "
-              + "grass blades at all and a quarter fewer plants in fields. Both leave out high shadows, specular "
-              + "anti-aliasing, terrain parallax, tessellation and ambient occlusion; High brings your choices back. "
-              + "Switching to or from High rebuilds the board's shaders. The choice is saved for the next session.", skin, "menu"));
+        quality = choice(skin, "Quality", "tuning-quality", BoardSwitches.Preset.values(), this::applyPreset);
+        quality.addListener(new TextTooltip("Low, Medium and High are sets of the quality switches below: Medium shades "
+              + "the board with cheaper light and materials, coarser distant terrain and fewer grass blades, for a higher "
+              + "frame rate on a similar look; Low does the same with no grass blades at all and a quarter fewer plants "
+              + "in fields. Changing a switch makes the choice Custom; picking Custom brings back your last Custom set. "
+              + "A change of the shading switches rebuilds the board's shaders. The choice is saved for the next "
+              + "session.", skin, "menu"));
         displayMode = choice(skin, "Display mode", "tuning-display-mode", new String[] { "Windowed", "Fullscreen" },
               this::applyDisplayMode);
         vsync = checkbox(skin, "VSync", "tuning-vsync");
@@ -299,27 +299,6 @@ final class GpuBoardTuning {
         antiAliasing.addListener(new TextTooltip("SMAA smooths the jagged edges of the 3D scene after its lighting and "
               + "atmosphere, before overlays, labels and the HUD. Off shows the scene as rendered. The choice is "
               + "saved for the next session.", skin, "menu"));
-        shadows = choice(skin, "Shadows", "tuning-shadows", new String[] { "Normal", "High" }, this::applyShadows);
-        // The saved choice (Normal until one is saved); like anti-aliasing, Defaults leaves it alone.
-        syncing = true;
-        shadows.setSelectedIndex("HIGH".equalsIgnoreCase(GUIPreferences.getInstance().getBoardShadows()) ? 1 : 0);
-        syncing = false;
-        shadows.addListener(new TextTooltip("The sun's shadow map follows the screen: about one shadow texel to a "
-              + "rendered pixel. High doubles that for sharper shadow edges under rims, rocks and plants; it uses more "
-              + "video memory and takes longer to redraw the shadows when the view zooms. The choice is saved for the "
-              + "next session.", skin, "menu"));
-        specularAntialiasing = checkbox(skin, "Specular anti-aliasing", "tuning-specular-anti-aliasing");
-        // The saved choice (on until one is saved); like anti-aliasing, Defaults leaves it alone.
-        specularAntialiasing.setChecked(GUIPreferences.getInstance().getBoardSpecularAntiAliasing());
-        GpuEnvironmentLighting.specularAntialiasing = specularAntialiasing.isChecked();
-        specularAntialiasing.addListener(new ChangeListener() {
-            @Override
-            public void changed(ChangeEvent event, Actor actor) {
-                boolean enabled = specularAntialiasing.isChecked();
-                GpuEnvironmentLighting.specularAntialiasing = enabled;
-                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardSpecularAntiAliasing(enabled));
-            }
-        });
         normalMaps = checkbox(skin, "Normal maps", "tuning-normal-maps");
         // The saved choice (on until one is saved); like anti-aliasing, Defaults leaves it alone.
         normalMaps.setChecked(GUIPreferences.getInstance().getBoardNormalMaps());
@@ -333,49 +312,11 @@ final class GpuBoardTuning {
                 SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardNormalMaps(enabled));
             }
         });
-        terrainParallax = checkbox(skin, "Terrain Parallax", "tuning-terrain-parallax");
-        // The saved choice (on until one is saved); like anti-aliasing, Defaults leaves it alone.
-        terrainParallax.setChecked(GUIPreferences.getInstance().getBoardTerrainParallax());
-        terrainParallax.addListener(new TextTooltip("Moves the sculpted terrain's materials with the view by their"
-              + " heightmaps, so stones, cracks and joints stand out of the ground as the camera turns. Independent of"
-              + " Normal maps; off is a little faster on rocky ground and cliffs. The choice is saved for the next"
-              + " session.", skin, "menu"));
-        terrainParallax.addListener(new ChangeListener() {
-            @Override
-            public void changed(ChangeEvent event, Actor actor) {
-                boolean enabled = terrainParallax.isChecked();
-                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardTerrainParallax(enabled));
-            }
-        });
-        tessellation = checkbox(skin, "Tessellation", "tuning-tessellation");
-        // The saved choice (off until one is saved); like anti-aliasing, Defaults leaves it alone.
-        tessellation.setChecked(GUIPreferences.getInstance().getBoardTessellation());
-        // OpenGL 4.0 and later: every Mac's 4.1, current Windows and Linux drivers' 4.6.
-        tessellation.setDisabled(!GpuTessellation.available());
-        tessellation.addListener(new TextTooltip("Rounds the sculpted banks and cliffs between their mesh points, so"
-              + " their outlines and the shadows they cast curve as the ground does. Up close it costs an integrated"
-              + " graphics chip a few milliseconds a frame. Needs OpenGL 4.0. Switching it rebuilds the board. The"
-              + " choice is saved for the next session.", skin, "menu"));
-        tessellation.addListener(new ChangeListener() {
-            @Override
-            public void changed(ChangeEvent event, Actor actor) {
-                boolean enabled = tessellation.isChecked();
-                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardTessellation(enabled));
-            }
-        });
-        ambientOcclusion = checkbox(skin, "Ambient occlusion", "tuning-ambient-occlusion");
-        // The saved choice (off until one is saved); like anti-aliasing, Defaults leaves it alone.
-        ambientOcclusion.setChecked(GUIPreferences.getInstance().getBoardAmbientOcclusion());
-        ambientOcclusion.addListener(new TextTooltip("Darkens the sky light where the ground and the trees hide the sky:"
-              + " cliff feet, hollows, the ground around trunks. Sunlight is unchanged; buildings and units take no part."
-              + " Switching it rebuilds the board's shaders. The choice is saved for the next session.", skin, "menu"));
-        ambientOcclusion.addListener(new ChangeListener() {
-            @Override
-            public void changed(ChangeEvent event, Actor actor) {
-                boolean enabled = ambientOcclusion.isChecked();
-                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardAmbientOcclusion(enabled));
-            }
-        });
+        switchControls(skin);
+        // The saved choice; like anti-aliasing, Defaults leaves it alone.
+        GUIPreferences saved = GUIPreferences.getInstance();
+        custom = BoardSwitches.savedCustom(saved);
+        showSwitches(BoardSwitches.saved(saved));
         depthCues = checkbox(skin, "Depth cues", "tuning-depth-cues");
         // The saved choice (off until one is saved); like anti-aliasing, Defaults leaves it alone.
         depthCues.setChecked(GUIPreferences.getInstance().getBoardDepthCues());
@@ -410,7 +351,7 @@ final class GpuBoardTuning {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 boolean enabled = grass.isChecked();
-                updateQualityOptions();
+                updateSwitchOptions();
                 SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardGrass(enabled));
             }
         });
@@ -855,7 +796,7 @@ final class GpuBoardTuning {
             }
         });
         restoreDefaults();
-        updateQualityOptions();
+        updateSwitchOptions();
         // The Display page's saved choices; Defaults leaves them alone.
         GUIPreferences preferences = GUIPreferences.getInstance();
         setValues(uiScale, new float[] { preferences.getBoardUiScale() * 100 });
@@ -1207,10 +1148,6 @@ final class GpuBoardTuning {
         return normalMaps.isChecked();
     }
 
-    boolean terrainParallax() {
-        return terrainParallax.isChecked();
-    }
-
     boolean terrainCache() { return terrainCache.isChecked(); }
 
     /** The Display page's VSync choice, which the window follows while a board shows (GpuBattleView#pace). */
@@ -1288,34 +1225,21 @@ final class GpuBoardTuning {
 
     /** The Display page's effective rendering choices. */
     BoardDisplaySettings displaySettings() {
-        return new BoardDisplaySettings(quality(), BoardCamera.renderScale, antiAliasing(), highShadows(),
-              specularAntialiasing.isChecked(), normalMaps(), terrainParallax(), tessellation(), ambientOcclusion(),
-              depthCues(), vignette());
+        return new BoardDisplaySettings(switches(), BoardCamera.renderScale, antiAliasing(), normalMaps(), depthCues(),
+              vignette());
     }
 
-    /** The chosen Quality level. */
-    BoardQuality quality() {
-        return quality.getSelected();
+    /** The quality switches the controls hold: a preset's values or a Custom set. */
+    BoardSwitches switches() {
+        BoardSwitches set = BoardSwitches.of(BoardSwitches.Preset.MEDIUM);
+        for (var entry : switchBoxes.entrySet()) { set = set.with(entry.getKey(), entry.getValue().isChecked()); }
+        for (var entry : switchSliders.entrySet()) { set = set.with(entry.getKey(), entry.getValue().slider().getValue()); }
+        return set;
     }
 
     /** SMAA on the window's 3D scene. */
     boolean antiAliasing() {
         return antiAliasing.getSelectedIndex() == 1;
-    }
-
-    /** High shadows: twice the shadow texels a rendered pixel takes (GpuTerrainShadows). */
-    boolean highShadows() {
-        return shadows.getSelectedIndex() == 1;
-    }
-
-    /** Tessellated sculpted relief (GpuTessellation), where the context offers it. */
-    boolean tessellation() {
-        return tessellation.isChecked();
-    }
-
-    /** Screen-space ambient occlusion on the opaque scene (GpuAmbientOcclusion). */
-    boolean ambientOcclusion() {
-        return ambientOcclusion.isChecked();
     }
 
     /** The haze that separates nearer surfaces from farther ones (GpuDepthCues). */
@@ -1335,33 +1259,81 @@ final class GpuBoardTuning {
         showRenderSize();
     }
 
-    /** The view reads the choice each frame; it is also saved for later sessions, on the Swing thread as the card is. */
-    private void applyQuality() {
-        updateQualityOptions();
-        String choice = quality().name();
-        SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardQuality(choice));
+    /**
+     * One control a quality switch, in BoardSwitch order, named {@code tuning-} and the switch's name in kebab case: a
+     * check box for an on/off switch, a slider for a value. A change shows the preset the values are, or Custom.
+     */
+    private void switchControls(Skin skin) {
+        for (BoardSwitch s : BoardSwitch.values()) {
+            String name = "tuning-" + s.name().toLowerCase(Locale.ROOT).replace('_', '-');
+            if (s.toggle()) {
+                CheckBox box = checkbox(skin, s.label, name);
+                box.addListener(new TextTooltip(s.help, skin, "menu"));
+                box.addListener(new ChangeListener() {
+                    @Override
+                    public void changed(ChangeEvent event, Actor actor) {
+                        if (!syncing) { applySwitch(); }
+                    }
+                });
+                switchBoxes.put(s, box);
+            } else {
+                Control control = controls(skin, List.of(new Knob(s.label, s.min, s.max, s.step, s.step < 1 ? "%.2f" : "%.0f")),
+                      this::applySwitch, 0).getFirst();
+                control.slider().setName(name);
+                control.slider().addListener(new TextTooltip(s.help, skin, "menu"));
+                switchSliders.put(s, control);
+            }
+        }
     }
 
-    /** What a level leaves out keeps its choice, disabled, until a level that has it brings the choice back. */
-    private void updateQualityOptions() {
-        BoardQuality level = quality();
-        shadows.setDisabled(!level.costlyOptions);
-        specularAntialiasing.setDisabled(!level.costlyOptions);
-        terrainParallax.setDisabled(!level.costlyOptions);
-        tessellation.setDisabled(!level.costlyOptions || !GpuTessellation.available());
-        ambientOcclusion.setDisabled(!level.costlyOptions);
-        grass.setDisabled(level.meadowShare == 0);
-        grassHeight.getFirst().slider().setDisabled(level.meadowShare == 0 || !grass.isChecked());
+    /** Shows a set on the switches' controls and the preset it is. */
+    private void showSwitches(BoardSwitches set) {
+        syncing = true;
+        for (var entry : switchBoxes.entrySet()) { entry.getValue().setChecked(set.on(entry.getKey())); }
+        for (var entry : switchSliders.entrySet()) { entry.getValue().slider().setValue(set.get(entry.getKey())); }
+        quality.setSelected(set.preset());
+        syncing = false;
+        updateReadings(List.copyOf(switchSliders.values()));
+    }
+
+    /** A preset picked: its values; Custom brings back the last Custom set, if there is one. Saved for later sessions. */
+    private void applyPreset() {
+        BoardSwitches.Preset preset = quality.getSelected();
+        showSwitches(preset != BoardSwitches.Preset.CUSTOM ? BoardSwitches.of(preset) : custom != null ? custom : switches());
+        updateSwitchOptions();
+        saveSwitches();
+    }
+
+    /** A switch changed: the preset shown follows the values, and a Custom set becomes the one Custom brings back. */
+    private void applySwitch() {
+        BoardSwitches set = switches();
+        if (set.preset() == BoardSwitches.Preset.CUSTOM) { custom = set; }
+        syncing = true;
+        quality.setSelected(set.preset());
+        syncing = false;
+        updateReadings(List.copyOf(switchSliders.values()));
+        updateSwitchOptions();
+        saveSwitches();
+    }
+
+    /** The view reads the switches each frame; they are also saved for later sessions, on the Swing thread. */
+    private void saveSwitches() {
+        BoardSwitches shown = switches(), kept = custom;
+        SwingUtilities.invokeLater(() -> BoardSwitches.save(GUIPreferences.getInstance(), shown, kept));
+    }
+
+    /** Grass blades and their height have nothing to draw without the meadow; tessellation needs OpenGL 4.0. */
+    private void updateSwitchOptions() {
+        boolean meadow = switches().get(BoardSwitch.MEADOW_SHARE) > 0;
+        grass.setDisabled(!meadow);
+        grassHeight.getFirst().slider().setDisabled(!meadow || !grass.isChecked());
+        // OpenGL 4.0 and later: every Mac's 4.1, current Windows and Linux drivers' 4.6.
+        switchBoxes.get(BoardSwitch.TESSELLATION).setDisabled(!GpuTessellation.available());
     }
 
     private void applyAntiAliasing() {
         String choice = antiAliasing.getSelected().toUpperCase(Locale.ROOT);
         SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardAntiAliasing(choice));
-    }
-
-    private void applyShadows() {
-        String choice = shadows.getSelected().toUpperCase(Locale.ROOT);
-        SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardShadows(choice));
     }
 
     /** The view reads the choice each frame; it is also saved for later sessions, on the Swing thread. */

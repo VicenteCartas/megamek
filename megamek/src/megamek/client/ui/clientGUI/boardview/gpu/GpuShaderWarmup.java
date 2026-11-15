@@ -666,19 +666,16 @@ final class GpuShaderWarmup {
 
     /** The Display settings and the graphics as one line, which the process reads back ({@link #display}). */
     private static String settings(BoardDisplaySettings display, BoardGraphics graphics) {
-        return String.join(",", graphics.name(), display.quality().name(), Float.toString(display.resolution()),
-              Boolean.toString(display.antiAliasing()), Boolean.toString(display.highShadows()),
-              Boolean.toString(display.specularAntiAliasing()), Boolean.toString(display.normalMaps()),
-              Boolean.toString(display.terrainParallax()), Boolean.toString(display.tessellation()),
-              Boolean.toString(display.ambientOcclusion()), Boolean.toString(display.depthCues()),
-              Boolean.toString(display.vignette()));
+        // The switches' text has no comma (BoardSwitches.format).
+        return String.join(",", graphics.name(), display.switches().format(), Float.toString(display.resolution()),
+              Boolean.toString(display.antiAliasing()), Boolean.toString(display.normalMaps()),
+              Boolean.toString(display.depthCues()), Boolean.toString(display.vignette()));
     }
 
     private static BoardDisplaySettings display(String[] fields) {
-        return new BoardDisplaySettings(BoardQuality.valueOf(fields[1]), Float.parseFloat(fields[2]),
+        return new BoardDisplaySettings(BoardSwitches.parse(fields[1]), Float.parseFloat(fields[2]),
               Boolean.parseBoolean(fields[3]), Boolean.parseBoolean(fields[4]), Boolean.parseBoolean(fields[5]),
-              Boolean.parseBoolean(fields[6]), Boolean.parseBoolean(fields[7]), Boolean.parseBoolean(fields[8]),
-              Boolean.parseBoolean(fields[9]), Boolean.parseBoolean(fields[10]), Boolean.parseBoolean(fields[11]));
+              Boolean.parseBoolean(fields[6]));
     }
 
     /** What the prepared programs are made of: anything that changes one of them changes this. */

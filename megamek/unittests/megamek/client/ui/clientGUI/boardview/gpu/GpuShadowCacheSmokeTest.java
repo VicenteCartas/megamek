@@ -57,7 +57,6 @@ class GpuShadowCacheSmokeTest {
     }
 
     private void check(GpuBoardFixture fixture, BoardScene scene) throws Exception {
-        BoardQuality previousQuality = BoardQuality.current;
         GpuTerrain terrain = new GpuTerrain();
         Model model = new ModelBuilder().createBox(20, 20, 20, new Material(ColorAttribute.createDiffuse(Color.WHITE)),
               VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal);
@@ -65,7 +64,7 @@ class GpuShadowCacheSmokeTest {
         profiler.enable();
         try {
             // These draw counts measure caster reuse, without High's separate shadow mip-generation draws.
-            terrain.setQuality(BoardQuality.MEDIUM);
+            terrain.setSwitches(BoardSwitches.of(BoardSwitches.Preset.MEDIUM));
             BoardCamera camera = new BoardCamera();
             camera.resize(1280, 900);
             camera.fit(scene);
@@ -173,7 +172,6 @@ class GpuShadowCacheSmokeTest {
             profiler.disable();
             model.dispose();
             terrain.dispose();
-            BoardQuality.current = previousQuality;
         }
     }
 

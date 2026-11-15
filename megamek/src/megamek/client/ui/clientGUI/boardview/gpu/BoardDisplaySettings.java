@@ -3,39 +3,27 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
 
-/** The saved Display choices, applied identically by the full board view and an embedded map inspection. */
-record BoardDisplaySettings(BoardQuality quality, float resolution, boolean antiAliasing, boolean highShadows,
-      boolean specularAntiAliasing, boolean normalMaps, boolean terrainParallax, boolean tessellation,
-      boolean ambientOcclusion, boolean depthCues, boolean vignette) {
-    /** A level without the costly options leaves them out; the saved choices stay, and High brings them back. */
-    BoardDisplaySettings {
-        if (!quality.costlyOptions) {
-            highShadows = false;
-            specularAntiAliasing = false;
-            terrainParallax = false;
-            tessellation = false;
-            ambientOcclusion = false;
-        }
-    }
-
+/**
+ * The saved Display choices, applied identically by the full board view and an embedded map inspection: the quality
+ * switches (a preset's or a Custom set, BoardSwitches) and the choices beside them.
+ */
+record BoardDisplaySettings(BoardSwitches switches, float resolution, boolean antiAliasing, boolean normalMaps,
+      boolean depthCues, boolean vignette) {
     static BoardDisplaySettings capture(GUIPreferences preferences) {
-        return new BoardDisplaySettings(BoardQuality.parse(preferences.getBoardQuality()),
-              preferences.getBoardRenderResolution(), "SMAA".equalsIgnoreCase(preferences.getBoardAntiAliasing()),
-              "HIGH".equalsIgnoreCase(preferences.getBoardShadows()), preferences.getBoardSpecularAntiAliasing(),
-              preferences.getBoardNormalMaps(), preferences.getBoardTerrainParallax(), preferences.getBoardTessellation(),
-              preferences.getBoardAmbientOcclusion(), preferences.getBoardDepthCues(), preferences.getBoardVignette());
+        return new BoardDisplaySettings(BoardSwitches.saved(preferences), preferences.getBoardRenderResolution(),
+              "SMAA".equalsIgnoreCase(preferences.getBoardAntiAliasing()), preferences.getBoardNormalMaps(),
+              preferences.getBoardDepthCues(), preferences.getBoardVignette());
     }
 
     /** GPU thread, before terrain preparation: these flags also select the material programs to prepare. */
     void apply(GpuTerrain terrain, GpuAtmosphere atmosphere, GpuAmbientOcclusion occlusion,
           int pixelsWide, int pixelsHigh, boolean tactical) {
-        terrain.setQuality(quality);
-        GpuEnvironmentLighting.specularAntialiasing = specularAntiAliasing;
-        terrain.setShadowScene(Math.max(pixelsWide, pixelsHigh) * resolution, highShadows);
+        terrain.setSwitches(switches);
+        terrain.setShadowScene(Math.max(pixelsWide, pixelsHigh) * resolution, switches.on(BoardSwitch.HIGH_SHADOWS));
         terrain.setNormalMaps(normalMaps);
-        terrain.setTerrainParallax(terrainParallax);
-        terrain.setTessellation(tessellation);
-        occlusion.configure(terrain.environment(), ambientOcclusion);
+        terrain.setTerrainParallax(switches.on(BoardSwitch.TERRAIN_PARALLAX));
+        terrain.setTessellation(switches.on(BoardSwitch.TESSELLATION));
+        occlusion.configure(terrain.environment(), switches.on(BoardSwitch.AMBIENT_OCCLUSION));
         atmosphere.setAntiAliasing(antiAliasing);
         atmosphere.setDepthCues(depthCues && !tactical ? GpuDepthCues.STRENGTH : 0);
         atmosphere.setVignette(vignette);

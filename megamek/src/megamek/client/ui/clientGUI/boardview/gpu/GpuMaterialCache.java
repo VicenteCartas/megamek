@@ -414,9 +414,10 @@ final class GpuMaterialCache {
      * it (their cover reaches 14 m past a hex, less than a neighbour's width), and in it and beside it no molten or
      * frozen liquid and water of one palette at most (GpuBiomeSurface.aqueous: the stage mixes nothing in for one
      * palette). A field's ground does not follow the view but for its stand's colour as the plants thin out, which the
-     * cached top lays live from the field's share the fill keeps (terrain-biome.glsl, cachedField).
+     * cached top lays live from the field's share the fill keeps (terrain-biome.glsl, cachedField). The hex's part of
+     * {@link #top}: the height field's merged level tops ask it alone (TerrainField).
      */
-    private static boolean uncovered(BoardScene scene, BoardScene.Tile tile) {
+    static boolean uncovered(BoardScene scene, BoardScene.Tile tile) {
         int palettes = 0;
         for (int direction = -1; direction < 6; direction++) {
             var near = direction < 0 ? tile : scene.neighbor(tile, direction);

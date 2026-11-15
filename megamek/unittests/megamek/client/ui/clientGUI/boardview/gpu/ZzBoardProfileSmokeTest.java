@@ -143,13 +143,14 @@ class ZzBoardProfileSmokeTest {
             modes.add(new Mode(parts[0], parts[1].equals("iso"), Float.parseFloat(parts[2]), parts.length > 3 ? parts[3] : ""));
         }
         GUIPreferences preferences = GUIPreferences.getInstance();
-        // The switches below only count in High.
-        preferences.setBoardQuality("HIGH");
-        preferences.setBoardAmbientOcclusion(Boolean.getBoolean("megamek.gpu.profileAo"));
-        preferences.setBoardTessellation(Boolean.getBoolean("megamek.gpu.profileTessellation"));
+        // High with these two switches.
+        BoardSwitches profiled = BoardSwitches.of(BoardSwitches.Preset.HIGH)
+              .with(BoardSwitch.AMBIENT_OCCLUSION, Boolean.getBoolean("megamek.gpu.profileAo"))
+              .with(BoardSwitch.TESSELLATION, Boolean.getBoolean("megamek.gpu.profileTessellation"));
+        BoardSwitches.save(preferences, profiled, null);
         Board board = BoardFile.loadSheet(new File(path), false, true);
         StringBuilder report = new StringBuilder("board=" + path + " window=" + width + "x" + height
-              + " ao=" + preferences.getBoardAmbientOcclusion() + " tessellation=" + preferences.getBoardTessellation()
+              + " switches=" + BoardSwitches.saved(preferences)
               + " programs=" + PROGRAMS + "\n");
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {

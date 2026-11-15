@@ -48,6 +48,8 @@ class GpuGroundMapSmokeTest {
             public void create() {
                 frame = new GpuReviewFrame(NOON);
                 terrain = new GpuTerrain();
+                // The map is kept for grass: High's meadow share (Low draws none).
+                terrain.setSwitches(BoardSwitches.of(BoardSwitches.Preset.HIGH));
                 try {
                     GpuCalibrationScenes.prepare(terrain, frame, new BoardCamera(), scene);
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());

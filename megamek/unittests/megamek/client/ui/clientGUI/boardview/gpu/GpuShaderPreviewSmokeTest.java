@@ -75,10 +75,10 @@ class GpuShaderPreviewSmokeTest {
         try {
             for (var preset : presets) {
                 var settings = settings(preset, true, ++restart);
-                var first = preview.render(settings, now += 100_000_000, manager.revision());
+                var first = preview.render(settings, BoardSwitches.BASE, now += 100_000_000, manager.revision());
                 assertImage(first);
                 assertEquals(preset, first.preset(), "Condition files select the matching automatic preview");
-                var later = preview.render(settings, now += 100_000_000, manager.revision());
+                var later = preview.render(settings, BoardSwitches.BASE, now += 100_000_000, manager.revision());
                 assertImage(later);
                 assertFalse(Arrays.equals(pixels(first.image()), pixels(later.image())), preset + " must animate");
                 int y = (restart - 1) * (GpuShaderPreview.HEIGHT + 24);
@@ -100,23 +100,23 @@ class GpuShaderPreviewSmokeTest {
                 var masks = BufferUtils.newByteBuffer(4);
                 Gdx.gl.glGetBooleanv(GL20.GL_COLOR_WRITEMASK, masks);
                 assertEquals(0, masks.get(0)); assertEquals(1, masks.get(1)); assertEquals(0, masks.get(3));
-                var paused = preview.render(settings(preset, false, restart), now += 100_000_000, manager.revision());
+                var paused = preview.render(settings(preset, false, restart), BoardSwitches.BASE, now += 100_000_000, manager.revision());
                 assertImage(paused);
                 assertEquals(later.seconds(), paused.seconds());
-                assertNull(preview.render(settings(preset, false, restart), now += 100_000_000, manager.revision()), "Pause skips readback");
+                assertNull(preview.render(settings(preset, false, restart), BoardSwitches.BASE, now += 100_000_000, manager.revision()), "Pause skips readback");
             }
             var small = preview.render(settings(GpuShaderPreview.Preset.IMPACT, false, ++restart,
-                  new GpuShaderPreview.Inputs(2, 1, 6, 6, true)), now += 100_000_000, manager.revision());
+                  new GpuShaderPreview.Inputs(2, 1, 6, 6, true)), BoardSwitches.BASE, now += 100_000_000, manager.revision());
             var large = preview.render(settings(GpuShaderPreview.Preset.IMPACT, false, restart,
-                  new GpuShaderPreview.Inputs(20, 1, 6, 6, true)), now += 100_000_000, manager.revision());
+                  new GpuShaderPreview.Inputs(20, 1, 6, 6, true)), BoardSwitches.BASE, now += 100_000_000, manager.revision());
             assertImage(small); assertImage(large);
             assertEquals(small.seconds(), large.seconds(), "Changing rack size preserves the paused impact phase");
             assertFalse(Arrays.equals(pixels(small.image()), pixels(large.image())), "rackSize reaches the real impact geometry");
             var restored = preview.render(settings(GpuShaderPreview.Preset.IMPACT, false, restart,
-                  new GpuShaderPreview.Inputs(2, 1, 6, 6, true)), now += 100_000_000, manager.revision());
+                  new GpuShaderPreview.Inputs(2, 1, 6, 6, true)), BoardSwitches.BASE, now += 100_000_000, manager.revision());
             assertTrue(Arrays.equals(pixels(small.image()), pixels(restored.image())), "Input comparisons use a stable sample seed and clock");
             var laser = settings(GpuShaderPreview.Preset.LASER, false, ++restart);
-            var original = preview.render(laser, now += 100_000_000, manager.revision());
+            var original = preview.render(laser, BoardSwitches.BASE, now += 100_000_000, manager.revision());
             assertImage(original);
             var result = manager.apply(Map.of("beams.frag", """
                   #version 330 core
@@ -125,18 +125,18 @@ class GpuShaderPreviewSmokeTest {
                   """));
             assertTrue(result.success(), result.message());
             assertTrue(result.updated() > 0, "The preview makes an otherwise inactive laser shader editable");
-            var edited = preview.render(laser, now += 100_000_000, manager.revision());
+            var edited = preview.render(laser, BoardSwitches.BASE, now += 100_000_000, manager.revision());
             assertImage(edited);
             assertFalse(Arrays.equals(pixels(original.image()), pixels(edited.image())), "An edit must reach preview pixels while paused");
             assertTrue(hasGreenPixels(edited.image()), "The edited laser is visibly green");
             assertFalse(manager.apply(Map.of("beams.frag", "unfinished edit")).success());
-            var retained = preview.render(settings(GpuShaderPreview.Preset.LASER, false, ++restart),
+            var retained = preview.render(settings(GpuShaderPreview.Preset.LASER, false, ++restart), BoardSwitches.BASE,
                   now += 100_000_000, manager.revision());
             assertImage(retained);
             assertTrue(Arrays.equals(pixels(edited.image()), pixels(retained.image())), "Invalid edits preserve the working sample");
             boolean disappeared = false, repeated = false;
             for (int frame = 0; frame < 40 && !repeated; frame++) {
-                var playing = preview.render(settings(GpuShaderPreview.Preset.LASER, true, restart),
+                var playing = preview.render(settings(GpuShaderPreview.Preset.LASER, true, restart), BoardSwitches.BASE,
                       now += 100_000_000, manager.revision());
                 assertImage(playing);
                 if (!hasGreenPixels(playing.image())) { disappeared = true; }
@@ -145,7 +145,7 @@ class GpuShaderPreviewSmokeTest {
             assertTrue(repeated, "The laser fires again automatically after completing a shot");
             var hidden = new GpuShaderPreview.Settings("beams.frag", GpuShaderPreview.Preset.AUTO, false, true, 1, -75, 18, 1, restart,
                   GpuShaderPreview.Inputs.DEFAULT);
-            assertNull(preview.render(hidden, now + 100_000_000, manager.revision()), "Hidden editors do no preview work");
+            assertNull(preview.render(hidden, BoardSwitches.BASE, now + 100_000_000, manager.revision()), "Hidden editors do no preview work");
             try {
                 Path folder = Path.of(System.getProperty("megamek.gpu.screenshots", "build/shader-preview"));
                 Files.createDirectories(folder);

@@ -176,6 +176,7 @@ final class GpuBoardPrint implements Disposable {
         terrain = new GpuTerrain(lender);
         // The live view's 3D Graphics (it is ready, so they are installed); a print keeps the fluff of the 3D view.
         terrain.setColumns(lender.columns());
+        terrain.setSwitches(lender.switches());
         terrain.setTessellation(lender.tessellation());
         terrain.setGravity(lighting.gravity());
         terrain.setVacuum(vacuum);

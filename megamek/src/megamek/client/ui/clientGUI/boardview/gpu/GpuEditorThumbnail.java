@@ -139,7 +139,7 @@ record GpuEditorThumbnail(String id, String asset) {
             }
 
             @Override public void render() {
-                models.update(); samples.update(terrain);
+                models.update(terrain.switches()); samples.update(terrain);
                 if (models.pending() + samples.pending() > 0) { return; }
                 int written = 0, missing = 0;
                 for (var entry : images.entrySet()) {

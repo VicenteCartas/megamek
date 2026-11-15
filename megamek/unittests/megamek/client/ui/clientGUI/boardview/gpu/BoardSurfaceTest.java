@@ -19,7 +19,7 @@ class BoardSurfaceTest {
         var original = TerrainSettings.capture();
         for (float scale : new float[] { .5f, 1, 2 }) {
             var settings = new TerrainSettings(new BoardGeometry.Tuning(scale, 1, 1, 18, .8f),
-                  original.relief(), original.revision(), original.terrainRevision());
+                  original.relief(), original.revision(), original.terrainRevision(), original.switches());
             try (var ignored = TerrainSettings.use(settings)) {
                 var ground = new BoardSurface.Face(new Vector3(0, 0, 3), new Vector3(2 * scale, 0, 3),
                       new Vector3(0, 2 * scale, 3), BoardSurface.Finish.BANK);

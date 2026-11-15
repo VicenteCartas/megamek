@@ -125,8 +125,8 @@ final class GpuShaderPreview implements Disposable {
     private float seconds;
     private String failure;
 
-    /** At most 30 small readbacks per second. Hidden editors do no preview work. */
-    Frame render(Settings settings, long now, long shaderRevision) {
+    /** At most 30 small readbacks per second. Hidden editors do no preview work. {@code switches}: the board's. */
+    Frame render(Settings settings, BoardSwitches switches, long now, long shaderRevision) {
         if (!settings.visible()) { lastFrame = 0; return null; }
         boolean changed = !settings.equals(previous) || shaderRevision != revision;
         if (lastFrame != 0 && now - lastFrame < 33_333_333L) { return null; }
@@ -167,7 +167,7 @@ final class GpuShaderPreview implements Disposable {
                   GpuColor.linear(.065f) * backdropScale,
                   GpuColor.linear(.085f) * backdropScale, 1, true);
             positionCamera(settings);
-            GpuEnvironmentLighting.applyAntialiasing(light);
+            GpuEnvironmentLighting.applySwitches(light, switches);
             batch.begin(camera);
             batch.render(floor, light);
             if (preset == Preset.MATERIAL) {

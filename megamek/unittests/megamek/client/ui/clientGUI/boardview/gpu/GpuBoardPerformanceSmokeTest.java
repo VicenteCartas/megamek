@@ -279,7 +279,8 @@ class GpuBoardPerformanceSmokeTest {
         // High, Medium, Medium, High in one GL context, so other work on the machine weighs on both alike.
         boolean compareQuality = Boolean.getBoolean("megamek.gpu.performanceCompareQuality");
         // Each comparison runs High, this level, this level, High.
-        BoardQuality comparedQuality = BoardQuality.parse(System.getProperty("megamek.gpu.performanceComparedQuality", "MEDIUM"));
+        BoardSwitches.Preset comparedQuality = BoardSwitches.Preset.parse(
+              System.getProperty("megamek.gpu.performanceComparedQuality", "MEDIUM"));
         Map<String, String> shaderBaseline = shaderSources(System.getProperty("megamek.gpu.performanceCompareShaders"));
         boolean compareShaders = !shaderBaseline.isEmpty();
         boolean waitForCache = compareCache || compareShaders || Boolean.getBoolean("megamek.gpu.performanceMaterialCache");
@@ -299,26 +300,25 @@ class GpuBoardPerformanceSmokeTest {
         var preferences = GUIPreferences.getInstance();
         BoardGraphics savedGraphics = preferences.getBoardGraphics();
         String savedAa = preferences.getBoardAntiAliasing();
-        boolean savedSpecularAa = preferences.getBoardSpecularAntiAliasing();
-        boolean savedAo = preferences.getBoardAmbientOcclusion();
         boolean savedNormals = preferences.getBoardNormalMaps();
-        boolean savedTessellation = preferences.getBoardTessellation();
-        boolean savedParallax = preferences.getBoardTerrainParallax();
-        String savedQuality = preferences.getBoardQuality();
+        String savedQuality = preferences.getBoardQuality(), savedSwitches = preferences.getBoardQualitySwitches();
         TerrainLod.Tuning savedLod = TerrainLod.tuning();
         float savedUiScale = preferences.getBoardUiScale();
         float savedRenderScale = BoardCamera.renderScale;
-        boolean savedShaderAa = GpuEnvironmentLighting.specularAntialiasing;
         Set<GpuTerrain.Prepass> savedPrepass = GpuTerrain.depthPrepass;
+        // The pinned preset; at High with these options, as the options counted only there before the switches.
+        BoardSwitches.Preset pinnedPreset = BoardSwitches.Preset.parse(System.getProperty("megamek.gpu.performanceQuality", "HIGH"));
+        BoardSwitches pinned = pinnedPreset != BoardSwitches.Preset.HIGH ? BoardSwitches.of(pinnedPreset)
+              : BoardSwitches.of(pinnedPreset).with(BoardSwitch.SPECULAR_ANTI_ALIASING, true)
+                    .with(BoardSwitch.AMBIENT_OCCLUSION, Boolean.getBoolean("megamek.gpu.performanceAmbientOcclusion"))
+                    .with(BoardSwitch.TESSELLATION,
+                          Boolean.parseBoolean(System.getProperty("megamek.gpu.performanceTessellation", "true")))
+                    .with(BoardSwitch.TERRAIN_PARALLAX, Boolean.getBoolean("megamek.gpu.performanceTerrainParallax"));
         if (pinnedSettings) {
             SwingUtilities.invokeAndWait(() -> {
                 preferences.setBoardAntiAliasing("OFF");
-                preferences.setBoardSpecularAntiAliasing(true);
-                preferences.setBoardAmbientOcclusion(Boolean.getBoolean("megamek.gpu.performanceAmbientOcclusion"));
                 preferences.setBoardNormalMaps(Boolean.parseBoolean(System.getProperty("megamek.gpu.performanceNormalMaps", "true")));
-                preferences.setBoardTessellation(Boolean.parseBoolean(System.getProperty("megamek.gpu.performanceTessellation", "true")));
-                preferences.setBoardTerrainParallax(Boolean.getBoolean("megamek.gpu.performanceTerrainParallax"));
-                preferences.setBoardQuality(System.getProperty("megamek.gpu.performanceQuality", "HIGH"));
+                BoardSwitches.save(preferences, pinned, null);
                 preferences.setBoardUiScale(1);
             });
             // A quality comparison measures the game's own pre-pass; older comparisons keep their pinned set.
@@ -416,20 +416,16 @@ class GpuBoardPerformanceSmokeTest {
                     if (pinnedSettings) {
                         assertEquals(1, BoardCamera.renderScale);
                         assertEquals(false, tuning.antiAliasing());
-                        assertEquals(true, GpuEnvironmentLighting.specularAntialiasing);
-                        assertEquals(Boolean.getBoolean("megamek.gpu.performanceAmbientOcclusion"), tuning.ambientOcclusion());
-                        assertEquals(BoardQuality.parse(System.getProperty("megamek.gpu.performanceQuality", "HIGH")),
-                              tuning.quality());
+                        assertEquals(pinned, tuning.switches());
                         if (System.getProperty("megamek.gpu.performanceQuality") == null) {
                             assertEquals(Set.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
                                   GpuTerrain.Prepass.IMPOSTORS), GpuTerrain.depthPrepass);
                         }
                     }
-                    System.out.printf("PERF settings renderScale=%.2f specularAA=%s SMAA=%s AO=%s prepass=%s uiScale=%.2f%n",
-                          BoardCamera.renderScale, GpuEnvironmentLighting.specularAntialiasing, tuning.antiAliasing(),
-                          tuning.ambientOcclusion(), GpuTerrain.depthPrepass, preferences.getBoardUiScale());
-                    System.out.printf("PERF terrain normals=%s tessellation=%s parallax=%s lod=%s%n",
-                          tuning.normalMaps(), tuning.tessellation(), tuning.terrainParallax(), TerrainLod.tuning());
+                    System.out.printf("PERF settings renderScale=%.2f switches=%s SMAA=%s prepass=%s uiScale=%.2f%n",
+                          BoardCamera.renderScale, tuning.switches(), tuning.antiAliasing(), GpuTerrain.depthPrepass,
+                          preferences.getBoardUiScale());
+                    System.out.printf("PERF terrain normals=%s lod=%s%n", tuning.normalMaps(), TerrainLod.tuning());
                     System.out.println("PERF total GPU is measured independently; stage percentiles must not be summed. "
                           + "Animation/FFT is included in cutaways and light; serialized wall time is not pipelined FPS.");
                     System.out.printf("PERF full-view board=%dx%d framebuffer=%dx%d renderer=%s%n", scene.width(), scene.height(),
@@ -506,8 +502,9 @@ class GpuBoardPerformanceSmokeTest {
                         // The switch takes effect in this warmup frame, which builds what the variant first draws.
                         if (configureFrame && graphics.size() > 1 && view == 0 && phase == 0) { setGraphics(shown); }
                         if (configureFrame && compareQuality && view == 0 && phase == 0) {
-                            SelectBox<BoardQuality> quality = GpuBoardTestUi.tuning(GpuBoardTestUi.tuning(this), "tuning-quality");
-                            quality.setSelected(variant == 0 || variant == 3 ? BoardQuality.HIGH : comparedQuality);
+                            SelectBox<BoardSwitches.Preset> quality = GpuBoardTestUi.tuning(GpuBoardTestUi.tuning(this),
+                                  "tuning-quality");
+                            quality.setSelected(variant == 0 || variant == 3 ? BoardSwitches.Preset.HIGH : comparedQuality);
                         }
                         if (configureFrame && frame == 1) {
                             boardCamera.setIsometric(!Boolean.getBoolean("megamek.gpu.performanceTopView"));
@@ -538,7 +535,8 @@ class GpuBoardPerformanceSmokeTest {
                             scenario += (variant == 0 || variant == 3 ? "-baseline-" : "-candidate-") + variant;
                         }
                         if (compareQuality) {
-                            BoardQuality shownQuality = variant == 0 || variant == 3 ? BoardQuality.HIGH : comparedQuality;
+                            BoardSwitches.Preset shownQuality = variant == 0 || variant == 3 ? BoardSwitches.Preset.HIGH
+                                  : comparedQuality;
                             scenario += "-" + shownQuality.name().toLowerCase(Locale.ROOT) + "-" + variant;
                         }
                         if (shown != null) { scenario += "-" + shown.name().toLowerCase(Locale.ROOT); }
@@ -791,16 +789,12 @@ class GpuBoardPerformanceSmokeTest {
             if (pinnedSettings) {
                 SwingUtilities.invokeAndWait(() -> {
                     preferences.setBoardAntiAliasing(savedAa);
-                    preferences.setBoardSpecularAntiAliasing(savedSpecularAa);
-                    preferences.setBoardAmbientOcclusion(savedAo);
                     preferences.setBoardNormalMaps(savedNormals);
-                    preferences.setBoardTessellation(savedTessellation);
-                    preferences.setBoardTerrainParallax(savedParallax);
                     preferences.setBoardQuality(savedQuality);
+                    preferences.setBoardQualitySwitches(savedSwitches);
                     preferences.setBoardUiScale(savedUiScale);
                 });
                 BoardCamera.renderScale = savedRenderScale;
-                GpuEnvironmentLighting.specularAntialiasing = savedShaderAa;
                 GpuTerrain.depthPrepass = savedPrepass;
                 TerrainLod.tune(savedLod);
             }

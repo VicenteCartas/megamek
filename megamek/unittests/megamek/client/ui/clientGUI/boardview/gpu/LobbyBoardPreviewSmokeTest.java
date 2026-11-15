@@ -198,14 +198,15 @@ class LobbyBoardPreviewSmokeTest {
         GUIPreferences preferences = GUIPreferences.getInstance();
         float resolution = preferences.getBoardRenderResolution();
         String aa = preferences.getBoardAntiAliasing(), quality = preferences.getBoardQuality();
-        boolean tessellation = preferences.getBoardTessellation(), normals = preferences.getBoardNormalMaps();
+        String switches = preferences.getBoardQualitySwitches();
+        boolean normals = preferences.getBoardNormalMaps();
         boolean coords = preferences.getCoordsEnabled(), types = preferences.getHexTypesEnabled();
         try {
             SwingUtilities.invokeAndWait(() -> {
-                preferences.setBoardQuality("HIGH");
+                BoardSwitches.save(preferences,
+                      BoardSwitches.of(BoardSwitches.Preset.HIGH).with(BoardSwitch.TESSELLATION, true), null);
                 preferences.setBoardRenderResolution(.5f);
                 preferences.setBoardAntiAliasing("SMAA");
-                preferences.setBoardTessellation(true);
                 preferences.setBoardNormalMaps(false);
                 preferences.setCoordsEnabled(true);
                 preferences.setHexTypesEnabled(true);
@@ -233,7 +234,7 @@ class LobbyBoardPreviewSmokeTest {
             SwingUtilities.invokeAndWait(() -> {
                 preferences.setBoardRenderResolution(1);
                 preferences.setBoardAntiAliasing("OFF");
-                preferences.setBoardTessellation(false);
+                BoardSwitches.save(preferences, BoardSwitches.of(BoardSwitches.Preset.HIGH), null);
                 preferences.setCoordsEnabled(false);
                 preferences.setHexTypesEnabled(false);
                 inspection.source().refresh();
@@ -247,9 +248,9 @@ class LobbyBoardPreviewSmokeTest {
         } finally {
             SwingUtilities.invokeAndWait(() -> {
                 preferences.setBoardQuality(quality);
+                preferences.setBoardQualitySwitches(switches);
                 preferences.setBoardRenderResolution(resolution);
                 preferences.setBoardAntiAliasing(aa);
-                preferences.setBoardTessellation(tessellation);
                 preferences.setBoardNormalMaps(normals);
                 preferences.setCoordsEnabled(coords);
                 preferences.setHexTypesEnabled(types);

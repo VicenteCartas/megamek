@@ -26,6 +26,10 @@ uniform sampler2DArray u_terrainLayers;
 uniform sampler2DArray u_terrainData;
 // The finish layers follow its normal/AO layers (finish-arrays.glsl).
 #define FINISH_LAYERS u_terrainData
+// The compact material's arrays and noise (ground-material.glsl).
+#define GROUND_COLOUR u_terrainLayers
+#define GROUND_DATA u_terrainData
+#define GROUND_NOISE(uv) textureLod(u_surfaceNoise, rainNoiseAt(uv), 0.0)
 uniform vec4 u_sculptLayers; // this family's colour/height layers: ground, debris, wall, mantle; normal/AO one up
 uniform vec4 u_sculptTiles; // metres per repeat: ground, debris, wall, mantle
 uniform vec2 u_treePitMaterial; // authored mulch colour layer and metres per repeat
@@ -365,7 +369,11 @@ void main() {
     mat2 wallYGradient = mat2(vec2(-worldDx.x * sign(projection.y), -worldDx.z),
           vec2(-worldDy.x * sign(projection.y), -worldDy.z));
     // Smooth value fields from the shared 64-texel noise: broad has ~11 m cells, fine ~2.5 m, and region ~40 m.
+#ifdef compactGroundFlag
+    vec3 fields = compactFields(world);
+#else
     vec3 fields = groundFields(world);
+#endif
     float broad = fields.x, fine = fields.y, region = fields.z;
     // Keep the walking surface fully muddy. Deposits continue over its caprock edge and drain down the shell,
     // with the existing world fields varying their reach. The shell carries drop from its local TOP edge, so
@@ -477,6 +485,19 @@ void main() {
         {
 #ifdef volcanicFlag
             TerrainMaterial material = crustOrBankMaterial(world, face);
+#elif defined(compactGroundFlag)
+            // The compact material (ground-material.glsl) from the same inputs: the family's rules from its table row.
+            GroundPixel px;
+            px.world = world; px.face = face; px.top = rockProjection.top; px.x = rockProjection.x;
+            px.y = rockProjection.y; px.topGradient = rockProjection.topGradient;
+            px.xGradient = rockProjection.xGradient; px.yGradient = rockProjection.yGradient;
+            px.side = rockProjection.side; px.facing = rockProjection.facing; px.aboveFoot = foot; px.belowRim = rim;
+            px.rock = rock; px.hardness = bed; px.sediment = sediment; px.shallowSediment = shallowSediment;
+            px.riverBank = riverBank; px.role = rocky ? 1.0 : 0.0; px.covered = terrainCovered;
+            px.levelMetres = u_levelHeight / u_metre; px.pixelMetres = pixelMetres; px.normalMaps = u_normalMaps > .5;
+            GroundSurface compact = groundSurface(px, int(sculptFamily + .5), fields);
+            TerrainMaterial material = TerrainMaterial(compact.albedo, compact.normal, compact.cavity, compact.height,
+                  Finish(compact.roughness, 0.0, 0.0, vec3(0.0)), 0.0, compact.relief);
 #else
             // One material for tops and walls: tops read the top projection, walls, banks and bedrock the sides.
             TerrainMaterial material = cliffMaterial(rockProjection, world, face, foot, rim, rock, bed, broad, fine,

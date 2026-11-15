@@ -41,11 +41,13 @@ vec3 cropCanopy(bool maize, float tone, float tilt) {
 // each survivor widening by as much (terrain-grass.glsl) so that the stand keeps its cover.
 float cropShare(bool maize, float pixels) { return clamp(pixels / (maize ? CROP_KEEP.y : CROP_KEEP.x), .001, 1.0); }
 
+// The terrain's detail scale (BoardSwitch.DETAIL_SCALE, at least 1): it takes each detail level at this many times the
+// hex's size. A program whose owner sets none reads 0, which counts as 1.
+uniform float u_detailScale;
+
 // How many of a field's plants stand as they fade into the ground's crop colour (terrain-biome.glsl).
 float cropPlants(float pixels) {
-#ifdef mediumQualityFlag
-    pixels /= CROP_MEDIUM_SCALE; // They stand on the detail levels it takes at larger hexes (TerrainLod.select).
-#endif
+    pixels /= max(u_detailScale, 1.0); // They stand on the detail levels it takes at larger hexes (TerrainLod.select).
     return smoothstep(CROP_FADE.x, CROP_FADE.y, pixels);
 }
 

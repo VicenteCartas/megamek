@@ -95,13 +95,14 @@ final class GpuGroundCover implements Disposable {
         }
 
         /** The instances a tile draws where a hex is {@code pixels} wide: a prefix by rank. */
-        int drawn(float pixels) {
+        int drawn(float pixels, BoardSwitches switches) {
             return switch (this) {
-                case GRASS -> (int) Math.ceil(TILE_BLADES * BoardQuality.current.meadowShare * density(pixels));
+                case GRASS -> (int) Math.ceil(TILE_BLADES * switches.get(BoardSwitch.MEADOW_SHARE) * density(pixels));
                 case TUSSOCK -> TUFTS * (int) Math.ceil(TUFT_BLADES * tuftDensity(pixels));
-                case WHEAT -> (int) Math.ceil(TILE_BLADES * GpuBiomeVegetation.cropDensity(BoardFields.Crop.WHEAT, pixels));
+                case WHEAT -> (int) Math.ceil(TILE_BLADES
+                      * GpuBiomeVegetation.cropDensity(BoardFields.Crop.WHEAT, pixels, switches));
                 case MAIZE -> (int) Math.ceil(2 * CROP_CELLS * CROP_CELLS
-                      * GpuBiomeVegetation.cropDensity(BoardFields.Crop.MAIZE, pixels));
+                      * GpuBiomeVegetation.cropDensity(BoardFields.Crop.MAIZE, pixels, switches));
             };
         }
 
@@ -268,12 +269,12 @@ final class GpuGroundCover implements Disposable {
      * Whether, with {@code grass}, grass or tussocks or, with {@code crops}, a field's plants can stand at this
      * scale. Orthographic detail has one scale everywhere; perspective detail still depends on each tile's depth.
      */
-    static boolean visibleAtScale(Camera camera, boolean grass, boolean crops) {
+    static boolean visibleAtScale(Camera camera, boolean grass, boolean crops, BoardSwitches switches) {
         float pixels = BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera, camera.position);
         boolean perspective = camera.projection.val[Matrix4.M33] == 0;
         // A tussock's blades stand before the meadow's.
         return grass && (perspective || tuftDensity(pixels) > 0)
-              || crops && (perspective || GpuBiomeVegetation.cropDensity(BoardFields.Crop.MAIZE, pixels) > 0);
+              || crops && (perspective || GpuBiomeVegetation.cropDensity(BoardFields.Crop.MAIZE, pixels, switches) > 0);
     }
 
     /** The ground map, whose textures and frame the blades' vertex stage reads (terrain-grass.glsl). */
@@ -305,10 +306,10 @@ final class GpuGroundCover implements Disposable {
      * Before a frame draws: each kind's runs of tiles under this view, and the ground map under them. The tiles cover
      * the ground the camera sees close enough for a blade to stand, where the board grows the kind; a run draws the
      * instances its nearest tile needs, and the vertex stage thins the farther ones. {@code grass}: the Grass blades
-     * option, which hides the grass and the tussocks; a field's plants stand either way. Nothing is kept per tile or hex
-     * but where each kind can grow at all.
+     * option, which hides the grass and the tussocks; a field's plants stand either way. {@code switches}: the terrain's,
+     * which thin the meadow and the fields. Nothing is kept per tile or hex but where each kind can grow at all.
      */
-    void prepare(BoardScene scene, Camera camera, boolean grass, GpuGroundMap.Terrain terrain) {
+    void prepare(BoardScene scene, Camera camera, boolean grass, BoardSwitches switches, GpuGroundMap.Terrain terrain) {
         shown.clear();
         for (Layer layer : layers) {
             layer.runs.clear();
@@ -327,7 +328,8 @@ final class GpuGroundCover implements Disposable {
         if (!any) { return; }
         boolean perspective = camera.projection.val[Matrix4.M33] == 0;
         // The smallest hex any of the board's kinds shows on: a field's plants stand much farther out than grass.
-        float smallest = grown[Kind.MAIZE.ordinal()] ? GpuBiomeVegetation.CROP_FADE[0] * BoardQuality.current.detailScale
+        float smallest = grown[Kind.MAIZE.ordinal()]
+              ? GpuBiomeVegetation.CROP_FADE[0] * switches.get(BoardSwitch.DETAIL_SCALE)
               : TUFT_START_PIXELS;
         // Beyond this depth a hex is too small for any of them: its size falls with its depth, as at the far plane.
         float scale = perspective ? BoardCamera.pixelsPerUnit(camera, outline[8].set(camera.position)
@@ -397,7 +399,7 @@ final class GpuGroundCover implements Disposable {
                 for (Layer layer : layers) {
                     int kind = layer.kind.ordinal();
                     boolean drawn = bit >= 0 && growing.get(bit + kind) && (grass || !layer.kind.grass());
-                    int count = drawn ? layer.kind.drawn(size) : 0;
+                    int count = drawn ? layer.kind.drawn(size, switches) : 0;
                     layer.tile(column, row, count, column == end);
                     if (count > 0) { pixels = Math.max(pixels, size); }
                 }

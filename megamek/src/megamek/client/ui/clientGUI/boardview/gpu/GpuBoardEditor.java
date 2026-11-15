@@ -758,8 +758,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         // Give document edits the GL upload budget before constructing more palette previews.
         if (terrain.get() == null || !terrain.get().busy()) {
             thumbnails.update(2);
-            models.update();
-            junctions.update();
+            BoardSwitches switches = terrain.get() == null ? BoardSwitches.BASE : terrain.get().switches();
+            models.update(switches);
+            junctions.update(switches);
             samples.update(terrain.get());
             // A card drawn now leaves its picture for the next time it shows.
             drawing.entrySet().removeIf(card -> {

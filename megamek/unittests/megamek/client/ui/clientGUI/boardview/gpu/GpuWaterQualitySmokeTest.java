@@ -203,7 +203,7 @@ class GpuWaterQualitySmokeTest {
           throws Exception {
         var report = new StringBuilder("A=saved water-pool/water-wave; B=current; order=ABBA; warmup=30; samples=120\n")
               .append("One terrain/camera and frozen simulation; no animate() calls during these rounds.\n")
-              .append("specularAA=").append(GpuEnvironmentLighting.specularAntialiasing)
+              .append("switches=").append(terrain.switches())
               .append("; prepass=").append(GpuTerrain.depthPrepass).append('\n');
         Path receipt = output.resolve("view-" + view + "-ab.txt");
         var radiance = new HashMap<String, float[]>();
