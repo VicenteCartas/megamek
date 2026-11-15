@@ -16,6 +16,8 @@ import java.util.Map;
 
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Quaternion;
+import com.badlogic.gdx.math.Vector3;
 
 /**
  * A generated kit in the habitat style ({@link GeneratedKit}, style "habitat", a variant's {@link Spec}): the lunar
@@ -452,7 +454,15 @@ final class HabitatKit {
         double along = isolated
               ? piece.polygons().stream().flatMap(List::stream).mapToDouble(p -> Math.abs(p[1])).max().orElse(0) / halfLength : 1;
         layout.forEach((name, places) -> places.forEach(at -> GeneratedKit.piece(geometry, modelled, lod, name,
-              on(at, deck, across, along).rotate(0, 0, 1, at.length > 2 ? (float) at[2] : 0), 0)));
+              turned(on(at, deck, across, along), at.length > 2 ? (float) at[2] : 0), 0)));
+    }
+
+    /**
+     * {@code frame} turned by {@code degrees} about z as Matrix4#rotate turns it, without the quaternion libGDX shares
+     * between threads: a kit's modules build side by side (GeneratedKit#lods).
+     */
+    private static Matrix4 turned(Matrix4 frame, float degrees) {
+        return degrees == 0 ? frame : frame.rotate(new Quaternion(Vector3.Z, degrees));
     }
 
     /**

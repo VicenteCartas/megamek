@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.IntToDoubleFunction;
+import java.util.stream.IntStream;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
@@ -292,22 +293,26 @@ final class GeneratedKit {
     static List<RigidGlb.Data> lods(String name, boolean square, List<ModelData> modelled, List<String> roles,
           List<KitOutline.Piece> pieces, Map<String, Float> boardUVs, Module module, IntToDoubleFunction deck) {
         String kit = name + (square ? "-square" : "");
-        List<RigidGlb.Data> result = new ArrayList<>();
-        for (int lod = 0; lod < GpuBuilding.lods(modelled).size(); lod++) {
+        // Read here, not in a module: the glTF reader fails on an interrupt a pool thread may carry (BoardKit).
+        if (deck != null) { aviationLight(); }
+        // Exposed connections only begin above ground; base caps (and their sidewalks) are never placed.
+        List<Map.Entry<String, KitOutline.Piece>> placed = roles.stream().flatMap(role -> pieces.stream()
+              .filter(piece -> !role.startsWith("base") || !piece.tags().endsWith("-cap")).map(piece -> Map.entry(role, piece))).toList();
+        // Every module of every level is independent: they build side by side, the nodes then laid in the kit's order.
+        return IntStream.range(0, GpuBuilding.lods(modelled).size()).parallel().mapToObj(lod -> {
+            List<Map<String, GeneratedMesh>> built = placed.parallelStream()
+                  .map(job -> module.build(job.getKey(), job.getValue(), lod)).toList();
             Map<String, GeneratedMesh> nodes = new LinkedHashMap<>();
-            for (String role : roles) {
-                for (var piece : pieces) {
-                    // Exposed connections only begin above ground; base caps (and their sidewalks) are never placed.
-                    if (role.startsWith("base") && piece.tags().endsWith("-cap")) { continue; }
-                    for (var twin : module.build(role, piece, lod).entrySet()) {
-                        String node = kit + "-lod" + lod + "-" + role + piece.tags() + twin.getKey();
-                        // A cap whose closed twins carry its edge, or a distant roof's without a parapet, needs no
-                        // geometry, but keeps the same node contract.
-                        if (twin.getValue().parts.isEmpty() && !piece.tags().endsWith("-cap")) {
-                            throw new IllegalStateException("Empty piece " + node);
-                        }
-                        nodes.put(node, twin.getValue());
+            for (int index = 0; index < placed.size(); index++) {
+                var piece = placed.get(index).getValue();
+                for (var twin : built.get(index).entrySet()) {
+                    String node = kit + "-lod" + lod + "-" + placed.get(index).getKey() + piece.tags() + twin.getKey();
+                    // A cap whose closed twins carry its edge, or a distant roof's without a parapet, needs no
+                    // geometry, but keeps the same node contract.
+                    if (twin.getValue().parts.isEmpty() && !piece.tags().endsWith("-cap")) {
+                        throw new IllegalStateException("Empty piece " + node);
                     }
+                    nodes.put(node, twin.getValue());
                 }
             }
             for (int side = 0; deck != null && !square && side < 6; side++) {
@@ -317,9 +322,8 @@ final class GeneratedKit {
             }
             var generated = GeneratedMesh.kit(kit + "-lod" + lod, nodes, boardUVs);
             finishes(generated, modelled, lod, deck != null);
-            result.add(generated);
-        }
-        return result;
+            return generated;
+        }).toList();
     }
 
     /**

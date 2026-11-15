@@ -25,6 +25,7 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelNodePart;
 import com.badlogic.gdx.math.Matrix3;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.FloatArray;
@@ -166,6 +167,7 @@ final class ConnectedKit {
     static void reload() {
         KITS.clear();
         GeneratedKit.reload();
+        GpuBuilding.reload();
     }
 
     static Kit load(List<ModelData> lods) {
@@ -196,18 +198,26 @@ final class ConnectedKit {
               || Integer.bitCount(piece.links() | piece.ends()) == 1 && (piece.links() | piece.ends()) == 1
               || (piece.links() | piece.ends()) == 3);
         Set<Long> wholes = pieces.stream().filter(Piece::whole).map(Piece::tags).collect(Collectors.toSet());
+        // What the checks ask of the other pieces, looked up rather than searched for: a kit holds a thousand pieces.
+        Set<String> tagged = new HashSet<>(), unbent = new HashSet<>(), plain = new HashSet<>(), caps = new HashSet<>(),
+              kinds = new HashSet<>();
         for (var piece : pieces) {
-            require(!piece.whole() || roles.keySet().stream().allMatch(role -> pieces.stream()
-                  .anyMatch(other -> other.role().equals(role) && other.tags() == piece.tags())),
+            String key = piece.role() + "/" + piece.tags();
+            tagged.add(key);
+            if (!piece.bend()) { unbent.add(key); }
+            if (piece.closed() == 0 && piece.notch() == 0 && !piece.cap()) { plain.add(key); }
+            if (piece.cap()) { caps.add(piece.role() + "/" + piece.links()); }
+            kinds.add(piece.role() + "/" + piece.identity());
+        }
+        for (var piece : pieces) {
+            require(!piece.whole() || roles.keySet().stream().allMatch(role -> tagged.contains(role + "/" + piece.tags())),
                   "Every module needs the kit's whole-hex pieces: " + piece.node());
-            require(!piece.bend() || pieces.stream().anyMatch(other -> other.role().equals(piece.role()) && !other.bend()
-                  && other.tags() == piece.tags()), "A bend piece stands in for its plain corner piece: " + piece.node());
-            require(piece.closed() == 0 && piece.notch() == 0 || pieces.stream().anyMatch(other -> other.role().equals(piece.role())
-                  && other.closed() == 0 && other.notch() == 0 && !other.cap() && other.tags() == piece.tags()),
+            require(!piece.bend() || unbent.contains(piece.role() + "/" + piece.tags()),
+                  "A bend piece stands in for its plain corner piece: " + piece.node());
+            require(piece.closed() == 0 && piece.notch() == 0 || plain.contains(piece.role() + "/" + piece.tags()),
                   "A closed or notched piece stands in for its plain piece: " + piece.node());
-            require(!piece.cap() || roles.keySet().stream().filter(role -> !role.startsWith("base")).allMatch(role -> pieces.stream()
-                  .anyMatch(other -> other.role().equals(role) && other.cap() && other.links() == piece.links())),
-                  "Every floor and roof needs the kit's link caps: " + piece.node());
+            require(!piece.cap() || roles.keySet().stream().filter(role -> !role.startsWith("base"))
+                  .allMatch(role -> caps.contains(role + "/" + piece.links())), "Every floor and roof needs the kit's link caps: " + piece.node());
             for (int steps = 1; steps < 6 && symmetric && piece.whole(); steps++) {
                 long turned = piece.turned(steps).tags();
                 require(turned == piece.tags() || !wholes.contains(turned),
@@ -217,11 +227,7 @@ final class ConnectedKit {
         if (!symmetric) {
             for (var piece : pieces) {
                 for (int steps = 1; steps < 6 && !piece.core(); steps++) {
-                    int links = turn(piece.links(), steps), ends = turn(piece.ends(), steps), closed = turn(piece.closed(), steps),
-                          notch = turn(piece.notch(), steps);
-                    require(pieces.stream().anyMatch(other -> other.role().equals(piece.role()) && other.links() == links
-                          && other.ends() == ends && other.bend() == piece.bend() && other.cap() == piece.cap()
-                          && other.closed() == closed && other.notch() == notch),
+                    require(kinds.contains(piece.role() + "/" + piece.turned(steps).identity()),
                           "A kit tags north only, or every direction: " + piece.node());
                 }
             }
@@ -231,19 +237,22 @@ final class ConnectedKit {
             if (Integer.bitCount(both) != 2) { continue; }
             for (int links = 0; links < 4; links++) {
                 int state = (links & 1) * Integer.lowestOneBit(both) | (links >> 1) * Integer.highestOneBit(both);
-                require(pieces.stream().anyMatch(other -> other.role().equals(piece.role()) && other.links() == state
-                      && other.ends() == (both & ~state)), "A corner piece needs all four link/end states: " + piece.node());
+                require(tagged.contains(piece.role() + "/" + ((long) state << 6 | both & ~state)),
+                      "A corner piece needs all four link/end states: " + piece.node());
             }
         }
         List<Map<String, Float>> grounds = new ArrayList<>();
         for (int level = 0; level < data.size(); level++) {
             var lod = data.get(level);
+            Map<String, ModelNode> nodes = new HashMap<>();
+            for (int index = 0; index < lod.nodes.size; index++) { nodes.putIfAbsent(lod.nodes.get(index).id, lod.nodes.get(index)); }
+            var meshParts = meshParts(lod);
             Map<String, BoundingBox> bounds = new HashMap<>();
             for (var piece : parts.get(level)) {
-                var node = node(lod, piece.node());
+                var node = nodes.get(piece.node());
                 if (node.parts.length == 0) { continue; }
-                bounds.computeIfAbsent(piece.role(), ignored -> new BoundingBox().inf()).ext(bounds(lod, node, new Matrix4()));
-                if (!piece.cap() && Integer.bitCount(piece.links()) == 1 && piece.ends() == 0) { reach(lod, node, piece); }
+                bounds.computeIfAbsent(piece.role(), ignored -> new BoundingBox().inf()).ext(bounds(meshParts, node, new Matrix4()));
+                if (!piece.cap() && Integer.bitCount(piece.links()) == 1 && piece.ends() == 0) { reach(meshParts, node, piece); }
             }
             Map<String, Float> ground = new HashMap<>();
             bounds.forEach((role, box) -> {
@@ -263,19 +272,44 @@ final class ConnectedKit {
     }
 
     /** A link arm runs out to its edge: its far end lies on the edge line through the midpoint. */
-    private static void reach(RigidGlb.Data data, ModelNode node, Piece piece) {
+    private static void reach(Map<String, List<MeshPart>> meshParts, ModelNode node, Piece piece) {
         int direction = Integer.numberOfTrailingZeros(piece.links());
         float angle = (float) Math.toRadians(90 - 60 * direction);
-        var axis = new Matrix4().rotateRad(Vector3.Z, (float) Math.PI / 2 - angle);
+        float turn = (float) Math.PI / 2 - angle;
+        // Not Matrix4#rotateRad, whose quaternion libGDX shares between threads: kits load side by side.
+        var axis = turn == 0 ? new Matrix4() : new Matrix4().rotate(new Quaternion().setFromAxisRad(Vector3.Z, turn));
         // Turned so that the arm points north, its far end is its highest y.
-        float far = bounds(data, node, axis).max.y;
+        float far = bounds(meshParts, node, axis).max.y;
         require(Math.abs(far - HexTile.HEIGHT / 2f) <= REACH_TOLERANCE,
               piece.node() + " must end on its edge, " + HexTile.HEIGHT / 2 + " units from the centre (ends at " + far + ")");
     }
 
-    private static BoundingBox bounds(RigidGlb.Data data, ModelNode node, Matrix4 view) {
+    /** A mesh part's indices into the vertices of the mesh holding it. */
+    private record MeshPart(float[] vertices, short[] indices) { }
+
+    /** {@code data}'s mesh parts by id, so a node's own are found without a walk over every mesh. */
+    private static Map<String, List<MeshPart>> meshParts(RigidGlb.Data data) {
+        Map<String, List<MeshPart>> result = new HashMap<>();
+        for (int index = 0; index < data.meshes.size; index++) {
+            var mesh = data.meshes.get(index);
+            for (var part : mesh.parts) { result.computeIfAbsent(part.id, ignored -> new ArrayList<>()).add(new MeshPart(mesh.vertices, part.indices)); }
+        }
+        return result;
+    }
+
+    /** The box of {@code node}'s triangles as {@code view} places them ({@link #triangles(RigidGlb.Data, ModelNode, Matrix4)}). */
+    private static BoundingBox bounds(Map<String, List<MeshPart>> meshParts, ModelNode node, Matrix4 view) {
+        Matrix4 placement = new Matrix4(view).mul(new Matrix4(node.translation, node.rotation, node.scale));
         var result = new BoundingBox().inf();
-        triangles(data, node, view).forEach(result::ext);
+        var point = new Vector3();
+        for (var nodePart : node.parts) {
+            for (var part : meshParts.getOrDefault(nodePart.meshPartId, List.of())) {
+                for (short index : part.indices()) {
+                    int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
+                    result.ext(point.set(part.vertices()[at], part.vertices()[at + 1], part.vertices()[at + 2]).mul(placement));
+                }
+            }
+        }
         require(result.isValid(), "Empty building module: " + node.id);
         return result;
     }

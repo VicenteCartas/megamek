@@ -1552,7 +1552,7 @@ final class GpuAssets implements Disposable {
     GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed,
           megamek.common.board.BuildingInteriors interiors, boolean stepped, float footprintScale, int[] corners,
           List<KitDoors.Cut> doors) {
-        if (!asset.startsWith("buildings/") || BoardWall.supports(asset)) { return null; }
+        if (!GpuBuilding.kitAsset(asset)) { return null; }
         File file = TilesetScenery.customBuildingFile(asset);
         // A kit that cannot load is reported under its own name; the caller then draws the asset's model, or its box.
         String kit = asset + " (kit)";

@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.g3d.Model;
@@ -54,7 +55,8 @@ final class GpuBuilding implements Disposable {
     // Whether the kit holds junctions or notch twins where its walls meet the neighbours' at a corner, or crown twins
     // for its roofs' corners inside a building (ConnectedKit#junctions).
     private boolean junctions;
-    // Per piece in its authored frame: near for picking and roof outlines, far for wall sections.
+    // Per piece in its authored frame: near for picking and roof outlines, far for wall sections; its box. Filled on the
+    // render thread as asked for: a kit holds a thousand pieces, a board shows few of them.
     private final Map<String, List<Vector3>> triangles = new HashMap<>();
     private final Map<String, List<Vector3>> farTriangles = new HashMap<>();
     private final Map<String, BoundingBox> bounds = new HashMap<>();
@@ -123,12 +125,7 @@ final class GpuBuilding implements Disposable {
                 int previous = data.indexOf(data.get(lod));
                 models.add(previous < lod ? models.get(previous) : upload.apply(data.get(lod)));
             }
-            // Every kit shares its picking geometry, a corner's junctions too; only enterable buildings need wall/roof
-            // footprints.
-            triangles.putAll(GpuTerrain.nodeTriangles(models.getFirst().nodes,
-                  part -> !part.material.id.endsWith(GeneratedMesh.BUILDING_FLOOR)));
             for (Node node : models.getFirst().nodes) {
-                bounds.put(node.id, node.calculateBoundingBox(new BoundingBox()));
                 junctions |= node.id.contains("-junction-") || node.id.contains("-notch-") || node.id.endsWith("-crown");
             }
         } catch (RuntimeException | Error error) {
@@ -160,6 +157,38 @@ final class GpuBuilding implements Disposable {
         String design = at < 0 ? asset : asset.substring(0, at);
         return GeneratedKit.kit(file, design.endsWith("-square"), at < 0 ? null : asset.substring(at + 1), footprintScale);
     }
+
+    /** Whether {@code asset} draws as a kit ({@link #kit(String, float)}) where it has a kit file: a building's, not a wall's. */
+    static boolean kitAsset(String asset) {
+        return asset.startsWith("buildings/") && !BoardWall.supports(asset);
+    }
+
+    /**
+     * Reads the kits of {@code tile}'s buildings, on the worker preparing its chunk, so that the render thread drawing them
+     * ({@link GpuAssets#building}) never waits for one: a generated kit's first build takes about a second. One that
+     * cannot load is reported where it is drawn.
+     */
+    static void readKits(BoardScene.Tile tile) {
+        for (var feature : tile.features()) {
+            String read = feature.asset() + "@" + feature.footprintScale();
+            if (!kitAsset(feature.asset()) || UNREAD.contains(read)
+                  || !megamek.common.board.TilesetScenery.customBuildingFile(feature.asset()).isFile()) {
+                continue;
+            }
+            try {
+                kit(feature.asset(), feature.footprintScale());
+            } catch (RuntimeException failure) {
+                // Not again for every chunk: a failed kit is not kept (BoardKit). A worker interrupted by a closing board
+                // failed for that alone.
+                if (!Thread.currentThread().isInterrupted()) { UNREAD.add(read); }
+            }
+        }
+    }
+
+    /** The kits {@link #readKits} could not read, until assets reload: left to the render thread, which reports them. */
+    private static final Set<String> UNREAD = ConcurrentHashMap.newKeySet();
+
+    static void reload() { UNREAD.clear(); }
 
     /** Trim trailing fallbacks, retaining authored level numbers and any gaps filled by the generic reader. */
     static <T extends ModelData> List<T> lods(List<T> loaded) {
@@ -301,7 +330,7 @@ final class GpuBuilding implements Disposable {
             for (var piece : pieces) {
                 if (piece.role().startsWith("roof") && piece.level() > level) {
                     roof.add(roofs.computeIfAbsent(placement(piece, null),
-                          plan -> GpuBuildingInterior.area(placed(piece, triangles.get(piece.node())))));
+                          plan -> GpuBuildingInterior.area(placed(piece, triangles(piece.node())))));
                 }
             }
             require(!roof.isEmpty(), kit.lods().getFirst().id + " requires a roof footprint above storey " + level);
@@ -316,6 +345,17 @@ final class GpuBuilding implements Disposable {
     private List<Vector3> cap(ConnectedKit.Placement piece) {
         return caps.computeIfAbsent(piece.node(), node -> GpuTerrain.triangles(List.of(models.getFirst().getNode(node)),
               part -> part.material.id.endsWith(GeneratedMesh.BUILDING_FLOOR)));
+    }
+
+    /** A piece's near triangles but its floors' in its authored frame, for picking and roof outlines, cached. */
+    private List<Vector3> triangles(String node) {
+        return triangles.computeIfAbsent(node, id -> GpuTerrain.triangles(List.of(models.getFirst().getNode(id)),
+              part -> !part.material.id.endsWith(GeneratedMesh.BUILDING_FLOOR)));
+    }
+
+    /** A piece's near box in its authored frame, cached. */
+    private BoundingBox bounds(String node) {
+        return bounds.computeIfAbsent(node, id -> models.getFirst().getNode(id).calculateBoundingBox(new BoundingBox()));
     }
 
     /**
@@ -345,10 +385,10 @@ final class GpuBuilding implements Disposable {
     /** A piece's faces beside a slab topped at {@code top} ({@link GpuBuildingInterior#faces}), cached; null without any. */
     private Faces faces(ConnectedKit.Placement piece, float top) {
         float local = top - piece.matrix().val[Matrix4.M23];
-        BoundingBox box = bounds.get(piece.node());
+        BoundingBox box = bounds(piece.node());
         if (box.min.z > local || box.max.z < local - GpuBuildingInterior.SLAB) { return null; }
         var faces = this.faces.computeIfAbsent(piece.node() + "@" + local, ignored -> {
-            var segments = GpuBuildingInterior.faces(triangles.get(piece.node()), local);
+            var segments = GpuBuildingInterior.faces(triangles(piece.node()), local);
             var path = new java.awt.geom.Path2D.Float();
             for (float[] face : segments) { path.moveTo(face[0], face[1]); path.lineTo(face[2], face[3]); }
             var bounds = path.getBounds2D();
@@ -435,11 +475,11 @@ final class GpuBuilding implements Disposable {
             local.origin.set(ray.origin).mul(inverse);
             local.direction.set(ray.direction).rot(inverse);
             if (deck && !piece.role().startsWith("roof")) { continue; }
-            var shape = !deck ? triangles.get(piece.node()) : decks.computeIfAbsent(piece.node(),
+            if (!Intersector.intersectRayBoundsFast(local, bounds(piece.node()))) { continue; }
+            var shape = !deck ? triangles(piece.node()) : decks.computeIfAbsent(piece.node(),
                   node -> GpuTerrain.triangles(List.of(models.getFirst().getNode(node)),
                         part -> part.material.id.contains(GeneratedMesh.ROOF_DECK)));
-            if (!shape.isEmpty() && Intersector.intersectRayBoundsFast(local, bounds.get(piece.node()))
-                  && Intersector.intersectRayTriangles(local, shape, point)) {
+            if (!shape.isEmpty() && Intersector.intersectRayTriangles(local, shape, point)) {
                 point.mul(piece.matrix());
                 float distance = point.dst2(ray.origin);
                 if (distance < nearest) { nearest = distance; result.set(point); }

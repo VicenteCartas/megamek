@@ -3902,7 +3902,7 @@ final class GpuTerrain implements Disposable {
         Set<Coords> objectChanges = onlyObjects ? Set.copyOf(rebuild.plan.changedTiles()) : Set.of();
         DetailJob job = new DetailJob(generation, index, source, buildLod, scene, settings, bottom, rebuilding, columns,
               CompletableFuture.supplyAsync(() -> settings.call(
-                    () -> onlyObjects ? prepareObjects(scene, source, x, y, bottom, buildLod, paint,
+                    () -> withKits(scene, x, y, onlyObjects ? prepareObjects(scene, source, x, y, bottom, buildLod, paint,
                           objectChanges, () -> checkBuild(generation, stale), settings, plants)
                           : columns ? prepareColumns(scene, x, y, bottom, buildLod, flow, settings, reuse, paintSurfaces, paint,
                           () -> checkBuild(generation, stale), progress, roadMaskData)
@@ -3910,10 +3910,23 @@ final class GpuTerrain implements Disposable {
                           () -> checkBuild(generation, stale), plants)
                           : prepare(scene, x, y, bottom, buildLod, flow, settings, reuse, waterShapes,
                           () -> checkBuild(generation, stale), progress, roadMaskData, paint, paintSurfaces, plants,
-                          keptPlants).packed()), detailWorker),
+                          keptPlants).packed())), detailWorker),
               null, null, progress, stale);
         // The job in a render-thread stage keeps it; this one waits its turn (advanceBuild).
         if (detailJob == null) { detailJob = job; } else { pending.add(job); }
+    }
+
+    /** {@code prepared}, once the kits of the buildings its chunk draws anew are read ({@link GpuBuilding#readKits}). */
+    private static Prepared withKits(BoardScene scene, int x, int y, Prepared prepared) {
+        // A paint update draws no features.
+        if (prepared.paintOnly()) { return prepared; }
+        for (int column = x; column < Math.min(scene.width(), x + CHUNK_SIZE); column++) {
+            for (int row = y; row < Math.min(scene.height(), y + CHUNK_SIZE); row++) {
+                Coords at = new Coords(column, row);
+                if (!prepared.reused().contains(at)) { GpuBuilding.readKits(scene.tile(at)); }
+            }
+        }
+        return prepared;
     }
 
     /** Only replacement object supports; the installed ground meshes, paint, water and atlas stay owned by the old chunk until commit. */
@@ -4293,13 +4306,13 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * The programs of every level of the chunk's kits that have more than one, as a dissolve between them draws its
+     * The programs of every level of {@code props}' kits that have more than one, as a dissolve between them draws its
      * levels (Chunk#shareProps): the drawn level's alone would leave the others' to link at their first switch. Each
      * kit's levels once a load ({@link #kitLevelsPrepared}).
      */
-    private void prepareKitLevels(Chunk chunk) {
+    private void prepareKitLevels(List<Prop> props) {
         List<ModelInstance> levels = new ArrayList<>();
-        for (Prop prop : chunk.props) {
+        for (Prop prop : props) {
             for (int lod = 0; prop.building != null && prop.lodCount() > 1 && lod < prop.lodCount(); lod++) {
                 if (kitLevelsPrepared.add(prop.building.model(lod))) { levels.add(new ModelInstance(prop.building.model(lod))); }
             }
@@ -6030,6 +6043,8 @@ final class GpuTerrain implements Disposable {
                     } else {
                         int props = chunk.props.size(), struts = chunk.struts.size(), glass = chunk.glass.size();
                         collectFeatures(this, scene.tile(coords), prepared.surfaces().get(coords), ground(this, coords));
+                        // Its kits' programs link while the chunk's meshes build and upload, not after (finish).
+                        prepareKitLevels(chunk.props.subList(props, chunk.props.size()));
                         tile.props.addAll(chunk.props.subList(props, chunk.props.size()));
                         tile.struts.addAll(chunk.struts.subList(struts, chunk.struts.size()));
                         tile.glass.addAll(chunk.glass.subList(glass, chunk.glass.size()));
@@ -6099,6 +6114,7 @@ final class GpuTerrain implements Disposable {
                     chunk.scatterDiameter = 0;
                     int props = chunk.props.size(), struts = chunk.struts.size(), glass = chunk.glass.size();
                     collectTile(this, scene.tile(coords));
+                    prepareKitLevels(chunk.props.subList(props, chunk.props.size()));
                     // A Classic hex's support is its column, which has no separate water geometry.
                     tile.support = prepared.topography().get(coords);
                     tile.water = !chunk.columns && scene.tile(coords).liquid().present()
@@ -6392,7 +6408,7 @@ final class GpuTerrain implements Disposable {
             // The modules and the placed objects draw instanced, in the GPU-driven path's groups; the editor's objects at
             // every level (prepareDecorations), and the kits' modules at every level, dissolving too.
             prepareInstanced(chunk.sharedProps, false);
-            prepareKitLevels(chunk);
+            prepareKitLevels(chunk.props);
             if (!editable) { prepareInstanced(chunk.decorationRenderables, false); }
             // Combat scars mark the 3D relief and what stands on it; the Classic columns show none. A scar patch draws
             // with its receiver's plain program (GpuSurfaceScars), which an instanced object never draws with itself.
