@@ -187,7 +187,7 @@ public final class UIUtil {
 
     /** Returns the (usually) red and gui-scaled warning sign. */
     public static String criticalSign() {
-        return fontHTML(GUIPreferences.getInstance().getWarningColor()) + WARNING_SIGN + "</FONT>";
+        return fontHTML(GUIPreferences.getInstance().getWarningColorForTheme()) + WARNING_SIGN + "</FONT>";
     }
 
     /**
@@ -1466,6 +1466,14 @@ public final class UIUtil {
      */
     public static String toColorHexString(Color col) {
         return Integer.toHexString(col.getRGB() & 0xFFFFFF);
+    }
+
+    /**
+     * @return {@code true} when the look-and-feel has a light background, using the same test as {@link #uiYellow()}
+     *       and the other theme-aware colours
+     */
+    public static boolean isLightTheme() {
+        return uiBgBrightness() > 130;
     }
 
     private static int uiBgBrightness() {

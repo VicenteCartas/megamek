@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.panels.phaseDisplay.lobby;
 
+import java.io.File;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -160,8 +161,10 @@ public final class LobbyServices {
         }
         if (done && GUIP.getSaveLobbyOnStart() && !lobbySavePerformed) {
             String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HHmmss"));
-            client().sendChat(ClientGUI.CG_CHAT_COMMAND_LOCAL_SAVE + " Lobby_Save_" + timestamp + " ./"
-                  + MMConstants.SAVEGAME_DIR);
+            String path = "./" + MMConstants.SAVEGAME_DIR;
+            LobbyBackupRotation.pruneBeforeNewBackup(new File(path), GUIP.getLobbyBackupsToKeep());
+            client().sendChat(ClientGUI.CG_CHAT_COMMAND_LOCAL_SAVE + " " + LobbyBackupRotation.LOBBY_BACKUP_PREFIX
+                  + timestamp + " " + path);
             lobbySavePerformed = true;
         }
         commands().sendDone(done);

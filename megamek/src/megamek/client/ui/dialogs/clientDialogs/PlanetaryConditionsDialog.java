@@ -455,7 +455,7 @@ public class PlanetaryConditionsDialog extends ClientDialog implements FocusList
             label.setForeground(null);
             label.setToolTipText(null);
         } else {
-            label.setForeground(GUIPreferences.getInstance().getWarningColor());
+            label.setForeground(GUIPreferences.getInstance().getWarningColorForTheme());
             label.setToolTipText(text.toString());
         }
     }

@@ -1488,8 +1488,10 @@ public class MovementDisplay extends ActionPhaseDisplay {
         MoveStep edgeLastStep = (cmd != null) ? cmd.getLastStep() : null;
         boolean edgeHasLastStep = edgeLastStep != null;
         // distanceToFinalIsOne catches both: a single direct step has the same final-coord
-        // distance as a long routed loop that ends on an adjacent hex.
-        boolean distanceToFinalIsOne = (currentEntity != null) && edgeHasLastStep
+        // distance as a long routed loop that ends on an adjacent hex. A walk-on unit has no position
+        // until it is placed (issue 9547).
+        boolean distanceToFinalIsOne = (currentEntity != null) && (currentEntity.getPosition() != null)
+                                       && edgeHasLastStep
                                        && (currentEntity.getPosition().distance(edgeLastStep.getPosition()) == 1);
         long forwardStepCount = (cmd != null) ? cmd.getStepVector().stream()
                                                    .filter(s -> s.getType() == MoveStepType.FORWARDS).count() : 0;
@@ -1752,7 +1754,10 @@ public class MovementDisplay extends ActionPhaseDisplay {
         }
 
         boolean hasLastStep = (cmd != null) && (cmd.getLastStep() != null);
-        boolean fleeStart = !hasLastStep && movingEntity.canFlee();
+        // A walk-on unit has no hex until it is placed, and a move from no hex cannot be sent (issue 9547). It can
+        // flee once placed on the edge.
+        boolean isPlaced = movingEntity.getPosition() != null;
+        boolean fleeStart = !hasLastStep && isPlaced && movingEntity.canFlee();
         boolean fleeEnd = hasLastStep
                           && (cmd.getMpUsed() < cmd.getMaxMP())
                           && (cmd.getLastStepMovementType() != EntityMovementType.MOVE_ILLEGAL)
@@ -2171,7 +2176,6 @@ public class MovementDisplay extends ActionPhaseDisplay {
         clientgui.showSensorRanges(currentlySelectedEntity, cmd.getFinalCoords());
         computeCFWarningHexes(currentlySelectedEntity);
 
-        jumpSubGear = GEAR_SUB_STANDARD;
         clearFlightPath();
         Color walkColor = GUIP.getMoveDefaultColor();
         clientgui.boardStates().forEach(bv -> bv.setHighlightColor(walkColor));
@@ -2686,6 +2690,17 @@ public class MovementDisplay extends ActionPhaseDisplay {
                     }
                 }
             }
+        }
+
+        // A unit walking on from the map edge never passes through the deployment phase, where this warning is
+        // otherwise given. Core rules make every edge-zone unit walk on, so without this most of a Core force
+        // arrives unwarned. Cancel keeps the planned path and sends nothing. The DEPLOY step is the test because
+        // planning a walk-on already marks the unit deployed on this client, so canWalkOnThisRound is false here.
+        boolean isWalkingOn = (currentlySelectedEntity != null) && (cmd != null)
+              && cmd.contains(MoveStepType.DEPLOY);
+        if (isWalkingOn && clientgui.getAutomaticEjectionWarning()
+              .warnIfDue("Walking on " + currentlySelectedEntity.getShortName())) {
+            return true;
         }
 
         return currentEntity() == null;

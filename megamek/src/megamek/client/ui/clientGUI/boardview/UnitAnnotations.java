@@ -53,6 +53,7 @@ import java.util.Set;
 import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.DamageLevelColors;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.UnitOwnerColors;
 import megamek.client.ui.util.StringDrawer;
@@ -950,13 +951,7 @@ public final class UnitAnnotations {
         if (!GUIP.getShowDamageLevel()) {
             return null;
         }
-        return switch (entity.getDamageLevel()) {
-            case Entity.DMG_CRIPPLED -> Color.black;
-            case Entity.DMG_HEAVY -> GUIP.getWarningColor();
-            case Entity.DMG_MODERATE -> GUIP.getCautionColor();
-            case Entity.DMG_LIGHT -> Color.green;
-            default -> null;
-        };
+        return DamageLevelColors.forEntity(entity);
     }
 
     /**

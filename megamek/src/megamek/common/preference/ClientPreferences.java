@@ -165,7 +165,7 @@ public class ClientPreferences extends PreferenceStoreProxy {
         store.setDefault(DATA_LOGGING, true);
         store.setDefault(SHOW_AUTO_RESOLVE_PANEL, false);
         store.setDefault(STAMP_FILENAMES, false);
-        store.setDefault(USE_CASPAR, false);
+        store.setDefault(USE_CASPAR, true);
         store.setDefault(FAVORITE_PRINCESS_BEHAVIOR_SETTING, DEFAULT_BEHAVIOR_DESCRIPTION);
         store.setDefault(LAST_SCENARIO, "");
 
@@ -291,9 +291,9 @@ public class ClientPreferences extends PreferenceStoreProxy {
     }
 
     /**
-     * @return {@code true} if the experimental CASPAR bot is offered as a selectable AI. This is a hidden
-     *       option: it is not shown in any settings UI and defaults to {@code false}; enable it by hand-adding
-     *       {@code <UseCASPAR>true</UseCASPAR>} to clientsettings.xml.
+     * @return {@code true} if the CASPAR bot is offered as a selectable AI. This defaults to {@code true} and is
+     *       not shown in any settings UI; hide it by hand-adding
+     *       {@code <preference name="UseCASPAR" value="false"/>} to clientsettings.xml.
      */
     public boolean getUseCASPAR() {
         return store.getBoolean(USE_CASPAR);
