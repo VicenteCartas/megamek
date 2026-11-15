@@ -45,11 +45,13 @@ final class HabitatKit {
      * footprint ({@link Fittings}); with {@code aviationLights}, aviation obstruction lights on the roofs' convex corners
      * ({@link GeneratedKit#lights}); its large doors' look ({@code largeDoor}, {@link KitDoors.Style}; a plain steel
      * door without); with {@code vault}, a roof that spans the hall ({@link BayKit.Vault}) in place of the flat roof
-     * with its rim, pier tops and fittings.
+     * with its rim, pier tops and fittings. With {@code hull}, as a bays kit's ({@link BayKit.Spec}), its far levels are
+     * closed outer hulls: no wall thickness, no body under the roof's deck but a parapet's; its near level alone is
+     * enterable.
      */
     record Spec(String name, String style, Map<String, String> materials, String pieces, double cornerRadius, int cornerSegments, Parapet parapet,
                 Eave eave, Skirt skirt, Uprights piers, Uprights tops, Uprights footings, Lone lone, List<Storey> storeys,
-                Fittings fittings, boolean aviationLights, KitDoors.Style largeDoor, BayKit.Vault vault) {
+                Fittings fittings, boolean aviationLights, KitDoors.Style largeDoor, BayKit.Vault vault, boolean hull) {
         /** The roof that spans the hall ({@code vault}; null: the flat roof), in the roof's material. */
         BayKit.Slab hall() {
             return vault == null ? null : new BayKit.Slab(materials.get("roof"), 18, 0, new double[] { 0 }, false, aviationLights, vault);
@@ -366,8 +368,8 @@ final class HabitatKit {
             double[] u = wallU(wall, square);
             face(geometry, material(spec, "wall"), wall.p(), wall.q(), normal(wall.p(), wall.q()), z0, z0 + LEVEL,
                   u[0] + storey.shift(), u[1] + storey.shift(), ground ? .72 : 1, v0);
-            // A far level is the outer hull: no wall thickness.
-            if (lod == 0) { KitOutline.wallBody(geometry, wall, piece.walls(), z0, z0 + LEVEL, 0, 2); }
+            // A far hull has no wall thickness.
+            if (!spec.hull() || lod == 0) { KitOutline.wallBody(geometry, wall, piece.walls(), z0, z0 + LEVEL, 0, 2); }
             if (ground && spec.skirt() != null) {
                 var band = new GeneratedMesh();
                 skirt(spec, band, wall, piece.walls(), z0);
@@ -402,9 +404,11 @@ final class HabitatKit {
                   : KitOutline.inset(polygon, piece.walls(), ROOF_INSET + radius);
             for (var part : laid) {
                 plate(geometry, roof + GeneratedMesh.ROOF_DECK, part, deck, plating, 1);
-                // A far level lays no body under the deck, but under a parapet's, the roof's foot, which every level
+                // A far hull lays no body under the deck, but under a parapet's, the roof's foot, which every level
                 // stands on (ConnectedKit#grounds).
-                if (lod == 0 || spec.parapet() != null) { geometry.slab(GeneratedMesh.BUILDING_BODY, part, deck - 1.2, deck, false); }
+                if (!spec.hull() || lod == 0 || spec.parapet() != null) {
+                    geometry.slab(GeneratedMesh.BUILDING_BODY, part, deck - 1.2, deck, false);
+                }
             }
         }
         for (var wall : piece.walls()) {
