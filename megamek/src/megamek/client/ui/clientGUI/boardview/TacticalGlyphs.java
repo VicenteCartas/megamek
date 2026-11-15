@@ -48,6 +48,7 @@ import java.awt.geom.Rectangle2D;
 
 import megamek.MMConstants;
 import megamek.client.ui.Messages;
+import megamek.client.ui.SharedUtility;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.StringDrawer;
@@ -480,7 +481,7 @@ public final class TacticalGlyphs {
             int walkMP = stepEntity.getWalkMP();
             costStringBuf.append(Math.min(step.getMpUsed(), walkMP));
         } else {
-            costStringBuf.append(step.getMpUsed());
+            costStringBuf.append(SharedUtility.formatMovementPoints(stepEntity, step.getMpUsed()));
         }
 
         // If the step is using a road bonus, mark it.

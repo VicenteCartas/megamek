@@ -102,7 +102,7 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
         }
 
         DeploymentServerHelper deploymentServerHelper = new DeploymentServerHelper(gameManager);
-        boolean isLegalLocation = deploymentServerHelper.isLegalDeployment(coords, boardId, entity, nFacing);
+        boolean isLegalLocation = deploymentServerHelper.isLegalDeployment(coords, boardId, entity, nFacing, elevation);
         Hex destinationHex = getGame().hasBoardLocation(coords, boardId)
               ? getGame().getBoard(boardId).getHex(coords) : null;
         boolean isLegalElevation = (destinationHex == null)

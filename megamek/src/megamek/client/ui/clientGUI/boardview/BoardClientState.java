@@ -703,6 +703,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                     colors.add(Color.yellow);
                 }
             }
+            return colors;
         }
 
         if (!en_Deployer.isLocationProhibited(BoardLocation.of(coords, boardId)) && !boardProhibited) {

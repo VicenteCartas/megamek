@@ -52,6 +52,7 @@ import megamek.common.compute.ComputeSideTable;
 import megamek.common.enums.AimingMode;
 import megamek.common.equipment.GunEmplacement;
 import megamek.common.equipment.WeaponMounted;
+import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.Entity;
 import megamek.common.units.LargeSupportTank;
 import megamek.common.units.Mek;
@@ -88,7 +89,9 @@ public class AimedShotHandler implements ActionListener, ItemListener {
             }
             String[] options = ((Entity) this.firingDisplay.getTarget()).getLocationNames();
             boolean[] enabled = createEnabledMask(options.length);
-            if (this.firingDisplay.getTarget() instanceof Mek) {
+            if (this.firingDisplay.getTarget() instanceof AbstractBuildingEntity) {
+                aimingAt = 0;
+            } else if (this.firingDisplay.getTarget() instanceof Mek) {
                 if (aimingMode.isImmobile()) {
                     aimingAt = Mek.LOC_HEAD;
                 } else if (aimingMode.isTargetingComputer()) {
@@ -154,12 +157,13 @@ public class AimedShotHandler implements ActionListener, ItemListener {
     }
 
     /**
-     * Whether an aimed shot at the target picks one of its locations, as the dialog offers them: a Mek, a tank or
-     * battle armor, but no building or gun emplacement.
+     * Whether an aimed shot at the target picks one of its locations, as the dialog offers them: a Mek, a tank,
+     * battle armor or a building entity, but no gun emplacement.
      */
     public static boolean aimsAtLocations(@Nullable Targetable target) {
-        return ((target instanceof Mek) || (target instanceof Tank) || (target instanceof BattleArmor))
-              && !target.isBuildingEntityOrGunEmplacement();
+        return (target instanceof AbstractBuildingEntity)
+              || (((target instanceof Mek) || (target instanceof Tank) || (target instanceof BattleArmor))
+              && !target.isBuildingEntityOrGunEmplacement());
     }
 
     boolean[] createEnabledMask(int length) {
@@ -175,6 +179,13 @@ public class AimedShotHandler implements ActionListener, ItemListener {
         boolean[] mask = new boolean[length];
 
         Arrays.fill(mask, true);
+
+        if (target instanceof AbstractBuildingEntity building) {
+            for (int location = 0; location < length; location++) {
+                mask[location] = building.getInternal(location) > 0;
+            }
+            return mask;
+        }
 
         int side = ComputeSideTable.sideTable(attacker, target);
 
@@ -370,7 +381,7 @@ public class AimedShotHandler implements ActionListener, ItemListener {
     public String getAimingLocation() {
         if ((this.firingDisplay.getTarget() != null) && (aimingAt != Entity.LOC_NONE)
               && !getAimingMode().isNone()) {
-            if (this.firingDisplay.getTarget().isBuildingEntityOrGunEmplacement()) {
+            if (this.firingDisplay.getTarget() instanceof GunEmplacement) {
                 return GunEmplacement.HIT_LOCATION_NAMES[aimingAt];
             } else if (this.firingDisplay.getTarget() instanceof Entity) {
                 return ((Entity) this.firingDisplay.getTarget()).getLocationName(aimingAt);

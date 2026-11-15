@@ -156,7 +156,7 @@ public class BayWeaponHandler extends WeaponHandler {
               && (target != null)
               && (target.getTargetType() != Targetable.TYPE_HEX_CLEAR
               && target.getTargetType() != Targetable.TYPE_HEX_IGNITE
-              && target.getTargetType() != Targetable.TYPE_BUILDING))
+              && !Targetable.isBuildingType(target.getTargetType())))
               || game.getBoard().isSpace()
               // Capital missile launchers should return the root handler...
               || (weaponType.getAtClass() == (WeaponType.CLASS_CAPITAL_MISSILE))
@@ -180,7 +180,7 @@ public class BayWeaponHandler extends WeaponHandler {
         }
 
         // Which building takes the damage?
-        IBuilding bldg = game.getBoard().getBuildingAt(target.getPosition());
+        IBuilding bldg = megamek.common.units.WallRules.getBuilding(game, target);
         String number = numWeapons > 1 ? " (" + numWeapons + ")" : "";
 
         // Report weapon attack and its to-hit value.
@@ -293,7 +293,7 @@ public class BayWeaponHandler extends WeaponHandler {
             return false;
         }
         // Targeting a building.
-        if (target.getTargetType() == Targetable.TYPE_BUILDING) {
+        if (Targetable.isBuildingType(target.getTargetType())) {
             // The building takes the full brunt of the attack
             handleBuildingDamage(vPhaseReport, bldg, nDamPerHit, target.getPosition());
             return false;
@@ -399,7 +399,7 @@ public class BayWeaponHandler extends WeaponHandler {
             attackingEntity.setLastTargetDisplayName(entityTarget.getDisplayName());
         }
         // Which building takes the damage?
-        IBuilding bldg = game.getBoard().getBuildingAt(target.getPosition());
+        IBuilding bldg = megamek.common.units.WallRules.getBuilding(game, target);
         // Report weapon attack and its to-hit value.
         Report report = new Report(3115);
         report.indent();

@@ -829,8 +829,8 @@ public final class UnitAnnotations {
     }
 
     private boolean hasAnnotations() {
-        // A building's origin is secondary position 0; a large craft's central sprite is position 6.
-        return secondaryPos == -1 || secondaryPos == 6 || entity instanceof AbstractBuildingEntity && secondaryPos == 0;
+        // Buildings number their footprint from the origin at index 0; a large craft's central sprite is position 6.
+        return secondaryPos == -1 || (entity instanceof AbstractBuildingEntity ? secondaryPos == 0 : secondaryPos == 6);
     }
 
     private Color labelBackground() {

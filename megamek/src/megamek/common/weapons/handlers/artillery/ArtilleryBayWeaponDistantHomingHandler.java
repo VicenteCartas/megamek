@@ -144,7 +144,7 @@ public class ArtilleryBayWeaponDistantHomingHandler extends ArtilleryBayWeaponDi
               && attackingEntity.getPosition().distance(target.getPosition()) <= 1;
 
         // Which building takes the damage?
-        IBuilding building = game.getBoard().getBuildingAt(target.getPosition());
+        IBuilding building = megamek.common.units.WallRules.getBuilding(game, target);
 
         // Determine what ammo we're firing for reporting and (later) damage
         AmmoMounted ammoUsed = attackingEntity.getAmmo(artilleryAttackAction.getAmmoId());
@@ -281,6 +281,7 @@ public class ArtilleryBayWeaponDistantHomingHandler extends ArtilleryBayWeaponDi
             // The building shields all units from a certain amount of damage.
             // The amount is based upon the building's CF at the phase's start.
             int bldgAbsorbs = 0;
+            boolean capitalBuildingDamaged = false;
             if (targetInBuilding && (building != null)) {
                 bldgAbsorbs = building.getAbsorption(target.getPosition());
             }
@@ -292,13 +293,17 @@ public class ArtilleryBayWeaponDistantHomingHandler extends ArtilleryBayWeaponDi
                 }
                 report.add(bldgAbsorbs);
                 vPhaseReport.addElement(report);
-                Vector<Report> buildingReports = gameManager.damageBuilding(building, nDamPerHit, target.getPosition());
+                Vector<Report> buildingReports = damageBuilding(building, nDamPerHit, target.getPosition());
                 if (entityTarget != null) {
                     for (Report buildingReport : buildingReports) {
                         buildingReport.subject = entityTarget.getId();
                     }
                 }
                 vPhaseReport.addAll(buildingReports);
+                if (building.usesCapitalScale()) {
+                    capitalBuildingDamaged = true;
+                    bldgAbsorbs = nDamPerHit;
+                }
             }
             nDamPerHit -= bldgAbsorbs;
 
@@ -307,7 +312,9 @@ public class ArtilleryBayWeaponDistantHomingHandler extends ArtilleryBayWeaponDi
                 report = new Report(3365);
                 report.subject = subjectId;
                 vPhaseReport.addElement(report);
-                return false;
+                if (!capitalBuildingDamaged) {
+                    return false;
+                }
             }
             if (!bMissed && (entityTarget != null)) {
                 handleEntityDamage(entityTarget, vPhaseReport, building, hits,
@@ -318,8 +325,9 @@ public class ArtilleryBayWeaponDistantHomingHandler extends ArtilleryBayWeaponDi
                 report = new Report(3390);
                 report.subject = subjectId;
                 vPhaseReport.addElement(report);
-                vPhaseReport.addAll(gameManager.damageBuilding(building,
+                vPhaseReport.addAll(damageBuilding(building,
                       nDamPerHit, target.getPosition()));
+                capitalBuildingDamaged = building.usesCapitalScale();
             } else if (!bMissed) { // Hex is targeted, need to report a hit
                 report = new Report(3390);
                 report.subject = subjectId;
@@ -341,12 +349,22 @@ public class ArtilleryBayWeaponDistantHomingHandler extends ArtilleryBayWeaponDi
             building = game.getBoard().getBuildingAt(coords);
             bldgAbsorbs = (building != null) ? building.getAbsorption(coords) : 0;
             bldgAbsorbs = Math.min(bldgAbsorbs, ratedDamage);
+            if (building != null && building.usesCapitalScale()) {
+                if (!capitalBuildingDamaged) {
+                    vPhaseReport.addAll(damageBuilding(building, ratedDamage, coords));
+                }
+                bldgAbsorbs = 0;
+            }
             // assumption: homing artillery splash damage is area effect.
             // do damage to woods, 2 * normal damage (TW page 112)
             handleClearDamage(vPhaseReport, building, ratedDamage * 2, false);
             ratedDamage -= bldgAbsorbs;
             if (ratedDamage > 0) {
                 for (Entity entity : game.getEntitiesVector(coords)) {
+                    if (building != null && building.usesCapitalScale()
+                          && (entity instanceof IBuilding || Compute.isInBuilding(game, entity, coords))) {
+                        continue;
+                    }
                     if (!bMissed) {
                         if (entity == entityTarget) {
                             continue; // don't splash the target unless missile

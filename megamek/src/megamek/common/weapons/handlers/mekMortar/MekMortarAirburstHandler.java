@@ -167,7 +167,7 @@ public class MekMortarAirburstHandler extends AmmoWeaponHandler {
         // Damage building directly
         IBuilding bldg = game.getBuildingAt(targetPos, target.getBoardId()).orElse(null);
         if (bldg != null) {
-            newReports = gameManager.damageBuilding(bldg, numRounds, " receives ", targetPos);
+            newReports = damageBuilding(bldg, numRounds, " receives ", targetPos);
             adjustReports(newReports);
             vPhaseReport.addAll(newReports);
         }
@@ -178,6 +178,10 @@ public class MekMortarAirburstHandler extends AmmoWeaponHandler {
         vPhaseReport.addAll(newReports);
 
         for (Entity target : game.getEntitiesVector(targetPos, target.getBoardId())) {
+            if (bldg != null && bldg.usesCapitalScale()
+                  && (target instanceof IBuilding || Compute.isInBuilding(game, target, targetPos))) {
+                continue; // The direct building hit already resolved its occupants.
+            }
             // Ignore airborne units
             if (target.isAirborne() || target.isAirborneVTOLorWIGE()) {
                 continue;
@@ -187,7 +191,7 @@ public class MekMortarAirburstHandler extends AmmoWeaponHandler {
             if (Compute.isInBuilding(game, target, targetPos)) {
                 Player tOwner = target.getOwner();
                 String colorCode = tOwner.getColour().getHexString(0x00F0F0F0);
-                newReports = gameManager.damageBuilding(bldg, numRounds, " shields "
+                newReports = damageBuilding(bldg, numRounds, " shields "
                       + target.getShortName() + " (<B><font color='"
                       + colorCode + "'>" + tOwner.getName()
                       + "</font></B>)"
