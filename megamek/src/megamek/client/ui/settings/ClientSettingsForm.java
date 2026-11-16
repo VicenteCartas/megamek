@@ -151,7 +151,7 @@ public final class ClientSettingsForm extends SettingsForm {
           new BindPage("panels",
                 new BindSection("panels", KeyCommandBind.GAME_MENU, KeyCommandBind.ROUND_REPORT,
                       KeyCommandBind.UNIT_OVERVIEW, KeyCommandBind.UNIT_DISPLAY, KeyCommandBind.FORCE_DISPLAY,
-                      KeyCommandBind.FORCES_GRID, KeyCommandBind.MINIMAP, KeyCommandBind.TACTICAL_OVERLAYS,
+                      KeyCommandBind.MINIMAP, KeyCommandBind.TACTICAL_OVERLAYS,
                       KeyCommandBind.TURN_DETAILS, KeyCommandBind.PLANETARY_CONDITIONS, KeyCommandBind.BOT_COMMANDS,
                       KeyCommandBind.KEY_BINDS, KeyCommandBind.CLIENT_SETTINGS),
                 new BindSection("unitTabs", KeyCommandBind.UD_GENERAL, KeyCommandBind.UD_PILOT,

@@ -1348,7 +1348,8 @@ class GpuCommandDockSmokeTest {
         BoardCamera camera = new BoardCamera();
         GpuContextMenu menu = new GpuContextMenu(hud.kit, source, state, id -> { });
         UiButton chat = new GpuChatPanel(hud.kit, source, state).button();
-        return new Dock(new GpuCommandDock(hud.kit, source, state, camera, menu, chat), state, camera, menu);
+        return new Dock(new GpuCommandDock(hud.kit, source, state, camera, menu, chat, new GpuDeployHeight(source)),
+              state, camera, menu);
     }
 
     /**

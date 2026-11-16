@@ -5,7 +5,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import megamek.client.ui.Messages;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
@@ -19,14 +18,8 @@ final class GpuHudState {
     /** The centred panels; opening one closes the others (Help closes Menu, Players and Tuning). */
     enum Dialog { NONE, HELP, MENU, PLAYERS, TUNING }
 
-    /** The overlays the deployment queue's chips show while deploying, one at a time; OFF shows none. */
-    enum DeployOverlay {
-        DAMAGE, ECM, OFF;
-
-        String label() {
-            return Messages.getString("GpuBoard.hud.deploy.overlay." + name());
-        }
-    }
+    /** Deployment's overlay; OFF shows none. */
+    enum DeployOverlay { DAMAGE, OFF }
 
     /**
      * The unit sheet's tabs with the Unit Display's keys that open them, F1 to F6 (unit panel design 5.1). SYSTEMS is
@@ -56,9 +49,7 @@ final class GpuHudState {
     GpuFireOrders.AimTarget aiming;
     Dialog dialog = Dialog.NONE;
     boolean overview;
-    /** The deployment strip leaves out the units already placed (GpuDeploymentQueue). */
-    boolean hideDeployed;
-    /** Deployment's overlay, which Ctrl+wheel chose last; null until it does. */
+    /** Deployment's overlay, which the Overlays popover's Expected damage chose last; null until it does. */
     DeployOverlay deployOverlay;
     boolean chatOpen;
     /** The unit sheet is open (unit panel design 2.3): one flag, one step of the Esc chain. */
@@ -82,9 +73,13 @@ final class GpuHudState {
     int expandedOrdinal;
     /** The sheet sections the player collapsed, by their caption keys. */
     final Set<String> collapsedSections = new HashSet<>();
-    boolean forcesGrid;
-    /** The forces rail is pinned open as the full panel; unpinned it opens only while the pointer is over it. */
+    /** The forces list is pinned open; unpinned it unfolds from its rail only while the pointer rests on it. */
     boolean forcesPinned;
+    /**
+     * The contacts rail is pinned open. The utility bar's contacts toggle shows and hides the rail; the pin stays as
+     * it was.
+     */
+    boolean contactsPinned;
     /** The conditions strip is expanded to the full list of conditions. */
     boolean conditionsExpanded;
     /** The nameplate key (SHOW_NAMEPLATES) shows every nameplate: it is held, or toggled on (NameplateMode). */

@@ -58,7 +58,6 @@ final class GpuInitiativeCard implements GpuHud.Component {
     private final Table slots = new Table();
     private final List<Table> boxes = new ArrayList<>();
     private final Table actions = new Table();
-    private final Cell<Table> actionsCell;
     private final UiButton reroll;
     private final UiButton proceed;
     private List<BoardScene.Command> commands = List.of();
@@ -80,8 +79,8 @@ final class GpuInitiativeCard implements GpuHud.Component {
         ScrollPane scroll = ui.scrollList(body);
         scroll.setName("initiative-body");
         root.add(scroll).grow().row();
-        // Before the first deployment the card is the whole screen's question, so it carries its own answer: Continue
-        // (and the Tactical Genius reroll) at its foot instead of a second panel below it.
+        // The initiative is the whole screen's question, so the card carries its own answer: Continue (and the
+        // Tactical Genius reroll) at its foot instead of a second panel below it.
         reroll = ui.button("hud", null, UiTheme.upper(Messages.getString("GpuBoard.hud.dock.rerollInitiative")), null);
         reroll.setName("initiative-reroll");
         reroll.pad(0, 14, 0, 14);
@@ -91,7 +90,7 @@ final class GpuInitiativeCard implements GpuHud.Component {
         onChange(proceed, () -> run(doneId));
         actions.add(reroll).height(ACTION).padRight(6);
         actions.add(proceed).growX().height(ACTION);
-        actionsCell = root.add(actions).growX().padTop(14);
+        root.add(actions).growX().padTop(14);
         body.top().left();
         body.defaults().left().growX();
         caption = ui.caption("");
@@ -151,19 +150,37 @@ final class GpuInitiativeCard implements GpuHud.Component {
             }
         }
         flow();
-        boolean staging = staging(next);
         BoardScene scene = inputs.frame().scene();
         commands = scene == null ? List.of() : scene.commands();
         doneId = inputs.frame().panels().phase().doneId();
-        actionsCell.setActor(staging ? actions : null).padTop(staging ? 14 : 0);
-        if (staging) {
-            BoardScene.Command done = command(doneId);
-            BoardScene.Command again = command(REROLL);
-            proceed.setDisabled(done == null || !done.enabled());
-            reroll.setVisible(again != null && again.enabled());
-            actions.getCell(reroll).width(reroll.isVisible() ? reroll.getPrefWidth() : 0)
-                  .padRight(reroll.isVisible() ? 6 : 0);
+        BoardScene.Command done = command(doneId);
+        BoardScene.Command again = command(REROLL);
+        proceed.setDisabled(done == null || !done.enabled());
+        boolean rerolls = again != null && again.enabled();
+        if (rerolls != (reroll.getParent() == actions)) {
+            // A hidden reroll leaves the row entirely, so Continue spans the card's full width.
+            actions.clearChildren();
+            if (rerolls) {
+                actions.add(reroll).height(ACTION).padRight(6);
+            }
+            actions.add(proceed).growX().height(ACTION);
         }
+    }
+
+    /** Enter's Continue while the card shows; it carries the phase's only answer. */
+    boolean proceed() {
+        if (!root.isVisible()) {
+            return false;
+        }
+        if (!proceed.isDisabled()) {
+            run(doneId);
+        }
+        return true;
+    }
+
+    /** An initiative phase or its report: the card is the screen's question and carries Continue itself. */
+    static boolean showing(GpuBattleStatus.Snapshot status) {
+        return status.phase().isInitiative() || status.phase().isInitiativeReport();
     }
 
     /** Before the first deployment: the deployment order is all there is, and the card answers it itself. */

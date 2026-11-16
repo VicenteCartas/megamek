@@ -303,21 +303,12 @@ class GpuForcesPanelSmokeTest {
             click(hud, panel.find("forces-rail-next"), Input.Buttons.LEFT);
             assertEquals(1, nextRuns.get());
 
-            // The pointer on the rail unfolds it; it folds again a moment after the pointer left.
+            // The pointer on the rail leaves it folded: unfolding under the pointer would move the rows away from it.
             Vector2 over = centre(hud, panel.find("forces-rail"));
             hud.stage.mouseMoved((int) over.x, (int) over.y);
             hud.stage.act(0);
             rail(hud, panel, frame);
-            assertFalse(panel.forces.folded(), "The pointer on the panel unfolds it");
-            hud.stage.mouseMoved(1900, 540);
-            hud.stage.act(0);
-            try {
-                Thread.sleep(GpuForcesPanel.COLLAPSE_MILLIS + 100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            rail(hud, panel, frame);
-            assertTrue(panel.forces.folded(), "It folds after the pointer left");
+            assertTrue(panel.forces.folded(), "The pointer on the rail does not unfold it");
 
             // The chevron pins the list open; the header's pin unpins it.
             click(hud, panel.find("forces-expand"), Input.Buttons.LEFT);

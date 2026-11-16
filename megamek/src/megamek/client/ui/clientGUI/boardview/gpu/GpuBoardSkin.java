@@ -210,6 +210,27 @@ final class GpuBoardSkin implements Disposable {
         theme.box("row-weapon-selected", Color.CLEAR, Color.WHITE, 2, 3, null, 7, 10, 0);
         // The dock's waiting box (#dock .waiting).
         theme.box("waiting", rgba(255, 255, 255, .05f), alpha(QUIET, .3f), 1, 3, null, 0, 0, 46);
+        // The phase header's subtitle plates: a faint, slightly rounded dark backing that hugs each line of text.
+        theme.box("subtitle", rgba(4, 8, 12, .55f), null, 0, 4, null, 0, 0, 0);
+        // The utility bar (battle HUD layout, zone 4): one dark plate whose buttons are flat, muted until hovered, mint
+        // over a mint underline while pressed.
+        theme.box("utility-plate", rgba(14, 20, 28, .82f), alpha(QUIET, .35f), 1, 3, null, 3, 6, 0);
+        TextButton.TextButtonStyle flat = new TextButton.TextButtonStyle(
+              skin.get("hud-utility-small", TextButton.TextButtonStyle.class));
+        flat.up = skin.newDrawable("white", Color.CLEAR);
+        flat.over = skin.newDrawable("white", rgba(255, 255, 255, .07f));
+        flat.down = flat.over;
+        flat.checked = new EdgeBox(white, alpha(MINT, .1f), MINT, 0, 0, 2, 0);
+        flat.checkedOver = flat.checked;
+        flat.checkedDown = flat.checked;
+        flat.disabled = flat.up;
+        flat.fontColor = MUTED;
+        flat.overFontColor = TEXT;
+        flat.downFontColor = TEXT;
+        flat.checkedFontColor = MINT;
+        flat.checkedOverFontColor = MINT;
+        flat.disabledFontColor = UiTheme.DISABLED;
+        theme.add("hud-utility-flat", flat, TextButton.TextButtonStyle.class);
         // Target pills (.pill, .pill.on).
         theme.box("pill", Color.CLEAR, alpha(QUIET, .35f), 1, 3, null, 3, 8, 0).setLeftWidth(3);
         theme.box("pill-on", Color.valueOf("E2EDE6"), Color.WHITE, 1, 3, null, 3, 8, 0).setLeftWidth(3);

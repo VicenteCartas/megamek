@@ -43,11 +43,11 @@ Status: **agreed** layout, from the 2026-11-15 tester round of the deployment pr
 | Zone | Holds | Component today | Change needed |
 | --- | --- | --- | --- |
 | 1 Your unit | Selected own unit: paperdoll, heat, MP, weapons; Unit record, Locate | `GpuUnitCard` (own) | Fixed width; the dock must not cover it |
-| 2 Actions | The phase's commands, its options row and Confirm | `GpuCommandDock` (not in deployment) | Also in deployment: Deploy, Clear, facing, elevation, load |
+| 2 Actions | The phase's commands, its options row and Confirm | `GpuCommandDock` | Done (deployment): Deploy, Clear, height stepper; turning, load and the rest in More |
 | 3 Enemy unit | Hovered or inspected enemy / target: its card | `GpuUnitCard` (other) | None for now; in firing the target info stays in the right column (decision 1) |
-| 4 View & filters | Utilities (view, tactical, minimap, log, menu), overlays, minimap, log | `GpuUtilityBar`, `GpuTacticalOverlays`, `GpuMinimap`, `GpuLogPanel` | None |
-| 5 Phase / turn | Phase, round, turn order, whose turn; the initiative result | `GpuPhaseHeader` (drake, 2026-11-14) | The initiative result card moves from the board centre into this zone |
-| 6 Units list | Own and allied units, contacts tab, grouping, Next pending; per-phase status line | `GpuForcesPanel` | Also in deployment (replaces `GpuDeploymentQueue`); hover expand without reflow |
+| 4 View & filters | Utilities (view, tactical, minimap, log, menu), overlays, minimap, log; deployment's overlay chips | `GpuUtilityBar`, `GpuTacticalOverlays`, `GpuDeployOverlays`, `GpuMinimap`, `GpuLogPanel` | Done: the deployment overlay chips moved here from the queue |
+| 5 Phase / turn | Phase, round, turn order, whose turn; the initiative result | `GpuPhaseHeader` (drake, 2026-11-14) | Done: the initiative result card stacks under the header, top centre |
+| 6 Units list | Own and allied units, contacts tab, grouping, Next pending; per-phase status line | `GpuForcesPanel` | Done: also in deployment (`GpuDeploymentQueue` removed); the rail unfolds only by its button or pin |
 
 ## Per phase
 
@@ -65,11 +65,15 @@ never shows other players' reinforcements.
 
 ## Known issues from the tester screenshots
 
-- The forces rail widens on hover and moves the hovered row out from under the pointer.
-- The dock is not centred in the window and covers the right side of the own unit card ("WEAPONS 6 of" is cut).
-- The initiative card sits in the middle of the board.
-- The movement mode buttons (Walk, Run, ...) are in the dock while the deployment buttons were next to the unit; rule 2
-  fixes the inconsistency.
+Addressed in the layout rework, pending a retest:
+
+- The forces rail widened on hover and moved the hovered row out from under the pointer. It now unfolds only by its
+  expand button or pin, and stays open in deployment.
+- The dock was not centred and covered the right side of the own unit card ("WEAPONS 6 of" was cut). It now centres
+  in the window, clamped between the bottom-left and bottom-right panels.
+- The initiative card sat in the middle of the board. It now stacks under the phase header.
+- The movement mode buttons (Walk, Run, ...) were in the dock while the deployment buttons were next to the unit. The
+  dock now holds deployment's commands too (rule 2); the buttons next to the unit stay as shortcuts.
 
 ## Decisions (2026-11-15)
 

@@ -11,42 +11,65 @@ import static megamek.client.ui.gdx.UiKit.text;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.IntConsumer;
 
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
+import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
+import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
+import com.badlogic.gdx.utils.TimeUtils;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuFirePreview.Contact;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuHudKit.UnitRow;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuHudKit.UnitRow.Line;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiKit.Tone;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.common.enums.GamePhase;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 
 /**
- * Contacts and the movement fire preview in the right column (C.1 G5). Without an active preview it lists the enemy
- * units; with one it shows where the previewed unit fires from, each enemy's best salvo both ways and the open row's
- * weapons, with the Outgoing and Incoming guide toggles. The highlighted row, and the preview's open row, is the unit
- * the card shows: a row's click inspects its enemy. It presents the snapshots and
- * opens unit menus; the client computes every value.
+ * The contacts in the right column (battle HUD layout, zone 4): the forces list's mirror for the enemy. It folds to a
+ * rail at the window's right edge, each contact's short name, armor and structure next to its sprite, and unfolds
+ * while the pointer rests on it into three-line rows (name, pilot and movement, armor and structure); the pin keeps
+ * it open, and the utility bar's contacts toggle shows and hides it. A sensor contact shows as a "?" with its
+ * distance only. During movement it carries the fire preview instead: the rail gives each enemy's best roll, and the
+ * open panel where the previewed unit fires from, each enemy's best salvo both ways and the open row's weapons, with
+ * the Outgoing and Incoming guide toggles. The highlighted row is the unit the card shows: a row's click inspects its
+ * enemy. It presents the snapshots and opens unit menus; the client computes every value.
  */
 final class GpuContactsPanel implements GpuHud.Component {
     private static final String UNIDENTIFIED = "GpuBoard.hud.common.unidentified";
     private static final String SENSOR_CONTACT = "GpuBoard.hud.common.sensorContact";
     private static final String SEPARATOR = " \u00B7 ";
+    /** Row and header heights; the rail and the open list share them, so rows stay in place as it unfolds. */
+    private static final float ROW_HEIGHT = 44;
+    private static final float HEAD_HEIGHT = 34;
+    /** The pointer rests this long on the rail before it unfolds, and the list folds this long after it left. */
+    private static final long UNFOLD_DELAY = 250;
+    private static final long FOLD_DELAY = 400;
+    private static final Color MOVED = Color.valueOf("BFEEE2");
+    private static final Color HOT = Color.valueOf("FF8A5B");
+    private static final Color SEPARATOR_LINE = new Color(43 / 255f, 56 / 255f, 71 / 255f, .45f);
+    private static final Color HOVER = new Color(1, 1, 1, .07f);
+    private static final Color INSPECTED = new Color(UiTheme.CORAL.r, UiTheme.CORAL.g, UiTheme.CORAL.b, .1f);
     /** A twist turns the torso by whole hexsides (the mock's "Twist left 60 degrees"). */
     private static final int HEXSIDE_DEGREES = 60;
     // Preview row opacities: no shot (.prow.none), a sensor contact (.prow.contact), and every row while updating.
@@ -67,7 +90,7 @@ final class GpuContactsPanel implements GpuHud.Component {
      * {@code card} is the unit the card shows ({@link GpuHudState#cardUnit}).
      */
     private record View(GpuFirePreview.Snapshot preview, List<UnitStatus> units, GpuBattleStatus.Snapshot status,
-          int focus, int card) { }
+          int focus, int card, boolean folded) { }
 
     private final GpuHudKit kit;
     private final UiKit ui;
@@ -75,8 +98,15 @@ final class GpuContactsPanel implements GpuHud.Component {
     private final GpuContextMenu menu;
     private final IntConsumer select;
     private final Table root;
-    private final Cell<Actor> headerCell;
-    private final Table previewHeader;
+    /** The open panel's header (title, count, the preview's toggles, pin) and the rail's (the count). */
+    private final Table openHead = new Table();
+    private final Table railHead = new Table();
+    private final Cell<Table> headCell;
+    private final Label count;
+    private final Label railCount;
+    private final Table toggles = new Table();
+    private final Cell<Table> togglesCell;
+    private final UiButton pin;
     private final UiButton outgoingToggle;
     private final UiButton incomingToggle;
     private final Container<Table> from;
@@ -88,17 +118,19 @@ final class GpuContactsPanel implements GpuHud.Component {
     private final Label fromThreats;
     private final Label fromLine;
     private final Table list = new Table();
-    /** The contact list's footer (its rule and line), which the fire preview does not have. */
-    private final Table footer = new Table();
-    private final Cell<Actor> footerCell;
-    private final Label contactsFoot;
     private final Drawable openFill;
     private final Drawable detailEdges;
-    /** The plain contact rows, kept across rebuilds so that their pointer state and tooltips stay with them. */
-    private final Map<Integer, UnitRow> contactRows = new HashMap<>();
+    /** The contacts' rows, kept across rebuilds so that their pointer state stays with them. */
+    private final Map<Integer, ContactRow> contactRows = new HashMap<>();
     private final Map<Integer, PreviewRow> previewRows = new HashMap<>();
     private boolean outgoing = true;
     private boolean incoming = true;
+    private boolean folded = true;
+    /** The open list's state while not pinned: unfolded by the resting pointer, folded a moment after it left. */
+    private boolean unfolded;
+    private boolean hovered;
+    private long enteredAt;
+    private long leftAt;
     private View shown;
 
     /**
@@ -118,6 +150,7 @@ final class GpuContactsPanel implements GpuHud.Component {
         fromDestination = ui.skin.getDrawable("from-destination");
         root = ui.panel();
         root.setName("contacts-panel");
+        root.top();
 
         outgoingToggle = toggle("GpuBoard.hud.contacts.outgoing", "GpuBoard.hud.contacts.outgoingTip",
               "button-mini-out", UiTheme.FILL_INK, Color.WHITE);
@@ -133,10 +166,36 @@ final class GpuContactsPanel implements GpuHud.Component {
             incoming = !incoming;
             incomingToggle.pressed(incoming);
         });
-        previewHeader = ui.header(text("GpuBoard.hud.common.contacts"), null, outgoingToggle, incomingToggle);
-        previewHeader.setName("contacts-header");
-        headerCell = root.add((Actor) null).growX();
+        toggles.add(outgoingToggle);
+        toggles.add(incomingToggle).padLeft(6);
+        pin = ui.button("hud-icon", "pin", null, null);
+        pin.setName("contacts-pin");
+        ui.tip(pin).getActor().setText(text("GpuBoard.hud.contacts.pinTip"));
+        onChange(pin, () -> {
+            state.contactsPinned = !state.contactsPinned;
+            unfolded = state.contactsPinned || hovered;
+        });
+
+        openHead.setName("contacts-header");
+        openHead.pad(0, 12, 0, 6);
+        openHead.add(ui.label(UiTheme.upper(text("GpuBoard.hud.common.contacts")), "hud-title", 14, UiTheme.TEXT))
+              .padRight(8);
+        count = ui.label("", "hud-medium", 12, UiTheme.MUTED);
+        count.setName(UiKit.HEADER_COUNT);
+        openHead.add(count).growX().left();
+        togglesCell = openHead.add((Table) null).padLeft(6);
+        openHead.add(pin).size(28).padLeft(2);
+        // The rail's header sits at the window's edge, over the rows' sprites.
+        railHead.setName("contacts-rail-head");
+        railHead.right().padRight(12);
+        railCount = ui.label("", "hud-medium", 12, UiTheme.MUTED);
+        Image disc = new Image(ui.skin.getDrawable("unit-disc-6"));
+        disc.setColor(UiTheme.CORAL);
+        railHead.add(disc).padRight(5);
+        railHead.add(railCount);
+        headCell = root.add(openHead).growX().height(HEAD_HEIGHT);
         root.row();
+        root.add(ui.solid(UiTheme.LINE)).growX().height(1).row();
 
         // The "from" block (.from): a 3-unit bar and padding 8 10 inside a margin of 0 10 8.
         Table block = new Table();
@@ -156,21 +215,34 @@ final class GpuContactsPanel implements GpuHud.Component {
         counts.add(fromThreats);
         block.add(counts).right().top().padLeft(8).row();
         block.add(fromLine).colspan(2).growX().left().padTop(2);
-        from = new Container<>(block).fillX().pad(0, 10, 8, 10);
-        fromCell = root.add((Actor) null).growX();
-        root.row();
+        from = new Container<>(block).fillX().pad(8, 10, 8, 10);
 
         list.top();
         ScrollPane scroll = ui.scrollList(list);
         scroll.setName("contacts-list");
-        root.add(scroll).growX().row();
+        root.add(scroll).grow().minHeight(0).row();
+        // Below the rows, so the rail's rows keep their place when hovering unfolds the panel.
+        fromCell = root.add((Actor) null).growX();
+        root.row();
 
-        Table foot = ui.footer(footer);
-        foot.setName("contacts-footer");
-        contactsFoot = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
-        contactsFoot.setEllipsis(true);
-        foot.add(contactsFoot).growX().minWidth(0).left();
-        footerCell = root.add((Actor) null).growX();
+        // The pointer resting on the panel unfolds the rail; it folds again a moment after the pointer left.
+        root.addListener(new InputListener() {
+            @Override
+            public void enter(InputEvent event, float x, float y, int pointer, Actor fromActor) {
+                if (pointer == -1 && !hovered && (fromActor == null || !fromActor.isDescendantOf(root))) {
+                    hovered = true;
+                    enteredAt = TimeUtils.millis();
+                }
+            }
+
+            @Override
+            public void exit(InputEvent event, float x, float y, int pointer, Actor toActor) {
+                if (pointer == -1 && (toActor == null || !toActor.isDescendantOf(root))) {
+                    hovered = false;
+                    leftAt = TimeUtils.millis();
+                }
+            }
+        });
     }
 
     @Override
@@ -178,14 +250,29 @@ final class GpuContactsPanel implements GpuHud.Component {
         return root;
     }
 
+    /** Whether the panel shows as its rail this frame, which the HUD gives {@link GpuForcesPanel#RAIL_WIDTH}. */
+    boolean folded() {
+        return folded;
+    }
+
     @Override
     public void update(GpuHud.Inputs inputs) {
+        long now = TimeUtils.millis();
+        if (state.contactsPinned) {
+            unfolded = true;
+        } else if (hovered) {
+            unfolded |= now - enteredAt >= UNFOLD_DELAY;
+        } else if (unfolded && !menu.isOpen() && now - leftAt >= FOLD_DELAY) {
+            unfolded = false;
+        }
+        folded = !unfolded;
         View view = new View(inputs.frame().panels().preview(), state.presentedUnits(), inputs.frame().status(),
-              state.focus(), state.cardUnit());
+              state.focus(), state.cardUnit(), folded);
         if (!view.equals(shown)) {
             shown = view;
             rebuild();
         }
+        pin.pressed(state.contactsPinned);
     }
 
     /** The Outgoing toggle (F3): the board shows the guides from the previewed unit to its targets while pressed. */
@@ -223,21 +310,29 @@ final class GpuContactsPanel implements GpuHud.Component {
         List<UnitStatus> enemies = shown.units().stream()
               .filter(unit -> unit.side() == GpuBattleStatus.Side.ENEMY).toList();
         boolean previewing = shown.preview().active();
+        boolean rail = shown.folded();
+        count.setText(String.valueOf(enemies.size()));
+        railCount.setText(String.valueOf(enemies.size()));
+        togglesCell.setActor(previewing ? toggles : null);
+        Table head = rail ? railHead : openHead;
+        if (headCell.getActor() != head) {
+            headCell.setActor(head);
+        }
+        fromCell.setActor(previewing && !rail ? from : null);
         list.clearChildren();
-        footerCell.setActor(previewing ? null : footer);
-        if (previewing) {
-            headerCell.setActor(previewHeader);
-            fromCell.setActor(from);
+        if (previewing && !rail) {
             showFrom(shown.preview());
             previewRows(shown.preview());
+        } else if (previewing) {
+            for (Contact contact : shown.preview().contacts()) {
+                UnitStatus unit = unit(contact.id());
+                if (unit != null) {
+                    list.add(contactRow(unit).show(unit, contact)).growX().minWidth(0).height(ROW_HEIGHT).row();
+                }
+            }
         } else {
-            Table header = ui.header(text("GpuBoard.hud.common.contacts"), String.valueOf(enemies.size()));
-            header.setName("contacts-header");
-            headerCell.setActor(header);
-            fromCell.setActor(null);
-            enemies.forEach(unit -> list.add(contactRow(unit)).growX().minWidth(0).pad(0, 10, 6, 10).row());
-            contactsFoot.setText(text(enemies.stream().anyMatch(UnitStatus::sensorContact)
-                  ? "GpuBoard.hud.contacts.includesUnidentified" : "GpuBoard.hud.contacts.allIdentified"));
+            enemies.forEach(unit -> list.add(contactRow(unit).show(unit, null)).growX().minWidth(0)
+                  .height(ROW_HEIGHT).row());
         }
         Set<Integer> ids = new HashSet<>(enemies.stream().map(UnitStatus::id).toList());
         contactRows.keySet().retainAll(ids);
@@ -449,23 +544,228 @@ final class GpuContactsPanel implements GpuHud.Component {
         return row;
     }
 
+    /** The contact's row, kept across rebuilds. */
+    private ContactRow contactRow(UnitStatus unit) {
+        return contactRows.computeIfAbsent(unit.id(), ContactRow::new);
+    }
+
+    /** The distance from the acting or own focus unit to {@code unit}, or -1 when they are not on one board. */
+    private int distance(UnitStatus unit) {
+        UnitStatus from = unit(UnitRow.acting(shown.status(), shown.focus()));
+        return from == null || from.position() == null || unit.position() == null || from.boardId() != unit.boardId()
+              ? -1 : from.position().distance(unit.position());
+    }
+
     /**
-     * A plain contact row (C12, F12): the enemy's sprite, model, name and status line, and at the right whether it
-     * is destroyed, has acted or runs hot, or its distance from the acting unit; the forces navigator's rows show the
-     * same.
+     * The second line's right part: what keeps the enemy from acting (shut down, prone), else its movement this round
+     * with its target modifier, else that it acts now, else its movement points.
      */
-    private UnitRow contactRow(UnitStatus unit) {
-        UnitRow row = contactRows.computeIfAbsent(unit.id(), id -> {
-            UnitRow created = kit.unitRow(40, 34);
-            created.setName("contacts-unit-" + id);
-            // The HUD's one selection rule, which inspects an enemy (C7).
-            onChange(created, () -> select.accept(id));
-            created.addListener(UnitRow.menuOpener(menu, id, this::unit));
-            return created;
-        });
-        GpuBattleStatus.Snapshot status = shown.status();
-        return row.show(unit, UnitRow.contactLine(unit, status), status.phase(), unit.id() == shown.card(),
-              unit(UnitRow.acting(status, shown.focus())));
+    private Line motion(UnitStatus unit) {
+        if (unit.destroyed()) {
+            return new Line("", Tone.NORMAL);
+        } else if (UnitRow.shutDown(unit)) {
+            return new Line(text("GpuBoard.hud.state.shutDown"), Tone.BAD);
+        } else if (UnitRow.prone(unit)) {
+            return new Line(text("GpuBoard.hud.state.prone"), Tone.BAD);
+        } else if (!unit.moved().isEmpty()) {
+            String moved = text("GpuBoard.hud.forces.moved", unit.moved(), unit.hexesMoved());
+            return new Line(unit.tmmShown() ? moved + SEPARATOR + String.format(Locale.ROOT, "%+d", unit.tmm())
+                  : moved, Tone.OK);
+        }
+        GamePhase phase = shown.status().phase();
+        Line status = UnitRow.contactLine(unit, shown.status());
+        if (phase.isMovement() && status.tone() == Tone.OK) {
+            return status;
+        }
+        return new Line(text("GpuBoard.hud.forces.mp", unit.walk(), unit.run(), unit.jump()), Tone.NORMAL);
+    }
+
+    /**
+     * A contact's row. Open: the name with its duplicate marker, the model and at the right destroyed, acted or the
+     * distance; the pilot with gunnery/piloting and the movement; the armor and structure bars and the heat; the
+     * sprite at the window's edge. On the rail: the short name and its state, then mini armor and structure bars or,
+     * during the fire preview, the best roll, next to the sprite where the open row has it. A sensor contact shows as
+     * a "?" with its distance. A click inspects the enemy, a right click opens its menu.
+     */
+    private final class ContactRow extends Table {
+        private final ClickListener pointer;
+        private final Cell<Table> face;
+        // Open form.
+        private final Table open = new Table();
+        private final GpuHudKit.UnitSprite sprite = kit.sprite(36, 28);
+        private final Label name = ui.label("", "hud-name", 13.5f, UiTheme.TEXT);
+        private final Label marker = ui.label("", "hud-name", 13.5f, UiTheme.CORAL);
+        private final Label model = ui.label("", "hud-small", 11, UiTheme.MUTED);
+        private final Container<Actor> tag = new Container<>();
+        private final Label pilot = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
+        private final Label skills = ui.label("", "hud-medium", 11.5f, UiTheme.TEXT);
+        private final Label detail = ui.label("", "hud-medium", 11.5f, UiTheme.TEXT);
+        private final Table bars = new Table();
+        private final GpuHudKit.MeterBar armor = kit.bar(66, 5);
+        private final GpuHudKit.MeterBar structure = kit.bar(46, 5);
+        private final Label structureCaption = ui.label("S", "hud-caption", 10, UiTheme.MUTED);
+        private final Label heat = ui.label("", "hud-medium", 11.5f, UiTheme.AMBER);
+        private final UiKit.Icon flame = ui.icon("flame", 12, UiTheme.AMBER);
+        // Rail form.
+        private final Table rail = new Table();
+        private final GpuHudKit.UnitSprite railSprite = kit.sprite(36, 28);
+        private final Label code = ui.label("", "hud-name", 10.5f, UiTheme.TEXT);
+        private final Label codeMarker = ui.label("", "hud-name", 10.5f, UiTheme.CORAL);
+        private final Container<Actor> dot = new Container<>();
+        private final Table railBars = new Table();
+        private final GpuHudKit.MeterBar railArmor = kit.bar(40, 3);
+        private final GpuHudKit.MeterBar railStructure = kit.bar(40, 3);
+        private final Cell<GpuHudKit.MeterBar> railStructureCell;
+        private final Label roll = ui.label("", "hud-medium", 11, Color.WHITE);
+        private final Cell<Actor> railLower;
+        private boolean highlight;
+
+        private ContactRow(int id) {
+            setName("contacts-unit-" + id);
+            setTouchable(Touchable.enabled);
+            face = add(open).grow();
+
+            name.setEllipsis(true);
+            model.setEllipsis(true);
+            pilot.setEllipsis(true);
+            detail.setEllipsis(true);
+            Table line1 = new Table();
+            line1.add(name).minWidth(0);
+            line1.add(marker).padLeft(4);
+            line1.add(model).growX().minWidth(0).padLeft(6).left();
+            line1.add(tag).padLeft(6);
+            Table line2 = new Table();
+            line2.add(pilot).minWidth(0).left();
+            line2.add(skills).padLeft(5);
+            line2.add().growX();
+            line2.add(detail).minWidth(0).padLeft(6).right();
+            bars.add(ui.label("A", "hud-caption", 10, UiTheme.MUTED)).padRight(4);
+            bars.add(armor).padRight(8);
+            bars.add(structureCaption).padRight(4);
+            bars.add(structure);
+            bars.add().growX();
+            bars.add(flame).padRight(2);
+            bars.add(heat);
+            Table text = new Table();
+            text.defaults().growX().minWidth(0);
+            text.add(line1).height(15).row();
+            text.add(line2).height(14).row();
+            text.add(bars).height(11);
+            open.pad(0, 10, 0, 8);
+            open.add(text).growX().minWidth(0);
+            open.add(sprite).width(42).padLeft(8);
+
+            code.setEllipsis(true);
+            Table codeLine = new Table();
+            codeLine.add(code).minWidth(0);
+            codeLine.add(codeMarker).padLeft(2);
+            codeLine.add().growX();
+            codeLine.add(dot).padLeft(3);
+            railBars.add(railArmor).growX().height(3).padTop(4).row();
+            railStructureCell = railBars.add(railStructure).growX().height(3).padTop(2);
+            Table side = new Table();
+            side.add(codeLine).growX().minWidth(0).height(15).row();
+            railLower = side.add((Actor) railBars).growX().minWidth(0).left();
+            rail.pad(0, 9, 0, 8);
+            rail.add(side).growX().minWidth(0);
+            rail.add(railSprite).width(42).padLeft(6);
+
+            pointer = new ClickListener() {
+                @Override
+                public void clicked(InputEvent event, float x, float y) {
+                    // The fire preview opens the inspected enemy's row; a click on the open row closes it (F6).
+                    if (shown.preview().active() && state.inspected == id) {
+                        state.inspected = Entity.NONE;
+                    } else {
+                        select.accept(id);
+                    }
+                }
+            };
+            addListener(pointer);
+            addListener(UnitRow.menuOpener(menu, id, GpuContactsPanel.this::unit));
+        }
+
+        /** Shows {@code unit}, with its fire preview {@code contact} on the rail during the preview (else null). */
+        ContactRow show(UnitStatus unit, Contact contact) {
+            Table wanted = shown.folded() ? rail : open;
+            if (face.getActor() != wanted) {
+                face.setActor(wanted);
+            }
+            boolean sensor = unit.sensorContact();
+            boolean acted = UnitRow.acted(unit, shown.status().phase());
+            int hexes = distance(unit);
+            String away = hexes < 0 ? "" : text("GpuBoard.hud.common.hexDistance", hexes);
+            boolean hasStructure = unit.marks().structureArgb() != 0 || unit.marks().equals(GpuBattleStatus.Marks.NONE);
+            float fade = 1;
+            if (shown.folded()) {
+                railSprite.set(sensor ? null : unit.icon(), sensor ? UiTheme.BLIP : UiTheme.CORAL);
+                code.setText(sensor ? away : GpuForcesPanel.code(unit));
+                code.setColor(sensor ? UiTheme.MUTED : UiTheme.TEXT);
+                codeMarker.setText(sensor ? "" : GpuForcesPanel.marker(unit));
+                dot.setActor(unit.destroyed() ? ui.icon("close", 11, UiTheme.CORAL)
+                      : acted ? ui.icon("check", 11, UiTheme.MUTED) : null);
+                if (sensor) {
+                    railLower.setActor(null);
+                } else if (contact != null) {
+                    GpuFirePreview.Side out = contact.outgoing();
+                    boolean shot = out.available() > 0;
+                    roll.setText(shot ? text("GpuBoard.hud.common.targetNumber", shown(out.best())) + SEPARATOR
+                          + percent(out.odds()) : "\u2014");
+                    roll.setColor(shot ? Color.WHITE : UiTheme.MUTED);
+                    railLower.setActor(roll);
+                    fade = (shot ? 1 : NO_SHOT_ALPHA) * (shown.preview().complete() ? 1 : UPDATING_ALPHA);
+                } else {
+                    railArmor.set(unit.armor(), unit.marks().armorArgb());
+                    railStructure.set(unit.structure(), unit.marks().structureArgb());
+                    railStructure.setVisible(hasStructure);
+                    railStructureCell.height(hasStructure ? 3 : 0).padTop(hasStructure ? 2 : 0);
+                    railLower.setActor(railBars);
+                }
+            } else {
+                sprite.set(sensor ? null : unit.icon(), sensor ? UiTheme.BLIP : UiTheme.CORAL);
+                name.setText(UiTheme.upper(sensor ? text(SENSOR_CONTACT) : unit.chassis()));
+                marker.setText(sensor ? "" : GpuForcesPanel.marker(unit));
+                model.setText(sensor ? "" : unit.model());
+                tag.setActor(unit.destroyed() ? ui.label(UiTheme.upper(text("GpuBoard.hud.state.destroyed")),
+                      "hud-mini", 10, UiTheme.CORAL) : acted ? ui.icon("check", 14, UiTheme.MUTED)
+                      : away.isEmpty() ? null : ui.label(away, "hud-medium", 11, UiTheme.MUTED));
+                boolean known = !sensor && !unit.pilot().isBlank();
+                pilot.setText(sensor ? text("GpuBoard.hud.status.sensorReturn") : known ? unit.pilot() : "");
+                skills.setText(known ? unit.gunnery() + "/" + unit.piloting() : "");
+                Line line = sensor ? new Line("", Tone.NORMAL) : motion(unit);
+                detail.setText(line.text());
+                detail.setColor(line.tone() == Tone.OK ? MOVED : line.tone() == Tone.NORMAL ? UiTheme.TEXT
+                      : line.tone().color);
+                bars.setVisible(!sensor);
+                armor.set(unit.armor(), unit.marks().armorArgb());
+                structure.set(unit.structure(), unit.marks().structureArgb());
+                structure.setVisible(hasStructure);
+                structureCaption.setVisible(hasStructure);
+                boolean hot = !unit.heatEffects().isEmpty();
+                flame.setVisible(unit.heat() > 0);
+                flame.setColor(hot ? HOT : UiTheme.AMBER);
+                heat.setText(unit.heat() > 0 ? String.valueOf(unit.heat()) : "");
+                heat.setColor(hot ? HOT : UiTheme.AMBER);
+            }
+            highlight = unit.id() == shown.card();
+            getColor().a = (unit.destroyed() ? .38f : acted ? .62f : 1) * fade;
+            return this;
+        }
+
+        @Override
+        public void draw(Batch batch, float parentAlpha) {
+            float previous = batch.getPackedColor();
+            if (highlight) {
+                ui.fill(batch, INSPECTED, parentAlpha, getX(), getY(), getWidth(), getHeight());
+                ui.fill(batch, UiTheme.CORAL, parentAlpha, getX() + getWidth() - 3, getY(), 3, getHeight());
+            }
+            if (pointer.isOver()) {
+                ui.fill(batch, HOVER, parentAlpha, getX(), getY(), getWidth(), getHeight());
+            }
+            ui.fill(batch, SEPARATOR_LINE, parentAlpha, getX(), getY(), getWidth(), 1);
+            batch.setPackedColor(previous);
+            super.draw(batch, parentAlpha);
+        }
     }
 
     private UnitStatus unit(int id) {

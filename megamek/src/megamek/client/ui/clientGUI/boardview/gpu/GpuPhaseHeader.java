@@ -8,6 +8,7 @@ import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.Widget;
@@ -17,8 +18,9 @@ import megamek.client.ui.gdx.UiTheme;
 import megamek.common.enums.GamePhase;
 
 /**
- * The phase header, top centre over the board as text without a frame, in every phase: the phase, the turn order
- * as one block per turn in its side's colour (the current one framed in white), and whose turn it is. Each
+ * The phase header, top centre over the board as subtitles, in every phase: the phase, the turn order
+ * as one block per turn in its side's colour (the current one framed in white), and whose turn it is. Each text line
+ * sits on a faint rounded plate that hugs it. Each
  * block is {@link #BLOCK_MIN} to {@link #BLOCK_MAX} units wide; an order longer than its room scrolls to keep the
  * current block in view and fades out at a side where it goes on. Presses pass through to the board.
  */
@@ -46,6 +48,8 @@ final class GpuPhaseHeader implements GpuHud.Component {
     private final Table root = new Table();
     private final Label name;
     private final Label who;
+    private final Container<Label> nameLine;
+    private final Container<Label> whoLine;
     private final Order order = new Order();
     private final float nameScale;
     private boolean narrow;
@@ -65,10 +69,21 @@ final class GpuPhaseHeader implements GpuHud.Component {
         // A name or who line longer than the header's room ends in an ellipsis.
         name.setEllipsis(true);
         who.setEllipsis(true);
-        root.add(name).height(24).minWidth(0).row();
+        // Each line sits on its own subtitle plate, hugging the text, so it reads over snow as over night.
+        nameLine = plate(name, 24, 2, 12);
+        whoLine = plate(who, 14, 2, 10);
+        root.add(nameLine).minWidth(0).row();
         // The order keeps its row while it has no turns, so the lines never move.
-        root.add(order).growX().height(BLOCK_HEIGHT).padTop(8).padBottom(8).row();
-        root.add(who).height(14).minWidth(0);
+        root.add(order).growX().height(BLOCK_HEIGHT).padTop(7).padBottom(7).row();
+        root.add(whoLine).minWidth(0);
+    }
+
+    /** A line's plate: the label at {@code height}, padded, on the rounded subtitle backing. */
+    private Container<Label> plate(Label label, float height, float vertical, float horizontal) {
+        Container<Label> plate = new Container<>(label);
+        plate.setBackground(ui.skin.getDrawable("subtitle"));
+        plate.height(height).pad(vertical, horizontal, vertical, horizontal);
+        return plate;
     }
 
     /** A label drawn over its shadow, one unit lower. */
@@ -107,6 +122,9 @@ final class GpuPhaseHeader implements GpuHud.Component {
         GpuBattleStatus.Slot current = status.turnIndex() >= 0 && status.turnIndex() < status.turns().size()
               ? status.turns().get(status.turnIndex()) : null;
         who.setText(UiTheme.upper(who(status, current, inputs)));
+        // An empty line keeps its room but shows no plate.
+        nameLine.setVisible(name.getText().notEmpty());
+        whoLine.setVisible(who.getText().notEmpty());
         // Under double blind the server reports no turn order, and the header shows none.
         order.show(status.turnOrderHidden() ? List.of() : status.turns(), status.turnIndex(), phase != shownPhase);
         shownPhase = phase;

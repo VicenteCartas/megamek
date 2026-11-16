@@ -755,4 +755,50 @@ final class GpuHudKit implements Disposable {
             }
         }
     }
+
+    /** A meter bar of the given size, as the forces and contacts rails show armor and structure. */
+    MeterBar bar(float width, float height) {
+        return new MeterBar(width, height);
+    }
+
+    /** A meter bar: a track with the share filled in the client's label colour, or green, yellow and red by share. */
+    final class MeterBar extends Widget {
+        private final float width;
+        private final float height;
+        private final Color fill = new Color();
+        private float share;
+
+        private MeterBar(float width, float height) {
+            this.width = width;
+            this.height = height;
+        }
+
+        void set(double value, int argb) {
+            share = (float) Math.clamp(value, 0, 1);
+            if (argb != 0) {
+                Color.argb8888ToColor(fill, argb);
+            } else {
+                fill.set(value > .66 ? UiTheme.MINT : value > .33 ? UiTheme.AMBER : UiTheme.CORAL);
+            }
+        }
+
+        @Override
+        public float getPrefWidth() {
+            return width;
+        }
+
+        @Override
+        public float getPrefHeight() {
+            return height;
+        }
+
+        @Override
+        public void draw(Batch batch, float parentAlpha) {
+            float previous = batch.getPackedColor();
+            float alpha = getColor().a * parentAlpha;
+            ui.fill(batch, UiTheme.TRACK, alpha, getX(), getY(), getWidth(), getHeight());
+            ui.fill(batch, fill, alpha, getX(), getY(), getWidth() * share, getHeight());
+            batch.setPackedColor(previous);
+        }
+    }
 }

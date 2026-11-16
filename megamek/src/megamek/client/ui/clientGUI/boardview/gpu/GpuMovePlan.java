@@ -477,6 +477,11 @@ final class GpuMovePlan implements AutoCloseable {
      */
     private void face(MovementDisplay md, int wanted) {
         MovePath path = md.getPlannedMovement();
+        if ((path.length() == base(path)) && placesWalkOn(path)) {
+            // A walk-on unit only placed on its entry hex turns there freely, as a deployed unit does.
+            md.turnWalkOnEntry(wanted);
+            return;
+        }
         if (wanted == path.getFinalFacing() || !facingMatters(path.getEntity())
               || !available(md, MoveCommand.MOVE_TURN)) { return; }
         boolean route = path.length() > base(path);

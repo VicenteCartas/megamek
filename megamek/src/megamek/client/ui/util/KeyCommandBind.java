@@ -182,7 +182,6 @@ public enum KeyCommandBind {
     MOVE_MODE_WALK("moveModeWalk", VK_1),
     MOVE_MODE_RUN("moveModeRun", VK_2),
     MOVE_MODE_JUMP("moveModeJump", VK_3),
-    FORCES_GRID("forcesGrid", VK_G),
     /** Expands or collapses the Tactical View's Overlays panel. */
     TACTICAL_OVERLAYS("tacticalOverlays", VK_H),
     CLEAR_ORDERS("clearOrders", VK_DELETE),

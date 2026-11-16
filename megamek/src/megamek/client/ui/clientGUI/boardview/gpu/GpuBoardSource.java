@@ -277,11 +277,12 @@ final class GpuBoardSource implements BoardSource {
         if (pin == null && hold != null) {
             pin = hold.pin();
         }
-        if (pin == null || !(panel instanceof DeploymentDisplay deployment)) {
+        Entity entity = panel instanceof DeploymentDisplay deployment ? deployment.currentEntity()
+              : panel instanceof MovementDisplay movement ? movement.currentEntity() : null;
+        if (pin == null || entity == null) {
             return;
         }
-        Entity entity = deployment.currentEntity();
-        boolean placedThere = entity != null && pin.hex().equals(entity.getPosition());
+        boolean placedThere = pin.hex().equals(entity.getPosition());
         if (hold != null && (!placedThere || entity.getFacing() == pin.facing()
               || System.currentTimeMillis() - hold.since() > DEPLOY_HOLD_MILLIS)) {
             facingHold = null;
@@ -1031,8 +1032,11 @@ final class GpuBoardSource implements BoardSource {
                 if (UnitConversion.changes(old, unit)) {
                     queueAnimation(new BoardScene.Conversion(next.scene().boardId(), old, unit));
                 }
-                // Deployment chooses a position and elevation; it is never a movement or takeoff.
+                // Deployment chooses a position and elevation; it is never a movement or takeoff. Nor is a walk-on
+                // unit's placement before its move is sent: its hologram follows the pointer along the edge.
                 if (next.status().phase().isDeployment()) { continue; }
+                Entity placed = view.game.getEntity(unit.id());
+                if (placed != null && !placed.isDeployed()) { continue; }
                 if (old != null && !unit.sensorContact() && UnitMotion.changesGear(old.location(), unit.location())) {
                     Entity entity = view.game.getEntity(unit.id());
                     queueAnimation(new BoardScene.Movement(unit.id(), next.scene().boardId(),
@@ -1813,7 +1817,7 @@ final class GpuBoardSource implements BoardSource {
     private BoardScene.Unit deploymentPreview(JComponent panel, Coords hover, int facing,
           Map<Image, Boolean> usedImages) {
         if (panel instanceof MovementDisplay movement) {
-            return walkOnPreview(movement, hover, usedImages);
+            return walkOnPreview(movement, hover, facing, usedImages);
         }
         if (hover == null || !(panel instanceof DeploymentDisplay deployment) || activeTurn() == null
               || !view.game.getPhase().isDeployment() || board == null || !board.contains(hover)) {
@@ -1840,8 +1844,12 @@ final class GpuBoardSource implements BoardSource {
         return unit.at(unitWaypoint(entity, hover, shownFacing));
     }
 
-    /** The walk-on ghost of {@link #deploymentPreview}: the local movement turn's unit before it enters the board. */
-    private BoardScene.Unit walkOnPreview(MovementDisplay movement, Coords hover, Map<Image, Boolean> usedImages) {
+    /**
+     * The walk-on ghost of {@link #deploymentPreview}: the local movement turn's unit before it enters the board, facing
+     * {@code facing} when it is a direction (0-5).
+     */
+    private BoardScene.Unit walkOnPreview(MovementDisplay movement, Coords hover, int facing,
+          Map<Image, Boolean> usedImages) {
         Entity entity = activeTurn() == null || !view.game.getPhase().isMovement() ? null : movement.currentEntity();
         if (hover == null || entity == null || entity.isDeployed() || board == null || !board.contains(hover)
               || entity.isBoardProhibited(board)
@@ -1849,7 +1857,8 @@ final class GpuBoardSource implements BoardSource {
               || !board.isLegalDeployment(hover, entity) || !deployableAt(entity, hover)) {
             return null;
         }
-        int shownFacing = DeploymentHelper.startingFacing(entity, view.game.getPlayersList(), hover);
+        int shownFacing = facing >= 0 && facing < 6 ? facing
+              : DeploymentHelper.startingFacing(entity, view.game.getPlayersList(), hover);
         return unit(entity, -1, hover, false, usedImages).at(unitWaypoint(entity, hover, shownFacing));
     }
 

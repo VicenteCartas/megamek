@@ -670,6 +670,7 @@ public final class Game extends AbstractGame implements Serializable,
     public boolean isCurrentPhasePlayable() {
         return switch (phase) {
             case INITIATIVE, END -> false;
+            case INITIATIVE_REPORT -> !isWalkOnOnlyDeploymentRound();
             case DEPLOYMENT,
                  TARGETING,
                  PREMOVEMENT,
@@ -2256,6 +2257,29 @@ public final class Game extends AbstractGame implements Serializable,
             }
         }
         return getFirstDeployableEntityNum(turn);
+    }
+
+    /**
+     * Round 0's initiative only orders its deployment phase. When every unit due then walks on instead, that phase
+     * has no turns, so the roll decides nothing and its report would just be followed by round 1's.
+     *
+     * @return true if this is round 0 and every unit due to deploy in it walks on
+     */
+    private boolean isWalkOnOnlyDeploymentRound() {
+        if (currentRound != 0) {
+            return false;
+        }
+        boolean anyDue = false;
+        for (Deployable unit : deployableInGameObjects()) {
+            if (unit.isDeployed() || (unit.getDeployRound() != currentRound)) {
+                continue;
+            }
+            if (!(unit instanceof Entity entity) || !rulesManager.getRulesGame().canWalkOnThisRound(entity)) {
+                return false;
+            }
+            anyDue = true;
+        }
+        return anyDue;
     }
 
     /**

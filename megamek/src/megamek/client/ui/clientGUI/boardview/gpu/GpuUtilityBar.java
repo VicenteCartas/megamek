@@ -19,10 +19,12 @@ import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
+import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
+import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -33,18 +35,23 @@ import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.KeyCommandBind;
 
 /**
- * Top-right utilities, the Tactical View chip and the Tactical View's north mark (C.1 G4). The row holds the
- * playback speeds, the developer's Tuning, View, the Tactical View, the minimap, contacts, the log and the Menu; View
- * opens a popover with the camera presets and the wireframe view. They show the playback's speed, the camera, the
- * wireframe view, the minimap and contacts preferences, the log's presented events and the HUD's open panels, and run
- * the playback history's speed, the camera's Tactical View, the tuning model's wireframe view, the View menu's minimap
- * item, the contacts preference and the HUD's own toggles. The Tactical View's overlays have their own panel,
- * GpuTacticalOverlays.
+ * Top-right utilities, the Tactical View chip and the Tactical View's north mark (C.1 G4). One dark plate holds the
+ * playback speeds, then Overlays and View, then the minimap, contacts, the log and the chat, then the Menu, the groups
+ * split by hairlines; the developer's Tuning is a pill under it. View opens a popover with the 3D / Tactical switch,
+ * the camera presets and the wireframe view; Overlays opens GpuTacticalOverlays. They show the playback's speed, the
+ * camera, the wireframe view, the minimap and contacts preferences, the log's presented events and the HUD's open
+ * panels, and run the playback history's speed, the camera's Tactical View, the tuning model's wireframe view, the
+ * View menu's minimap item, the contacts preference and the HUD's own toggles.
  */
 final class GpuUtilityBar implements GpuHud.Component {
     /** The row's gap (#sys). */
     static final float GAP = 8;
     static final float HEIGHT = 34;
+    /** The developer's Tuning pill under the row. */
+    static final float DEV_HEIGHT = 24;
+    /** A flat button inside the plate. */
+    private static final float BUTTON_WIDTH = 32;
+    private static final float BUTTON_HEIGHT = 28;
     /**
      * The top of the Tactical View's north mark in the window, centred: its baseline then lies at the prototype's
      * y 96 (flat.js), whether or not the chip above it has room.
@@ -68,82 +75,123 @@ final class GpuUtilityBar implements GpuHud.Component {
     private final Table chip = new Table();
     private final UiButton view;
     private final Table viewMenu = new Table();
+    private final UiButton overlays;
+    private final GpuTacticalOverlays overlaysMenu;
     private final Group popover = new Group();
+    private final UiKit.Segmented viewMode;
     private final UiButton isometric;
-    private final UiButton tactical;
+    private final UiButton top;
+    private final UiButton fit;
+    /** Whether the View popover's rows are laid out for the Tactical View. */
+    private boolean viewTactical;
     private final UiButton wireframe;
     private final Actor wireframeMark;
     private final UiButton map;
     private final UiButton contacts;
     private final UiButton log;
+    private final UiButton chat;
     private final UiButton menu;
     private final Label menuTip;
     /** The row's tooltips, which the open popover takes off their buttons. */
     private final Map<Actor, TextTooltip> tips = new HashMap<>();
-    /** Closes the View popover on a press anywhere outside it and its button. */
+    /** Closes the open popover on a press anywhere outside it and its button. */
     private final InputListener outside = new InputListener() {
         @Override
         public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
             Actor target = event.getTarget();
-            if (viewOpen && target != null && !target.isDescendantOf(viewMenu) && !target.isDescendantOf(view)) {
-                setViewOpen(false);
+            if (openMenu != null && target != null && !target.isDescendantOf(openMenu)
+                  && !target.isDescendantOf(opener())) {
+                setOpen(null);
             }
             return false;
         }
     };
     private Stage listening;
-    private boolean viewOpen;
+    /** The open popover, View's or the Overlays', or null. */
+    private Actor openMenu;
     private GpuHudState.Dialog dialogAtOpen = GpuHudState.Dialog.NONE;
     private GpuHud.Inputs inputs;
 
     GpuUtilityBar(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera,
-          GpuBoardTuning tuning, Actor tuningButton, Runnable fitBoard) {
+          GpuBoardTuning tuning, Actor tuningButton, GpuTacticalOverlays overlaysMenu, UiButton chat,
+          Runnable fitBoard) {
         this.state = state;
         this.camera = camera;
         this.tuning = tuning;
+        this.overlaysMenu = overlaysMenu;
+        this.chat = chat;
         root.setName("utility-bar");
         chip.setName("tactical-chip");
         UiKit ui = kit.ui;
-        // The row keeps what a player reaches for in play; the camera presets and the wireframe view sit in the View
-        // popover, and Help is a page of the Menu (and its key).
+        // The row keeps what a player reaches for in play; the camera presets, the Tactical View and the wireframe
+        // view sit in the View popover, the board's overlays in the Overlays popover, and Help is a page of the Menu.
+        overlays = iconButton(ui, "layers", Messages.getString("GpuBoard.hud.overlays.title"), "utility-overlays");
         view = iconButton(ui, "show", Messages.getString("GpuBoard.hud.util.view"), "utility-view");
-        tactical = iconButton(ui, "tactical", Messages.getString("GpuBoard.hud.util.tactical"), "utility-tactical");
         map = iconButton(ui, "map", Messages.getString("GpuBoard.hud.util.map"), "utility-map");
         contacts = iconButton(ui, "enemy", Messages.getString("GpuBoard.hud.common.contacts"), "utility-contacts");
         log = iconButton(ui, "report", Messages.getString("GpuBoard.hud.util.log"), "utility-log");
         menu = iconButton(ui, "menu", Messages.getString("GpuBoard.hud.menu.title"), "utility-menu");
         menuTip = tipLabel(menu);
-        // The playback speeds lead the row, then the developer's Tuning with its caption.
+        // One plate: the playback speeds, then the board (Overlays, View), the panels (minimap, contacts, log, chat)
+        // and the Menu, split by hairlines. The developer's Tuning is a pill on a line of its own under the plate's
+        // right end, near the top where the developers look for it, and goes before release.
         speeds = speeds(ui, state);
-        root.add(speeds).height(HEIGHT);
-        root.add(tuningButton).height(HEIGHT).padLeft(GAP);
-        for (UiButton utility : List.of(view, tactical, map, contacts, log, menu)) {
-            root.add(utility).size(HEIGHT).padLeft(GAP);
+        Table plate = new Table();
+        plate.setName("utility-plate");
+        plate.setBackground(ui.skin.getDrawable("utility-plate"));
+        plate.add(speeds).height(BUTTON_HEIGHT - 2);
+        List<List<UiButton>> groups = List.of(List.of(overlays, view), List.of(map, contacts, log, chat),
+              List.of(menu));
+        for (List<UiButton> group : groups) {
+            plate.add(new Image(ui.skin.newDrawable("white", UiTheme.QUIET))).size(1, 20).padLeft(6).padRight(4);
+            for (UiButton utility : group) {
+                utility.setStyle(ui.skin.get("hud-utility-flat", TextButton.TextButtonStyle.class));
+                utility.pad(0);
+                plate.add(utility).size(BUTTON_WIDTH, BUTTON_HEIGHT).padLeft(2);
+            }
         }
+        root.add(plate).height(HEIGHT).right();
+        root.row();
+        root.add(tuningButton).right().height(DEV_HEIGHT).padTop(GAP);
 
         viewMenu.setName("utility-view-menu");
         viewMenu.setBackground(ui.skin.getDrawable("panel-pop"));
         viewMenu.pad(6);
         viewMenu.defaults().height(HEIGHT).growX();
-        UiButton top = viewItem(ui, "hex", "GpuBoard.hud.util.viewTop", "map-view-top");
-        isometric = viewItem(ui, "layers", "GpuBoard.hud.util.viewIsometric", "map-view-isometric");
-        UiButton fit = viewItem(ui, "expand", "GpuBoard.hud.util.viewFit", "map-view-fit");
-        wireframe = viewItem(ui, "wireframe", "GpuBoard.hud.util.wireframe", "utility-wireframe");
+        // The camera's mode first: the 3D view or the Tactical View (the T key).
+        viewMode = ui.segmented("hud-pill", true, Messages.getString("GpuBoard.hud.util.view3d"),
+              Messages.getString("GpuBoard.hud.util.tactical"));
+        viewMode.setName("view-mode");
+        viewMode.buttons.get(0).setName("view-mode-3d");
+        viewMode.buttons.get(1).setName("utility-tactical");
+        for (UiButton mode : viewMode.buttons) {
+            mode.pad(4, 14, 4, 14);
+        }
+        top = popoverItem(ui, "hex", "GpuBoard.hud.util.viewTop", "map-view-top");
+        isometric = popoverItem(ui, "layers", "GpuBoard.hud.util.viewIsometric", "map-view-isometric");
+        fit = popoverItem(ui, "expand", "GpuBoard.hud.util.viewFit", "map-view-fit");
+        wireframe = popoverItem(ui, "wireframe", "GpuBoard.hud.util.wireframe", "utility-wireframe");
         wireframeMark = ui.icon("check", 14, Color.WHITE);
         wireframe.icons.add(wireframeMark);
         wireframe.add(wireframeMark).padLeft(10);
+        layoutViewMenu(false);
         viewMenu.setVisible(false);
         viewMenu.setTouchable(Touchable.childrenOnly);
-        // The HUD lays this layer over the panels, so the popover is not covered by the minimap or the right column.
+        overlaysMenu.actor().setVisible(false);
+        overlaysMenu.actor().setTouchable(Touchable.childrenOnly);
+        // The HUD lays this layer over the panels, so the popovers are not covered by the minimap or the right column.
         popover.setName("utility-view-layer");
         popover.setTouchable(Touchable.childrenOnly);
         popover.addActor(viewMenu);
+        popover.addActor(overlaysMenu.actor());
 
-        onChange(view, () -> setViewOpen(!viewOpen));
+        onChange(view, () -> setOpen(openMenu == viewMenu ? null : viewMenu));
+        onChange(overlays, this::toggleOverlays);
+        onChange(viewMode.buttons.get(0), () -> setTactical(false));
+        onChange(viewMode.buttons.get(1), () -> setTactical(true));
         onChange(top, () -> closeAfter(() -> camera.setIsometric(false)));
         onChange(isometric, () -> closeAfter(() -> camera.setIsometric(true)));
         onChange(fit, () -> closeAfter(fitBoard));
-        onChange(tactical, () -> setTactical(!camera.tactical()));
         // The thermal wireframe view, a switch of the tuning model the board reads; the popover stays to show it.
         onChange(wireframe, () -> tuning.setWireframe(!tuning.wireframe()));
         onChange(map, () -> runMinimap(inputs));
@@ -152,8 +200,8 @@ final class GpuUtilityBar implements GpuHud.Component {
         onChange(log, state::toggleLog);
         onChange(menu, () -> state.toggle(GpuHudState.Dialog.MENU));
 
-        // The chip names the mode only; the pressed Tactical view utility and its key switch back (the user's
-        // decision of 2026-10-02).
+        // The chip names the mode only; the View popover's switch and the T key switch back (the user's decision of
+        // 2026-10-02).
         chip.setBackground(ui.skin.getDrawable("panel-rails"));
         // The caption ends as far from the right edge as the icon starts from the left one.
         chip.padRight(CHIP_SIDE);
@@ -178,9 +226,13 @@ final class GpuUtilityBar implements GpuHud.Component {
                     : Messages.getString("GpuBoard.hud.util.speedRate", speed.rate / UnitMotion.Speed.NORMAL.rate))
               .toArray(String[]::new));
         speeds.setName("utility-speeds");
-        // The utilities' bracketed face around the pill's sections.
-        speeds.setBackground(ui.skin.get("hud-utility-small", TextButton.TextButtonStyle.class).up);
-        speeds.pad(3);
+        // On the utility plate the speeds need no frame or hairlines of their own: the plate is their frame.
+        speeds.setBackground((Drawable) null);
+        speeds.pad(0);
+        speeds.clearChildren();
+        for (UiButton button : speeds.buttons) {
+            speeds.add(button);
+        }
         for (int i = 0; i < SPEEDS.size(); i++) {
             UnitMotion.Speed speed = SPEEDS.get(i);
             UiButton button = speeds.buttons.get(i);
@@ -202,10 +254,20 @@ final class GpuUtilityBar implements GpuHud.Component {
     }
 
     /** A row of the View popover. */
-    private UiButton viewItem(UiKit ui, String icon, String label, String name) {
-        UiButton item = popoverItem(ui, icon, label, name);
-        viewMenu.add(item).row();
-        return item;
+    /**
+     * The View popover's rows: the mode switch, then the camera presets (3D only, as the Tactical View is a top-down
+     * camera of its own), fit board and the wireframe view.
+     */
+    private void layoutViewMenu(boolean tactical) {
+        viewTactical = tactical;
+        viewMenu.clearChildren();
+        viewMenu.add(viewMode).height(30).pad(2, 4, 6, 4).row();
+        if (!tactical) {
+            viewMenu.add(top).row();
+            viewMenu.add(isometric).row();
+        }
+        viewMenu.add(fit).row();
+        viewMenu.add(wireframe).row();
     }
 
     /**
@@ -226,22 +288,43 @@ final class GpuUtilityBar implements GpuHud.Component {
 
     /** A camera preset closes the popover once it has run. */
     private void closeAfter(Runnable action) {
-        setViewOpen(false);
+        setOpen(null);
         action.run();
     }
 
-    private void setViewOpen(boolean open) {
-        viewOpen = open;
+    /** The row's utilities after the playback speeds, in their order. */
+    private List<UiButton> utilities() {
+        return List.of(overlays, view, map, contacts, log, chat, menu);
+    }
+
+    /** The button the open popover hangs from. */
+    private UiButton opener() {
+        return openMenu == overlaysMenu.actor() ? overlays : view;
+    }
+
+    /** The Overlays button and the TACTICAL_OVERLAYS key: open or close the Overlays popover. */
+    void toggleOverlays() {
+        setOpen(openMenu == overlaysMenu.actor() ? null : overlaysMenu.actor());
+    }
+
+    /** Opens {@code menu}, one of the popovers, in place of the open one; null closes it. */
+    private void setOpen(Actor menu) {
+        if (openMenu != null) {
+            openMenu.setVisible(false);
+        }
+        openMenu = menu;
         dialogAtOpen = state.dialog;
-        viewMenu.setVisible(open);
-        if (open) {
-            viewMenu.pack();
-            placeViewMenu();
+        if (menu != null) {
+            menu.setVisible(true);
+            if (menu instanceof Table table) {
+                table.pack();
+            }
+            placeMenu();
         }
         // The row's tooltips would cover the open popover.
-        for (UiButton utility : List.of(view, tactical, map, contacts, log, menu)) {
+        for (UiButton utility : utilities()) {
             TextTooltip tip = tip(utility);
-            if (open) {
+            if (menu != null) {
                 tip.hide();
                 utility.removeListener(tip);
             } else if (!utility.getListeners().contains(tip, true)) {
@@ -254,21 +337,27 @@ final class GpuUtilityBar implements GpuHud.Component {
         }
     }
 
-    /** The popover hangs one gap below the View button, its left edge at the button's. */
-    private void placeViewMenu() {
-        if (view.getStage() == null || popover.getStage() == null) {
+    /**
+     * The popover hangs one gap below its button, its right edge at the button's right edge or further left, so it
+     * stays in the window.
+     */
+    private void placeMenu() {
+        UiButton button = opener();
+        if (openMenu == null || button.getStage() == null || popover.getStage() == null) {
             return;
         }
-        Vector2 corner = view.localToActorCoordinates(popover, new Vector2());
-        viewMenu.setPosition(corner.x, corner.y - GAP - viewMenu.getHeight());
+        Vector2 corner = button.localToActorCoordinates(popover, new Vector2(button.getWidth(), 0));
+        float x = openMenu == viewMenu ? corner.x - button.getWidth() : corner.x - openMenu.getWidth();
+        x = Math.min(x, popover.getStage().getWidth() - openMenu.getWidth() - GAP);
+        openMenu.setPosition(Math.max(GAP, x), corner.y - GAP - openMenu.getHeight());
     }
 
-    /** Esc's first step while the View popover is open: closes it; false when it was closed. */
+    /** Esc's first step while a popover is open: closes it; false when none was open. */
     boolean closeView() {
-        if (!viewOpen) {
+        if (openMenu == null) {
             return false;
         }
-        setViewOpen(false);
+        setOpen(null);
         return true;
     }
 
@@ -349,17 +438,24 @@ final class GpuUtilityBar implements GpuHud.Component {
         BoardScene.Command minimap = minimapCommand(inputs);
         // K12: the round's reviewable events the board has presented, which the log lists (C.6; game.js S.events)
         int reviewable = state.history.played().size();
-        isometric.setDisabled(camera.tactical());
-        tactical.pressed(tacticalView);
+        if (tacticalView != viewTactical) {
+            layoutViewMenu(tacticalView);
+        }
+        viewMode.select(tacticalView ? 1 : 0);
         wireframe.setDisabled(!GpuWireframe.supported());
         wireframeMark.setVisible(tuning.wireframe());
         // A dialog opened over the row closes the popover; one already open when it opened (Tuning) keeps it.
-        if (viewOpen && state.dialog != dialogAtOpen) {
-            setViewOpen(false);
+        if (openMenu != null && state.dialog != dialogAtOpen) {
+            setOpen(null);
         }
-        view.pressed(viewOpen || tuning.wireframe());
-        if (viewOpen) {
-            placeViewMenu();
+        view.pressed(openMenu == viewMenu || tuning.wireframe());
+        overlays.pressed(openMenu == overlaysMenu.actor());
+        if (openMenu != null) {
+            // The Overlays popover grows a line while deploying.
+            if (openMenu instanceof Table table && table.getHeight() != table.getPrefHeight()) {
+                table.pack();
+            }
+            placeMenu();
         }
         Stage stage = root.getStage();
         if (stage != listening) {
@@ -385,7 +481,9 @@ final class GpuUtilityBar implements GpuHud.Component {
 
     /** As the T key: the camera enters the Tactical View or returns to the 3D pose it replaced. */
     private void setTactical(boolean enabled) {
-        camera.setTactical(enabled, inputs.frame().scene());
+        if (inputs != null && camera.tactical() != enabled) {
+            camera.setTactical(enabled, inputs.frame().scene());
+        }
     }
 
     /**
