@@ -161,6 +161,7 @@ final class GpuCommandDock implements GpuHud.Component {
     private final UiButton waypoint;
     private final UiKit.Checkbox backwards;
     private final UiButton clearRoute;
+    private final TextTooltip clearRouteTip;
     private final UiButton holdAll;
     // Weapon declaration.
     private final UiButton twistLeft;
@@ -277,8 +278,9 @@ final class GpuCommandDock implements GpuHud.Component {
         backwards.setName("dock-backwards");
         onChange(backwards, () -> source.moves().setMode(GpuMovePlan.Mode.BACK));
         clearRoute = button("hud-mini", null, "X", null, "dock-clear-route");
-        onChange(clearRoute, () -> source.moves().clearRoute());
-        ui.tip(clearRoute).getActor().setText(text("GpuBoard.hud.dock.clearRoute"));
+        onChange(clearRoute, () -> source.moves().clearOrWithdraw());
+        clearRouteTip = ui.tip(clearRoute);
+        clearRouteTip.getActor().setText(text("GpuBoard.hud.dock.clearRoute"));
         holdAll = button("hud-mini", null, text("GpuBoard.hud.dock.holdAllButton"), null, "dock-hold-all");
         onChange(holdAll, () -> requestConfirmation(Confirm.HOLD_ALL));
         ui.tip(holdAll).getActor().setText(text("GpuBoard.hud.dock.holdAll"));
@@ -759,7 +761,9 @@ final class GpuCommandDock implements GpuHud.Component {
         main(text("GpuBoard.hud.dock.confirmMove"), route && enabled(done()));
         secondary(text("GpuBoard.hud.dock.holdPosition"), enabled(skip()));
         waypoint.setDisabled(!move.canPin());
-        clearRoute.setDisabled(!route);
+        clearRoute.setDisabled(!route && !move.walkedOn());
+        clearRouteTip.getActor().setText(text(!route && move.walkedOn() ? "GpuBoard.hud.dock.withdrawWalkOn"
+              : "GpuBoard.hud.dock.clearRoute"));
         holdAll.setDisabled(!enabled(skip()) || move.holdingRemaining() > 0);
         if (open == Confirm.HOLD_ALL) {
             confirmation.text(text("GpuBoard.hud.dock.holdAllTitle"), text("GpuBoard.hud.dock.holdAllConfirm"),

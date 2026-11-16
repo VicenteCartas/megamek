@@ -28,6 +28,7 @@ import megamek.common.actions.AttackAction;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.SearchlightAttackAction;
 import megamek.common.actions.WeaponAttackAction;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeECM;
@@ -37,6 +38,7 @@ import megamek.common.force.Force;
 import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.options.OptionsConstants;
+import megamek.common.rules.RulesGame;
 import megamek.common.turns.SpecificEntityTurn;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
@@ -146,7 +148,9 @@ final class GpuBattleStatus {
      * {@code tmmShown} whether its target movement modifier means something now ({@code UnitAnnotations.tmmShown}).
      * A sensor contact carries only its id, side, position, board and blip icon: its text is empty, its numbers are
      * zero, its facing and twist are -1, its meters are {@code ARMOR_NA}, its owner is {@code Player.PLAYER_NONE}, it
-     * has no status words or tiles and its marks are {@link Marks#NONE}.
+     * has no status words or tiles and its marks are {@link Marks#NONE}. {@code walkOnZone} is the zone of the edge the
+     * unit walks on from under walk-on deployment ({@code Board.START_NONE} for a unit that deploys or stands on the
+     * board) and {@code walkOnRound} the round in whose movement phase it enters.
      */
     record UnitStatus(int id, Side side, boolean sensorContact, String name, String chassis, String model,
           double tons, String weightClass, String formation, String pilot, int gunnery, int piloting, double armor,
@@ -155,11 +159,32 @@ final class GpuBattleStatus {
           boolean destroyed, int damageLevel, List<String> destroyedLocations, String heatEffects, Coords position,
           int boardId, BoardScene.Pixels icon, List<UnitStatusWords.StatusWord> statusWords, int weightClassIndex,
           int declaredAttacks, int ownerId, List<UnitStatusWords.StatusWord> statusTiles, String label, Marks marks,
-          int twist, int moveRgb, boolean tmmShown) {
+          int twist, int moveRgb, boolean tmmShown, int walkOnZone, int walkOnRound) {
         UnitStatus {
             destroyedLocations = List.copyOf(destroyedLocations);
             statusWords = List.copyOf(statusWords);
             statusTiles = List.copyOf(statusTiles);
+        }
+
+        /** A unit that does not walk on, as the HUD tests that do not deploy build it. */
+        UnitStatus(int id, Side side, boolean sensorContact, String name, String chassis, String model,
+              double tons, String weightClass, String formation, String pilot, int gunnery, int piloting, double armor,
+              double structure, int heat, int heatRgb, String heatCapacity, int walk, String run, int jump,
+              String moved, int mpUsed, int hexesMoved, int facing, int tmm, boolean canActNow, boolean pending,
+              boolean done, boolean destroyed, int damageLevel, List<String> destroyedLocations, String heatEffects,
+              Coords position, int boardId, BoardScene.Pixels icon, List<UnitStatusWords.StatusWord> statusWords,
+              int weightClassIndex, int declaredAttacks, int ownerId, List<UnitStatusWords.StatusWord> statusTiles,
+              String label, Marks marks, int twist, int moveRgb, boolean tmmShown) {
+            this(id, side, sensorContact, name, chassis, model, tons, weightClass, formation, pilot, gunnery,
+                  piloting, armor, structure, heat, heatRgb, heatCapacity, walk, run, jump, moved, mpUsed, hexesMoved,
+                  facing, tmm, canActNow, pending, done, destroyed, damageLevel, destroyedLocations, heatEffects,
+                  position, boardId, icon, statusWords, weightClassIndex, declaredAttacks, ownerId, statusTiles,
+                  label, marks, twist, moveRgb, tmmShown, Board.START_NONE, 0);
+        }
+
+        /** Whether the unit enters the board by walking on rather than being placed. */
+        boolean walksOn() {
+            return walkOnZone != Board.START_NONE;
         }
 
         /** A unit without a twist, movement colour or shown modifier, as the HUD tests that do not draw bases build it. */
@@ -250,6 +275,12 @@ final class GpuBattleStatus {
         // The same ECM computation the board view makes for its unit labels (BoardView.updateEcmList)
         List<ECMInfo> ecm = ComputeECM.computeAllEntitiesECMInfo(game.getEntitiesVector());
         Map<Integer, Integer> attacks = declaredAttacks(game, local);
+        // A deployment turn belongs to the units that cannot walk on; it takes one that can only when none is left
+        // (Game.getFirstDeployableEntityNum), so until then a unit that walks on waits for the movement phase.
+        int firstDeployable = game.getPhase().isDeployment() ? game.getFirstDeployableEntityNum(activeTurn)
+              : Entity.NONE;
+        boolean turnTakesWalkOn = firstDeployable != Entity.NONE
+              && game.walksOnInsteadOfDeploying(game.getEntity(firstDeployable));
         List<UnitStatus> units = new ArrayList<>();
         for (Entity entity : listed) {
             Side side = side(entity.getOwnerId() == localId, entity.getOwner(), local);
@@ -264,12 +295,17 @@ final class GpuBattleStatus {
             // check keeps such units pending, because that option only delays their turn.
             boolean pending = remaining.stream().anyMatch(turn -> turn.isValidEntity(entity, game)
                   || turn.isValidEntity(entity, game, false));
+            boolean canActNow = activeTurn != null && activeTurn.isValidEntity(entity, game);
+            if (game.walksOnInsteadOfDeploying(entity)) {
+                canActNow &= turnTakesWalkOn;
+                pending = canActNow;
+            }
             // The local player's view adds the scan and recon camera words (upstream), as the board labels show them.
             List<UnitStatusWords.StatusWord> words = UnitStatusWords.statusWords(entity,
                   ComputeECM.isAffectedByECM(entity, entity.getPosition(), entity.getPosition(), ecm),
                   local);
             List<UnitStatusWords.StatusWord> tiles = UnitStatusWords.statusTiles(entity, game.isOnSpaceMap(entity), local);
-            units.add(unit(game, entity, side, activeTurn != null && activeTurn.isValidEntity(entity, game), pending,
+            units.add(unit(game, entity, side, canActNow, pending,
                   icon.apply(entity), words, tiles, attacks.getOrDefault(entity.getId(), 0)));
         }
         // The arcs follow the pointer and the focus, which the source knows only later: they stay until arcs() runs.
@@ -554,6 +590,18 @@ final class GpuBattleStatus {
               UnitAnnotations.labelName(entity, GUIPreferences.getInstance().getUnitLabelStyle()), marks,
               UnitAnnotations.twistFacing(entity),
               GUIPreferences.getInstance().getColorForMovement(entity.moved).getRGB(),
-              UnitAnnotations.tmmShown(entity, game.getPhase()));
+              UnitAnnotations.tmmShown(entity, game.getPhase()),
+              walkOnZone(entity), Math.max(Math.max(1, entity.getDeployRound()), game.getRoundCount()));
+    }
+
+    /**
+     * The zone of the edge an undeployed unit walks on from under walk-on deployment, whether in this round or a
+     * later one; {@code Board.START_NONE} for a unit that is placed instead or already stands on the board.
+     */
+    private static int walkOnZone(Entity entity) {
+        RulesGame rules = Game.rulesManager.getRulesGame();
+        int zone = entity.getStartingPos();
+        return !entity.isDeployed() && entity.getDeployRound() >= 0 && rules.isWalkOnDeployment()
+              && rules.restrictDeploymentWidth(entity.getOwner(), zone) ? zone : Board.START_NONE;
     }
 }

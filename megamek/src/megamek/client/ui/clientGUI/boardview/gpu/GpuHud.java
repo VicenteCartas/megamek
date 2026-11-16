@@ -203,6 +203,7 @@ final class GpuHud implements GpuBoardHud {
     private final GpuPhaseHeader phaseHeader;
     private final GpuDeploymentQueue deployQueue;
     private final GpuArrivalCues arrivalCues;
+    private final GpuIncomingCues incomingCues;
     private final GpuDamageNumbers damageNumbers;
     /** The layer of Help, Menu, Players and the tuning panel: a focus in it is that dialog's Esc step. */
     private final Group dialogs;
@@ -347,6 +348,7 @@ final class GpuHud implements GpuBoardHud {
         modal = new GpuModalDialog(kit, source, state);
         GpuHexTip hexTip = new GpuHexTip(kit, state, contextMenu);
         arrivalCues = new GpuArrivalCues(kit, source, state);
+        incomingCues = new GpuIncomingCues(kit, source, state);
         damageNumbers = new GpuDamageNumbers(kit);
         GpuAimDialog aim = new GpuAimDialog(kit, source, state, paperdolls);
         List<Component> parts = new ArrayList<>(List.of(nameplates, deployConfirm, boardLabels, targetCards, losPanel,
@@ -354,7 +356,7 @@ final class GpuHud implements GpuBoardHud {
               initiativeCard, conditionsCard, forces, deployQueue, unitCard, otherUnitCard, recordSheet, utilities, hint,
               minimap, overlays,
               contacts, weapons, solution, log, dock, chat, overview, help, menu, players, contextMenu, hexTip, aim,
-              toasts, modal, arrivalCues, damageNumbers));
+              toasts, modal, arrivalCues, incomingCues, damageNumbers));
 
         // The Tactical View's north mark first: the prototype draws it on the board, under the labels (G4). Then the
         // prototype's #fx strokes (guides, traces, leaders) under every board label, the nameplates included (G8b).
@@ -365,7 +367,8 @@ final class GpuHud implements GpuBoardHud {
               slot(labels, boardLabels.fx()),
               slot(labels, nameplates.actor()), slot(labels, boardLabels.actor()), slot(labels, targetCards.actor()), slot(labels, losPanel.actor()),
               slot(labels, deployConfirm.actor()),
-              slot(popover, hexTip.actor()), slot(popover, arrivalCues.actor()), slot(popover, unitCard.overlay()),
+              slot(popover, hexTip.actor()), slot(popover, incomingCues.actor()), slot(popover, arrivalCues.actor()),
+              slot(popover, unitCard.overlay()),
               slot(popover, otherUnitCard.overlay()),
               slot(popover, recordSheet.overlay()),
               slot(popover, contextMenu.actor()), slot(popover, dock.confirmation().actor())));
@@ -631,6 +634,11 @@ final class GpuHud implements GpuBoardHud {
     /** Other players' arrivals the board view still marks, before this frame's update. */
     void arrivals(List<GpuArrivalCues.Cue> cues) {
         arrivalCues.cues(cues);
+    }
+
+    /** The edges the player's units still walk on from, before this frame's update. */
+    void incoming(List<GpuIncomingCues.Cue> cues) {
+        incomingCues.cues(cues);
     }
 
     /** The Damage overlay's numbers on the hexes the camera shows, before this frame's update. */
@@ -951,6 +959,9 @@ final class GpuHud implements GpuBoardHud {
             return true;
         } else if (planning(inputs) && !inputs.frame().panels().move().route().isEmpty()) {
             source.moves().clearRoute();
+        } else if (planning(inputs) && inputs.frame().panels().move().walkedOn()) {
+            // Like MegaMek's Esc: the route goes first, then the walk-on unit's placement.
+            source.moves().withdrawWalkOn();
         } else if (dock.releaseChosen()) {
             return true;
         } else if (swingMovement(inputs)) {

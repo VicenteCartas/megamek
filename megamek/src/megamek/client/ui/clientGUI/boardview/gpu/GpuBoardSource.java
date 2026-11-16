@@ -45,6 +45,7 @@ import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.client.ui.clientGUI.tooltip.HexTooltip;
 import megamek.client.ui.dialogs.RoundsInAirDialog;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
+import megamek.client.ui.panels.phaseDisplay.DeploymentHelper;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.client.ui.tileset.UnitModelEquipment;
@@ -65,6 +66,7 @@ import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.board.BoardEvent;
 import megamek.common.event.board.BoardListenerAdapter;
 import megamek.common.event.entity.GameEntityChangeEvent;
+import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.moves.MovePath;
 import megamek.common.preference.ClientPreferences;
@@ -1805,10 +1807,14 @@ final class GpuBoardSource implements BoardSource {
      * The unit being deployed, not yet placed, standing on the hovered hex while that hex is a legal deployment hex
      * for it: the view draws it as a ghost under the pointer, so the player sees what a click puts there. It faces as
      * the click would place it (DeploymentDisplay#placementFacing), or {@code facing} when it is a direction (0-5).
-     * Null outside the local deployment turn.
+     * A walk-on unit in the local movement turn gets the same ghost on its edge hexes, facing as MegaMek enters it.
+     * Null outside the local deployment turn and walk-on.
      */
     private BoardScene.Unit deploymentPreview(JComponent panel, Coords hover, int facing,
           Map<Image, Boolean> usedImages) {
+        if (panel instanceof MovementDisplay movement) {
+            return walkOnPreview(movement, hover, usedImages);
+        }
         if (hover == null || !(panel instanceof DeploymentDisplay deployment) || activeTurn() == null
               || !view.game.getPhase().isDeployment() || board == null || !board.contains(hover)) {
             noPreview(panel instanceof DeploymentDisplay && activeTurn() == null ? "not the local turn" : null, null);
@@ -1832,6 +1838,19 @@ final class GpuBoardSource implements BoardSource {
         BoardScene.Unit unit = unit(entity, -1, hover, false, usedImages);
         // As a placed unit is captured, so an aerospace unit or a LAM shows its own form and flight state.
         return unit.at(unitWaypoint(entity, hover, shownFacing));
+    }
+
+    /** The walk-on ghost of {@link #deploymentPreview}: the local movement turn's unit before it enters the board. */
+    private BoardScene.Unit walkOnPreview(MovementDisplay movement, Coords hover, Map<Image, Boolean> usedImages) {
+        Entity entity = activeTurn() == null || !view.game.getPhase().isMovement() ? null : movement.currentEntity();
+        if (hover == null || entity == null || entity.isDeployed() || board == null || !board.contains(hover)
+              || entity.isBoardProhibited(board)
+              || !Game.rulesManager.getRulesGame().canWalkOnThisRound(entity)
+              || !board.isLegalDeployment(hover, entity) || !deployableAt(entity, hover)) {
+            return null;
+        }
+        int shownFacing = DeploymentHelper.startingFacing(entity, view.game.getPlayersList(), hover);
+        return unit(entity, -1, hover, false, usedImages).at(unitWaypoint(entity, hover, shownFacing));
     }
 
     private int previewEntityId = Entity.NONE;

@@ -2308,6 +2308,21 @@ public class MovementDisplay extends ActionPhaseDisplay {
         updateButtons();
     }
 
+    /**
+     * Takes back a walk-on unit's placement and any movement after it, as Escape on a bare placement does, so the unit
+     * can enter from another edge hex. EDT only.
+     *
+     * @return {@code false} when the current path places no walk-on unit
+     */
+    public boolean withdrawWalkOn() {
+        if (deploymentAnchor(cmd) == null) {
+            return false;
+        }
+        clear(false);
+        updateMove();
+        return true;
+    }
+
     /** Redraws the current path, the board cursor and the unit's arcs after steps were removed from the path's end. */
     private void redrawShortenedPath(Entity entity) {
         // clear board cursors

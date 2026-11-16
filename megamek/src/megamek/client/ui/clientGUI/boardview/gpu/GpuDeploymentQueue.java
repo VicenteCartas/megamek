@@ -29,6 +29,7 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.common.interfaces.IStartingPositions;
 
 /**
  * The deployment phase's force along the bottom of the screen: a compact card per own unit, in two rows, filled
@@ -279,7 +280,21 @@ final class GpuDeploymentQueue implements GpuHud.Component {
 
     /** The unit deploys in a later round: it has neither a hex nor a turn in this one. */
     static boolean later(UnitStatus unit) {
-        return unit.position() == null && !unit.pending();
+        return unit.position() == null && !unit.pending() && !walksOnLater(unit);
+    }
+
+    /**
+     * Under walk-on deployment the unit enters from its edge in a movement phase instead of being placed now: it has
+     * no hex and this turn does not take it.
+     */
+    static boolean walksOnLater(UnitStatus unit) {
+        return unit.walksOn() && unit.position() == null && !unit.canActNow() && !unit.pending();
+    }
+
+    /** "Walks on from the W edge in round 1", what a card that walks on later says. */
+    static String walkOnLine(UnitStatus unit) {
+        return text("GpuBoard.hud.deploy.walkOn", IStartingPositions.getDisplayName(unit.walkOnZone()),
+              unit.walkOnRound());
     }
 
     /**
@@ -347,7 +362,8 @@ final class GpuDeploymentQueue implements GpuHud.Component {
             armor.set(unit.armor());
             structure.set(unit.structure());
             boolean placed = placed(unit);
-            String line = placed ? text("GpuBoard.hud.deploy.placed") : later(unit) ? text("GpuBoard.hud.deploy.later")
+            String line = placed ? text("GpuBoard.hud.deploy.placed") : walksOnLater(unit) ? walkOnLine(unit)
+                  : later(unit) ? text("GpuBoard.hud.deploy.later")
                   : notThisTurn(unit, locked) ? text("GpuBoard.hud.deploy.notNow") : "";
             String tipText = title(unit) + "\n" + facts(unit);
             if (unit.damageLevel() > 0) {
@@ -370,7 +386,8 @@ final class GpuDeploymentQueue implements GpuHud.Component {
      * A unit of the force, what tells its units apart when choosing who goes where: its sprite beside its chassis and
      * model, its pilot beneath, then its tonnage, pilot skills (gunnery/piloting) and walk, run and jump MP, over a bar
      * of the armor left, amber once damaged. A unit that starts damaged carries a coral mark; one placed carries a mint
-     * check and one deploying in a later round an hourglass, and both dim, keeping their place in the strip.
+     * check, one deploying in a later round an hourglass and one walking on from its edge an entering arrow, and they
+     * dim, keeping their place in the strip.
      */
     private final class Card extends Tile {
         private final Label name = ui.label("", "hud-medium", 11, UiTheme.TEXT);
@@ -381,6 +398,7 @@ final class GpuDeploymentQueue implements GpuHud.Component {
         private final Label damage = ui.label("▲", "hud-small", 10, UiTheme.CORAL);
         private final Image placedMark = ui.icon("check-circle", 12, UiTheme.MINT);
         private final Image laterMark = ui.icon("hourglass", 12, UiTheme.MUTED);
+        private final Image walkOnMark = ui.icon("walk-on", 12, UiTheme.MUTED);
         private final Image notNowMark = ui.icon("lock", 12, UiTheme.MUTED);
         private final Table body = new Table();
 
@@ -389,6 +407,7 @@ final class GpuDeploymentQueue implements GpuHud.Component {
             pad(3, 4, 3, 5);
             damage.setName("deploy-card-damage");
             placedMark.setName("deploy-card-placed");
+            walkOnMark.setName("deploy-card-walk-on");
             name.setEllipsis(true);
             pilot.setEllipsis(true);
             move.setEllipsis(true);
@@ -397,7 +416,7 @@ final class GpuDeploymentQueue implements GpuHud.Component {
             Table title = new Table();
             title.add(name).growX().minWidth(0).left();
             title.add(damage).padLeft(3);
-            title.add(new Stack(placedMark, laterMark, notNowMark)).size(12).padLeft(3);
+            title.add(new Stack(placedMark, laterMark, walkOnMark, notNowMark)).size(12).padLeft(3);
             text.add(title).growX().minWidth(0).row();
             text.add(pilot).growX().minWidth(0).left().row();
             Table facts = new Table();
@@ -424,11 +443,13 @@ final class GpuDeploymentQueue implements GpuHud.Component {
             damage.setVisible(unit.damageLevel() > 0);
             boolean placed = placed(unit);
             boolean later = later(unit);
+            boolean walkOn = walksOnLater(unit);
             boolean notNow = notThisTurn(unit, locked);
             placedMark.setVisible(placed);
             laterMark.setVisible(later);
+            walkOnMark.setVisible(walkOn);
             notNowMark.setVisible(notNow);
-            body.getColor().a = placed || later ? .55f : notNow ? .4f : 1;
+            body.getColor().a = placed || later || walkOn ? .55f : notNow ? .4f : 1;
         }
     }
     /** Walk, run and jump MP as the unit card writes them: "4 / 6", "4 / 6 / 4" with jump jets. */

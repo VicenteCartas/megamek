@@ -47,6 +47,7 @@ import megamek.client.ui.panels.phaseDisplay.PrephaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.enums.GamePhase;
+import megamek.common.interfaces.IStartingPositions;
 import megamek.common.units.Entity;
 
 /**
@@ -677,6 +678,14 @@ final class GpuForcesPanel implements GpuHud.Component {
         }
         boolean acting = unit.id() == acting();
         boolean actingNow = acting && status.myTurn();
+        if (unit.walksOn() && unit.position() == null) {
+            // Under walk-on deployment the unit enters from its edge in a movement phase instead of being placed.
+            if (phase.isMovement() && unit.pending()) {
+                return acting ? actingLine(actingNow) : new Line(text("GpuBoard.hud.status.walkOnNow",
+                      IStartingPositions.getDisplayName(unit.walkOnZone())), Tone.WARN);
+            }
+            return new Line(GpuDeploymentQueue.walkOnLine(unit), Tone.NORMAL);
+        }
         if (phase.isMovement()) {
             if (unit.done()) {
                 return new Line(text("GpuBoard.hud.status.moved", moved), Tone.NORMAL);

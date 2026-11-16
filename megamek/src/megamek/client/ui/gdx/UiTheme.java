@@ -205,6 +205,8 @@ public final class UiTheme implements Disposable {
           Map.entry("more-vert", 0xE5D4), Map.entry("add", 0xE145), Map.entry("check-circle", 0xE86C),
           Map.entry("radio-unchecked", 0xE836), Map.entry("hourglass", 0xE88B), Map.entry("bot", 0xF06C),
           Map.entry("palette", 0xE40A), Map.entry("build", 0xE869),
+          // login: a unit that walks on from its board edge instead of deploying
+          Map.entry("walk-on", 0xEA77),
           // The lobby's unit cards: hub (a C3 network) and delete
           Map.entry("hub", 0xE9F4), Map.entry("delete", 0xE872),
           // The lobby's top bar: gavel, Game options (the rules of the game)

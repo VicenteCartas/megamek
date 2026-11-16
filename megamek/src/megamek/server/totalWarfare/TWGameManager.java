@@ -3292,7 +3292,9 @@ public class TWGameManager extends AbstractGameManager {
                     public boolean accept(Entity entity) {
                         return (entity instanceof ProtoMek) &&
                               (ownerId == entity.getOwnerId()) &&
-                              entity.isSelectableThisTurn();
+                              entity.isSelectableThisTurn() &&
+                              !(phase.isDeployment() &&
+                                    Game.rulesManager.getRulesGame().canWalkOnThisRound(entity));
                     }
                 });
                 HashSet<Integer> points = new HashSet<>();

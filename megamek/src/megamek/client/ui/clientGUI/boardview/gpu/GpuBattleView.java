@@ -40,6 +40,7 @@ import com.badlogic.gdx.graphics.glutils.ImmediateModeRenderer20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.ConvexHull;
+import com.badlogic.gdx.math.Interpolation;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Polygon;
@@ -1351,6 +1352,7 @@ class GpuBattleView extends ApplicationAdapter {
             ui.cameraGesture(boardInput.panning && boardInput.dragged || !cameraKeys.isEmpty());
             if (ui instanceof GpuHud hud) {
                 hud.arrivals(arrivalCues(frame.scene() != null));
+                hud.incoming(incomingCues(frame.scene() != null));
                 hud.damageNumbers(damageNumbers(frame.scene() != null));
             }
             ui.update(frame, view, dialog(), source.uiPreferences());
@@ -1634,25 +1636,60 @@ class GpuBattleView extends ApplicationAdapter {
         if (!drawn || scene == null || arrivalNotices.isEmpty()) {
             return List.of();
         }
-        com.badlogic.gdx.graphics.Camera camera = boardCamera.camera;
-        float stage = ui.stage().getWidth() / camera.viewportWidth;
         List<GpuArrivalCues.Cue> cues = new ArrayList<>(arrivalNotices.size());
         for (GpuArrivalCues.Arrival arrival : arrivalNotices) {
             if (arrival.boardId() != scene.boardId() || scene.tile(arrival.hex()) == null) {
                 continue;
             }
-            Vector3 hex = new Vector3(BoardGeometry.centerX(arrival.hex()), BoardGeometry.centerY(arrival.hex()),
-                  BoardTacticalGeometry.floatingZ(scene, arrival.hex()));
-            Vector2 at = GpuNameplates.project(camera, hex);
-            if (at == null) {
-                Vector3 toward = hex.sub(camera.position);
-                Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
-                at = new Vector2(toward.dot(right), toward.dot(camera.up)).nor().scl(1e5f)
-                      .add(camera.viewportWidth / 2, camera.viewportHeight / 2);
-            }
-            cues.add(new GpuArrivalCues.Cue(arrival, at.scl(stage)));
+            cues.add(new GpuArrivalCues.Cue(arrival, stagePoint(arrival.hex())));
         }
         return cues;
+    }
+
+    /** The edges the player's units still walk on from, each with where it lies in stage units (y up). */
+    private List<GpuIncomingCues.Cue> incomingCues(boolean drawn) {
+        GpuBattleStatus.Snapshot status = shownStatus;
+        if (!drawn || scene == null || status == null || status.phase().isLounge()) {
+            return List.of();
+        }
+        List<GpuIncomingCues.Cue> cues = new ArrayList<>();
+        Coords middle = new Coords(scene.width() / 2, scene.height() / 2);
+        Vector3 centre = new Vector3(BoardGeometry.centerX(middle), BoardGeometry.centerY(middle), 0);
+        float step = Math.abs(BoardGeometry.centerX(new Coords(1, 0)) - BoardGeometry.centerX(new Coords(0, 0)));
+        for (GpuIncomingCues.Edge edge : GpuIncomingCues.edges(status, scene.width(), scene.height())) {
+            if (scene.tile(edge.hex()) != null) {
+                // Just outside the board beyond the edge hex, so the plate does not cover the strip it marks.
+                Vector3 hex = hexPoint(edge.hex());
+                Vector3 out = new Vector3(hex.x - centre.x, hex.y - centre.y, 0).nor().scl(step * 1.4f);
+                cues.add(new GpuIncomingCues.Cue(edge, stagePoint(hex.add(out))));
+            }
+        }
+        return cues;
+    }
+
+    /** Where a hex lies in stage units (y up); a hex behind the camera lies far out in its direction. */
+    private Vector2 stagePoint(Coords coords) {
+        return stagePoint(hexPoint(coords));
+    }
+
+    /** The hex's centre on the plane of the hex annotations, in world units. */
+    private Vector3 hexPoint(Coords coords) {
+        return new Vector3(BoardGeometry.centerX(coords), BoardGeometry.centerY(coords),
+              BoardTacticalGeometry.floatingZ(scene, coords));
+    }
+
+    /** Where a world point lies in stage units (y up); a point behind the camera lies far out in its direction. */
+    private Vector2 stagePoint(Vector3 hex) {
+        com.badlogic.gdx.graphics.Camera camera = boardCamera.camera;
+        float stage = ui.stage().getWidth() / camera.viewportWidth;
+        Vector2 at = GpuNameplates.project(camera, hex);
+        if (at == null) {
+            Vector3 toward = hex.sub(camera.position);
+            Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
+            at = new Vector2(toward.dot(right), toward.dot(camera.up)).nor().scl(1e5f)
+                  .add(camera.viewportWidth / 2, camera.viewportHeight / 2);
+        }
+        return at.scl(stage);
     }
 
     /**
@@ -1884,6 +1921,14 @@ class GpuBattleView extends ApplicationAdapter {
                 }
                 facing = motion.facing();
                 UnitFootprint.clearTerrain(scene, placement, position, facing, airborne);
+            }
+            float driveIn = (motion != null && motion.isMoving()) ? 0 : driveInRemaining(unit.id());
+            if (driveIn > 0) {
+                // It enters along its facing, from the hex behind its entry hex.
+                Coords here = unit.location().coords();
+                Vector3 behind = BoardGeometry.center(here.translated((Math.round(unit.location().facing()) + 3) % 6), 0)
+                      .sub(BoardGeometry.center(here, 0));
+                position.add(behind.x * driveIn, behind.y * driveIn, 0);
             }
             BoardScene.Tile tile = scene.tile(unit.location().coords());
             if (tile != null && tile.waterDepth() == 0 && !tile.frozen() && !airborne
@@ -2173,6 +2218,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (status == null) {
             return;
         }
+        trackDriveIns(status);
         if (!status.phase().isDeployment()) {
             offBoardSince.clear();
             arrivalStarts.clear();
@@ -2206,6 +2252,45 @@ class GpuBattleView extends ApplicationAdapter {
                       now));
             }
         }
+    }
+
+    /**
+     * Walk-on: how long an own unit placed on its entry hex takes to drive in from the hex behind it, beyond the board
+     * edge. Other players' walk-ons play as their movement replay, which starts on the entry hex.
+     */
+    static final long DRIVE_IN_MILLIS = 600;
+    /** Own units seen waiting off the board this movement phase, and when each placed one began to drive in. */
+    private final Set<Integer> walkOnWaiting = new HashSet<>();
+    private final Map<Integer, Long> driveInStarts = new HashMap<>();
+
+    private void trackDriveIns(GpuBattleStatus.Snapshot status) {
+        if (!status.phase().isMovement()) {
+            walkOnWaiting.clear();
+            driveInStarts.clear();
+            return;
+        }
+        long now = TimeUtils.millis();
+        driveInStarts.values().removeIf(start -> now - start > DRIVE_IN_MILLIS);
+        for (GpuBattleStatus.UnitStatus listed : status.units()) {
+            if (listed.side() != GpuBattleStatus.Side.OWN) {
+                continue;
+            }
+            if (listed.position() == null) {
+                walkOnWaiting.add(listed.id());
+            } else if (walkOnWaiting.remove(listed.id())) {
+                driveInStarts.put(listed.id(), now);
+            }
+        }
+    }
+
+    /** How far the unit still is from its entry hex: 1 behind it, 0 there (eased), 0 when it is not driving in. */
+    private float driveInRemaining(int id) {
+        Long start = driveInStarts.get(id);
+        if (start == null) {
+            return 0;
+        }
+        float progress = MathUtils.clamp((TimeUtils.millis() - start) / (float) DRIVE_IN_MILLIS, 0, 1);
+        return 1 - Interpolation.pow2Out.apply(progress);
     }
 
 
