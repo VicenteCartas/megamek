@@ -241,6 +241,63 @@ class FormationTypeTest {
     }
 
     @Test
+    void qualify_reportsEachAlternativeOfAnUnmetPair_withItsShortfall() throws Exception {
+        FormationType ft = createFormationWithPairedJuggernautOrSniper();
+        MekSummary sniper = mockTank(SNIPER);
+
+        FormationQualification result = ft.qualify(List.of(sniper, mockTank(BRAWLER), mockTank(BRAWLER),
+              mockTank(BRAWLER)));
+
+        assertFalse(result.qualifies());
+        assertEquals(FormationQualification.Verdict.FAILS, result.verdict());
+        List<FormationQualification.Requirement> unmet = result.unmet();
+        assertEquals(List.of("Juggernaut", "Sniper"), unmet.stream().map(FormationQualification.Requirement::description)
+              .toList());
+        assertEquals(1, unmet.get(0).shortfall());
+        assertEquals(List.of(sniper), unmet.get(1).matching());
+        assertTrue(unmet.get(1).orPrevious(), "The Sniper alternative is the second of its pair");
+    }
+
+    @Test
+    void qualify_countsBothAlternativesOfAPairMet_whenEitherIs() throws Exception {
+        FormationType ft = createFormationWithPairedJuggernautOrSniper();
+
+        FormationQualification result = ft.qualify(List.of(mockTank(SNIPER), mockTank(SNIPER), mockTank(BRAWLER),
+              mockTank(BRAWLER)));
+
+        assertTrue(result.qualifies());
+        assertTrue(result.unmet().isEmpty(), "Two Snipers meet the Juggernaut alternative too");
+        assertEquals(FormationQualification.Verdict.QUALIFIES, result.verdict());
+    }
+
+    @Test
+    void qualify_cannotVerifyARoleRule_whenUnitsHaveNoRole() {
+        FormationType lightFire = FormationType.getFormationType("Light Fire");
+        List<MekSummary> units = List.of(mockTank(UnitRole.UNDETERMINED), mockTank(UnitRole.UNDETERMINED),
+              mockTank(UnitRole.UNDETERMINED), mockTank(UnitRole.UNDETERMINED));
+
+        FormationQualification result = lightFire.qualify(units);
+
+        assertFalse(result.qualifies());
+        assertEquals(FormationQualification.Verdict.UNVERIFIED, result.verdict());
+        assertEquals(units, result.unknownRoles());
+    }
+
+    @Test
+    void qualify_failsOutright_onAWrongWeightClass_whateverTheRoles() {
+        FormationType lightFire = FormationType.getFormationType("Light Fire");
+        MekSummary heavy = mockTank(UnitRole.UNDETERMINED, EntityWeightClass.WEIGHT_HEAVY);
+
+        FormationQualification result = lightFire.qualify(List.of(heavy, mockTank(UnitRole.UNDETERMINED),
+              mockTank(UnitRole.UNDETERMINED), mockTank(UnitRole.UNDETERMINED)));
+
+        assertEquals(FormationQualification.Verdict.FAILS, result.verdict());
+        FormationQualification.Requirement weight = result.unmet().get(0);
+        assertEquals(FormationQualification.Kind.WEIGHT_CLASS, weight.kind());
+        assertFalse(weight.matching().contains(heavy));
+    }
+
+    @Test
     void getTooltipKey_sanitizesSpacesAndSlashes() {
         assertEquals("FormationType.Anvil.tooltip",
               FormationType.getFormationType("Anvil").getTooltipKey());
