@@ -5,7 +5,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import megamek.client.ui.Messages;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
@@ -19,14 +18,8 @@ final class GpuHudState {
     /** The centred panels; opening one closes the others (Help closes Menu, Players and Tuning). */
     enum Dialog { NONE, HELP, MENU, PLAYERS, TUNING }
 
-    /** The overlays the deployment queue's chips show while deploying, one at a time; OFF shows none. */
-    enum DeployOverlay {
-        DAMAGE, ECM, OFF;
-
-        String label() {
-            return Messages.getString("GpuBoard.hud.deploy.overlay." + name());
-        }
-    }
+    /** Deployment's overlay; OFF shows none. */
+    enum DeployOverlay { DAMAGE, OFF }
 
     /**
      * The unit sheet's tabs with the Unit Display's keys that open them, F1 to F6 (unit panel design 5.1). SYSTEMS is
@@ -56,9 +49,7 @@ final class GpuHudState {
     GpuFireOrders.AimTarget aiming;
     Dialog dialog = Dialog.NONE;
     boolean overview;
-    /** The deployment strip leaves out the units already placed (GpuDeploymentQueue). */
-    boolean hideDeployed;
-    /** Deployment's overlay, which Ctrl+wheel chose last; null until it does. */
+    /** Deployment's overlay, which the Overlays popover's Expected damage chose last; null until it does. */
     DeployOverlay deployOverlay;
     boolean chatOpen;
     /** The unit sheet is open (unit panel design 2.3): one flag, one step of the Esc chain. */
@@ -82,9 +73,13 @@ final class GpuHudState {
     int expandedOrdinal;
     /** The sheet sections the player collapsed, by their caption keys. */
     final Set<String> collapsedSections = new HashSet<>();
-    boolean forcesGrid;
-    /** The forces rail is pinned open as the full panel; unpinned it opens only while the pointer is over it. */
+    /** The forces list is pinned open; unpinned it unfolds from its rail only while the pointer rests on it. */
     boolean forcesPinned;
+    /**
+     * The contacts rail is pinned open. The utility bar's contacts toggle shows and hides the rail; the pin stays as
+     * it was.
+     */
+    boolean contactsPinned;
     /** The conditions strip is expanded to the full list of conditions. */
     boolean conditionsExpanded;
     /** The nameplate key (SHOW_NAMEPLATES) shows every nameplate: it is held, or toggled on (NameplateMode). */
@@ -158,7 +153,10 @@ final class GpuHudState {
         unit = presented(ownInspection);
         if (unit != null && unit.side() == GpuBattleStatus.Side.OWN) { return ownInspection; }
         unit = presented(focus);
-        return unit != null && unit.side() == GpuBattleStatus.Side.OWN ? focus : presentedUnits.stream()
+        if (unit != null && unit.side() == GpuBattleStatus.Side.OWN) { return focus; }
+        // Outside the local deployment turn the card waits for a pick rather than showing the first unit.
+        if (focusStatus != null && focusStatus.phase().isDeployment()) { return Entity.NONE; }
+        return presentedUnits.stream()
               .filter(candidate -> candidate.side() == GpuBattleStatus.Side.OWN)
               .mapToInt(GpuBattleStatus.UnitStatus::id).findFirst().orElse(Entity.NONE);
     }
@@ -227,7 +225,8 @@ final class GpuHudState {
             maskedStatus = status;
             presentedStatus = new GpuBattleStatus.Snapshot(status.round(), status.phase(), true,
                   status.localPlayerId(), Entity.NONE, status.turns(), status.turnIndex(), status.units(),
-                  status.initiative(), status.turnOrderHidden());
+                  status.initiative(), status.turnOrderHidden(), List.of(), GpuBattleStatus.Arc.NONE,
+                  status.incoming());
         }
         GpuHudData shown = new GpuHudData(panels.phase(), locked ? GpuMovePlan.Snapshot.EMPTY : panels.move(),
               locked ? GpuFireOrders.Snapshot.EMPTY : panels.fire(),
@@ -367,7 +366,7 @@ final class GpuHudState {
                       held.actorId() == hidden.entityId() ? Entity.NONE : held.actorId(), held.turns(), held.turnIndex(),
                       presentedUnits, held.initiative(), held.turnOrderHidden(),
                       held.links().stream().filter(link -> link.fromId() != hidden.entityId()
-                            && link.toId() != hidden.entityId()).toList(), GpuBattleStatus.Arc.NONE);
+                            && link.toId() != hidden.entityId()).toList(), GpuBattleStatus.Arc.NONE, held.incoming());
             }
         }
         return select;
@@ -378,7 +377,7 @@ final class GpuHudState {
      * phase starts at the first, or at the player's pick while it is a candidate; a finished local turn, or a focus
      * that stops being a candidate without a pick holding it, moves to the next candidate after it; during the local
      * turn the focus is the actor. The actor's commit reaches the status before its turn ends, so the focus waits for
-     * the turn's end and moves on once.
+     * the turn's end and moves on once. Outside the local deployment turn there is no focus unless the player picks one.
      */
     private int updateFocus(GpuBattleStatus.Snapshot previous, GpuBattleStatus.Snapshot next, boolean phaseStart) {
         List<Integer> candidates = next.units().stream()
@@ -413,6 +412,11 @@ final class GpuHudState {
             } else if (own(next, next.actorId())) {
                 focus = next.actorId();
             }
+        }
+        if (next.phase().isDeployment() && !next.myTurn() && !picked) {
+            // Outside the local deployment turn no unit is about to be placed: none is selected until the player
+            // picks one, and the local turn selects the unit it places.
+            focus = Entity.NONE;
         }
         // A cleared selection ends with the next turn, phase or focus unit.
         if (focus != before || phaseStart || turnBegins || turnEnded) { ownInspection = Entity.NONE; }

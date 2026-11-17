@@ -70,7 +70,9 @@ import megamek.common.planetaryConditions.Fog;
 import megamek.common.turns.SpecificEntityTurn;
 import megamek.common.turns.UnloadStrandedTurn;
 import megamek.common.units.Aero;
+import megamek.common.units.AeroSpaceFighter;
 import megamek.common.units.Entity;
+import megamek.common.units.EntityClassTurn;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.EntityWeightClass;
 import megamek.common.units.Infantry;
@@ -793,6 +795,47 @@ class GpuBattleStatusTest {
     void captureRefusesToReadTheGameOffTheSwingThread() {
         assertThrows(IllegalStateException.class, () -> new GpuBattleStatus().capture(new Game(), null, null,
               Entity.NONE, entity -> true, entity -> true, entity -> null));
+    }
+
+    /**
+     * Aerospace units have deployment turns of their own after every ground turn: until the local player's next turn
+     * is one, a fighter waits for the ground units, whoever's turn it is now.
+     */
+    @Test
+    void anAerospaceUnitWaitsForTheGroundUnitsUntilTheLocalPlayersNextTurnTakesIt() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            AtomicReference<List<GpuBattleStatus.Wait>> waits = new AtomicReference<>(new ArrayList<>());
+            SwingUtilities.invokeAndWait(() -> {
+                Game game = fixture.game;
+                game.setPhase(GamePhase.DEPLOYMENT);
+                fixture.entity.setPosition(null);
+                fixture.entity.setDeployed(false);
+                AeroSpaceFighter fighter = new AeroSpaceFighter();
+                fighter.setId(2);
+                fighter.setOwner(fixture.player);
+                fighter.setChassis("Stuka");
+                fighter.setAltitude(5);
+                game.addEntity(fighter, false);
+                int aerospace = EntityClassTurn.CLASS_AERO | EntityClassTurn.CLASS_SMALL_CRAFT
+                      | EntityClassTurn.CLASS_DROPSHIP | EntityClassTurn.CLASS_JUMPSHIP
+                      | EntityClassTurn.CLASS_WARSHIP | EntityClassTurn.CLASS_SPACE_STATION;
+                game.setTurnVector(List.of(new GameTurn(1), new EntityClassTurn(0, ~aerospace),
+                      new EntityClassTurn(0, EntityClassTurn.CLASS_AERO)));
+                GpuBattleStatus status = new GpuBattleStatus();
+                for (int index = 0; index < 3; index++) {
+                    game.setTurnIndex(index, Player.PLAYER_NONE);
+                    GameTurn active = index == 0 ? null : game.getTurn();
+                    GpuBattleStatus.Snapshot shown = status.capture(game, fixture.player, active, Entity.NONE,
+                          entity -> true, entity -> true, entity -> null);
+                    waits.get().add(unit(shown, 2).deployWait());
+                    waits.get().add(unit(shown, fixture.entity.getId()).deployWait());
+                }
+            });
+            assertEquals(List.of(GpuBattleStatus.Wait.AFTER_GROUND, GpuBattleStatus.Wait.NONE,
+                        GpuBattleStatus.Wait.AFTER_GROUND, GpuBattleStatus.Wait.NONE,
+                        GpuBattleStatus.Wait.NONE, GpuBattleStatus.Wait.NONE), waits.get(),
+                  "The opponent's turn and the ground turn hold the fighter back; its own turn and the Mek never wait");
+        }
     }
 
     /**

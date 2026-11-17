@@ -53,7 +53,7 @@ public final class FirePreview {
     /** Why something was not previewed. */
     public enum Reason {
         UNSUPPORTED_UNIT, UNSUPPORTED_STATE, UNSUPPORTED_STEP, ILLEGAL_PATH, STALE_PLAN, NOT_MOVEMENT_PHASE,
-        OTHER_BOARD, NOT_A_TARGET, FIRES_AUTOMATICALLY, OTHER_PHASE_WEAPON, DUMPING_AMMO;
+        OTHER_BOARD, NOT_A_TARGET, FIRES_AUTOMATICALLY, OTHER_PHASE_WEAPON, DUMPING_AMMO, WALK_ON;
 
         /** The localized explanation. */
         public String description() {
@@ -133,6 +133,10 @@ public final class FirePreview {
             // Other phases can hold declared twists and attacks: forward would not be the twist a move leaves, and a
             // secondary-target modifier would break the exact early stop of compute.
             return Reason.NOT_MOVEMENT_PHASE;
+        }
+        // A walk-on move starts off the board, which the hypothetical state cannot stand the unit in.
+        if (plan.contains(MoveStepType.DEPLOY)) {
+            return Reason.WALK_ON;
         }
         Reason refused = HypotheticalState.refusal(live);
         if (refused != null) {

@@ -104,7 +104,10 @@ final class GpuTuningPanel implements GpuHud.Component {
         });
         root.setName("tuning-panel");
         root.top().right();
-        button = GpuUtilityBar.utility(ui, "tune", "GpuBoard.hud.tuning.title", "tuning-button");
+        // A developer's tool, marked so in amber; it goes before release.
+        button = GpuUtilityBar.utility(ui, "tune", "GpuBoard.hud.tuning.dev", "tuning-button");
+        button.getLabel().setColor(UiTheme.AMBER);
+        button.icons.forEach(icon -> icon.setColor(UiTheme.AMBER));
         onChange(button, () -> state.toggle(GpuHudState.Dialog.TUNING));
     }
 
@@ -145,7 +148,7 @@ final class GpuTuningPanel implements GpuHud.Component {
         }
         if (!metrics.equals(sized)) {
             sized = metrics;
-            float top = GpuUtilityBar.HEIGHT + 2 * metrics.gap();
+            float top = GpuUtilityBar.HEIGHT + GpuUtilityBar.DEV_HEIGHT + 3 * metrics.gap();
             root.pad(top, 0, 0, metrics.gap());
             panelCell.width(Math.min(WIDTH, metrics.width() - 2 * metrics.gap()))
                   .maxHeight(metrics.height() - top - BOTTOM);

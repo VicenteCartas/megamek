@@ -32,8 +32,8 @@ import megamek.common.board.Coords;
  * how far the nearest enemy stands and, in coral, a hazard placing a unit there brings (as the ghost's red tint
  * does).</p>
  *
- * <p>In deployment, a unit on the map that is not the player's shows what its queue card tells instead: its name, then
- * its tonnage, pilot, skills and MP, and whether it starts damaged.</p>
+ * <p>A hovered unit, the player's own included, has no card: its nameplate grows a line with what a card would add
+ * ({@link GpuNameplates}). A sensor contact keeps the hex's card, as does the unit being placed.</p>
  */
 final class GpuHexTip implements GpuHud.Component {
     /** Seconds the pointer rests on a hex before its card shows: Swing's default tooltip delay. */
@@ -57,11 +57,6 @@ final class GpuHexTip implements GpuHud.Component {
     private final Cell<Label> headCell;
     private final Cell<Label> bodyCell;
     private final Cell<Label> alertCell;
-    /** The peeked unit's armor and structure, under its card's text. */
-    private final Table gauges = new Table();
-    private final GpuDeploymentQueue.ArmorBar armor;
-    private final GpuDeploymentQueue.ArmorBar structure;
-    private final Cell<Table> gaugesCell;
     private final Vector2 pointer = new Vector2();
     private final Vector2 rest = new Vector2();
     /** The hex the pointer rests on, or null. */
@@ -86,16 +81,6 @@ final class GpuHexTip implements GpuHud.Component {
         card.row();
         alert = ui.label("", "hud-small", 11.5f, UiTheme.CORAL);
         alertCell = card.add(alert).left();
-        card.row();
-        armor = GpuDeploymentQueue.ArmorBar.armor(ui);
-        structure = GpuDeploymentQueue.ArmorBar.structure(ui);
-        gauges.add(ui.label(text("GpuBoard.hud.common.armor"), "hud-small", 10, UiTheme.MUTED)).left().padRight(6);
-        gauges.add(armor).growX().height(4).row();
-        gauges.add(ui.label(text("GpuBoard.hud.common.structure"), "hud-small", 10, UiTheme.MUTED)).left()
-              .padRight(6);
-        gauges.add(structure).growX().height(4);
-        gaugesCell = card.add(gauges).growX().padTop(4);
-        gaugesCell.setActor(null);
         root.addActor(card);
     }
 
@@ -117,24 +102,11 @@ final class GpuHexTip implements GpuHud.Component {
         stage.screenToStageCoordinates(pointer.set(Gdx.input.getX(), Gdx.input.getY()));
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         boolean placing = status.myTurn() && status.phase().isDeployment();
-        GpuBattleStatus.UnitStatus peeked = status.phase().isDeployment() ? state.presented(inputs.view().hoveredUnit())
-              : null;
-        if (peeked != null && peeked.side() != GpuBattleStatus.Side.OWN && !peeked.sensorContact()) {
-            // Deployment's peek at a unit on the map that is not the player's: what the queue's card tells of it.
-            if (!hex.equals(restHex)) {
-                hide();
-                restHex = hex;
-                rested = 0;
-            }
-            rested += Gdx.graphics.getDeltaTime();
-            if (placing || rested >= DELAY) {
-                rest.set(pointer);
-                armor.set(peeked.armor());
-                structure.set(peeked.structure());
-                show(GpuDeploymentQueue.title(peeked), GpuDeploymentQueue.facts(peeked),
-                      peeked.damageLevel() > 0 ? text("GpuBoard.hud.deploy.damaged") : null,
-                      peeked.armor() >= 0 || peeked.structure() >= 0, stage);
-            }
+        GpuBattleStatus.UnitStatus peeked = state.presented(inputs.view().hoveredUnit());
+        // A hovered unit's nameplate shows its details; the unit being placed keeps the placement's readout.
+        if (peeked != null && !peeked.sensorContact() && !(placing && peeked.id() == status.actorId())) {
+            restHex = null;
+            hide();
             return;
         }
         if (placing) {
@@ -146,7 +118,7 @@ final class GpuHexTip implements GpuHud.Component {
             int nearest = nearestEnemy(hex);
             String enemy = nearest < 0 ? "" : text("GpuBoard.hud.deploy.nearestEnemy", nearest);
             String body = lines == null ? enemy : enemy.isEmpty() ? lines : lines + "\n" + enemy;
-            show(text("GpuBoard.hud.context.hex", hex.getBoardNum()), body, hazard(tile), false, stage);
+            show(text("GpuBoard.hud.context.hex", hex.getBoardNum()), body, hazard(tile), stage);
             return;
         }
         if (!hex.equals(restHex) || !card.isVisible() && pointer.dst(rest) > DRIFT) {
@@ -162,7 +134,7 @@ final class GpuHexTip implements GpuHud.Component {
         rested += Gdx.graphics.getDeltaTime();
         String lines = rested < DELAY ? null : GpuContextMenu.hexLines(inputs.frame(), hex);
         if (lines != null) {
-            show(text("GpuBoard.hud.context.hex", hex.getBoardNum()), lines, null, false, stage);
+            show(text("GpuBoard.hud.context.hex", hex.getBoardNum()), lines, null, stage);
         }
     }
 
@@ -200,11 +172,11 @@ final class GpuHexTip implements GpuHud.Component {
      * head, the title and the terrain line, breaks only between its terms ({@link #balance}); MegaMek's lines below it
      * stay as they are.
      */
-    private void show(String title, String lines, String warning, boolean gauged, Stage stage) {
+    private void show(String title, String lines, String warning, Stage stage) {
         if (lines == null) {
             lines = "";
         }
-        String text = title + "\n" + lines + "\n" + warning + "\n" + gauged;
+        String text = title + "\n" + lines + "\n" + warning;
         if (!text.equals(shown)) {
             shown = text;
             int newline = lines.indexOf('\n');
@@ -226,7 +198,6 @@ final class GpuHexTip implements GpuHud.Component {
             fit(bodyCell, body, width);
             alert.setText(warning == null ? "" : warning);
             alertCell.setActor(warning == null ? null : alert);
-            gaugesCell.setActor(gauged ? gauges : null);
             card.pack();
         }
         float x = rest.x + OFFSET_X;

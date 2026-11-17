@@ -62,8 +62,7 @@ class GpuLivePlaybackSmokeTest {
     /**
      * C.6 and the log, forces and labels during live playback: the Atlas's armor drop shows on its card, its forces
      * tile and its overview card only after the Quickdraw's shots played; each shot counts in the log's totals and
-     * pops up at its target as it lands. The Atlas's forces line holds the phase from before the report, as the whole
-     * HUD does, and counts the shots once they have played. The dock's speed and pause steer the board's playback, and
+     * pops up at its target as it lands. The dock's speed and pause steer the board's playback, and
      * a paused playback holds its newest pop-up.
      */
     @Test
@@ -83,9 +82,6 @@ class GpuLivePlaybackSmokeTest {
                 List<String> doll = play.texts("unit-card-doll");
                 assertTrue(doll.contains(String.valueOf(before.armor())) && !doll.contains(lost), () -> "" + doll);
                 assertEquals(List.of("0", "0"), play.totals(), "The log counts no shot yet");
-                String counted = Messages.getString("GpuBoard.hud.status.attacks", 1, 1);
-                assertTrue(play.texts("forces-unit-" + ATLAS).stream().noneMatch(text -> text.contains(counted)),
-                      "The Atlas's review line counts no shot yet");
 
                 // The utility row's speeds are the board's: at 2x a shot's clock runs twice as fast.
                 play.click(live.actor("utility-speed-double"));
@@ -102,8 +98,6 @@ class GpuLivePlaybackSmokeTest {
                 assertEquals(List.of(hit(5, "CT")), play.popUps, "Its pop-up");
                 play.assertAtTarget(ARCHER);
                 assertEquals(List.of("1", "0"), play.totals());
-                assertTrue(play.texts("forces-unit-" + ATLAS).stream().noneMatch(text -> text.contains(counted)),
-                      "The forces line holds the phase from before the report until the playback ends");
                 assertEquals(1, play.atlas().armor(), "The Quickdraw's volley still waits: no damage shows");
 
                 // The dock pauses the board: nothing more lands, and the newest pop-up stays, held young.
@@ -130,8 +124,6 @@ class GpuLivePlaybackSmokeTest {
                 // Once the volley has played, the HUD shows the client's units.
                 assertTrue(play.until(() -> !play.history.running()), "The playback ends");
                 assertEquals(List.of("3", "1"), play.totals());
-                assertTrue(play.texts("forces-unit-" + ATLAS).stream().anyMatch(text -> text.contains(counted)),
-                      () -> "The Atlas's review line counts its shot: " + play.texts("forces-unit-" + ATLAS));
                 assertEquals(Set.of(hit(5, "CT"), hit(10, "CT"), hit(5, "LT"), UiTheme.upper(
                       Messages.getString("GpuBoard.hud.common.miss")) + " "
                       + Messages.getString("GpuBoard.hud.labels.missRoll", 7, 9)), Set.copyOf(play.popUps),
@@ -143,7 +135,6 @@ class GpuLivePlaybackSmokeTest {
                       () -> "The card's doll shows the new armor and the loss: " + damaged);
                 String percent = String.valueOf(Math.round(play.atlas().armor() * 100));
                 assertTrue(play.overview(ATLAS).contains(percent), "The overview card's armor share");
-                assertEquals((float) play.atlas().armor(), play.tileArmor(ATLAS), .0001f, "The forces tile's bar");
             });
         }
     }
@@ -597,16 +588,6 @@ class GpuLivePlaybackSmokeTest {
             live.hud.state.overview = false;
             live.draw(1, 0);
             return texts;
-        }
-
-        /** The armor share of unit {@code id}'s tile in the forces grid, shown for one frame. */
-        float tileArmor(int id) throws Exception {
-            live.hud.state.forcesGrid = true;
-            live.draw(1, 0);
-            float armor = (float) field(live.actor("forces-tile-" + id), "armor");
-            live.hud.state.forcesGrid = false;
-            live.draw(1, 0);
-            return armor;
         }
 
         /** The log's card of step {@code number}. */

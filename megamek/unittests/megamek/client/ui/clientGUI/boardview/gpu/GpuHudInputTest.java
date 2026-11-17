@@ -296,8 +296,8 @@ class GpuHudInputTest {
         assertTrue(press(Input.Keys.D, KeyEvent.VK_D, CTRL_DOWN_MASK));
         assertTrue(hud.state.recordOpen && !hud.state.overview, "over the overview it closes it and shows the sheet");
         update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true)));
-        assertTrue(press(Input.Keys.G, KeyEvent.VK_G, 0));
-        assertTrue(hud.state.forcesGrid && !hud.state.recordOpen, "one wide left panel at a time: G shows the grid");
+        assertTrue(press(Input.Keys.D, KeyEvent.VK_D, CTRL_DOWN_MASK));
+        assertFalse(hud.state.recordOpen);
         assertEquals(GpuHudState.SheetTab.EXTRAS, hud.state.sheetTab, "the tab stays for the next opening");
     }
 

@@ -360,22 +360,27 @@ final class GpuBoardOverlay implements Disposable {
     /** Another player's arrival: its side's colour, enemies coral and allies blue. */
     private static final Color ARRIVAL_ENEMY = new Color(1f, .42f, .36f, 1);
     private static final Color ARRIVAL_ALLY = new Color(.45f, .72f, 1f, 1);
-    private static final float ARRIVAL_WAVE_GAP = .4f;
-    private static final float ARRIVAL_WAVE_SECONDS = 1.3f;
-    private static final float ARRIVAL_WAVE_CYCLE = 1.8f;
-    private static final int ARRIVAL_WAVE_REPEATS = 1;
+    /** The landing repeats while the notice lasts: the route pulse's landing (GpuRoutePulse) every cycle. */
+    private static final float ARRIVAL_CYCLE = 1.5f;
+    private static final float ARRIVAL_FLASH = .5f;
+    private static final float ARRIVAL_RING_SECONDS = .75f;
+    private static final float ARRIVAL_RING_START = .9f;
+    private static final float ARRIVAL_RING_RADIUS = 1.65f;
+    private static final float ARRIVAL_ECHO = .14f;
+    private static final float ARRIVAL_ECHO_STRENGTH = .35f;
 
     /**
-     * Where another player just deployed a unit (GpuBattleView#trackArrivals): rings ripple out from its hex as it
-     * materializes, and the hex's outline beats in its side's colour until the notice ends, over everything so a
-     * player looking elsewhere on the screen catches it.
+     * Where another player just deployed or walked on a unit (GpuBattleView#trackArrivals): the hex lands as a plotted
+     * route's destination does (GpuRoutePulse), a flash and a shock ring with its fainter echo, again every cycle while
+     * the notice lasts, over everything so a player looking elsewhere on the screen catches it.
      */
     void renderArrivals(Camera camera, List<GpuArrivalCues.Arrival> arrivals, int boardId, long now) {
         if (scene == null || arrivals.isEmpty()) {
             return;
         }
         Gdx.gl.glEnable(GL20.GL_BLEND);
-        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+        // Added light, as the route pulse's glow.
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE);
         Gdx.gl.glDepthMask(false);
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         shapes.setProjectionMatrix(camera.combined);
@@ -385,7 +390,6 @@ final class GpuBoardOverlay implements Disposable {
                 if (arrival.boardId() != boardId || scene.tile(arrival.hex()) == null) {
                     continue;
                 }
-                float seconds = (now - arrival.start()) / 1000f;
                 float life = 1 - (now - arrival.start()) / (float) GpuBattleView.ARRIVAL_NOTICE_MILLIS;
                 if (life <= 0) {
                     continue;
@@ -394,44 +398,79 @@ final class GpuBoardOverlay implements Disposable {
                 Coords hex = arrival.hex();
                 Vector3 center = BoardGeometry.center(hex, 0);
                 float z = BoardTacticalGeometry.floatingZ(scene, hex);
-                float beat = .6f + .4f * MathUtils.sin(seconds * 7);
                 float fade = Math.min(1, life * 4);
-                hexRing(hex, center, z, .8f, 1.06f, color, fade * beat);
-                // Two cycles of three waves each, then only the outline beats on until the notice fades.
-                for (int wave = 0; wave < 3; wave++) {
-                    float since = seconds - wave * ARRIVAL_WAVE_GAP;
-                    if (since < 0 || since >= ARRIVAL_WAVE_REPEATS * ARRIVAL_WAVE_CYCLE) {
-                        continue;
-                    }
-                    float t = (since % ARRIVAL_WAVE_CYCLE) / ARRIVAL_WAVE_SECONDS;
-                    if (t > 1) {
-                        continue;
-                    }
-                    float scale = 1 + 3f * t;
-                    hexRing(hex, center, z, scale - .22f, scale, color, fade * (1 - t) * (1 - t));
+                float since = ((now - arrival.start()) / 1000f) % ARRIVAL_CYCLE;
+                // The hex's own ring stays lit between the landings.
+                hexGlow(hex, center, z, .84f, 1, color, 0, .55f * fade);
+                hexGlow(hex, center, z, 1, 1.08f, color, .55f * fade, 0);
+                if (since < ARRIVAL_FLASH) {
+                    float rise = .06f;
+                    float lit = since < rise ? since / rise : 1 - (since - rise) / (ARRIVAL_FLASH - rise);
+                    lit *= lit * fade;
+                    hexGlow(hex, center, z, 0, 1.1f, color, .45f * lit, 0);
                 }
+                arrivalRipple(hex, center, z, color, since, fade);
+                arrivalRipple(hex, center, z, color, since - ARRIVAL_ECHO, fade * ARRIVAL_ECHO_STRENGTH);
             }
         } finally {
             shapes.end();
+            Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
             Gdx.gl.glDepthMask(true);
             Gdx.gl.glDisable(GL20.GL_BLEND);
         }
     }
 
-    /** A hexagonal band around {@code hex} between {@code inner} and {@code outer} times its corners' distance. */
-    private void hexRing(Coords hex, Vector3 center, float z, float inner, float outer, Color color, float alpha) {
-        float bits = Color.toFloatBits(color.r, color.g, color.b, MathUtils.clamp(alpha, 0, 1));
-        Vector3[] in = new Vector3[6];
-        Vector3[] out = new Vector3[6];
-        for (int corner = 0; corner < 6; corner++) {
-            Vector3 offset = BoardGeometry.corner(hex, 0, corner).sub(center);
-            in[corner] = new Vector3(offset).scl(inner).add(center.x, center.y, z);
-            out[corner] = new Vector3(offset).scl(outer).add(center.x, center.y, z);
+    /** GpuRoutePulse#ripple about a hex: a bright edge with a soft fringe ahead and a fading wake behind. */
+    private void arrivalRipple(Coords hex, Vector3 center, float z, Color color, float since, float strength) {
+        if (since < 0 || since >= ARRIVAL_RING_SECONDS || strength <= 0) {
+            return;
         }
+        float progress = since / ARRIVAL_RING_SECONDS;
+        float left = 1 - progress;
+        float at = ARRIVAL_RING_START + (ARRIVAL_RING_RADIUS - ARRIVAL_RING_START) * (1 - left * left * left);
+        float fade = strength * (1 - progress * progress * (3 - 2 * progress));
+        float edge = .05f;
+        float wake = 6 * edge * (.5f + progress);
+        hexGlow(hex, center, z, at - wake, at, color, 0, .65f * fade);
+        hexGlow(hex, center, z, at, at + 2 * edge, color, .7f * fade, 0);
+        hexGlow(hex, center, z, at - edge, at, color, fade, fade);
+    }
+
+    /**
+     * A hexagonal band around {@code hex} between {@code inner} and {@code outer} times its corners' distance, its
+     * opacity running from {@code alphaIn} at the inner edge to {@code alphaOut} at the outer.
+     */
+    private void hexGlow(Coords hex, Vector3 center, float z, float inner, float outer, Color color, float alphaIn,
+          float alphaOut) {
+        float in = Color.toFloatBits(color.r, color.g, color.b, MathUtils.clamp(alphaIn, 0, 1));
+        float out = Color.toFloatBits(color.r, color.g, color.b, MathUtils.clamp(alphaOut, 0, 1));
+        ImmediateModeRenderer renderer = shapes.getRenderer();
         for (int corner = 0; corner < 6; corner++) {
-            int next = (corner + 1) % 6;
-            triangle(out[corner], out[next], in[next], bits);
-            triangle(out[corner], in[next], in[corner], bits);
+            Vector3 a = BoardGeometry.corner(hex, 0, corner).sub(center);
+            Vector3 b = BoardGeometry.corner(hex, 0, (corner + 1) % 6).sub(center);
+            if (renderer.getNumVertices() + 6 > renderer.getMaxVertices()) {
+                shapes.flush();
+            }
+            float ax = center.x + a.x * outer;
+            float ay = center.y + a.y * outer;
+            float bx = center.x + b.x * outer;
+            float by = center.y + b.y * outer;
+            float cx = center.x + b.x * inner;
+            float cy = center.y + b.y * inner;
+            float dx = center.x + a.x * inner;
+            float dy = center.y + a.y * inner;
+            renderer.color(out);
+            renderer.vertex(ax, ay, z);
+            renderer.color(out);
+            renderer.vertex(bx, by, z);
+            renderer.color(in);
+            renderer.vertex(cx, cy, z);
+            renderer.color(out);
+            renderer.vertex(ax, ay, z);
+            renderer.color(in);
+            renderer.vertex(cx, cy, z);
+            renderer.color(in);
+            renderer.vertex(dx, dy, z);
         }
     }
 
@@ -634,6 +673,11 @@ final class GpuBoardOverlay implements Disposable {
         batch.end();
     }
 
+    /** The hex the plotted route's ghost ({@link #renderGhost}) stands on, or null without one. */
+    Coords ghostHex() {
+        return mover == null || arrival == null ? null : arrival.coords();
+    }
+
     /**
      * The plotted route's ghost (rebuild plan A.7 G4): a copy of the instance the view draws for the moving unit
      * ({@code shown} gives it for a scene unit, or null), sharing its meshes, at the route's destination in the final
@@ -787,7 +831,7 @@ final class GpuBoardOverlay implements Disposable {
      * Null when none of them is on the board with a usable weapon.
      */
     private static Reach reach(BoardScene scene, GpuBattleStatus.Snapshot status, GpuHudState state, int hovered) {
-        if (scene == null || !status.phase().isDeployment()
+        if (scene == null || !GpuHud.damagePhase(status)
               || state.deployOverlay != GpuHudState.DeployOverlay.DAMAGE) {
             return null;
         }

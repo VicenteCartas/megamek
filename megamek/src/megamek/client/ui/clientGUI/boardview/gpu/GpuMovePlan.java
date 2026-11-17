@@ -86,14 +86,27 @@ final class GpuMovePlan implements AutoCloseable {
      * ({@code MountPathHelper.trimToMountableTransport}). {@code facingMatters} is false for a unit that takes no turn
      * commands ({@link #facingMatters}). {@code cancellable}: outside the planner, MegaMek's CANCEL has something to
      * drop (a step of the path, a walk-on unit's placement and a jump's start included; a gear other than walking; a
-     * hex pick); always false in the planner, whose route the HUD clears itself.
+     * hex pick); always false in the planner, whose route the HUD clears itself. {@code walkedOn}: the path places a
+     * walk-on unit on its entry hex (MegaMek's DEPLOY step), which {@link #withdrawWalkOn} takes back.
      */
     record Snapshot(boolean active, boolean planner, boolean external, int entityId, Mode mode, boolean explicit,
           String gearLabel, List<Step> route, List<Step> hover, List<Step> pins, Coords destination, int facing,
           int cost, int budget, EntityMovementType type, String typeLabel, boolean auto, int heat, int tmm,
           boolean legal, List<String> warnings, boolean canUndo, boolean canPin, boolean facingMatters,
-          Map<Coords, Band> envelope, Set<Integer> mounts, int holdingRemaining, boolean cancellable) {
+          Map<Coords, Band> envelope, Set<Integer> mounts, int holdingRemaining, boolean cancellable,
+          boolean walkedOn) {
         static final Snapshot EMPTY = idle(0);
+
+        /** A plan that places no walk-on unit. */
+        Snapshot(boolean active, boolean planner, boolean external, int entityId, Mode mode, boolean explicit,
+              String gearLabel, List<Step> route, List<Step> hover, List<Step> pins, Coords destination, int facing,
+              int cost, int budget, EntityMovementType type, String typeLabel, boolean auto, int heat, int tmm,
+              boolean legal, List<String> warnings, boolean canUndo, boolean canPin, boolean facingMatters,
+              Map<Coords, Band> envelope, Set<Integer> mounts, int holdingRemaining, boolean cancellable) {
+            this(active, planner, external, entityId, mode, explicit, gearLabel, route, hover, pins, destination,
+                  facing, cost, budget, type, typeLabel, auto, heat, tmm, legal, warnings, canUndo, canPin,
+                  facingMatters, envelope, mounts, holdingRemaining, cancellable, false);
+        }
 
         /** No plan (not the local movement turn, or no unit selected), with the hold's count. */
         static Snapshot idle(int holdingRemaining) {
@@ -210,7 +223,7 @@ final class GpuMovePlan implements AutoCloseable {
               shown.heat(), shown.tmm(), shown.legal(), shown.warnings(), planner && canUndo(path),
               planner && pinnable(md, path), facingMatters(entity), reach, planner ? mounts(md, entity) : Set.of(),
               held, !planner && (path.length() > 0 || md.getGear() != MovementDisplay.GEAR_LAND
-                    || md.isSelectingHex()));
+                    || md.isSelectingHex()), placesWalkOn(path));
         if (!next.equals(published)) {
             published = next;
         }
@@ -278,6 +291,31 @@ final class GpuMovePlan implements AutoCloseable {
     /** Esc and "Clear route": back to the mode's start. */
     void clearRoute() {
         command(this::clear);
+    }
+
+    /** Esc on a walk-on unit's bare placement: the unit leaves its entry hex to be placed again. */
+    void withdrawWalkOn() {
+        command(this::withdraw);
+    }
+
+    /** The dock's ✕: the route back to the mode's start, else a walk-on unit's placement. */
+    void clearOrWithdraw() {
+        command(md -> {
+            MovePath path = md.getPlannedMovement();
+            if (path.length() > base(path)) {
+                clear(md);
+            } else {
+                withdraw(md);
+            }
+        });
+    }
+
+    private void withdraw(MovementDisplay md) {
+        if (md.withdrawWalkOn()) {
+            history.clear();
+            pins = List.of();
+            external = false;
+        }
     }
 
     /**
@@ -439,6 +477,11 @@ final class GpuMovePlan implements AutoCloseable {
      */
     private void face(MovementDisplay md, int wanted) {
         MovePath path = md.getPlannedMovement();
+        if ((path.length() == base(path)) && placesWalkOn(path)) {
+            // A walk-on unit only placed on its entry hex turns there freely, as a deployed unit does.
+            md.turnWalkOnEntry(wanted);
+            return;
+        }
         if (wanted == path.getFinalFacing() || !facingMatters(path.getEntity())
               || !available(md, MoveCommand.MOVE_TURN)) { return; }
         boolean route = path.length() > base(path);
@@ -841,6 +884,10 @@ final class GpuMovePlan implements AutoCloseable {
 
     private boolean canUndo(MovePath path) {
         return !history.isEmpty() || (external && (path.length() > base(path)));
+    }
+
+    private static boolean placesWalkOn(MovePath path) {
+        return path.getStepVector().stream().anyMatch(step -> step.getType() == MoveStepType.DEPLOY);
     }
 
     /** G7: a walk or run destination that cost MP and differs from the last pin's hex or floor can be pinned. */

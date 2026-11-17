@@ -58,7 +58,6 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
-import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.Client;
@@ -72,7 +71,6 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.gdx.DisplayScale;
-import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.phaseDisplay.DeployMinefieldDisplay;
@@ -332,7 +330,7 @@ class GpuHudRoutingSmokeTest {
             // A pending dialog: no key acts, no press clicks, no wheel zooms, nothing is posted but its answer.
             camera.fit((BoardScene) field(routing.view, "scene"));
             routing.view.render();
-            Vector3 board = routing.screen(EMPTY_HEX);
+            Vector3 board = routing.screen(routing.openHex());
             DialogRequest choice = new DialogRequest(41, DialogKind.CHOICE, "Load unit", "Which unit?", false,
                   List.of("OK", "Cancel"), 0, 1, List.of(new DialogRow("Atlas", "", null, true),
                   new DialogRow("Archer", "", null, true)), List.of(0), "", false, null, null, null, List.of());
@@ -394,7 +392,7 @@ class GpuHudRoutingSmokeTest {
             routing.show(new GpuBoardSource.Frame(scene, List.of(), null, List.of(), "", frame.centerRequest(),
                   frame.boardGeneration(), "", frame.scenarioAtmosphere(), GpuReportLog.Snapshot.EMPTY,
                   frame.status(), data));
-            Vector3 board = routing.screen(EMPTY_HEX);
+            Vector3 board = routing.screen(routing.openHex());
             Actor trigger = routing.find("dock-hold-all");
             routing.press(trigger);
             assertTrue(shown(routing.find("dock-confirm")));
@@ -770,8 +768,7 @@ class GpuHudRoutingSmokeTest {
                         GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY)));
             routing.press(routing.find("forces-unit-" + OTHER_OWN_ID));
             assertEquals(OTHER_OWN_ID, state.inspected);
-            UiButton row = routing.find("forces-unit-" + OTHER_OWN_ID);
-            assertSame(row.getSkin().getDrawable("row-friend"), row.getBackground(), "a friendly unit's mint edges");
+            assertEquals(2, highlight(routing, OTHER_OWN_ID), "a friendly unit's inspected row");
             routing.capture("i1a2-forces-own-turn-inspected");
 
             // The card's ✕ closes the card and deselects: no card and no
@@ -781,9 +778,7 @@ class GpuHudRoutingSmokeTest {
             assertEquals(List.of(Entity.NONE, Entity.NONE), List.of(state.inspected, state.cardUnit()), "the ✕");
             assertFalse(shown(routing.find("unit-card")), "closes the card");
             for (int id : List.of(OWN_ID, OTHER_OWN_ID)) {
-                UiButton unitRow = routing.find("forces-unit-" + id);
-                assertFalse(unitRow.isChecked() || unitRow.getBackground() == unitRow.getSkin().getDrawable("row-friend"),
-                      "and highlights no row: " + id);
+                assertEquals(0, highlight(routing, id), "and highlights no row: " + id);
             }
             verify(routing.source, never()).selectUnit(anyInt());
             routing.press(routing.find("forces-unit-" + OTHER_OWN_ID));
@@ -816,7 +811,7 @@ class GpuHudRoutingSmokeTest {
                       scenario + ": the ✕ clears the selection");
                 assertFalse(shown(routing.find("unit-card")), scenario + ": no card");
                 assertFalse(shown(routing.find("dock-title")), scenario + ": the dock keeps only the chat");
-                assertFalse(routing.<UiButton>find("forces-unit-" + OWN_ID).isChecked(), scenario + ": no row");
+                assertEquals(0, highlight(routing, OWN_ID), scenario + ": no row");
                 clearInvocations(routing.source, routing.moves, routing.fire);
 
                 routing.click(EMPTY_HEX, Input.Buttons.LEFT, 0, 0);
@@ -860,8 +855,8 @@ class GpuHudRoutingSmokeTest {
     /**
      * The unit the card shows is the one highlighted row of the forces list, in the initiative phase, the own movement
      * turn and the opponent's. Panel clicks and board clicks switch it from a friendly unit to the enemy and back: a
-     * friendly unit's forces row, the enemy's row in the forces list's contacts, never a second row; in the own turn
-     * the acting unit keeps its "Acting now" line meanwhile. The forces grid's tiles follow the same rule.
+     * friendly unit's forces row, no row for the enemy (the list holds the own side), never a second row; in the own
+     * turn the acting unit keeps its Now tag meanwhile.
      */
     @Test
     void theCardsUnitIsTheOneHighlightedRowOfTheLists() throws Exception {
@@ -881,21 +876,13 @@ class GpuHudRoutingSmokeTest {
                 // The C.5 focus: the Atlas, or after the own turn the next own unit.
                 assertHighlighted(routing, state.focus(), scenario + ": the focus");
 
-                // Panel clicks: the other friendly unit, the enemy's row in the forces list's contacts, the first
-                // friendly unit.
+                // Panel clicks: the other friendly unit, then the first friendly unit (the list holds no enemies).
                 routing.press(routing.find("forces-unit-" + OTHER_OWN_ID));
                 assertHighlighted(routing, OTHER_OWN_ID, scenario + ": a friendly forces row");
                 if (own) {
-                    assertEquals("Acting now", routing.<GpuHudKit.UnitRow>find("forces-unit-" + OWN_ID).line
-                          .getText().toString(), scenario + ": the actor keeps its line");
-                }
-                routing.press(routing.find("forces-tab-contacts"));
-                routing.press(routing.find("forces-unit-" + FOE_ID));
-                assertHighlighted(routing, FOE_ID, scenario + ": the enemy's contacts row");
-                routing.press(routing.find("forces-tab-friendly"));
-                if (own) {
-                    assertEquals("Acting now", routing.<GpuHudKit.UnitRow>find("forces-unit-" + OWN_ID).line
-                          .getText().toString(), scenario + ": the actor keeps its line, unhighlighted");
+                    assertTrue(GpuBoardTestUi.texts(routing.find("forces-unit-" + OWN_ID))
+                          .contains(UiTheme.upper(Messages.getString("GpuBoard.hud.forces.now"))),
+                          scenario + ": the actor keeps its Now tag, unhighlighted");
                 }
                 routing.press(routing.find("forces-unit-" + OWN_ID));
                 assertHighlighted(routing, OWN_ID, scenario + ": the first friendly forces row");
@@ -909,12 +896,10 @@ class GpuHudRoutingSmokeTest {
                 routing.view.render();
                 assertHighlighted(routing, OWN_ID, scenario + ": the Atlas clicked on the board");
 
-                // The forces list's contacts tab highlights the board-clicked enemy, and still no friendly row.
-                routing.press(routing.find("forces-tab-contacts"));
+                // The board-clicked enemy again: still no friendly row.
                 routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
                 routing.view.render();
-                assertHighlighted(routing, FOE_ID, scenario + ": the enemy in the contacts tab");
-                routing.press(routing.find("forces-tab-friendly"));
+                assertHighlighted(routing, FOE_ID, scenario + ": the enemy clicked again");
                 if (scenario.phase() == GamePhase.INITIATIVE) {
                     routing.capture("ux2-highlight-initiative-enemy");
                 }
@@ -922,21 +907,6 @@ class GpuHudRoutingSmokeTest {
                 routing.view.render();
                 assertEquals(Entity.NONE, state.inspected, scenario + ": Esc ends the inspection");
                 assertHighlighted(routing, OWN_ID, scenario + ": the focus again");
-
-                // The grid's tiles: the focus's in mint; another friendly unit's click picks it (outside the turn) or
-                // inspects it (inside, mint edges); no friendly tile while the enemy is shown.
-                state.forcesGrid = true;
-                routing.view.render();
-                assertTile(routing, OWN_ID, "field-focused", scenario + ": the focus's tile");
-                assertTile(routing, OTHER_OWN_ID, "row", scenario + ": another tile");
-                routing.press(routing.find("forces-tile-" + OTHER_OWN_ID));
-                assertTile(routing, OTHER_OWN_ID, own ? "row-friend" : "field-focused", scenario + ": its click");
-                assertTile(routing, OWN_ID, "row", scenario + ": one tile");
-                routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
-                routing.view.render();
-                assertTile(routing, OTHER_OWN_ID, "row", scenario + ": no friendly tile while the enemy is shown");
-                assertTile(routing, OWN_ID, "row", scenario + ": nor the focus's");
-                state.forcesGrid = false;
             }
         });
     }
@@ -961,7 +931,7 @@ class GpuHudRoutingSmokeTest {
             assertTrue(list.isScrollY(), "the forces list scrolls");
             BoardCamera camera = routing.view.boardCamera;
             Vector3 overList = routing.screen(list);
-            Vector3 board = routing.screen(EMPTY_HEX);
+            Vector3 board = routing.screen(routing.openHex());
             for (boolean pressed : new boolean[] { false, true }) {
                 list.setScrollY(0);
                 list.updateVisualScroll();
@@ -986,21 +956,19 @@ class GpuHudRoutingSmokeTest {
     }
 
     /**
-     * The one highlighted row of the forces list is the unit's: its forces row, for an enemy while the list shows its
-     * contacts; the card shows the unit, an enemy on the card for other units.
+     * The one highlighted row of the forces list is the unit's forces row, none for an enemy, which the list does not
+     * hold; the card shows the unit, an enemy on the card for other units.
      */
     private static void assertHighlighted(Routing routing, int unitId, String when) {
         Set<String> expected = new HashSet<>();
         boolean enemy = unitId == FOE_ID;
-        if (!enemy || shown(routing.find("forces-unit-" + unitId))) {
+        if (!enemy) {
             expected.add("forces-unit-" + unitId);
         }
         Set<String> highlighted = new HashSet<>();
         for (int id : List.of(OWN_ID, FOE_ID, OTHER_OWN_ID)) {
-            GpuHudKit.UnitRow row = routing.find("forces-unit-" + id);
-            if (row != null && shown(row) && (row.isChecked()
-                  || row.getBackground() == row.getSkin().getDrawable("row-friend")
-                  || row.getBackground() == row.getSkin().getDrawable("row-foe"))) {
+            Actor row = routing.find("forces-unit-" + id);
+            if (row != null && shown(row) && highlight(routing, id) != 0) {
                 highlighted.add("forces-unit-" + id);
             }
         }
@@ -1009,12 +977,9 @@ class GpuHudRoutingSmokeTest {
         assertEquals(UiTheme.upper("Unit " + unitId), name.getText().toString(), when + ": the card");
     }
 
-    /** The forces grid's tile of the unit shows the named skin drawable. */
-    private static void assertTile(Routing routing, int unitId, String drawable, String when) {
-        Table tile = routing.find("forces-tile-" + unitId);
-        assertNotNull(tile, when);
-        Skin skin = routing.<UiButton>find("utility-map").getSkin();
-        assertSame(skin.getDrawable(drawable), tile.getBackground(), when);
+    /** A forces row's card highlight: 0 none, 1 the selected focus, 2 an inspected unit. */
+    private static int highlight(Routing routing, int unitId) {
+        return field(routing.find("forces-unit-" + unitId), "highlight");
     }
 
     /** The unit is the shown, selected one: the focus, its forces row pressed in mint, the card showing it. */
@@ -1022,9 +987,7 @@ class GpuHudRoutingSmokeTest {
         assertEquals(List.of(unitId, Entity.NONE), List.of(routing.hud.state.focus(), routing.hud.state.inspected),
               when + ": focus and inspection");
         for (int id : List.of(OWN_ID, OTHER_OWN_ID)) {
-            UiButton row = routing.find("forces-unit-" + id);
-            assertEquals(id == unitId, row.isChecked(), when + ": row " + id + " selected");
-            assertNotEquals(row.getSkin().getDrawable("row-foe"), row.getBackground(), when + ": a friendly row");
+            assertEquals(id == unitId ? 1 : 0, highlight(routing, id), when + ": row " + id + " selected");
         }
         Label name = routing.find("unit-card-name");
         assertEquals(UiTheme.upper("Unit " + unitId), name.getText().toString(), when + ": the card");
@@ -1091,6 +1054,9 @@ class GpuHudRoutingSmokeTest {
             assertEquals(GpuHudState.Dialog.NONE, state.dialog, "one Esc closes the Players panel");
             // The next frame lays out the closed dialog's backdrop, which takes presses until then.
             routing.view.render();
+            routing.press(routing.find("utility-view"));
+            routing.view.render();
+            // The View popover hangs over the Tuning pill under the utility plate: close it first.
             routing.press(routing.find("utility-view"));
             routing.view.render();
             routing.press(routing.find("tuning-button"));
@@ -1230,7 +1196,7 @@ class GpuHudRoutingSmokeTest {
             // Esc clears the selection, or opens the Menu; F10 always toggles it.
             case CANCEL, GAME_MENU, SHOW_NAMEPLATES, ROUND_REPORT, KEY_BINDS, BOT_COMMANDS, LOS_SETTING,
                  UNIT_OVERVIEW, FORCE_DISPLAY, UNIT_DISPLAY, UD_GENERAL, UD_PILOT, UD_ARMOR, UD_WEAPONS, UD_SYSTEMS,
-                 UD_EXTRAS, FORCES_GRID, TOGGLE_CHAT, TOGGLE_CHAT_CMD, DONE -> true;
+                 UD_EXTRAS, TOGGLE_CHAT, TOGGLE_CHAT_CMD, DONE, TACTICAL_OVERLAYS -> true;
             case MOVE_MODE_WALK, MOVE_MODE_RUN, MOVE_MODE_JUMP, TURN_LEFT, TURN_RIGHT -> scenario.planning();
             case TWIST_LEFT, TWIST_RIGHT -> firing;
             case UNDO_LAST_STEP, CLEAR_ORDERS -> scenario.planning() || firing;
@@ -1452,7 +1418,6 @@ class GpuHudRoutingSmokeTest {
             state.chatOpen = false;
             state.dialog = GpuHudState.Dialog.NONE;
             state.recordOpen = false;
-            state.forcesGrid = false;
             state.inspected = Entity.NONE;
             state.armedWeapon = -1;
             state.allNameplates = false;
@@ -1583,6 +1548,27 @@ class GpuHudRoutingSmokeTest {
             Vector3 point = view.screenPosition(hex);
             assertFalse(hud.hit(Math.round(point.x), Math.round(point.y)), hex + " lies under a HUD panel");
             return point;
+        }
+
+        /** {@link #EMPTY_HEX}, or where panels cover it, the first board hex in the window that no panel covers. */
+        Coords openHex() {
+            BoardScene scene = field(view, "scene");
+            List<Coords> hexes = new ArrayList<>(List.of(EMPTY_HEX));
+            for (int y = 0; y < scene.height(); y++) {
+                for (int x = 0; x < scene.width(); x++) {
+                    hexes.add(new Coords(x, y));
+                }
+            }
+            for (Coords hex : hexes) {
+                Vector3 point = view.screenPosition(hex);
+                int x = Math.round(point.x);
+                int y = Math.round(point.y);
+                if (!hex.equals(OWN_HEX) && !hex.equals(FOE_HEX) && x > 0 && y > 0 && x < Gdx.graphics.getWidth()
+                      && y < Gdx.graphics.getHeight() && !hud.hit(x, y)) {
+                    return hex;
+                }
+            }
+            throw new AssertionError("Every board hex lies under a HUD panel");
         }
 
         /** The window point (y down) of an actor's centre. */

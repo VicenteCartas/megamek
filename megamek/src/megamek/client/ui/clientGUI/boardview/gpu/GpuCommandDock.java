@@ -63,7 +63,8 @@ final class GpuCommandDock implements GpuHud.Component {
      * Stand up in Jump's place.
      */
     private record Shape(Variant variant, List<String> buttons, boolean more, boolean primary, boolean secondary,
-          boolean stop, boolean legend, boolean steps, boolean backwards, boolean turns, boolean standUp) { }
+          boolean stop, boolean legend, boolean steps, boolean backwards, boolean turns, boolean standUp,
+          boolean heights) { }
 
     /**
      * The More popover's content (plan A.7 G14, A.8 H38, C.2), which G12 shows above the More button: a title and
@@ -91,10 +92,14 @@ final class GpuCommandDock implements GpuHud.Component {
     /** The physical options the option row shows (the prototype's four limbs), and the generic phase commands. */
     private static final int OPTIONS = 4;
     private static final int COMMANDS = 5;
-    /** Deployment's compact dock: its row's commands, and those only More offers. */
+    /**
+     * Deployment's compact dock: its row's commands, and those the row leaves to More (Clear, also the secondary
+     * button, among them).
+     */
     private static final int DEPLOY_COMMANDS = 2;
+    private static final String DEPLOY_CLEAR = DeployCommand.DEPLOY_CLEAR_DEPLOY.getCmd();
     private static final Set<String> DEPLOY_MORE_ONLY = Set.of(DeployCommand.DEPLOY_NEXT.getCmd(),
-          DeployCommand.DEPLOY_TURN.getCmd(), DeployCommand.DEPLOY_REMOVE.getCmd());
+          DeployCommand.DEPLOY_TURN.getCmd(), DeployCommand.DEPLOY_REMOVE.getCmd(), DEPLOY_CLEAR);
     private static final String SEPARATOR = " \u00B7 ";
     private static final Color WAITING = Color.valueOf("8A9593");
     private static final List<GpuMovePlan.Mode> MODES = List.of(GpuMovePlan.Mode.WALK, GpuMovePlan.Mode.RUN,
@@ -143,7 +148,6 @@ final class GpuCommandDock implements GpuHud.Component {
     private final Cell<Table> headCell;
     private final Cell<Actor> row1Cell;
     private final Cell<Actor> row2Cell;
-    private final UiButton chatButton;
     private final UiButton main;
     private final UiButton secondary;
     private final UiButton more;
@@ -161,6 +165,7 @@ final class GpuCommandDock implements GpuHud.Component {
     private final UiButton waypoint;
     private final UiKit.Checkbox backwards;
     private final UiButton clearRoute;
+    private final TextTooltip clearRouteTip;
     private final UiButton holdAll;
     // Weapon declaration.
     private final UiButton twistLeft;
@@ -171,6 +176,11 @@ final class GpuCommandDock implements GpuHud.Component {
     private final UiButton clear;
     private final UiButton resolve;
     private final UiConfirmation confirmation;
+    // Deployment: the placed unit's height stepper.
+    private final GpuDeployHeight deployHeight;
+    private final UiButton heightDown;
+    private final UiButton height;
+    private final UiButton heightUp;
     // Another player's turn.
     private final Container<Label> waiting;
     // Playback and review.
@@ -211,13 +221,13 @@ final class GpuCommandDock implements GpuHud.Component {
      * More button (A.7 G14, G12).
      */
     GpuCommandDock(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera, GpuContextMenu menu,
-          UiButton chatButton) {
+          GpuDeployHeight deployHeight) {
         ui = kit.ui;
         this.source = source;
         this.state = state;
         this.camera = camera;
         this.menu = menu;
-        this.chatButton = chatButton;
+        this.deployHeight = deployHeight;
         root = ui.panel();
         root.setName("command-dock");
         // #dock padding 9 12 8, inside the 2-unit rails and the transparent side borders.
@@ -277,8 +287,9 @@ final class GpuCommandDock implements GpuHud.Component {
         backwards.setName("dock-backwards");
         onChange(backwards, () -> source.moves().setMode(GpuMovePlan.Mode.BACK));
         clearRoute = button("hud-mini", null, "X", null, "dock-clear-route");
-        onChange(clearRoute, () -> source.moves().clearRoute());
-        ui.tip(clearRoute).getActor().setText(text("GpuBoard.hud.dock.clearRoute"));
+        onChange(clearRoute, () -> source.moves().clearOrWithdraw());
+        clearRouteTip = ui.tip(clearRoute);
+        clearRouteTip.getActor().setText(text("GpuBoard.hud.dock.clearRoute"));
         holdAll = button("hud-mini", null, text("GpuBoard.hud.dock.holdAllButton"), null, "dock-hold-all");
         onChange(holdAll, () -> requestConfirmation(Confirm.HOLD_ALL));
         ui.tip(holdAll).getActor().setText(text("GpuBoard.hud.dock.holdAll"));
@@ -307,6 +318,19 @@ final class GpuCommandDock implements GpuHud.Component {
 
         // A floating card on the popover layer, separate from the dock's layout.
         confirmation = new UiConfirmation(ui, "dock-confirm", () -> open = null);
+
+        // Deployment: the placed unit's height, lower and higher beside it; a click on it steps up and wraps.
+        heightDown = button("hud", "chevron-down", null, null, "dock-height-down");
+        heightDown.pad(0, 8, 0, 8);
+        ui.tip(heightDown).getActor().setText(text("GpuBoard.hud.deploy.heightDown"));
+        onChange(heightDown, () -> deployHeight.step(deployingActor(), -1, false));
+        height = button("hud", null, "", null, "dock-height");
+        ui.tip(height).getActor().setText(text("GpuBoard.hud.deploy.heightTip"));
+        onChange(height, () -> deployHeight.step(deployingActor(), 1, true));
+        heightUp = button("hud", "chevron-up", null, null, "dock-height-up");
+        heightUp.pad(0, 8, 0, 8);
+        ui.tip(heightUp).getActor().setText(text("GpuBoard.hud.deploy.heightUp"));
+        onChange(heightUp, () -> deployHeight.step(deployingActor(), 1, false));
 
         Label waitingLabel = ui.label(UiTheme.upper(text("GpuBoard.hud.dock.waitingForOpponent")), "hud-main",
               17, WAITING);
@@ -427,7 +451,8 @@ final class GpuCommandDock implements GpuHud.Component {
             case INITIATIVE -> enabled(command(REROLL));
             case PLAN, PHYSICAL -> true;
             // Without MegaMek's Skip, its Done both moves and holds: the main button is that command already.
-            case GENERIC -> skip() != null && !skipIsDone();
+            // Deployment has no Skip: Clear takes its place.
+            case GENERIC -> deployClear() != null || skip() != null && !skipIsDone();
             default -> false;
         };
         boolean stopShown = phase.isMovement() && panels.move().holdingRemaining() > 0
@@ -437,7 +462,8 @@ final class GpuCommandDock implements GpuHud.Component {
               && (variant != Variant.GENERIC || done() != null), secondaryShown, stopShown,
               variant == Variant.PLAN && panels.move().route().isEmpty(), stepsShown(),
               variant == Variant.PLAN && enabled(command(MoveCommand.MOVE_BACK_UP.getCmd())),
-              variant == Variant.PLAN && panels.move().facingMatters(), standUpShown());
+              variant == Variant.PLAN && panels.move().facingMatters(), standUpShown(),
+              variant == Variant.GENERIC && deployHeight.choice(deployingActor()) != null);
         if (!shape.equals(shown)) {
             shown = shape;
             layout(shape);
@@ -617,6 +643,12 @@ final class GpuCommandDock implements GpuHud.Component {
             }
             case WAITING -> row2.add(waiting).growX().minWidth(0);
             case GENERIC -> {
+                // Deployment's height stepper leads the row: lower, the height, higher (battle HUD layout, zone 2).
+                if (shape.heights()) {
+                    row1.add(heightDown).width(SQUARE).height(PLAIN);
+                    row1.add(height).growX().minWidth(0).height(PLAIN);
+                    row1.add(heightUp).width(SQUARE).height(PLAIN);
+                }
                 for (BoardScene.Command command : rowCommands()) {
                     UiButton button = button("hud", null, command.label(), null,
                           "dock-command-" + command.id());
@@ -628,8 +660,9 @@ final class GpuCommandDock implements GpuHud.Component {
             }
             default -> { }
         }
-        // Without an option row (no adjacent enemy), More closes the action row.
-        boolean moreInRow2 = shape.variant() == Variant.NO_PHYSICAL;
+        // Without an option row (no adjacent enemy), or a generic row with nothing in it, More closes the action row.
+        boolean moreInRow2 = shape.variant() == Variant.NO_PHYSICAL
+              || shape.variant() == Variant.GENERIC && shape.buttons().isEmpty() && !shape.heights();
         if (shape.more() && !moreInRow2) {
             row1.add(more).width(SQUARE).fillY();
         }
@@ -667,8 +700,7 @@ final class GpuCommandDock implements GpuHud.Component {
         if (shape.steps()) {
             footRight.add(steps).padLeft(8);
         }
-        footRight.add(chatButton).minWidth(chatButton.getPrefWidth()).padLeft(8);
-        foot.add(footRight).minWidth(chatButton.getPrefWidth() + 8);
+        foot.add(footRight);
     }
 
     // ------------------------------------------------------------------ variants
@@ -759,7 +791,9 @@ final class GpuCommandDock implements GpuHud.Component {
         main(text("GpuBoard.hud.dock.confirmMove"), route && enabled(done()));
         secondary(text("GpuBoard.hud.dock.holdPosition"), enabled(skip()));
         waypoint.setDisabled(!move.canPin());
-        clearRoute.setDisabled(!route);
+        clearRoute.setDisabled(!route && !move.walkedOn());
+        clearRouteTip.getActor().setText(text(!route && move.walkedOn() ? "GpuBoard.hud.dock.withdrawWalkOn"
+              : "GpuBoard.hud.dock.clearRoute"));
         holdAll.setDisabled(!enabled(skip()) || move.holdingRemaining() > 0);
         if (open == Confirm.HOLD_ALL) {
             confirmation.text(text("GpuBoard.hud.dock.holdAllTitle"), text("GpuBoard.hud.dock.holdAllConfirm"),
@@ -950,8 +984,15 @@ final class GpuCommandDock implements GpuHud.Component {
             main(phase.isReport() ? text("GpuBoard.hud.dock.continue") : done.label(), done.enabled());
         }
         BoardScene.Command skip = skip();
-        if (skip != null) {
+        BoardScene.Command clear = deployClear();
+        if (clear != null) {
+            secondary(clear.label(), clear.enabled());
+        } else if (skip != null) {
             secondary(skip.label(), skip.enabled());
+        }
+        GpuBoardSource.HeightChoice choice = shown.heights() ? deployHeight.choice(deployingActor()) : null;
+        if (choice != null) {
+            height.setText(UiTheme.upper(deployHeight.label(choice)));
         }
         if (deploying) {
             // Placing is local until Deploy (Done) sends the unit, so the foot names the confirmation once it can.
@@ -998,11 +1039,12 @@ final class GpuCommandDock implements GpuHud.Component {
         }
     }
 
-    /** The action row's secondary button: reroll, hold position, no attack or MegaMek's skip. */
+    /** The action row's secondary button: reroll, hold position, no attack, deployment's Clear or MegaMek's skip. */
     private void secondary() {
         switch (variant) {
             case INITIATIVE -> run(REROLL);
-            case PLAN, GENERIC -> run(inputs.frame().panels().phase().skipId());
+            case GENERIC -> run(deployClear() != null ? DEPLOY_CLEAR : inputs.frame().panels().phase().skipId());
+            case PLAN -> run(inputs.frame().panels().phase().skipId());
             case PHYSICAL -> run(noAction());
             default -> { }
         }
@@ -1119,6 +1161,16 @@ final class GpuCommandDock implements GpuHud.Component {
             chosen.clear();
         }
         chosen.add(id);
+    }
+
+    /** Esc's step in the player's deployment turn: takes the placed unit back off the board, as Clear does. */
+    boolean clearPlacement() {
+        BoardScene.Command clear = deployClear();
+        if (!enabled(clear)) {
+            return false;
+        }
+        run(clear);
+        return true;
     }
 
     /** Esc's step in the physical attack: releases the chosen options, undeclared; false when none is chosen. */
@@ -1293,6 +1345,18 @@ final class GpuCommandDock implements GpuHud.Component {
 
     private BoardScene.Command skip() {
         return command(inputs.frame().panels().phase().skipId());
+    }
+
+    /** Deployment's Clear (MegaMek's "clear deployment"), the secondary button in the player's own turn, or null. */
+    private BoardScene.Command deployClear() {
+        GpuBattleStatus.Snapshot status = inputs.frame().status();
+        return status.phase().isDeployment() && status.myTurn() ? command(DEPLOY_CLEAR) : null;
+    }
+
+    /** The unit the player deploys now, or -1. */
+    private int deployingActor() {
+        GpuBattleStatus.Snapshot status = inputs.frame().status();
+        return status.phase().isDeployment() && status.myTurn() ? status.actorId() : -1;
     }
 
     /**

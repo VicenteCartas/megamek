@@ -120,7 +120,7 @@ final class GpuUnitCard implements GpuHud.Component {
     /** What the card shows; it is rebuilt when this changes. Snapshots keep their identity while unchanged. */
     private record Shown(GpuBattleStatus.UnitStatus unit, GpuUnitRecord.Snapshot record, GpuFireOrders.Heat heat,
           boolean low, GamePhase phase, boolean mini, boolean sheetSelected, Deltas deltas,
-          List<GpuBoardSource.Bind> binds, List<Setup> setup) { }
+          List<GpuBoardSource.Bind> binds, List<Setup> setup, boolean deploying) { }
 
     /** A deployment command of the placed unit as the card shows it; the card runs it by id at the click. */
     private record Setup(String id, String label, boolean enabled) { }
@@ -249,7 +249,8 @@ final class GpuUnitCard implements GpuHud.Component {
         Shown next = new Shown(unit, unitRecord, forecast, inputs.metrics().lowHeight(),
               inputs.frame().status().phase(), !other && GpuRecordSheet.open(state),
               state.recordOpen && state.cardUnit() == unit.id(), deltas.shown(now),
-              inputs.preferences().binds(), setup(inputs.frame().status(), unit));
+              inputs.preferences().binds(), setup(inputs.frame().status(), unit),
+              deploying(inputs.frame().status(), unit));
         if (!next.equals(shown)) {
             shown = next;
             show(next, inputs.preferences());
@@ -479,13 +480,38 @@ final class GpuUnitCard implements GpuHud.Component {
         name.setName(name("-name"));
         ui.tip(name).getActor().setText(unit.name());
         header.add(name).minWidth(0).growX().left().height(low ? 22 : 24);
+        if (next.deploying()) {
+            header.add(deployingTag()).right().padLeft(8);
+        }
         header.add(damageLevel(unit, next.record())).right().padLeft(8);
         header.add(closeButton()).size(28).padLeft(2).padRight(-6);
         header.row();
         Label subtitle = ui.label(subtitle(unit), "hud-body", low ? 11 : 12, UiTheme.MUTED);
         subtitle.setEllipsis(true);
-        header.add(subtitle).colspan(3).left().minWidth(0).growX().height(low ? 16 : 17);
+        header.add(subtitle).colspan(next.deploying() ? 4 : 3).left().minWidth(0).growX().height(low ? 16 : 17);
         return header;
+    }
+
+    /** The own card's unit is the one the local deployment turn places: a click on the board deploys it. */
+    private boolean deploying(GpuBattleStatus.Snapshot status, GpuBattleStatus.UnitStatus unit) {
+        return !other && status.phase().isDeployment() && status.myTurn() && status.actorId() == unit.id();
+    }
+
+    /** The accent tag naming the unit the deployment turn places, beside its name. */
+    private Label deployingTag() {
+        Label tag = ui.label(UiTheme.upper(text("GpuBoard.hud.deploy.deploying")), "hud-name", 10.5f,
+              UiTheme.FILL_INK);
+        tag.setName(name("-deploying"));
+        Label.LabelStyle style = new Label.LabelStyle(tag.getStyle());
+        Drawable fill = ui.skin.newDrawable("white", UiTheme.ACCENT);
+        fill.setLeftWidth(5);
+        fill.setRightWidth(5);
+        fill.setTopHeight(1);
+        fill.setBottomHeight(1);
+        style.background = fill;
+        tag.setStyle(style);
+        ui.tip(tag).getActor().setText(text("GpuBoard.hud.deploy.deployingTip"));
+        return tag;
     }
 
     /** The sub-line (4.1): model, tons and pilot, or an ally's player, a carrier, a removed unit. */

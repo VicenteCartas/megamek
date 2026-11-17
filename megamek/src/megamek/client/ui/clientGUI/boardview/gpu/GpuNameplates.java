@@ -45,7 +45,8 @@ import megamek.common.units.Entity;
  * Every unit but a sensor contact or a destroyed unit also gets its board label's marks on its head, under the pip or
  * tag: the Legacy 2D board's damage tile, armor and structure bars ({@link GpuBattleStatus.Marks}), and an E(C)CM
  * source its "ECM"/"ECCM" chip beside them. A tag carries the unit's weight class letter and its gunnery and piloting
- * skills. In the Tactical View the units' bases show the pips, marks and E(C)CM badges, so a unit has a tag or
+ * skills. The hovered unit's tag grows a second line with its pilot, movement points and heat (and, while deploying, a
+ * coral note that it starts damaged), so the board needs no separate hover card. In the Tactical View the units' bases show the pips, marks and E(C)CM badges, so a unit has a tag or
  * nothing. The weapon target cards replace their targets' plates, and a unit whose head lies behind the camera has
  * none. The hovered unit's plate and the plate of the unit the card shows are drawn over the others, and the board
  * labels' TN badges stand on the plates ({@link #top}). It reads the presented snapshots only, on the render thread,
@@ -205,8 +206,15 @@ final class GpuNameplates implements GpuHud.Component {
             if (unit.sensorContact()) {
                 plate.tag(Look.CONTACT, hovered || !many ? text(SENSOR_CONTACT) : CONTACT_UNKNOWN, "", "");
             } else if (tag) {
+                // The unit placed in the local deployment turn keeps its full plate, so the Deploy pair standing on it
+                // (GpuDeployConfirm) does not jump as the pointer enters and leaves the unit.
+                boolean placed = status.myTurn() && status.phase().isDeployment() && unit.id() == status.actorId()
+                      && unit.position() != null;
+                boolean expanded = (hovered || placed) && !unit.destroyed();
                 plate.tag(unit.id() == state.focus() ? Look.FOCUS : enemy ? Look.ENEMY : Look.FRIEND, unit.label(),
-                      sub, chip(unit));
+                      sub, chip(unit), expanded ? detail(unit) : "",
+                      expanded && status.phase().isDeployment() && unit.damageLevel() > 0
+                            ? text("GpuBoard.hud.deploy.damaged") : "");
             } else {
                 plate.pip(enemy ? UiTheme.CORAL : UiTheme.MINT, unit.destroyed() ? DESTROYED_OPACITY
                       : unit.done() && status.phase().isMovement() ? MOVED_OPACITY : 1);
@@ -282,6 +290,19 @@ final class GpuNameplates implements GpuHud.Component {
         return text("GpuBoard.hud.plate.skills", letter, unit.gunnery(), unit.piloting()).strip();
     }
 
+    /** The hovered unit's second line: its pilot, movement points and, when it runs hot, its heat. */
+    static String detail(UnitStatus unit) {
+        List<String> parts = new ArrayList<>();
+        if (!unit.pilot().isBlank()) {
+            parts.add(unit.pilot().strip());
+        }
+        parts.add(text("GpuBoard.hud.forces.mp", unit.walk(), unit.run(), unit.jump()));
+        if (unit.heat() > 0) {
+            parts.add(text("GpuBoard.hud.plate.heat", unit.heat()));
+        }
+        return parts.stream().reduce((line, part) -> text(STATUS, line, part)).orElse("");
+    }
+
     /** The hovered enemy's part: the focus unit's best roll on it while it declares fire, else its distance, or "". */
     private static String hoverDetail(UnitStatus unit, UnitStatus from, GpuFireOrders.Snapshot fire) {
         if (fire.editable()) {
@@ -308,6 +329,12 @@ final class GpuNameplates implements GpuHud.Component {
         final Cell<Label> chipCell;
         final Label sub = ui.label("", "hud-body", TEXT_SIZE, Color.WHITE);
         final Cell<Label> subCell;
+        /** The hovered unit's second line: pilot, movement points and heat, then an alert in coral. */
+        final Table detailRow = new Table();
+        final Label detail = ui.label("", "hud-body", TEXT_SIZE, Color.WHITE);
+        final Label alert = ui.label("", "hud-medium", TEXT_SIZE, UiTheme.CORAL);
+        final Cell<Label> alertCell;
+        final Cell<Table> detailCell;
         final Pip pip = new Pip();
         final UnitMarks marks = new UnitMarks();
         /** An E(C)CM source's chip, in the marks' row. */
@@ -321,9 +348,15 @@ final class GpuNameplates implements GpuHud.Component {
             tag.setName("nameplate-" + id);
             tag.setTouchable(Touchable.disabled);
             tag.pad(PAD_Y, PAD_X, PAD_Y, PAD_X);
-            tag.add(name).height(LINE_HEIGHT);
-            chipCell = tag.add(chip).height(LINE_HEIGHT);
-            subCell = tag.add(sub).height(LINE_HEIGHT);
+            // Each line is its own row, so the wider hover line does not spread the name line's columns apart.
+            Table nameRow = new Table();
+            nameRow.add(name).height(LINE_HEIGHT);
+            chipCell = nameRow.add(chip).height(LINE_HEIGHT);
+            subCell = nameRow.add(sub).height(LINE_HEIGHT);
+            tag.add(nameRow).left().row();
+            detailRow.add(detail).height(LINE_HEIGHT);
+            alertCell = detailRow.add(alert).height(LINE_HEIGHT);
+            detailCell = tag.add(detailRow).left();
             pip.setName("pip-" + id);
             marks.setName("marks-" + id);
             ecm.setName("ecm-" + id);
@@ -372,12 +405,16 @@ final class GpuNameplates implements GpuHud.Component {
         }
 
         void tag(Look look, String nameText, String subText, String chipText) {
+            tag(look, nameText, subText, chipText, "", "");
+        }
+
+        void tag(Look look, String nameText, String subText, String chipText, String detailText, String alertText) {
             pip.remove();
             if (tag.getParent() == null) {
                 tags.addActor(tag);
             }
             if (look == this.look && name.textEquals(nameText) && sub.textEquals(subText)
-                  && chip.textEquals(chipText)) {
+                  && chip.textEquals(chipText) && detail.textEquals(detailText) && alert.textEquals(alertText)) {
                 return;
             }
             this.look = look;
@@ -390,6 +427,13 @@ final class GpuNameplates implements GpuHud.Component {
             sub.setText(subText);
             sub.setColor(look.sub);
             subCell.padLeft(nameText.isEmpty() && chipText.isEmpty() || subText.isEmpty() ? 0 : GAP);
+            detail.setText(detailText);
+            detail.setColor(look.sub);
+            alert.setText(alertText);
+            alertCell.padLeft(detailText.isEmpty() || alertText.isEmpty() ? 0 : GAP);
+            boolean detailed = !detailText.isEmpty() || !alertText.isEmpty();
+            detailCell.setActor(detailed ? detailRow : null);
+            detailCell.padTop(detailed ? 1 : 0);
             tag.pack();
             // Whole units keep the one-unit border on the pixel grid, as the browser snaps the box's edges.
             tag.setSize(Math.round(tag.getWidth()), Math.round(tag.getHeight()));

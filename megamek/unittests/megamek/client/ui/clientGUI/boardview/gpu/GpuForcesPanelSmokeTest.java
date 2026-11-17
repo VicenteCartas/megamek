@@ -4,17 +4,17 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side.ALLY;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side.ENEMY;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side.OWN;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -23,8 +23,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.IntConsumer;
-import java.util.function.IntPredicate;
 import java.util.function.UnaryOperator;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -40,23 +38,21 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
+import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.clientGUI.unitDisplay.HeatEffects;
-import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.ResolvedAttack;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
-import megamek.common.units.EntityWeightClass;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.mockito.invocation.Invocation;
 
 /**
- * The forces navigator (G2) in the component harness: its list and grid beside the hud-v3 shots 01-04, 08-11, 14
- * and 15, its layout at the three window sizes, and what its rows, tabs, search, grid controls and Next pending do.
+ * The forces list (G2) in the component harness: its list beside the hud-v3 shots 01-04, 08-10, 14 and 15, its layout
+ * at the three window sizes, its rail, and what its rows, search, collapse and the strip's Next pending do.
  */
 @Tag("on-demand")
 class GpuForcesPanelSmokeTest {
@@ -69,6 +65,8 @@ class GpuForcesPanelSmokeTest {
     private static final float CARD = 222;
     /** The player id of an allied player, on the local player's team. */
     private static final int ALLIED_PLAYER = 7;
+    /** The open row's tag of the unit the local player acts with. */
+    private static final String NOW = UiTheme.upper(Messages.getString("GpuBoard.hud.forces.now"));
 
     /** A panel under test with the HUD state it reads, the units it selected and the menu it opened. */
     private static final class Panel {
@@ -111,30 +109,50 @@ class GpuForcesPanelSmokeTest {
             return root.findActor(name);
         }
 
-        String line(int id) {
-            GpuHudKit.UnitRow row = find("forces-unit-" + id);
+        /** A part of the unit's row, by its field. */
+        <T> T part(int id, String name) {
+            Actor row = find("forces-unit-" + id);
             assertNotNull(row, "row of unit " + id);
-            return row.line.getText().toString();
+            return field(row, name);
         }
 
-        String foot() {
-            Table foot = find("forces-footer");
-            return ((Label) foot.getChildren().first()).getText().toString();
+        /** The second line's right part of the unit's row: what keeps it from acting, its move, or its MP. */
+        String detail(int id) {
+            return this.<Label>part(id, "detail").getText().toString();
+        }
+
+        /** The unit's heat label. */
+        Label heat(int id) {
+            return part(id, "heat");
+        }
+
+        /** The row's card highlight: 0 none, 1 the selected focus, 2 an inspected unit. */
+        int highlight(int id) {
+            return this.<Integer>part(id, "highlight");
+        }
+
+        /** Whether the unit's row carries the Now tag of the unit acting. */
+        boolean now(int id) {
+            return GpuBoardTestUi.texts(find("forces-unit-" + id)).contains(NOW);
+        }
+
+        /** The header's count: the units still to act, else the force. */
+        String summary() {
+            return this.<Label>find("forces-summary").getText().toString();
         }
     }
 
     @Test
-    void listAndGridBesideTheMock() {
+    void listBesideTheMock() {
         GpuHudTestStage.run(hud -> {
             Panel panel = fresh(hud);
             // Shot 01: the initiative phase, no unit acts; the header has no ribbon yet (bottom 104).
             panel.update(hud, frame(status(GamePhase.INITIATIVE, false, Entity.NONE, -1,
                   own(unit -> copy(unit, unit.id(), unit.formation(), false, false, false, "", 0)))));
             panel.place(hud, 20, 116, 300, 1080 - 20);
-            assertEquals("Ready", panel.line(1));
-            assertEquals("Ready \u00B7 heat 4", panel.line(2));
-            assertEquals("5 / 5 operational", panel.foot());
-            assertTrue(panel.<Button>find("forces-next").isDisabled(), "Nothing is pending");
+            assertEquals(mp(unit(MOCK, 1)), panel.detail(1));
+            assertEquals("4", panel.heat(2).getText().toString());
+            assertEquals("5", panel.summary(), "Nothing is pending: the header counts the force");
             shoot(hud, panel, "forces-01-initiative", "01-initiative.jpg", 20, 116);
 
             // Shot 02: the local movement turn with the Atlas acting.
@@ -142,12 +160,10 @@ class GpuForcesPanelSmokeTest {
             panel = fresh(hud);
             panel.update(hud, frame(MOCK, moveNext));
             panel.place(hud, 20, 132, 300, 1080 - 20 - CARD - 12);
-            assertEquals("Acting now", panel.line(1));
-            assertEquals("Pending", panel.line(2));
-            assertEquals(UiTheme.MINT, panel.<GpuHudKit.UnitRow>find("forces-unit-1").line.getColor());
-            assertTrue(panel.<GpuHudKit.UnitRow>find("forces-unit-1").isChecked(), "The acting row is selected");
-            assertEquals("5 pending / 5", panel.foot());
-            assertFalse(panel.<Button>find("forces-next").isDisabled());
+            assertTrue(panel.now(1), "The Atlas acts now");
+            assertFalse(panel.now(2));
+            assertEquals(1, panel.highlight(1), "The acting row is selected");
+            assertEquals("5", panel.summary(), "Five units to move");
             shoot(hud, panel, "forces-02-movement", "02-movement-fire-preview.jpg", 20, 132);
 
             // Shot 03: the Panther acts.
@@ -155,36 +171,33 @@ class GpuForcesPanelSmokeTest {
             panel.update(hud, frame(status(GamePhase.MOVEMENT, true, 4, 0,
                   own(unit -> copy(unit, unit.id(), unit.formation(), unit.id() == 4, true, false, "", 0))), moveNext));
             panel.place(hud, 20, 132, 300, 1080 - 20 - CARD - 12);
-            assertEquals("Acting now", panel.line(4));
-            assertEquals("Pending", panel.line(1));
+            assertTrue(panel.now(4), "The Panther acts now");
+            assertFalse(panel.now(1));
             shoot(hud, panel, "forces-03-waypoint", "03-waypoint-route.jpg", 20, 132);
 
-            // Shot 04: the opponent's turn after the Atlas walked; the Warhammer is up next. MegaMek disables its
-            // next-unit command outside the local turn, so Next pending is disabled here, unlike the mock.
+            // Shot 04: the opponent's turn after the Atlas walked; the Warhammer is up next.
             panel = fresh(hud);
             panel.update(hud, frame(status(GamePhase.MOVEMENT, false, Entity.NONE, 1, own(unit -> unit.id() == 1
                   ? copy(unit, 1, unit.formation(), false, false, true, "Walked", 2)
                   : copy(unit, unit.id(), unit.formation(), false, true, false, "", 0))), next(false, () -> { })));
             panel.place(hud, 20, 132, 300, 1080 - 20 - CARD - 12);
-            assertEquals("Moved \u00B7 Walked \u00B7 2 MP \u00B7 N", panel.line(1));
-            assertEquals("Up next", panel.line(2));
-            assertEquals("4 pending / 5", panel.foot());
+            assertTrue(panel.detail(1).startsWith("Walked"), panel.detail(1));
+            assertFalse(panel.now(2), "Outside the local turn no unit acts now");
+            assertEquals("4", panel.summary());
             shoot(hud, panel, "forces-04-opponent", "04-opponent-turn.jpg", 20, 132);
 
-            // Shot 08: the weapon playback lists the round's attacks and hits, else the move (C6).
+            // Shot 08: the weapon playback; the rows show the round's moves.
             panel = fresh(hud);
             panel.update(hud, frame(status(GamePhase.FIRING_REPORT, false, Entity.NONE, -1,
                   own(GpuForcesPanelSmokeTest::played)), GpuFireOrders.Snapshot.EMPTY,
                   reports(GamePhase.FIRING_REPORT, attacks(1, 4, 2)), List.of()));
             panel.place(hud, 20, 116, 300, 1080 - 20);
-            assertEquals("4 attacks \u00B7 2 hit", panel.line(1));
-            assertEquals("held position", panel.line(2));
-            assertEquals("Ran \u00B7 5 MP \u00B7 N", panel.line(3));
-            assertEquals("5 / 5 operational", panel.foot());
+            assertTrue(panel.detail(1).startsWith("Walked"), panel.detail(1));
+            assertEquals(mp(unit(MOCK, 2)), panel.detail(2), "The Warhammer held its position");
+            assertTrue(panel.detail(3).startsWith("Ran"), panel.detail(3));
             shoot(hud, panel, "forces-08-playback", "08-weapon-playback.jpg", 20, 116);
 
-            // Shot 09: the local physical turn; the Atlas and the Panther have physical turns left. A turn says nothing
-            // of an adjacent enemy, so unlike the mock's lines these name none.
+            // Shot 09: the local physical turn; the Atlas and the Panther have physical turns left.
             panel = fresh(hud);
             panel.update(hud, frame(status(GamePhase.PHYSICAL, true, 1, 0, own(unit -> {
                 UnitStatus round = played(unit);
@@ -192,15 +205,12 @@ class GpuForcesPanelSmokeTest {
                       false, round.moved(), round.mpUsed());
             })), next(true, () -> { })));
             panel.place(hud, 20, 116, 300, 1080 - 20);
-            assertEquals("Acting now", panel.line(1));
-            assertEquals("No physical attack \u00B7 held position", panel.line(2));
-            assertEquals("No physical attack \u00B7 Ran \u00B7 5 MP \u00B7 N", panel.line(3));
-            assertEquals("Pending", panel.line(4));
-            assertEquals(UiTheme.AMBER, panel.<GpuHudKit.UnitRow>find("forces-unit-4").line.getColor());
-            assertEquals("2 pending / 5", panel.foot());
+            assertTrue(panel.now(1));
+            assertFalse(panel.now(4));
+            assertEquals("2", panel.summary(), "Two units to act");
             shoot(hud, panel, "forces-09-physical", "09-physical-attacks.jpg", 20, 116);
 
-            // Shot 10: the round report adds the heat; a Mek whose heat has effects is amber with the flame.
+            // Shot 10: the round report adds the heat; a Mek whose heat has effects is hotter than amber.
             panel = fresh(hud);
             panel.update(hud, frame(status(GamePhase.END_REPORT, false, Entity.NONE, -1, own(unit -> heat(
                   played(unit), switch (unit.id()) {
@@ -211,27 +221,19 @@ class GpuForcesPanelSmokeTest {
                   }))), GpuFireOrders.Snapshot.EMPTY, reports(GamePhase.END_REPORT, Stream.of(attacks(1, 5, 2),
                   attacks(2, 2, 1), attacks(3, 5, 1), attacks(4, 2, 2)).flatMap(List::stream).toList()), List.of()));
             panel.place(hud, 20, 116, 300, 1080 - 20);
-            assertEquals("5 attacks \u00B7 2 hit \u00B7 heat 4", panel.line(1));
-            assertEquals("5 attacks \u00B7 1 hit \u00B7 heat 15", panel.line(3));
-            assertEquals("Walked \u00B7 8 MP \u00B7 N", panel.line(5));
-            assertEquals(UiTheme.AMBER, panel.<GpuHudKit.UnitRow>find("forces-unit-3").line.getColor());
-            assertNotNull(panel.<GpuHudKit.UnitRow>find("forces-unit-3").right.getActor(), "The flame");
-            assertNull(panel.<GpuHudKit.UnitRow>find("forces-unit-1").right.getActor(), "Heat 4 has no effects");
+            assertEquals("4", panel.heat(1).getText().toString());
+            assertEquals("15", panel.heat(3).getText().toString());
+            assertNotEquals(UiTheme.AMBER, panel.heat(3).getColor(), "Heat 15 has effects");
+            assertEquals(UiTheme.AMBER, panel.heat(1).getColor(), "Heat 4 has no effects");
+            assertTrue(panel.detail(5).startsWith("Walked"), panel.detail(5));
             shoot(hud, panel, "forces-10-report", "10-round-report.jpg", 20, 116);
 
-            // Shot 11: the grid of shot 02, 630 units wide at 1920.
+            // Shot 14: 100 v 100; the list scrolls below the tenth lance, and the force has its filter chips.
             panel = fresh(hud);
-            panel.state.forcesGrid = true;
-            panel.update(hud, frame(MOCK, moveNext));
-            panel.place(hud, 20, 132, GpuHud.Metrics.of(1920, 1080).grid(), 1080 - 20 - CARD - 12);
-            assertNotNull(panel.find("forces-tile-5"));
-            assertNull(panel.find("forces-unit-5"), "The grid shows tiles, not rows");
-            shoot(hud, panel, "forces-11-grid", "11-force-grid.jpg", 20, 132);
-
-            // Shot 14: 100 v 100 in the grid; the list scrolls below the tenth lance.
             panel.update(hud, frame(large(), moveNext));
-            panel.place(hud, 20, 132, GpuHud.Metrics.of(1920, 1080).grid(), 1080 - 20 - CARD - 12);
-            assertEquals("100 pending / 100", panel.foot());
+            panel.place(hud, 20, 132, 300, 1080 - 20 - CARD - 12);
+            assertEquals("100", panel.summary());
+            assertNotNull(panel.find("forces-chips"), "More than a company gets the filter chips");
             assertTrue(panel.<ScrollPane>find("forces-list").isScrollY(), "The list scrolls");
             shoot(hud, panel, "forces-14-large", "14-large-battle-100v100.jpg", 20, 132);
 
@@ -245,9 +247,9 @@ class GpuForcesPanelSmokeTest {
             })), fire(1, 5), GpuReportLog.Snapshot.EMPTY, List.of(next(true, () -> { }))));
             GpuHud.Metrics compact = GpuHud.Metrics.of(1280, 720);
             panel.place(hud, compact.gap(), 108, compact.forces(), 478 - 12);
-            assertEquals("Acting now \u00B7 5 drafted \u00B7 Walked \u00B7 2 MP \u00B7 N", panel.line(1));
-            assertEquals("Pending \u00B7 held position", panel.line(2));
-            assertEquals("Pending \u00B7 Ran \u00B7 5 MP \u00B7 N", panel.line(3));
+            assertTrue(panel.now(1));
+            assertTrue(panel.detail(1).startsWith("Walked"), panel.detail(1));
+            assertTrue(panel.detail(3).startsWith("Ran"), panel.detail(3));
             shoot(hud, panel, "forces-15-compact", "15-compact-1280x720.jpg", 16, 108);
         });
     }
@@ -265,18 +267,15 @@ class GpuForcesPanelSmokeTest {
                 float bottom = size[1] - metrics.gap() - card - 12;
                 // y up, as the stage: the utility row at the right.
                 Rectangle utilities = new Rectangle(size[0] - metrics.gap() - 420, size[1] - 18 - 56, 420, 56);
-                for (boolean grid : new boolean[] { false, true }) {
-                    panel.state.forcesGrid = grid;
-                    panel.update(hud, frame(large(), next(true, () -> { })));
-                    panel.place(hud, metrics.gap(), top, grid ? metrics.grid() : metrics.forces(), bottom);
-                    hud.draw();
-                    hud.capture("forces-layout-" + (grid ? "grid-" : "list-") + size[0] + "x" + size[1]).dispose();
-                    hud.assertLayout(panel.root, utilities);
-                    // Header, selects, tabs and footer fit the slot, so nothing is drawn over the header or the card.
-                    assertTrue(panel.root.getMinHeight() <= bottom - top, "The panel needs "
-                          + panel.root.getMinHeight() + " of the " + (bottom - top) + " units at " + size[0]);
-                    assertTrue(panel.<ScrollPane>find("forces-list").isScrollY(), "100 units scroll at " + size[0]);
-                }
+                panel.update(hud, frame(large(), next(true, () -> { })));
+                panel.place(hud, metrics.gap(), top, metrics.forces(), bottom);
+                hud.draw();
+                hud.capture("forces-layout-list-" + size[0] + "x" + size[1]).dispose();
+                hud.assertLayout(panel.root, utilities);
+                // The header and the filter chips fit the slot, so nothing is drawn over the header or the card.
+                assertTrue(panel.root.getMinHeight() <= bottom - top, "The panel needs "
+                      + panel.root.getMinHeight() + " of the " + (bottom - top) + " units at " + size[0]);
+                assertTrue(panel.<ScrollPane>find("forces-list").isScrollY(), "100 units scroll at " + size[0]);
             }
         });
     }
@@ -286,45 +285,48 @@ class GpuForcesPanelSmokeTest {
         GpuHudTestStage.run(hud -> {
             Panel panel = new Panel(hud);
             panel.state.forcesPinned = false;
-            AtomicInteger nextRuns = new AtomicInteger();
-            GpuBoardSource.Frame frame = frame(MOCK, next(true, nextRuns::incrementAndGet));
+            GpuBoardSource.Frame frame = frame(MOCK, next(true, () -> { }));
             rail(hud, panel, frame);
 
-            // Folded: the rail lists every unit as a sprite under the pending count, and no rows.
+            // Folded: the rail draws the same rows narrow, under the count of the units still to act.
             assertTrue(panel.forces.folded(), "An unpinned panel folds");
-            assertTrue(GpuBoardTestUi.shown(panel.find("forces-rail")));
-            assertNull(panel.find("forces-unit-1"), "The rail shows no rows");
-            assertEquals(List.of(1, 2, 3, 4, 5), railItems(panel.root));
-            assertEquals("5", panel.<Label>find("forces-rail-count").getText().toString());
+            assertTrue(GpuBoardTestUi.shown(panel.find("forces-rail-head")));
+            assertEquals(List.of(1, 2, 3, 4, 5), listed(panel, "forces-unit-"));
+            assertTrue(GpuBoardTestUi.texts(panel.find("forces-rail-head")).contains("5"));
 
-            // Its items select and its Next pending runs the phase's command, as the list's do.
-            click(hud, panel.find("forces-rail-2"), Input.Buttons.LEFT);
+            // Its rows select, as the list's do.
+            click(hud, panel.find("forces-unit-2"), Input.Buttons.LEFT);
             assertEquals(List.of(2), panel.selected);
-            click(hud, panel.find("forces-rail-next"), Input.Buttons.LEFT);
-            assertEquals(1, nextRuns.get());
 
-            // The pointer on the rail unfolds it; it folds again a moment after the pointer left.
-            Vector2 over = centre(hud, panel.find("forces-rail"));
+            // The pointer resting on the rail unfolds it, so a row stays under the pointer; it folds once it left. The stage
+            // fires enter and exit as it acts, so each move takes a frame before the delay starts.
+            Vector2 over = centre(hud, panel.find("forces-unit-3"));
             hud.stage.mouseMoved((int) over.x, (int) over.y);
-            hud.stage.act(0);
             rail(hud, panel, frame);
-            assertFalse(panel.forces.folded(), "The pointer on the panel unfolds it");
-            hud.stage.mouseMoved(1900, 540);
-            hud.stage.act(0);
-            try {
-                Thread.sleep(GpuForcesPanel.COLLAPSE_MILLIS + 100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+            assertTrue(panel.forces.folded(), "A passing pointer leaves the rail folded");
+            sleep(300);
             rail(hud, panel, frame);
-            assertTrue(panel.forces.folded(), "It folds after the pointer left");
+            assertFalse(panel.forces.folded(), "The resting pointer unfolds the rail");
+            hud.stage.mouseMoved(hud.width() - 10, hud.height() / 2);
+            rail(hud, panel, frame);
+            assertFalse(panel.forces.folded(), "The list stays open a moment after the pointer left");
+            sleep(450);
+            rail(hud, panel, frame);
+            assertTrue(panel.forces.folded(), "The list folds after the pointer left");
 
-            // The chevron pins the list open; the header's pin unpins it.
-            click(hud, panel.find("forces-expand"), Input.Buttons.LEFT);
-            assertTrue(panel.state.forcesPinned);
-            show(hud, panel, frame);
+            // The pin on the unfolded list keeps it open, and unpins it again.
+            hud.stage.mouseMoved((int) over.x, (int) over.y);
+            rail(hud, panel, frame);
+            sleep(300);
+            rail(hud, panel, frame);
             assertFalse(panel.forces.folded());
-            assertNotNull(panel.find("forces-unit-1"), "The pinned panel lists its rows");
+            click(hud, panel.find("forces-pin"), Input.Buttons.LEFT);
+            assertTrue(panel.state.forcesPinned);
+            hud.stage.mouseMoved(hud.width() - 10, hud.height() / 2);
+            show(hud, panel, frame);
+            sleep(450);
+            show(hud, panel, frame);
+            assertFalse(panel.forces.folded(), "The pinned list stays open");
             click(hud, panel.find("forces-pin"), Input.Buttons.LEFT);
             assertFalse(panel.state.forcesPinned);
         });
@@ -337,21 +339,17 @@ class GpuForcesPanelSmokeTest {
         hud.draw();
     }
 
-    /** The unit ids of the rail's items, in their order on the screen. */
-    private static List<Integer> railItems(Actor actor) {
-        List<Integer> ids = new ArrayList<>();
-        String name = actor.getName();
-        if (name != null && name.matches("forces-rail-\\d+")) {
-            ids.add(Integer.parseInt(name.substring("forces-rail-".length())));
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
         }
-        if (actor instanceof Group group) {
-            group.getChildren().forEach(child -> ids.addAll(railItems(child)));
-        }
-        return ids;
     }
 
     @Test
-    void rowsTabsAndNextPendingUseTheHudsCommands() {
+    void rowsAndNextPendingUseTheHudsCommands() {
         GpuHudTestStage.run(hud -> {
             Panel panel = new Panel(hud);
             AtomicInteger nextRuns = new AtomicInteger();
@@ -370,76 +368,50 @@ class GpuForcesPanelSmokeTest {
             hud.stage.touchDown((int) press.x, (int) press.y, 0, Input.Buttons.LEFT);
             show(hud, panel, frame(status(GamePhase.MOVEMENT, true, 1, 0, own(unit -> unit.id() == 3
                   ? copy(unit, 3, unit.formation(), false, false, true, "Ran", 5) : unit)), next(true, () -> { })));
-            assertEquals("Moved \u00B7 Ran \u00B7 5 MP \u00B7 N", panel.line(3));
+            assertTrue(panel.detail(3).startsWith("Ran"), panel.detail(3));
             hud.stage.touchUp((int) press.x, (int) press.y, 0, Input.Buttons.LEFT);
             assertEquals(List.of(2, 4), panel.selected);
             show(hud, panel, frame);
+            // The list holds the own side: the enemy is the contacts' and the target card's.
+            assertNull(panel.find("forces-unit-6"));
 
-            // Next pending runs the phase's own next-unit command, and only while it and a pending unit exist.
-            click(hud, panel.find("forces-next"), Input.Buttons.LEFT);
+            // While the unit sheet is open the panel is its strip, whose Next pending runs the phase's own next-unit
+            // command, and only while it and a pending unit exist.
+            panel.state.recordOpen = true;
+            show(hud, panel, frame);
+            click(hud, panel.find("forces-strip-next"), Input.Buttons.LEFT);
             assertEquals(1, nextRuns.get());
             show(hud, panel, frame(MOCK, next(false, nextRuns::incrementAndGet)));
-            assertTrue(panel.<Button>find("forces-next").isDisabled());
-            click(hud, panel.find("forces-next"), Input.Buttons.LEFT);
+            assertTrue(panel.<Button>find("forces-strip-next").isDisabled());
+            click(hud, panel.find("forces-strip-next"), Input.Buttons.LEFT);
             assertEquals(1, nextRuns.get(), "A disabled next-unit command is not run");
             // Before movement and firing it is the prephase display's next-unit command.
             AtomicInteger prephaseRuns = new AtomicInteger();
             show(hud, panel, frame(status(GamePhase.PREMOVEMENT, true, 1, 0, MOCK.units()),
                   next("prephaseNext", true, prephaseRuns::incrementAndGet)));
-            click(hud, panel.find("forces-next"), Input.Buttons.LEFT);
+            click(hud, panel.find("forces-strip-next"), Input.Buttons.LEFT);
             assertEquals(1, prephaseRuns.get());
-
-            // The contacts: grouped by formation, the sensor contact under "Unidentified", the menu hint in the foot.
-            click(hud, panel.find("forces-tab-contacts"), Input.Buttons.LEFT);
-            show(hud, panel, frame);
-            UiButton contacts = panel.find("forces-tab-contacts");
-            assertTrue(contacts.isChecked());
-            assertEquals("Contacts 5", contacts.getText().toString());
-            assertNull(panel.find("forces-unit-1"));
-            assertEquals("Unidentified \u00B7 sensor return", panel.line(GpuHudFixtures.CONTACT));
-            assertEquals("Pending", panel.line(6), "An enemy with a movement turn left");
-            assertNotNull(panel.find("forces-group-Unidentified"));
-            assertNotNull(panel.find("forces-group-Opposition lance 1"));
-            assertEquals("1 unidentified", panel.foot());
-            hud.capture("forces-contacts").dispose();
-            click(hud, panel.find("forces-unit-6"), Input.Buttons.LEFT);
-            assertEquals(List.of(2, 4, 6), panel.selected, "An enemy row goes to the same rule, which inspects it");
-
-            // Under double blind the enemy formations stay unnamed (plan C4).
-            GpuBoardSource.Frame doubleBlind = frame(new GpuBattleStatus.Snapshot(3, GamePhase.MOVEMENT, true, 1, 1,
-                  MOCK.turns(), 0, MOCK.units(), List.of(), true));
-            show(hud, panel, doubleBlind);
-            assertNull(panel.find("forces-group-Opposition lance 1"));
-            assertNotNull(panel.find("forces-unit-6"));
-            // Outside the movement phase an identified enemy reads as a visual contact.
-            show(hud, panel, frame(status(GamePhase.FIRING, true, 1, 0, MOCK.units())));
-            assertEquals("Visual", panel.line(6));
+            panel.state.recordOpen = false;
 
             // Allies are friendly and listed last, one group per allied player whatever their formations (C2).
-            click(hud, panel.find("forces-tab-friendly"), Input.Buttons.LEFT);
             List<UnitStatus> units = new ArrayList<>(MOCK.units());
             units.add(side(copy(unit(MOCK, 5), 11, "Hotel lance", false, true, false, "", 0), ALLY, ALLIED_PLAYER));
             units.add(side(copy(unit(MOCK, 4), 12, "India lance", false, true, false, "", 0), ALLY, ALLIED_PLAYER));
             GpuBoardSource.Frame allies = frame(status(GamePhase.MOVEMENT, true, 1, 0, units), players());
             show(hud, panel, allies);
-            assertEquals("Friendly 7", panel.<UiButton>find("forces-tab-friendly").getText().toString());
             assertEquals(List.of("Alpha lance", "Bravo lance", "Allies \u00B7 Kurita"), groups(panel));
             assertEquals(List.of(1, 2, 3, 4, 5, 11, 12), listed(panel, "forces-unit-"));
-            assertEquals("5 pending / 5", panel.foot(), "The foot counts the local player's own units");
+            assertEquals("5", panel.summary(), "The header counts the local player's own units to move");
             hud.capture("forces-allies").dispose();
 
-            // The search matches the group a unit is listed in: allies by their player, and no enemy by the formation
-            // that double blind hides (C3, C4).
+            // The search matches the group a unit is listed in: allies by their player (C3).
             search(hud, panel, allies, "kurita");
             assertEquals(List.of(11, 12), listed(panel, "forces-unit-"));
-            click(hud, panel.find("forces-tab-contacts"), Input.Buttons.LEFT);
-            search(hud, panel, doubleBlind, "opposition");
-            assertEquals(List.of(), listed(panel, "forces-unit-"));
         });
     }
 
     @Test
-    void searchGridAndCollapseChangeWhatIsListed() {
+    void searchAndCollapseChangeWhatIsListed() {
         GpuHudTestStage.run(hud -> {
             Panel panel = new Panel(hud);
             // The Atlas has moved, the Warhammer is prone, the Marauder runs hot and the Panther is hull down, with the
@@ -480,54 +452,19 @@ class GpuForcesPanelSmokeTest {
             show(hud, panel, frame);
             assertEquals(List.of(1, 2, 3, 4, 5), listed(panel, "forces-unit-"));
 
-            // The grid's grouping select lists formation, readiness and weight class (C8).
-            panel.state.forcesGrid = true;
+            // Rows show heat with effects hotter than amber, and the move once the unit acted.
             show(hud, panel, frame);
-            assertEquals(List.of("Alpha lance", "Bravo lance"), groups(panel));
-            assertEquals(List.of(true, true, true), choose(hud, panel, "forces-grouping", 1));
-            show(hud, panel, frame);
-            assertEquals(List.of("Acted", "Needs orders"), groups(panel));
-            choose(hud, panel, "forces-grouping", 2);
-            show(hud, panel, frame);
-            assertEquals(List.of("Assault", "Heavy", "Light"), groups(panel), "Heaviest first");
-            hud.capture("forces-grid-weight").dispose();
-            // A group follows its heaviest unit, not the class code: a small support vehicle's code (12) lies above
-            // ASSAULT's (4), but it weighs less than a Locust.
-            List<UnitStatus> withVehicle = new ArrayList<>(frame.status().units());
-            withVehicle.add(0, weighs(unit(MOCK, 5), 13, 4.5, "Small Support Vehicle",
-                  EntityWeightClass.WEIGHT_SMALL_SUPPORT));
-            show(hud, panel, frame(status(GamePhase.MOVEMENT, true, 2, 0, withVehicle)));
-            assertEquals(List.of("Assault", "Heavy", "Light", "Small Support Vehicle"), groups(panel));
-            assertEquals(List.of(1, 2, 3, 4, 5, 13), listed(panel, "forces-tile-"));
-            show(hud, panel, frame);
-            // A filter that would list no unit of the tab is disabled: "war" matches the Warhammer only, which has not
-            // acted.
-            search(hud, panel, frame, "war");
-            assertEquals(List.of(true, true, false, true), choose(hud, panel, "forces-filter", 0));
-            click(hud, panel.find("forces-search"), Input.Buttons.LEFT);
-            show(hud, panel, frame);
-            // The filter: needs orders, acted, then damaged or impaired (heat effects count).
-            assertEquals(List.of(true, true, true, true), choose(hud, panel, "forces-filter", 1));
-            show(hud, panel, frame);
-            assertEquals(List.of(2, 3, 4, 5), listed(panel, "forces-tile-"));
-            choose(hud, panel, "forces-filter", 2);
-            show(hud, panel, frame);
-            assertEquals(List.of(1), listed(panel, "forces-tile-"));
-            choose(hud, panel, "forces-filter", 3);
-            show(hud, panel, frame);
-            assertEquals(List.of(2, 3), listed(panel, "forces-tile-"), "Prone impairs, hull down does not");
-            click(hud, panel.find("forces-tile-3"), Input.Buttons.LEFT);
-            assertEquals(List.of(3), panel.selected, "A tile goes to the HUD's selection rule too");
-            // Rows show heat effects as a flame, and the move once the unit acted.
-            panel.state.forcesGrid = false;
-            show(hud, panel, frame);
-            assertNotNull(panel.<GpuHudKit.UnitRow>find("forces-unit-3").right.getActor(), "Heat 15 has effects");
-            assertNull(panel.<GpuHudKit.UnitRow>find("forces-unit-2").right.getActor(), "Heat 4 has none");
-            assertEquals("Moved \u00B7 Walked \u00B7 2 MP \u00B7 N", panel.line(1));
-            assertEquals(.72f, panel.<Actor>find("forces-unit-1").getColor().a, 1e-4, "An acted row fades");
+            assertNotEquals(UiTheme.AMBER, panel.heat(3).getColor(), "Heat 15 has effects");
+            assertEquals(UiTheme.AMBER, panel.heat(2).getColor(), "Heat 4 has none");
+            assertTrue(panel.detail(1).startsWith("Walked"), panel.detail(1));
+            assertEquals(.62f, panel.<Actor>find("forces-unit-1").getColor().a, 1e-4, "An acted row fades");
         });
     }
 
+    /** The movement points line of a unit that has not moved. */
+    private static String mp(UnitStatus unit) {
+        return Messages.getString("GpuBoard.hud.forces.mp", unit.walk(), unit.run(), unit.jump());
+    }
     /** A new panel in the emptied window: each shot starts from a fresh HUD state, as at a phase start. */
     private static Panel fresh(GpuHudTestStage hud) {
         hud.window.clearChildren();
@@ -550,7 +487,7 @@ class GpuForcesPanelSmokeTest {
     /** One frame at the left column's place, drawn so that clicks find laid-out actors. */
     private static void show(GpuHudTestStage hud, Panel panel, GpuBoardSource.Frame frame) {
         panel.update(hud, frame);
-        panel.place(hud, 20, 132, panel.state.forcesGrid ? GpuHud.Metrics.of(1920, 1080).grid() : 300, 1080 - 20);
+        panel.place(hud, 20, 132, 300, 1080 - 20);
         hud.draw();
     }
 
@@ -568,24 +505,6 @@ class GpuForcesPanelSmokeTest {
         Vector2 point = centre(hud, actor);
         hud.stage.touchDown((int) point.x, (int) point.y, 0, button);
         hud.stage.touchUp((int) point.x, (int) point.y, 0, button);
-    }
-
-    /**
-     * Clicks the grid select {@code select} and chooses {@code choice} in the select list it opens; returns which of the
-     * list's choices are enabled.
-     */
-    private static List<Boolean> choose(GpuHudTestStage hud, Panel panel, String select, int choice) {
-        clearInvocations(panel.menu);
-        click(hud, panel.find(select), Input.Buttons.LEFT);
-        List<Invocation> lists = mockingDetails(panel.menu).getInvocations().stream()
-              .filter(call -> call.getMethod().getName().equals("list")).toList();
-        assertEquals(1, lists.size(), select + " opens its list");
-        Object[] list = lists.getFirst().getArguments();
-        assertSame(panel.find(select), list[0], "below the select");
-        List<Boolean> enabled = IntStream.range(0, ((List<?>) list[1]).size())
-              .mapToObj(index -> list.length < 5 || ((IntPredicate) list[3]).test(index)).toList();
-        ((IntConsumer) list[list.length - 1]).accept(choice);
-        return enabled;
     }
 
     /** The actor's centre in screen coordinates. */
@@ -736,13 +655,6 @@ class GpuForcesPanelSmokeTest {
         return copy(unit, unit.id(), unit.side(), unit.ownerId(), unit.formation(), unit.tons(), unit.weightClass(),
               unit.weightClassIndex(), unit.canActNow(), unit.pending(), unit.done(), unit.moved(), unit.mpUsed(), heat,
               heat < 5 ? "" : HeatEffects.getHeatEffects(heat, false, false), unit.statusWords());
-    }
-
-    /** A copy of a unit with another id, weight and weight class. */
-    private static UnitStatus weighs(UnitStatus unit, int id, double tons, String weightClass, int weightClassIndex) {
-        return copy(unit, id, unit.side(), unit.ownerId(), unit.formation(), tons, weightClass, weightClassIndex,
-              unit.canActNow(), unit.pending(), unit.done(), unit.moved(), unit.mpUsed(), unit.heat(),
-              unit.heatEffects(), unit.statusWords());
     }
 
     /** A copy of a unit whose board label shows one word ({@code UnitStatusWords.statusWords} key and severity). */

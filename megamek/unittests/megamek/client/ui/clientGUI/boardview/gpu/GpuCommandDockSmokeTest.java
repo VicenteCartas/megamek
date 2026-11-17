@@ -643,7 +643,7 @@ class GpuCommandDockSmokeTest {
             assertTrue(hold.x + hold.width <= waypoint.x && waypoint.x + waypoint.width <= clear.x);
             assertEquals(waypoint.y, clear.y, .01f);
             clickAndShow(hud, dock, plan, "dock-clear-route");
-            verify(moves).clearRoute();
+            verify(moves).clearOrWithdraw();
             show(hud, dock, back);
             assertTrue(button(dock, "dock-clear-route").isDisabled());
 
@@ -1293,7 +1293,7 @@ class GpuCommandDockSmokeTest {
             status = new GpuBattleStatus.Snapshot(status.round(), status.phase(), status.myTurn(),
                   status.localPlayerId(), status.actorId(), status.turns(), status.turnIndex(), status.units().stream()
                   .map(unit -> unit.id() == ATLAS ? prone(unit, prone) : unit).toList(), status.initiative(),
-                  status.turnOrderHidden(), status.links(), status.arc());
+                  status.turnOrderHidden(), status.links(), status.arc(), status.incoming());
         }
         return new Shot(status, shot.panels(), commands);
     }
@@ -1347,8 +1347,8 @@ class GpuCommandDockSmokeTest {
         GpuHudState state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
         BoardCamera camera = new BoardCamera();
         GpuContextMenu menu = new GpuContextMenu(hud.kit, source, state, id -> { });
-        UiButton chat = new GpuChatPanel(hud.kit, source, state).button();
-        return new Dock(new GpuCommandDock(hud.kit, source, state, camera, menu, chat), state, camera, menu);
+        return new Dock(new GpuCommandDock(hud.kit, source, state, camera, menu, new GpuDeployHeight(source)), state,
+              camera, menu);
     }
 
     /**

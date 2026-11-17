@@ -131,7 +131,7 @@ final class GpuHintLine implements GpuHud.Component {
         }
         boolean overlaid = !camera.firstPerson() && state.deployOverlay != null
               && state.deployOverlay != GpuHudState.DeployOverlay.OFF && deploying.myTurn()
-              && deploying.phase().isDeployment();
+              && GpuHud.damagePhase(deploying);
         if (overlaid && state.deployOverlay == GpuHudState.DeployOverlay.DAMAGE) {
             String legend = damageLegend(state.presentedRecord(deploying.actorId()));
             if (!legend.isEmpty()) {

@@ -102,9 +102,8 @@ final class GpuConditionsCard implements GpuHud.Component {
     public void update(GpuHud.Inputs inputs) {
         GpuBoardActions.PhaseInfo phase = inputs.frame().panels().phase();
         List<String> notable = phase.notable();
-        // Deployment keeps the top clear: the strip only shows unusual conditions, which change where to deploy.
-        boolean quiet = notable.isEmpty() && !state.conditionsExpanded
-              && inputs.frame().status().phase().isDeployment();
+        // Unusual conditions only: normal weather is the default and would take room from the board in every phase.
+        boolean quiet = notable.isEmpty() && !state.conditionsExpanded;
         root.setVisible(inputs.preferences().conditionsVisible() && !quiet);
         summary.setText(notable.isEmpty() ? Messages.getString("GpuBoard.hud.conditions.normal")
               : String.join(SEPARATOR, notable));

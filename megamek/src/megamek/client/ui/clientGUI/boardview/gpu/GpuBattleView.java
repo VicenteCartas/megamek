@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -40,6 +41,7 @@ import com.badlogic.gdx.graphics.glutils.ImmediateModeRenderer20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.ConvexHull;
+import com.badlogic.gdx.math.Interpolation;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Polygon;
@@ -69,6 +71,7 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
+import megamek.common.game.Game;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.units.Entity;
 import megamek.common.weapons.handlers.AreaEffectHelper;
@@ -169,6 +172,13 @@ class GpuBattleView extends ApplicationAdapter {
     private ModelInstance placingGhost;
     /** The hex of {@link #placingGhost}, or null. */
     private Coords placingHex;
+    /**
+     * The walk-on unit the local movement plan placed on its entry hex and has not sent yet (its DEPLOY step), or
+     * {@link Entity#NONE}: solid, as this turn's moving unit, after walking in from beyond the edge.
+     */
+    private int walkOnPlaced = Entity.NONE;
+    /** {@link #walkOnPlaced} of the last frame, whose change starts or ends a walk-in. */
+    private int walkOnShown = Entity.NONE;
     /** The least opacity of the shading outside LOS while deployment's LOS overlay is on. */
     private static final float LOS_EMPHASIS = .8f;
     /** The status of the frame drawn, which tells a deployment preview from a unit on the board. */
@@ -821,6 +831,8 @@ class GpuBattleView extends ApplicationAdapter {
         List<BoardScene.Tile> previousTiles = scene == null ? null : scene.tiles();
         scene = frame.scene();
         shownStatus = frame.status();
+        GpuMovePlan.Snapshot plan = frame.panels().move();
+        walkOnPlaced = plan.walkedOn() ? plan.entityId() : Entity.NONE;
         if (unitModels != null) { unitModels.setDisplayMode(displayMode(), boardCamera.tactical()); }
         history.accept(frame.timeline(), scene, frame.reports(), this::hasInfantryTransports);
         // What the timeline is about to bring down or break is cut into its pieces ahead of its fall, and only that.
@@ -1220,7 +1232,7 @@ class GpuBattleView extends ApplicationAdapter {
         fireControl.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), boardCamera.tactical());
         renderStage("terrain markers");
         tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), boardCamera.tactical(),
-              source.uiPreferences().overlays(), ui instanceof GpuHud hud && hud.showsAllEcmFields());
+              source.uiPreferences().overlays());
         renderStage("hex grid");
         // Outside the Tactical View the grid over the finished scene; inside it, the ground layer drew it.
         if (!boardCamera.tactical()) {
@@ -1230,7 +1242,9 @@ class GpuBattleView extends ApplicationAdapter {
         renderHexText(wireframeView);
         renderStage("overlay labels and ghosts");
         overlay.renderGhost(boardCamera.camera, shownUnit);
-        overlay.renderGhosts(boardCamera.camera, arriving, placingGhost,
+        // A walk-on unit turned on its entry hex: the route's ghost alone shows it, in its final facing.
+        ModelInstance placing = placingHex != null && placingHex.equals(overlay.ghostHex()) ? null : placingGhost;
+        overlay.renderGhosts(boardCamera.camera, arriving, placing,
               placingHex != null && GpuHexTip.hazard(scene.tile(placingHex)) != null);
         fireControl.renderLabels(boardCamera.camera, boardCamera.tactical());
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
@@ -1351,6 +1365,7 @@ class GpuBattleView extends ApplicationAdapter {
             ui.cameraGesture(boardInput.panning && boardInput.dragged || !cameraKeys.isEmpty());
             if (ui instanceof GpuHud hud) {
                 hud.arrivals(arrivalCues(frame.scene() != null));
+                hud.incoming(incomingCues(frame.scene() != null));
                 hud.damageNumbers(damageNumbers(frame.scene() != null));
             }
             ui.update(frame, view, dialog(), source.uiPreferences());
@@ -1634,25 +1649,60 @@ class GpuBattleView extends ApplicationAdapter {
         if (!drawn || scene == null || arrivalNotices.isEmpty()) {
             return List.of();
         }
-        com.badlogic.gdx.graphics.Camera camera = boardCamera.camera;
-        float stage = ui.stage().getWidth() / camera.viewportWidth;
         List<GpuArrivalCues.Cue> cues = new ArrayList<>(arrivalNotices.size());
         for (GpuArrivalCues.Arrival arrival : arrivalNotices) {
             if (arrival.boardId() != scene.boardId() || scene.tile(arrival.hex()) == null) {
                 continue;
             }
-            Vector3 hex = new Vector3(BoardGeometry.centerX(arrival.hex()), BoardGeometry.centerY(arrival.hex()),
-                  BoardTacticalGeometry.floatingZ(scene, arrival.hex()));
-            Vector2 at = GpuNameplates.project(camera, hex);
-            if (at == null) {
-                Vector3 toward = hex.sub(camera.position);
-                Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
-                at = new Vector2(toward.dot(right), toward.dot(camera.up)).nor().scl(1e5f)
-                      .add(camera.viewportWidth / 2, camera.viewportHeight / 2);
-            }
-            cues.add(new GpuArrivalCues.Cue(arrival, at.scl(stage)));
+            cues.add(new GpuArrivalCues.Cue(arrival, stagePoint(arrival.hex())));
         }
         return cues;
+    }
+
+    /** The edges the player's units still walk on from, each with where it lies in stage units (y up). */
+    private List<GpuIncomingCues.Cue> incomingCues(boolean drawn) {
+        GpuBattleStatus.Snapshot status = shownStatus;
+        if (!drawn || scene == null || status == null || status.phase().isLounge()) {
+            return List.of();
+        }
+        List<GpuIncomingCues.Cue> cues = new ArrayList<>();
+        Coords middle = new Coords(scene.width() / 2, scene.height() / 2);
+        Vector3 centre = new Vector3(BoardGeometry.centerX(middle), BoardGeometry.centerY(middle), 0);
+        float step = Math.abs(BoardGeometry.centerX(new Coords(1, 0)) - BoardGeometry.centerX(new Coords(0, 0)));
+        for (GpuIncomingCues.Edge edge : GpuIncomingCues.edges(status, scene.width(), scene.height())) {
+            if (scene.tile(edge.hex()) != null) {
+                // Just outside the board beyond the edge hex, so the plate does not cover the strip it marks.
+                Vector3 hex = hexPoint(edge.hex());
+                Vector3 out = new Vector3(hex.x - centre.x, hex.y - centre.y, 0).nor().scl(step * 1.4f);
+                cues.add(new GpuIncomingCues.Cue(edge, stagePoint(hex.add(out))));
+            }
+        }
+        return cues;
+    }
+
+    /** Where a hex lies in stage units (y up); a hex behind the camera lies far out in its direction. */
+    private Vector2 stagePoint(Coords coords) {
+        return stagePoint(hexPoint(coords));
+    }
+
+    /** The hex's centre on the plane of the hex annotations, in world units. */
+    private Vector3 hexPoint(Coords coords) {
+        return new Vector3(BoardGeometry.centerX(coords), BoardGeometry.centerY(coords),
+              BoardTacticalGeometry.floatingZ(scene, coords));
+    }
+
+    /** Where a world point lies in stage units (y up); a point behind the camera lies far out in its direction. */
+    private Vector2 stagePoint(Vector3 hex) {
+        com.badlogic.gdx.graphics.Camera camera = boardCamera.camera;
+        float stage = ui.stage().getWidth() / camera.viewportWidth;
+        Vector2 at = GpuNameplates.project(camera, hex);
+        if (at == null) {
+            Vector3 toward = hex.sub(camera.position);
+            Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
+            at = new Vector2(toward.dot(right), toward.dot(camera.up)).nor().scl(1e5f)
+                  .add(camera.viewportWidth / 2, camera.viewportHeight / 2);
+        }
+        return at.scl(stage);
     }
 
     /**
@@ -1884,6 +1934,18 @@ class GpuBattleView extends ApplicationAdapter {
                 }
                 facing = motion.facing();
                 UnitFootprint.clearTerrain(scene, placement, position, facing, airborne);
+            }
+            float driveIn = (motion != null && motion.isMoving()) ? 0 : driveInRemaining(unit.id());
+            Coords beyond = driveIn > 0 ? GpuBoardSource.offBoardBehind(unit.location().coords(),
+                  Math.round(unit.location().facing()), coords -> scene.tile(coords) != null) : null;
+            if (beyond != null) {
+                // It walks in from the hex beyond the edge, legs and all.
+                Vector3 back = BoardGeometry.center(beyond, 0).sub(BoardGeometry.center(unit.location().coords(), 0));
+                position.add(back.x * driveIn, back.y * driveIn, 0);
+                float heading = MathUtils.atan2(-back.x, -back.y) * MathUtils.radiansToDegrees;
+                sample = new UnitMotion.Sample(true, megamek.common.units.EntityMovementType.MOVE_WALK, 1 - driveIn,
+                      (1 - driveIn) * back.len() / BoardGeometry.height(), 0, MathUtils.cosDeg(heading - facing),
+                      heading, 0, null);
             }
             BoardScene.Tile tile = scene.tile(unit.location().coords());
             if (tile != null && tile.waterDepth() == 0 && !tile.frozen() && !airborne
@@ -2173,16 +2235,20 @@ class GpuBattleView extends ApplicationAdapter {
         if (status == null) {
             return;
         }
+        trackDriveIns(status);
+        long now = TimeUtils.millis();
+        arrivalNotices.removeIf(notice -> now - notice.start() > ARRIVAL_NOTICE_MILLIS);
+        trackWalkOns(status, now);
         if (!status.phase().isDeployment()) {
             offBoardSince.clear();
             arrivalStarts.clear();
-            arrivalNotices.clear();
+            if (!status.phase().isMovement()) {
+                arrivalNotices.clear();
+            }
             knownUnits.clear();
             return;
         }
-        long now = TimeUtils.millis();
         arrivalStarts.values().removeIf(start -> now - start > GpuUnitShader.Shown.MATERIALIZE_MILLIS);
-        arrivalNotices.removeIf(notice -> now - notice.start() > ARRIVAL_NOTICE_MILLIS);
         boolean primed = !knownUnits.isEmpty();
         for (GpuBattleStatus.UnitStatus listed : status.units()) {
             int id = listed.id();
@@ -2206,6 +2272,111 @@ class GpuBattleView extends ApplicationAdapter {
                       now));
             }
         }
+    }
+
+    /** Every unit the status has listed this movement phase, under walk-on deployment. */
+    private final Set<Integer> movementUnits = new HashSet<>();
+    /**
+     * Other players' units that walked on this movement phase and are not marked yet, each with since when the board
+     * has been idle for it (0 while it plays); {@link #walkOnReplayed} holds those whose replay has started.
+     */
+    private final Map<Integer, Long> walkedOn = new HashMap<>();
+    private final Set<Integer> walkOnReplayed = new HashSet<>();
+    /** How long an idle board waits for a walk-on's replay before marking the unit where it stands anyway. */
+    private static final long WALK_ON_REPLAY_WAIT = 1000;
+
+    /**
+     * Walk-on: another player's unit enters the board in the movement phase, not the deployment phase, and gets the
+     * deployment's arrival notice on the hex its move ended once its replay has walked it in (its entry hex, where
+     * MegaMek may list it first, is only a step of that move). Other players' units are listed only once they stand on
+     * the board, so one first listed during the phase has just walked on.
+     */
+    private void trackWalkOns(GpuBattleStatus.Snapshot status, long now) {
+        if (!status.phase().isMovement() || !Game.rulesManager.getRulesGame().isWalkOnDeployment()) {
+            movementUnits.clear();
+            walkedOn.clear();
+            walkOnReplayed.clear();
+            return;
+        }
+        boolean primed = !movementUnits.isEmpty();
+        for (GpuBattleStatus.UnitStatus listed : status.units()) {
+            if (movementUnits.add(listed.id()) && primed && listed.side() != GpuBattleStatus.Side.OWN
+                  && !listed.sensorContact() && listed.position() != null) {
+                walkedOn.put(listed.id(), now);
+            }
+        }
+        if (walkedOn.isEmpty()) {
+            return;
+        }
+        boolean busy = playbackBusy();
+        for (Iterator<Map.Entry<Integer, Long>> iterator = walkedOn.entrySet().iterator(); iterator.hasNext(); ) {
+            Map.Entry<Integer, Long> pending = iterator.next();
+            int id = pending.getKey();
+            UnitMotion motion = motions.get(id);
+            boolean moving = motion != null && motion.isMoving();
+            if (moving) {
+                walkOnReplayed.add(id);
+                continue;
+            }
+            // Its own replay has ended: marked at once, though other units' moves may still play.
+            if (!walkOnReplayed.contains(id)) {
+                if (busy) {
+                    pending.setValue(0L);
+                    continue;
+                }
+                if (pending.getValue() == 0) {
+                    pending.setValue(now);
+                }
+                if (now - pending.getValue() < WALK_ON_REPLAY_WAIT) {
+                    continue;
+                }
+            }
+            iterator.remove();
+            walkOnReplayed.remove(id);
+            GpuBattleStatus.UnitStatus shown = GpuHudState.unit(status, id);
+            if (shown == null || shown.position() == null) {
+                continue;
+            }
+            arrivalNotices.removeIf(notice -> notice.id() == id);
+            arrivalNotices.add(new GpuArrivalCues.Arrival(id, shown.side(),
+                  shown.label().isEmpty() ? shown.name() : shown.label(), shown.position(), shown.boardId(), now));
+        }
+    }
+
+    /**
+     * Walk-on: how long an own unit takes to walk in from beyond the board edge to its entry hex once it is placed
+     * there ({@link #walkOnPlaced}); until then it stands on the edge as a hologram. Other players' walk-ons play as
+     * their movement replay, which starts beyond the edge too (GpuBoardSource#offBoardBehind).
+     */
+    static final long DRIVE_IN_MILLIS = 800;
+    /** When each own unit placed on its entry hex began to walk in. */
+    private final Map<Integer, Long> driveInStarts = new HashMap<>();
+
+    private void trackDriveIns(GpuBattleStatus.Snapshot status) {
+        if (!status.phase().isMovement()) {
+            walkOnShown = Entity.NONE;
+            driveInStarts.clear();
+            return;
+        }
+        long now = TimeUtils.millis();
+        driveInStarts.values().removeIf(start -> now - start > DRIVE_IN_MILLIS);
+        if (walkOnPlaced != Entity.NONE && walkOnPlaced != walkOnShown) {
+            driveInStarts.put(walkOnPlaced, now);
+        } else if (walkOnPlaced == Entity.NONE && walkOnShown != Entity.NONE) {
+            // Taken back (Esc) or sent: a withdrawn unit is a hologram again at once, a sent one is already in.
+            driveInStarts.remove(walkOnShown);
+        }
+        walkOnShown = walkOnPlaced;
+    }
+
+    /** How far the unit still is from its entry hex: 1 behind it, 0 there (eased), 0 when it is not driving in. */
+    private float driveInRemaining(int id) {
+        Long start = driveInStarts.get(id);
+        if (start == null) {
+            return 0;
+        }
+        float progress = MathUtils.clamp((TimeUtils.millis() - start) / (float) DRIVE_IN_MILLIS, 0, 1);
+        return 1 - Interpolation.pow2Out.apply(progress);
     }
 
 
@@ -2260,12 +2431,15 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /**
-     * Whether a scene unit is the deployment's preview under the pointer: in the deployment phase, a unit the status
-     * lists without a hex. Every unit on the board has one.
+     * Whether a scene unit is a placement not yet made, drawn as the plan's hologram: in the deployment phase, a unit
+     * the status lists without a hex (the preview under the pointer; every unit on the board has one); in the movement
+     * phase, likewise a walk-on unit's preview on its edge. Once placed on its entry hex it is that turn's moving unit
+     * and solid ({@link #walkOnPlaced}).
      */
     private boolean placingPreview(BoardScene.Unit unit) {
         GpuBattleStatus.Snapshot status = shownStatus;
-        if (status == null || !status.phase().isDeployment() || unit.sensorContact() || unit.attachment() != null) {
+        if (status == null || unit.sensorContact() || unit.attachment() != null
+              || !status.phase().isDeployment() && !status.phase().isMovement()) {
             return false;
         }
         for (GpuBattleStatus.UnitStatus listed : status.units()) {

@@ -4,7 +4,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.gdx.UiKit.onChange;
 import static megamek.client.ui.gdx.UiKit.text;
 
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -12,7 +11,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.IntConsumer;
-import java.util.stream.Stream;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.Batch;
@@ -28,8 +28,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
-import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
-import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.TimeUtils;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side;
@@ -47,13 +45,15 @@ import megamek.client.ui.panels.phaseDisplay.PrephaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.enums.GamePhase;
+import megamek.common.interfaces.IStartingPositions;
 import megamek.common.units.Entity;
 
 /**
- * Forces navigator in the left column (C.1 G2): the own and allied units, or the contacts, as grouped rows or as a grid
- * of tiles, with search, the grid's grouping and filter, and the phase's next-unit command; while the unit sheet is
- * open it shrinks to its strip. Unless pinned open (or in its grid, or searching) it folds to a rail at the window's
- * edge, which unfolds while the pointer rests on it. It shows the presented units and calls the HUD's selection rule,
+ * The forces list in the left column (battle HUD layout, zone 6): the own and allied units by formation, each a
+ * three-line row (name and duplicate marker, pilot and movement, armor, structure and heat), with search and, for a
+ * force of more than a company, filter chips. It folds to a rail at the window's edge, the same rows drawn narrow, and
+ * unfolds while the pointer rests on it, so a row stays under the pointer as it unfolds; the pin keeps it open. While
+ * the unit sheet is open it shrinks to its strip. It shows the presented units and calls the HUD's selection rule,
  * the unit menu and the phase command; every rule stays with the client.
  */
 final class GpuForcesPanel implements GpuHud.Component {
@@ -62,38 +62,37 @@ final class GpuForcesPanel implements GpuHud.Component {
           FiringDisplay.FiringCommand.FIRE_NEXT.getCmd(), PhysicalDisplay.PhysicalCommand.PHYSICAL_NEXT.getCmd(),
           DeploymentDisplay.DeployCommand.DEPLOY_NEXT.getCmd(),
           PrephaseDisplay.PrephaseCommand.PREPHASE_NEXT.getCmd());
-    private static final String UNIDENTIFIED = "GpuBoard.hud.common.unidentified";
-    /** The separator of a status line's parts. */
-    private static final String SEPARATOR = " \u00B7 ";
-    /** A group of at most this many units takes half the grid's width (.gg.half). */
-    private static final int HALF_GROUP = 4;
-    /** Grid tiles are at least 64 units wide, 5 apart (.tiles). */
-    private static final float TILE_MIN = 64;
-    private static final float TILE_GAP = 5;
     /** The rail's width, which the HUD gives the forces slot while the panel is folded to it. */
-    static final float RAIL_WIDTH = 58;
-    /** How long the panel stays expanded after the pointer left it. */
-    static final long COLLAPSE_MILLIS = 350;
+    static final float RAIL_WIDTH = 128;
+    /** Row, group header and panel header heights; the rail and the open list share them, so rows stay in place. */
+    private static final float ROW_HEIGHT = 44;
+    private static final float GROUP_HEIGHT = 22;
+    /** A collapsed group: its header line, and its units' small sprites under it. */
+    private static final float STRIP_HEIGHT = 20;
+    private static final float HEAD_HEIGHT = 34;
+    /** A force of more units than a company gets the filter chips. */
+    private static final int COMPANY = 12;
+    /** The pointer rests this long on the rail before it unfolds, and the list folds this long after it left. */
+    private static final long UNFOLD_DELAY = 250;
+    private static final long FOLD_DELAY = 400;
+    /** The client's duplicate marker ({@code Entity.createShortName}): " #2", or " ID:17" with unit ids shown. */
+    private static final Pattern MARKER = Pattern.compile(" (#\\d+|ID:\\d+)$");
+    private static final String SEPARATOR = " \u00B7 ";
+    private static final Color MOVED = Color.valueOf("BFEEE2");
+    private static final Color HOT = Color.valueOf("FF8A5B");
+    private static final Color INK = Color.valueOf("0B0F14");
+    private static final Color SEPARATOR_LINE = new Color(43 / 255f, 56 / 255f, 71 / 255f, .45f);
+    private static final Color GROUP_FILL = new Color(1, 1, 1, .03f);
+    private static final Color HOVER = new Color(1, 1, 1, .07f);
+    private static final Color INSPECTED = new Color(1, 1, 1, .05f);
+    private static final Color SELECTED = new Color(UiTheme.MINT.r, UiTheme.MINT.g, UiTheme.MINT.b, .12f);
+    private static final Color HEAT_TRACK = new Color(1, 1, 1, .08f);
 
-    /** The grid's groupings (.gsel), in the order its select face steps through them. */
-    private enum Grouping {
-        FORMATION("GpuBoard.hud.forces.byFormation"),
-        READINESS("GpuBoard.hud.forces.byReadiness"),
-        WEIGHT("GpuBoard.hud.forces.byWeightClass");
-
-        private final String key;
-
-        Grouping(String key) {
-            this.key = key;
-        }
-    }
-
-    /** The grid's filters (.gsel), in the order its select face steps through them. */
+    /** The filter chips of a force larger than a company. */
     private enum Filter {
-        ALL("GpuBoard.hud.forces.allUnits"),
-        NEEDS_ORDERS("GpuBoard.hud.state.needsOrders"),
-        ACTED("GpuBoard.hud.state.acted"),
-        DAMAGED("GpuBoard.hud.forces.damagedOrImpaired");
+        ALL("GpuBoard.hud.forces.filterAll"),
+        PENDING("GpuBoard.hud.forces.filterPending"),
+        DAMAGED("GpuBoard.hud.forces.filterDamaged");
 
         private final String key;
 
@@ -107,10 +106,9 @@ final class GpuForcesPanel implements GpuHud.Component {
      * cheap, and the list is rebuilt only when it differs. {@code card} is the unit the card shows
      * ({@link GpuHudState#cardUnit}); {@code revision} counts the collapsed groups' changes.
      */
-    private record View(List<UnitStatus> units, GpuBattleStatus.Snapshot status, int focus, int card,
-          boolean grid, boolean contacts, Grouping grouping, Filter filter, String query, int revision, float width,
-          Map<Integer, Integer> drafted, int fireActor, int fireAttacks, List<GpuReportLog.CombatEvent> combat,
-          List<GpuBoardSource.Bind> binds, GpuPlayers.Snapshot players) { }
+    private record View(List<UnitStatus> units, GpuBattleStatus.Snapshot status, int focus, int card, Filter filter,
+          String query, int revision, boolean folded, List<GpuBoardSource.Bind> binds,
+          GpuPlayers.Snapshot players) { }
 
     private final GpuHudKit kit;
     private final UiKit ui;
@@ -123,60 +121,52 @@ final class GpuForcesPanel implements GpuHud.Component {
     private final Table strip = new Table();
     private final Cell<Table> content;
     private final Label stripCount;
+    /**
+     * The open list's header (title, unit count, search, pin, overview) and the rail's: the units still to act. The
+     * pin is only on the open list: on the rail the pointer moving to it would unfold the list under it.
+     */
+    private final Table openHead = new Table();
+    private final Table railHead = new Table();
+    private final Cell<Table> headCell;
+    private final Label summary;
+    private final Label railCount;
+    private final Container<Actor> railDisc = new Container<>();
+    private final Container<Actor> openDisc = new Container<>();
     private final UiButton overview;
-    private final UiButton searchToggle;
-    private final UiButton gridToggle;
     private final TextTooltip overviewTip;
-    private final TextTooltip gridTip;
-    private final Table selects = new Table();
-    private final UiButton groupingSelect;
-    private final UiButton filterSelect;
-    private final Cell<Actor> selectsCell;
-    private final UiKit.Segmented tabs;
+    private final UiButton searchToggle;
+    private final UiButton pin;
+    private final Table chips = new Table();
+    private final Container<Actor> chipsSpacer = new Container<>();
+    private final Map<Filter, UiButton> chipButtons = new HashMap<>();
+    private final Cell<Actor> chipsCell;
     private final UiKit.SearchField search;
     private final Table searchRow = new Table();
     private final Cell<Actor> searchCell;
     private final Table list = new Table();
-    private final Label footText;
-    private final Container<Actor> footRight = new Container<>();
-    private final UiButton next;
     private final UiButton stripNext;
-    private final Label rightClick;
-    /**
-     * The rail at the window's edge, the panel's form until the pointer rests on it or it is pinned open: the own and
-     * allied units as sprites, the pending count and Next pending.
-     */
-    private final Table rail = new Table();
-    private final Table railList = new Table();
-    private final Label railCount;
-    private final UiButton railNext;
-    private final UiButton pin;
-    private final TextTooltip pinTip;
-    private final Map<Integer, RailItem> railItems = new HashMap<>();
-    private List<Integer> railShown = List.of();
-    /** The pointer is over the panel, and when it last left, in TimeUtils milliseconds. */
-    private boolean hovered;
-    private long leftAt;
-    private boolean folded;
-    /** The units' rows and tiles, kept across rebuilds so that their pointer state stays with them. */
-    private final Map<Integer, UnitRow> rows = new HashMap<>();
-    private final Map<Integer, Tile> tiles = new HashMap<>();
-    /** The collapsed groups, by name; list and grid share them, as in the prototype. */
+    /** The units' rows and the groups' headers, kept across rebuilds so that their pointer state stays with them. */
+    private final Map<Integer, ForceRow> rows = new HashMap<>();
+    private final Map<String, GroupHeader> headers = new HashMap<>();
     private final Set<String> collapsed = new HashSet<>();
-    private boolean contacts;
+    private boolean folded;
+    /** The open list's state while not pinned: unfolded by the resting pointer, folded a moment after it left. */
+    private boolean unfolded;
+    private boolean hovered;
+    private long enteredAt;
+    private long leftAt;
     private boolean searching;
-    private Grouping grouping = Grouping.FORMATION;
     private Filter filter = Filter.ALL;
     private int revision;
     private int pending;
     private GpuHud.Inputs inputs;
     private View shown;
-    /** What the list's actors were laid out for: mode, width, query, collapse revision, groups and their units. */
+    /** What the list's actors were laid out for: fold, chips, query, filter, collapse revision, groups and units. */
     private List<Object> shownLayout;
 
     /**
-     * {@code menu} opens this component's unit menus and select lists (C13, SelectField). {@code select} selects or
-     * inspects a unit ({@link GpuHud#select}).
+     * {@code menu} opens this component's unit menus (C13). {@code select} selects or inspects a unit
+     * ({@link GpuHud#select}).
      */
     GpuForcesPanel(GpuHudKit kit, GpuBoardSource source, GpuHudState state, GpuContextMenu menu, IntConsumer select) {
         this.kit = kit;
@@ -197,81 +187,70 @@ final class GpuForcesPanel implements GpuHud.Component {
         searchToggle.setName("forces-search");
         ui.tip(searchToggle).getActor().setText(text("GpuBoard.hud.forces.searchTip"));
         onChange(searchToggle, this::toggleSearch);
-        gridToggle = ui.button("hud-icon", "grid", null, null);
-        gridToggle.setName("forces-grid");
-        gridTip = ui.tip(gridToggle);
-        onChange(gridToggle, () -> state.forcesGrid = !state.forcesGrid);
-        pin = ui.button("hud-icon", "unlock", null, null);
+        pin = ui.button("hud-icon", "pin", null, null);
         pin.setName("forces-pin");
-        pinTip = ui.tip(pin);
-        onChange(pin, () -> state.forcesPinned = !state.forcesPinned);
-        full.add(ui.header(text("GpuBoard.hud.forces.title"), null, overview, searchToggle, gridToggle, pin)).growX()
-              .row();
+        ui.tip(pin).getActor().setText(text("GpuBoard.hud.forces.pinTip"));
+        onChange(pin, () -> {
+            state.forcesPinned = !state.forcesPinned;
+            unfolded = state.forcesPinned || hovered;
+        });
 
-        // Grid only: the grouping and filter selects (G12), each opening its list below it. A filter that would list
-        // no unit of the shown tab is disabled there; All units always stays.
-        groupingSelect = ui.select("", false);
-        groupingSelect.setName("forces-grouping");
-        onChange(groupingSelect, () -> menu.list(groupingSelect,
-              Arrays.stream(Grouping.values()).map(each -> text(each.key)).toList(), grouping.ordinal(),
-              index -> grouping = Grouping.values()[index]));
-        filterSelect = ui.select("", false);
-        filterSelect.setName("forces-filter");
-        onChange(filterSelect, () -> menu.list(filterSelect,
-              Arrays.stream(Filter.values()).map(each -> text(each.key)).toList(), filter.ordinal(),
-              index -> Filter.values()[index] == Filter.ALL
-                    || tabUnits().anyMatch(unit -> passes(unit, Filter.values()[index])),
-              index -> filter = Filter.values()[index]));
-        for (UiButton face : List.of(groupingSelect, filterSelect)) {
-            // The mock's .fsel is a native select: 29 units tall, its text 13.5 in and its arrow near the edge.
-            face.pad(7.5f, 13.5f, 7.5f, 6);
-        }
-        selects.pad(0, 14, 8, 14);
-        selects.defaults().growX().uniformX().minWidth(0);
-        selects.add(groupingSelect).padRight(8);
-        selects.add(filterSelect);
-        selectsCell = full.add((Actor) null).growX();
+        openHead.setName("forces-head");
+        openHead.pad(0, 12, 0, 6);
+        openHead.add(ui.label(UiTheme.upper(text("GpuBoard.hud.forces.yourForce")), "hud-title", 14, UiTheme.TEXT))
+              .padRight(8);
+        summary = ui.label("", "hud-medium", 12, UiTheme.MUTED);
+        summary.setName("forces-summary");
+        openHead.add(openDisc).padRight(5);
+        openHead.add(summary).growX().left();
+        openHead.add(searchToggle).size(28).padLeft(2);
+        openHead.add(pin).size(28).padLeft(2);
+        openHead.add(overview).size(28).padLeft(2);
+        railHead.setName("forces-rail-head");
+        railHead.left().padLeft(12);
+        railCount = ui.label("", "hud-medium", 12, UiTheme.MUTED);
+        railHead.add(railDisc).padRight(5);
+        railHead.add(railCount);
+        headCell = full.add(openHead).growX().height(HEAD_HEIGHT);
         full.row();
+        full.add(ui.solid(UiTheme.LINE)).growX().height(1).row();
 
-        tabs = ui.segmented("hud-tab", false, "", "");
-        tabs.left().pad(2, 14, 0, 14);
-        tabs.buttons.get(0).setName("forces-tab-friendly");
-        tabs.buttons.get(1).setName("forces-tab-contacts");
-        onChange(tabs.buttons.get(0), () -> contacts = false);
-        onChange(tabs.buttons.get(1), () -> contacts = true);
-        full.add(tabs).growX().row();
+        // A force larger than a company: All, Pending and Damaged.
+        chips.setName("forces-chips");
+        chips.pad(7, 10, 7, 10).left();
+        for (Filter each : Filter.values()) {
+            UiButton chip = ui.button("hud-mini", null, "", null);
+            chip.setName("forces-chip-" + each.name().toLowerCase(Locale.ROOT));
+            onChange(chip, () -> filter = each);
+            chipButtons.put(each, chip);
+            chips.add(chip).padRight(6);
+        }
+        chipsCell = full.add((Actor) null).growX();
+        full.row();
 
         search = ui.search(text("GpuBoard.hud.forces.searchPlaceholder"));
         search.field.setName("forces-search-field");
-        searchRow.pad(0, 14, 8, 14);
+        searchRow.pad(8, 10, 8, 10);
         searchRow.add(search).growX();
         searchCell = full.add((Actor) null).growX();
         full.row();
 
-        // Left: a grid group narrower than the list (a half one alone on its row) starts at the left edge.
         list.top().left();
         ScrollPane scroll = ui.scrollList(list);
         scroll.setName("forces-list");
-        full.add(scroll).growX().row();
-
-        Table foot = ui.footer(full);
-        foot.setName("forces-footer");
-        footText = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
-        footText.setEllipsis(true);
-        foot.add(footText).growX().minWidth(0).left();
-        foot.add(footRight).padLeft(10);
-        next = nextButton("forces-next");
-        rightClick = ui.label(text("GpuBoard.hud.forces.rightClickHint"), "hud-small", 11.5f, UiTheme.MUTED);
+        full.add(scroll).grow().minHeight(0).row();
 
         // The strip (unit panel design 3.3): the title, the pending count, Next pending and ⌄, which closes the sheet.
-        stripNext = nextButton("forces-strip-next");
+        stripNext = ui.button("hud-mini", null, text("GpuBoard.hud.forces.nextPending"), null);
+        stripNext.setName("forces-strip-next");
+        onChange(stripNext, this::runNext);
         UiButton restore = ui.button("hud-icon", "chevron-down", null, null);
         restore.setName("forces-restore");
         ui.tip(restore).getActor().setText(text("GpuBoard.hud.forces.restoreTip"));
         onChange(restore, () -> state.recordOpen = false);
         strip.setName("forces-strip");
         strip.pad(0, 12, 0, 6);
-        strip.add(ui.label(UiTheme.upper(text("GpuBoard.hud.forces.title")), "hud-title", 16, UiTheme.TEXT))
+        strip.add(ui.label(UiTheme.upper(text("GpuBoard.hud.forces.yourForce")), "hud-title", 16, UiTheme.TEXT))
               .height(40).padRight(8);
         stripCount = ui.label("", "hud-body", 12, UiTheme.MUTED);
         stripCount.setEllipsis(true);
@@ -279,33 +258,13 @@ final class GpuForcesPanel implements GpuHud.Component {
         strip.add(stripNext).padLeft(8);
         strip.add(restore).size(30).padLeft(4);
 
-        rail.setName("forces-rail");
-        rail.top().pad(6, 0, 6, 0);
-        UiButton expand = ui.button("hud-icon", "chevron-right", null, null);
-        expand.setName("forces-expand");
-        ui.tip(expand).getActor().setText(text("GpuBoard.hud.forces.pinTip"));
-        onChange(expand, () -> state.forcesPinned = true);
-        railCount = ui.label("", "hud-medium", 11, Tone.WARN.color);
-        railCount.setAlignment(Align.center);
-        railCount.setName("forces-rail-count");
-        railList.top();
-        ScrollPane railScroll = ui.scrollList(railList);
-        railScroll.setName("forces-rail-list");
-        railNext = ui.button("hud-icon", "skip", null, null);
-        railNext.setName("forces-rail-next");
-        ui.tip(railNext).getActor().setText(text("GpuBoard.hud.forces.nextPending"));
-        onChange(railNext, this::runNext);
-        rail.add(expand).size(30).row();
-        rail.add(railCount).growX().height(14).row();
-        rail.add(railScroll).growX().minHeight(0).padTop(4).row();
-        rail.add(railNext).size(30).padTop(4);
-
         // The pointer resting on the panel unfolds the rail; it folds again a moment after the pointer left.
         root.addListener(new InputListener() {
             @Override
             public void enter(InputEvent event, float x, float y, int pointer, Actor fromActor) {
-                if (pointer == -1 && (fromActor == null || !fromActor.isDescendantOf(root))) {
+                if (pointer == -1 && !hovered && (fromActor == null || !fromActor.isDescendantOf(root))) {
                     hovered = true;
+                    enteredAt = TimeUtils.millis();
                 }
             }
 
@@ -324,7 +283,7 @@ final class GpuForcesPanel implements GpuHud.Component {
         return folded;
     }
 
-    /** The phase's next-unit command, as the Next pending buttons run it. */
+    /** The phase's next-unit command, as the strip's Next pending runs it. */
     private void runNext() {
         BoardScene.Command command = nextCommand();
         if (command != null && command.enabled()) {
@@ -332,14 +291,6 @@ final class GpuForcesPanel implements GpuHud.Component {
             state.restoreSelection();
             command.action().run();
         }
-    }
-
-    /** The phase's next-unit command as a mini button (Next pending ›), in the footer and in the strip. */
-    private UiButton nextButton(String name) {
-        UiButton button = ui.button("hud-mini", null, text("GpuBoard.hud.forces.nextPending"), null);
-        button.setName(name);
-        onChange(button, this::runNext);
-        return button;
     }
 
     @Override
@@ -350,34 +301,33 @@ final class GpuForcesPanel implements GpuHud.Component {
     @Override
     public void update(GpuHud.Inputs inputs) {
         this.inputs = inputs;
-        boolean grid = state.forcesGrid;
-        selectsCell.setActor(grid ? selects : null);
-        GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
-        View view = new View(state.presentedUnits(), inputs.frame().status(), state.focus(), state.cardUnit(), grid,
-              contacts, grouping, filter, searching ? search.field.getText().strip().toLowerCase(Locale.ROOT) : "",
-              revision, grid ? inputs.metrics().grid() : inputs.metrics().forces(), fire.drafted(),
-              fire.active() ? fire.actorId() : Entity.NONE, fire.attacks().size(), state.history.playedAttacks(),
+        long now = TimeUtils.millis();
+        if (state.forcesPinned || searching) {
+            unfolded = true;
+        } else if (hovered) {
+            unfolded |= now - enteredAt >= UNFOLD_DELAY;
+        } else if (unfolded && !menu.isOpen() && now - leftAt >= FOLD_DELAY) {
+            unfolded = false;
+        }
+        boolean sheet = GpuRecordSheet.open(state);
+        folded = !unfolded && !sheet;
+        View view = new View(state.presentedUnits(), inputs.frame().status(), state.focus(), state.cardUnit(), filter,
+              searching ? search.field.getText().strip().toLowerCase(Locale.ROOT) : "", revision, folded,
               inputs.preferences().binds(), inputs.frame().panels().players());
         if (!view.equals(shown)) {
             shown = view;
             rebuild();
         }
-        // The phase's own command decides, as in MegaMek; the scene changes more often than the list.
         BoardScene.Command command = nextCommand();
-        next.setDisabled(pending == 0 || command == null || !command.enabled());
-        stripNext.setDisabled(next.isDisabled());
-        railNext.setDisabled(next.isDisabled());
+        stripNext.setDisabled(pending == 0 || command == null || !command.enabled());
         pin.pressed(state.forcesPinned);
-        pin.icons.forEach(icon -> ((Image) icon).setDrawable(ui.skin.getDrawable(state.forcesPinned ? "icon-lock"
-              : "icon-unlock")));
-        pinTip.getActor().setText(text(state.forcesPinned ? "GpuBoard.hud.forces.unpinTip"
-              : "GpuBoard.hud.forces.pinTip"));
-        boolean open = state.forcesPinned || state.forcesGrid || searching || hovered
-              || TimeUtils.timeSinceMillis(leftAt) < COLLAPSE_MILLIS;
-        folded = !open && !GpuRecordSheet.open(state);
-        Table wanted = GpuRecordSheet.open(state) ? strip : folded ? rail : full;
+        Table wanted = sheet ? strip : full;
         if (content.getActor() != wanted) {
             content.setActor(wanted);
+        }
+        Table head = folded ? railHead : openHead;
+        if (headCell.getActor() != head) {
+            headCell.setActor(head);
         }
     }
 
@@ -400,110 +350,91 @@ final class GpuForcesPanel implements GpuHud.Component {
     }
 
     private void rebuild() {
-        List<UnitStatus> units = shown.units();
-        gridToggle.icons.forEach(icon -> ((Image) icon).setDrawable(ui.skin.getDrawable(shown.grid() ? "icon-list"
-              : "icon-grid")));
-        // The binds' key texts; the view holds the binds, so a changed key rebuilds the tooltips.
-        GpuBoardSource.UiPreferences preferences = inputs.preferences();
-        gridTip.getActor().setText(text(shown.grid() ? "GpuBoard.hud.forces.listViewTip"
-              : "GpuBoard.hud.forces.gridViewTip", GpuHintLine.key(preferences, KeyCommandBind.FORCES_GRID)));
         overviewTip.getActor().setText(text("GpuBoard.hud.forces.overviewTip",
-              GpuHintLine.key(preferences, KeyCommandBind.UNIT_OVERVIEW)));
-        groupingSelect.setText(text(shown.grouping().key));
-        filterSelect.setText(text(shown.filter().key));
-        long hostile = units.stream().filter(unit -> unit.side() == Side.ENEMY).count();
-        tabs.buttons.get(0).setText(text("GpuBoard.hud.forces.friendlyTab", units.size() - hostile));
-        tabs.buttons.get(1).setText(text("GpuBoard.hud.forces.contactsTab", hostile));
-        tabs.select(shown.contacts() ? 1 : 0);
-
-        // The footer counts the local player's own units, the ones this client gives orders to.
-        List<UnitStatus> own = units.stream().filter(unit -> unit.side() == Side.OWN).toList();
-        pending = (int) own.stream().filter(UnitStatus::pending).count();
-        long operational = own.stream().filter(unit -> !unit.destroyed()).count();
+              GpuHintLine.key(inputs.preferences(), KeyCommandBind.UNIT_OVERVIEW)));
+        GamePhase phase = shown.status().phase();
+        // The list holds the own and allied units; the enemy's are the contacts' and the target card's.
+        List<UnitStatus> force = shown.units().stream().filter(unit -> unit.side() != Side.ENEMY).toList();
+        pending = (int) force.stream().filter(unit -> unit.side() == Side.OWN && unit.pending()).count();
+        String verb = verb(phase);
+        // Both headers count the units still to act (the amber disc of their rows), else the force.
+        boolean waiting = verb != null && pending > 0;
+        String count = String.valueOf(waiting ? pending : force.size());
+        for (Label label : List.of(summary, railCount)) {
+            label.setText(count);
+            label.setColor(waiting ? UiTheme.TEXT : UiTheme.MUTED);
+        }
+        railDisc.setActor(waiting ? disc(UiTheme.AMBER) : null);
+        openDisc.setActor(waiting ? disc(UiTheme.AMBER) : null);
         stripCount.setText(pending > 0 ? text("GpuBoard.hud.forces.stripPending", pending) : "");
-        if (shown.contacts()) {
-            footText.setText(text("GpuBoard.hud.forces.unidentifiedCount",
-                  units.stream().filter(UnitStatus::sensorContact).count()));
-            footRight.setActor(rightClick);
-        } else {
-            footText.setText(pending > 0 ? text("GpuBoard.hud.forces.pendingCount", pending, own.size())
-                  : text("GpuBoard.hud.forces.operationalCount", operational, own.size()));
-            footRight.setActor(next);
-        }
 
-        // The rail lists the own and allied units; its count is the pending ones.
-        railCount.setText(pending > 0 ? String.valueOf(pending) : "");
-        List<UnitStatus> railed = units.stream().filter(unit -> unit.side() != Side.ENEMY).toList();
-        List<Integer> railIds = railed.stream().map(UnitStatus::id).toList();
-        if (railIds.equals(railShown)) {
-            railed.forEach(this::railItem);
-        } else {
-            railShown = railIds;
-            railList.clearChildren();
-            railItems.keySet().retainAll(railIds);
-            railed.forEach(unit -> railList.add(railItem(unit)).size(RailItem.WIDTH, RailItem.HEIGHT).padBottom(4)
-                  .row());
+        boolean big = force.size() > COMPANY;
+        if (big) {
+            chipButtons.get(Filter.ALL).setText(text(Filter.ALL.key, force.size()));
+            chipButtons.get(Filter.PENDING).setText(text(Filter.PENDING.key,
+                  force.stream().filter(UnitStatus::pending).count()));
+            chipButtons.get(Filter.DAMAGED).setText(text(Filter.DAMAGED.key,
+                  force.stream().filter(GpuForcesPanel::damaged).count()));
+            chipButtons.forEach((each, chip) -> chip.pressed(each == shown.filter()));
+            chipsSpacer.height(chips.getPrefHeight());
         }
-
-        List<UnitStatus> listed = tabUnits().filter(unit -> !shown.grid() || passes(unit, shown.filter())).toList();
-        Map<String, List<UnitStatus>> groups = groups(listed, shown.grid() ? shown.grouping() : Grouping.FORMATION);
-        // While the same groups list the same units, only the rows' and tiles' contents change: re-adding them would
+        Actor chipsShown = !big ? null : shown.folded() ? chipsSpacer : chips;
+        if (chipsCell.getActor() != chipsShown) {
+            chipsCell.setActor(chipsShown);
+        }
+        Filter active = big ? shown.filter() : Filter.ALL;
+        List<UnitStatus> listed = force.stream().filter(this::matches).filter(unit -> passes(unit, active)).toList();
+        Map<String, List<UnitStatus>> groups = GpuHudKit.groups(listed, this::formation, (first, second) -> 0);
+        // While the same groups list the same units, only the rows' and headers' contents change: re-adding them would
         // cancel a press on one (Scene2D unfocuses removed actors), and status updates arrive during the enemy's turn.
-        List<Object> layout = List.of(shown.grid(), shown.width(), shown.query(), revision, groups.entrySet().stream()
+        // A force not split into formations is one unassigned group: it lists its units without a header, as the
+        // panel's header already counts them.
+        boolean bare = groups.size() == 1 && groups.containsKey(text("GpuBoard.hud.forces.unassigned"));
+        List<Object> layout = List.of(shown.folded(), big, shown.query(), active, revision, groups.entrySet().stream()
               .map(group -> List.of(group.getKey(), group.getValue().stream().map(UnitStatus::id).toList())).toList());
-        if (layout.equals(shownLayout)) {
+        if (!layout.equals(shownLayout)) {
+            shownLayout = layout;
+            list.clearChildren();
+            if (listed.isEmpty()) {
+                ui.empty(list, shown.query().isEmpty() ? text("GpuBoard.hud.forces.noUnits")
+                      : text("GpuBoard.hud.forces.noMatch", shown.query()));
+            }
+            headers.keySet().retainAll(bare ? Set.of() : groups.keySet());
             groups.forEach((name, members) -> {
-                if (!collapsed.contains(name)) {
-                    members.forEach(shown.grid() ? this::tile : this::row);
+                if (!bare) {
+                    GroupHeader header = headers.computeIfAbsent(name, GroupHeader::new);
+                    list.add(header).growX().minWidth(0)
+                          .height(collapsed.contains(name) ? GROUP_HEIGHT + STRIP_HEIGHT : GROUP_HEIGHT).row();
+                }
+                if (bare || !collapsed.contains(name)) {
+                    members.forEach(unit -> list.add(rows.computeIfAbsent(unit.id(), ForceRow::new)).growX()
+                          .minWidth(0).height(ROW_HEIGHT).row());
                 }
             });
-            return;
+            rows.keySet().retainAll(listed.stream().map(UnitStatus::id).toList());
         }
-        shownLayout = layout;
-        list.clearChildren();
-        list.pad(0);
-        if (listed.isEmpty()) {
-            ui.empty(list, shown.query().isEmpty() ? text("GpuBoard.hud.forces.noUnits")
-                  : text("GpuBoard.hud.forces.noMatch", shown.query()));
-        } else if (shown.grid()) {
-            grid(groups);
-        } else {
-            groups.forEach((name, members) -> {
-                list.add(groupHeader(name, members.size())).growX().row();
-                if (!collapsed.contains(name)) {
-                    // A row is a Button, whose minimum width is its preferred one; the cell lets it shrink.
-                    members.forEach(unit -> list.add(row(unit)).growX().minWidth(0).pad(0, 10, 6, 10).row());
-                }
-            });
-        }
-        Set<Integer> ids = new HashSet<>(listed.stream().map(UnitStatus::id).toList());
-        rows.keySet().retainAll(ids);
-        tiles.keySet().retainAll(ids);
+        groups.forEach((name, members) -> {
+            if (!bare) {
+                headers.get(name).show(members, verb);
+            }
+            if (bare || !collapsed.contains(name)) {
+                members.forEach(unit -> rows.get(unit.id()).show(unit));
+            }
+        });
     }
 
-    /**
-     * Groups in the order the units come, each unit in its group in that order; by weight class in the order of their
-     * heaviest units, the unidentified last ({@link GpuHudKit#HEAVIEST_FIRST}).
-     */
-    private Map<String, List<UnitStatus>> groups(List<UnitStatus> units, Grouping by) {
-        return GpuHudKit.groups(units, unit -> group(unit, by),
-              by == Grouping.WEIGHT ? GpuHudKit.HEAVIEST_FIRST : (first, second) -> 0);
-    }
-
-    /**
-     * A unit's group (C4, C8): its formation as the lists name it ({@link GpuHudKit#formation}), its readiness, or its
-     * weight class. Contacts are "Unidentified".
-     */
-    private String group(UnitStatus unit, Grouping by) {
-        if (unit.sensorContact()) {
-            return text(UNIDENTIFIED);
+    /** The phase's verb for the units still to act ("to move"), or null in a phase in which none acts in turn. */
+    private static String verb(GamePhase phase) {
+        if (phase.isDeployment()) {
+            return "GpuBoard.hud.forces.verbDeploy";
+        } else if (phase.isMovement()) {
+            return "GpuBoard.hud.forces.verbMove";
+        } else if (phase.isFiring() || phase.isTargeting() || phase.isOffboard()) {
+            return "GpuBoard.hud.forces.verbFire";
+        } else if (phase.isPhysical() || phase.isPremovement() || phase.isPreFiring()) {
+            return "GpuBoard.hud.forces.verbAct";
         }
-        return switch (by) {
-            case FORMATION -> formation(unit);
-            case READINESS -> text(unit.pending() ? "GpuBoard.hud.state.needsOrders"
-                  : unit.done() ? "GpuBoard.hud.state.acted" : "GpuBoard.hud.state.waiting");
-            case WEIGHT -> unit.weightClass();
-        };
+        return null;
     }
 
     private String formation(UnitStatus unit) {
@@ -515,368 +446,290 @@ final class GpuForcesPanel implements GpuHud.Component {
         return GpuHudKit.matches(unit, formation(unit), shown.query());
     }
 
-    /** The units of the shown tab that match the search, before the grid's filter. */
-    private Stream<UnitStatus> tabUnits() {
-        return shown.units().stream().filter(unit -> (unit.side() == Side.ENEMY) == shown.contacts())
-              .filter(this::matches);
-    }
-
-    /** The grid's filter (C8); damaged or impaired includes heat effects, as the prototype's "Running hot". */
     private static boolean passes(UnitStatus unit, Filter filter) {
         return switch (filter) {
             case ALL -> true;
-            case NEEDS_ORDERS -> unit.pending();
-            case ACTED -> unit.done();
-            case DAMAGED -> unit.destroyed() || unit.damageLevel() > Entity.DMG_NONE || impaired(unit)
-                  || !unit.destroyedLocations().isEmpty() || hot(unit);
+            case PENDING -> unit.pending();
+            case DAMAGED -> damaged(unit);
         };
     }
 
-    /**
-     * The board label warns or cautions about the unit, e.g. prone or shut down; its precautions and notes, such as
-     * hidden, hull down or evading, impair nothing.
-     */
-    private static boolean impaired(UnitStatus unit) {
-        return unit.statusWords().stream().anyMatch(word -> word.severity() == UnitStatusWords.Severity.WARNING
-              || word.severity() == UnitStatusWords.Severity.CAUTION);
+    /** Damaged or impaired, heat effects included (the prototype's "Running hot"). */
+    private static boolean damaged(UnitStatus unit) {
+        return unit.destroyed() || unit.damageLevel() > Entity.DMG_NONE || !unit.destroyedLocations().isEmpty()
+              || !unit.heatEffects().isEmpty() || unit.statusWords().stream()
+              .anyMatch(word -> word.severity() == UnitStatusWords.Severity.WARNING
+                    || word.severity() == UnitStatusWords.Severity.CAUTION);
     }
 
-    /** A group's header (.grp): chevron, name and unit count; a click collapses or opens it. */
-    private Table groupHeader(String name, int count) {
-        Table header = new Table();
-        header.setName("forces-group-" + name);
-        header.pad(9, 14, 5, 14);
-        header.add(ui.icon(collapsed.contains(name) ? "chevron-right" : "chevron-down", 12, UiTheme.MUTED))
-              .padRight(6);
-        Label label = ui.label(name, "hud-medium", 11.5f, UiTheme.ACCENT);
-        label.setEllipsis(true);
-        header.add(label).growX().minWidth(0);
-        header.add(ui.label(text("GpuBoard.hud.forces.groupCount", count), "hud-medium", 11, UiTheme.MUTED))
-              .padLeft(6);
-        header.setTouchable(Touchable.enabled);
-        header.addListener(new ClickListener() {
-            @Override
-            public void clicked(InputEvent event, float x, float y) {
-                if (!collapsed.remove(name)) {
-                    collapsed.add(name);
-                }
-                revision++;
-            }
-        });
-        return header;
+    /** The client's duplicate marker of the unit's name ("#2"), empty for the first of its kind. */
+    static String marker(UnitStatus unit) {
+        Matcher matcher = MARKER.matcher(unit.name());
+        return matcher.find() ? matcher.group(1) : "";
     }
 
-    /**
-     * The grid (.ggrid): groups wrap two to a row when they hold at most four units, each with its tiles in as many
-     * columns of at least 64 units as fit (.tiles). The column count comes from the panel width the HUD gives it.
-     */
-    private void grid(Map<String, List<UnitStatus>> groups) {
-        // The panel's 2-unit side borders and the grid's 4-unit padding.
-        float width = shown.width() - 12;
-        list.pad(0, 4, 0, 4);
-        boolean open = false;
-        for (Map.Entry<String, List<UnitStatus>> group : groups.entrySet()) {
-            boolean half = group.getValue().size() <= HALF_GROUP;
-            if (!half && open) {
-                list.row();
-                open = false;
-            }
-            float groupWidth = half ? width / 2 : width;
-            Cell<Table> cell = list.add(gridGroup(group.getKey(), group.getValue(), groupWidth)).width(groupWidth)
-                  .top().left();
-            if (half) {
-                if (open) {
-                    list.row();
-                }
-                open = !open;
-            } else {
-                cell.colspan(2);
-                list.row();
-            }
+    /** The rail's short name: the model code, or the chassis' first word when the code is long or missing. */
+    static String code(UnitStatus unit) {
+        String model = unit.model().strip();
+        if (!model.isEmpty() && model.length() <= 7) {
+            return model.toUpperCase(Locale.ROOT);
         }
+        String chassis = unit.chassis().strip();
+        int space = chassis.indexOf(' ');
+        String word = space < 0 ? chassis : chassis.substring(0, space);
+        return word.substring(0, Math.min(7, word.length())).toUpperCase(Locale.ROOT);
     }
 
-    private Table gridGroup(String name, List<UnitStatus> members, float width) {
-        Table group = new Table();
-        group.top().left();
-        group.add(groupHeader(name, members.size())).growX().row();
-        if (collapsed.contains(name)) {
-            return group;
-        }
-        Table grid = new Table();
-        grid.pad(2, 8, 8, 8).top().left();
-        grid.defaults().space(TILE_GAP);
-        float inner = width - 16;
-        int columns = Math.max(1, (int) ((inner + TILE_GAP) / (TILE_MIN + TILE_GAP)));
-        float tileWidth = (inner - TILE_GAP * (columns - 1)) / columns;
-        for (int index = 0; index < members.size(); index++) {
-            grid.add(tile(members.get(index))).width(tileWidth);
-            if (index % columns == columns - 1) {
-                grid.row();
-            }
-        }
-        group.add(grid).left();
-        return group;
-    }
-
-    private UnitRow row(UnitStatus unit) {
-        UnitRow row = rows.computeIfAbsent(unit.id(), id -> {
-            UnitRow created = kit.unitRow(40, 34);
-            created.setName("forces-unit-" + id);
-            onChange(created, () -> select.accept(id));
-            created.addListener(UnitRow.menuOpener(menu, id, this::unit));
-            return created;
-        });
-        // The one highlighted unit is the card's: the focus pressed in mint, an
-        // inspected unit with its edges. The acting unit keeps its line, "Acting now", without the highlight.
-        boolean card = unit.id() == shown.card();
-        row.show(unit, line(unit), shown.status().phase(), card && unit.id() != shown.focus(), unit(acting()));
-        row.pressed(card && unit.id() == shown.focus());
-        return row;
-    }
-
-    private Tile tile(UnitStatus unit) {
-        Tile tile = tiles.computeIfAbsent(unit.id(), Tile::new);
-        tile.show(unit, line(unit));
-        return tile;
-    }
-
-    private RailItem railItem(UnitStatus unit) {
-        RailItem item = railItems.computeIfAbsent(unit.id(), RailItem::new);
-        item.show(unit, line(unit));
-        return item;
-    }
-
-    /** The prototype's acting() (C.5), whose row reads "Acting now" or "Up next". */
+    /** The unit the local player acts with, or the own focus unit before its turn (C.5). */
     private int acting() {
         return UnitRow.acting(shown.status(), shown.focus());
-    }
-
-    private static boolean attacking(GamePhase phase) {
-        return phase.isFiring() || phase.isTargeting() || phase.isOffboard();
     }
 
     private UnitStatus unit(int id) {
         return shown.units().stream().filter(unit -> unit.id() == id).findFirst().orElse(null);
     }
 
-    /**
-     * The status line of the phase (r1 section 3.3, plan C6) from the unit's snapshot, the fire orders' drafts and
-     * the attacks the playback has presented; nothing is recomputed.
-     */
-    private Line line(UnitStatus unit) {
-        GpuBattleStatus.Snapshot status = shown.status();
-        if (unit.side() == Side.ENEMY || unit.sensorContact() || unit.destroyed()) {
-            // The contacts list shows the same lines.
-            return UnitRow.contactLine(unit, status);
+    /** The unit's state, which its tag (open) and dot (rail) show. */
+    /** WAITING: it deploys this round, but not in the local player's next turn (GpuDeployment#waits). */
+    private enum State { NONE, NOW, PENDING, WAITING, DONE, DESTROYED }
+
+    private State stateOf(UnitStatus unit) {
+        GamePhase phase = shown.status().phase();
+        if (unit.destroyed()) {
+            return State.DESTROYED;
+        } else if (unit.id() == acting() && shown.status().myTurn() && !unit.done()) {
+            return State.NOW;
+        } else if (UnitRow.acted(unit, phase) || (phase.isDeployment() && GpuDeployment.placed(unit))) {
+            return State.DONE;
+        } else if (phase.isDeployment() && GpuDeployment.waits(unit)) {
+            return State.WAITING;
+        } else if (unit.pending() && verb(phase) != null) {
+            return State.PENDING;
         }
-        GamePhase phase = status.phase();
-        String moved = UnitRow.moved(unit, phase);
-        if (UnitRow.shutDown(unit)) {
-            return new Line(join(text("GpuBoard.hud.state.shutDown"), moved), Tone.BAD);
+        return State.NONE;
+    }
+
+    /**
+     * The second line's right part: what keeps the unit from acting (shut down, prone, deploying later, walking on),
+     * else its movement this round with its target modifier, else its movement points.
+     */
+    private Line detail(UnitStatus unit) {
+        GamePhase phase = shown.status().phase();
+        if (unit.destroyed()) {
+            return new Line("", Tone.NORMAL);
+        } else if (UnitRow.shutDown(unit)) {
+            return new Line(text("GpuBoard.hud.state.shutDown"), Tone.BAD);
+        } else if (UnitRow.prone(unit)) {
+            return new Line(text("GpuBoard.hud.state.prone"), Tone.BAD);
         }
         boolean acting = unit.id() == acting();
-        boolean actingNow = acting && status.myTurn();
-        if (phase.isMovement()) {
-            if (unit.done()) {
-                return new Line(text("GpuBoard.hud.status.moved", moved), Tone.NORMAL);
-            } else if (acting) {
-                return actingLine(actingNow);
-            }
-            return waiting(unit, text("GpuBoard.hud.status.pending"));
-        } else if (attacking(phase)) {
-            if (unit.done()) {
-                return new Line(join(unit.declaredAttacks() > 0
-                      ? text("GpuBoard.hud.status.declared", unit.declaredAttacks())
-                      : text("GpuBoard.hud.status.holdingFire"), moved), Tone.NORMAL);
-            }
-            // The actor's queued attacks, or another unit's saved drafts (the mock's drafts, plan H33).
-            int drafted = unit.id() == shown.fireActor() ? shown.fireAttacks()
-                  : shown.drafted().getOrDefault(unit.id(), 0);
-            Line state;
-            if (actingNow) {
-                state = new Line(drafted > 0 ? text("GpuBoard.hud.status.actingDrafted", drafted)
-                      : text("GpuBoard.hud.status.actingNow"), Tone.OK);
-            } else if (acting) {
-                state = actingLine(false);
-            } else {
-                state = waiting(unit, drafted > 0 ? text("GpuBoard.hud.status.pendingDrafted", drafted)
-                      : text("GpuBoard.hud.status.pending"));
-            }
-            return new Line(join(state.text(), moved), state.tone());
-        } else if (phase.isPhysical()) {
-            if (unit.done() && unit.declaredAttacks() > 0) {
-                return new Line(text("GpuBoard.hud.status.declared", unit.declaredAttacks()), Tone.NORMAL);
-            } else if (unit.pending() && !unit.done()) {
-                // A physical turn of the phase accepts the unit. That says nothing of an adjacent target (without
-                // the skip-ineligible option every Mek gets one), and the status holds none, so the line names none.
-                return acting ? actingLine(actingNow) : waiting(unit, text("GpuBoard.hud.status.pending"));
-            }
-            return new Line(join(text("GpuBoard.hud.status.noPhysicalAttack"), moved), Tone.NORMAL);
-        } else if ((phase.isReport() && !phase.isInitiativeReport()) || phase.isEnd()) {
-            return review(unit, moved);
+        if (unit.walksOn() && unit.position() == null && !acting) {
+            // Under walk-on deployment the unit enters from its edge in a movement phase instead of being placed.
+            return phase.isMovement() && unit.pending()
+                  ? new Line(text("GpuBoard.hud.status.walkOnNow", IStartingPositions.getDisplayName(
+                        unit.walkOnZone())), Tone.WARN)
+                  : new Line(GpuDeployment.walkOnLine(unit), Tone.NORMAL);
         }
-        return new Line(unit.heat() > 0 ? text("GpuBoard.hud.status.readyHeat", unit.heat())
-              : text("GpuBoard.hud.status.ready"), Tone.NORMAL);
-    }
-
-    /** The unit the local player acts with, or the own focus unit before its turn (C.5). */
-    private static Line actingLine(boolean now) {
-        return new Line(text(now ? "GpuBoard.hud.status.actingNow" : "GpuBoard.hud.status.upNext"), Tone.OK);
-    }
-
-    /** A unit that has not acted: amber while a remaining turn of the phase accepts it, else waiting. */
-    private static Line waiting(UnitStatus unit, String pendingText) {
-        return unit.pending() ? new Line(pendingText, Tone.WARN)
-              : new Line(text("GpuBoard.hud.state.waiting"), Tone.NORMAL);
-    }
-
-    /**
-     * The review line of the report phases: the unit's attacks of the round that the playback has presented and their
-     * hits (C.6: none counts before its shot lands), else its movement, and in the end phase its heat, amber while it
-     * has heat effects.
-     */
-    private Line review(UnitStatus unit, String moved) {
-        int round = shown.status().round();
-        List<GpuReportLog.CombatEvent> attacks = shown.combat().stream()
-              .filter(event -> event.round() == round && event.attackerId() == unit.id()).toList();
-        long hits = attacks.stream().filter(GpuReportLog.CombatEvent::hit).count();
-        GamePhase phase = shown.status().phase();
-        boolean heat = (phase.isEnd() || phase.isEndReport()) && unit.heat() > 0;
-        String text;
-        if (!attacks.isEmpty()) {
-            text = heat ? text("GpuBoard.hud.status.attacksHeat", attacks.size(), hits, unit.heat())
-                  : text("GpuBoard.hud.status.attacks", attacks.size(), hits);
-        } else {
-            String summary = moved.isEmpty() ? text("GpuBoard.hud.status.noAttacks") : moved;
-            text = heat ? join(summary, text("GpuBoard.hud.status.heat", unit.heat())) : summary;
+        if (phase.isDeployment() && !acting && !GpuDeployment.placed(unit)) {
+            if (GpuDeployment.later(unit)) {
+                return new Line(text("GpuBoard.hud.deploy.later"), Tone.NORMAL);
+            } else if (GpuDeployment.waits(unit)) {
+                return new Line(text("GpuBoard.hud.deploy.wait." + unit.deployWait().name()), Tone.NORMAL);
+            }
         }
-        return new Line(text, heat && hot(unit) ? Tone.WARN : Tone.NORMAL);
-    }
-
-    /**
-     * The unit's heat has effects (the prototype's "running hot"): the status carries the heat table's text only for
-     * a heat level with effects.
-     */
-    private static boolean hot(UnitStatus unit) {
-        return !unit.heatEffects().isEmpty();
+        if (!unit.moved().isEmpty()) {
+            String moved = text("GpuBoard.hud.forces.moved", unit.moved(), unit.hexesMoved());
+            return new Line(unit.tmmShown() ? moved + SEPARATOR + String.format(Locale.ROOT, "%+d", unit.tmm())
+                  : moved, Tone.OK);
+        }
+        return new Line(text("GpuBoard.hud.forces.mp", unit.walk(), unit.run(), unit.jump()), Tone.NORMAL);
     }
 
     private static String join(String first, String second) {
         return second.isEmpty() ? first : first + SEPARATOR + second;
     }
 
-    /**
-     * A grid tile (.tile): sprite, name, the status line's first part and a 2-unit armor bar along the bottom. It
-     * selects like a row, and opens the same menu.
-     */
-    private final class Tile extends Table {
-        private final GpuHudKit.UnitSprite sprite = kit.sprite(36, 30);
-        private final Label name = ui.label("", "hud-medium", 11, UiTheme.TEXT);
-        private final Label status = ui.label("", "hud-small", 10, Color.WHITE);
-        private final Drawable up = ui.skin.getDrawable("row");
-        private final Drawable over = ui.skin.getDrawable("row-over");
-        // A mint border over a faint mint fill, without the row's inset bar (.tile.sel).
-        private final Drawable picked = ui.skin.getDrawable("field-focused");
-        // An inspected unit's edges, as its row has them: mint for a friendly unit, coral for an enemy.
-        private final Drawable friend = ui.skin.getDrawable("row-friend");
-        private final Drawable foe = ui.skin.getDrawable("row-foe");
-        private final Drawable bar = ui.skin.getDrawable("white");
-        private final ClickListener pointer;
-        /** The tile's highlight while the card shows its unit, else null. */
-        private Drawable highlight;
-        private float armor;
-        private Color barColor = UiTheme.MINT;
+    /** The state disc of the rail's dot and the open row's pending tag. */
+    private Actor disc(Color color) {
+        Image disc = new Image(ui.skin.getDrawable("unit-disc-6"));
+        disc.setColor(color);
+        return disc;
+    }
 
-        private Tile(int id) {
-            setName("forces-tile-" + id);
-            // The 1-unit border and .tile's padding.
-            pad(7, 5, 8, 5);
-            setBackground(up);
+    /**
+     * A formation's header: chevron, name and how many of its units are still to act; a click collapses it, and a
+     * collapsed one lists its units as small sprites on a line under it. On the rail it shows the name alone.
+     */
+    private final class GroupHeader extends Table {
+        private final String name;
+        private final Label count = ui.label("", "hud-small", 11, UiTheme.MUTED);
+        private final Table sprites = new Table();
+        private final Map<Integer, GpuHudKit.UnitSprite> miniSprites = new HashMap<>();
+
+        private GroupHeader(String name) {
+            this.name = name;
+            setName("forces-group-" + name);
             setTouchable(Touchable.enabled);
-            // A contact's "?" at the tile's small size (.tile span outranks .q).
-            sprite.setActor(ui.label("?", "hud-heading", 10, Color.WHITE));
-            name.setEllipsis(true);
-            name.setAlignment(Align.center);
-            status.setEllipsis(true);
-            status.setAlignment(Align.center);
-            add(sprite).row();
-            // Line heights: the name's font shorthand resets it to Roboto's normal 1.17, the status keeps 1.35.
-            add(name).growX().minWidth(0).height(13).padTop(3).row();
-            add(status).growX().minWidth(0).height(13.5f);
-            pointer = new ClickListener() {
+            sprites.left();
+            sprites.setClip(true);
+            addListener(new ClickListener() {
                 @Override
                 public void clicked(InputEvent event, float x, float y) {
-                    select.accept(id);
+                    if (!collapsed.remove(name)) {
+                        collapsed.add(name);
+                    }
+                    revision++;
                 }
-            };
-            addListener(pointer);
-            addListener(UnitRow.menuOpener(menu, id, GpuForcesPanel.this::unit));
+            });
         }
 
-        void show(UnitStatus unit, Line line) {
-            sprite.set(unit.sensorContact() ? null : unit.icon(),
-                  unit.sensorContact() ? UiTheme.ACCENT : UnitRow.spriteColor(unit));
-            // The prototype's tile names a contact "Contact"; "Sensor contact" would not fit.
-            name.setText(unit.sensorContact() ? text("GpuBoard.hud.forces.contactTile") : unit.chassis());
-            int end = line.text().indexOf(SEPARATOR);
-            status.setText(end < 0 ? line.text() : line.text().substring(0, end));
-            status.setColor(line.tone().color);
-            // The card's unit, as the rows highlight it: the focus selected, an inspected unit with its edges.
-            highlight = unit.id() != shown.card() ? null : unit.id() == shown.focus() ? picked
-                  : unit.side() == Side.ENEMY ? foe : friend;
-            armor = unit.sensorContact() ? 0 : (float) Math.max(0, unit.armor());
-            barColor = unit.side() == Side.ENEMY ? UiTheme.CORAL : UiTheme.MINT;
-            getColor().a = unit.destroyed() ? .4f : 1;
-        }
-
-        @Override
-        public void act(float delta) {
-            setBackground(highlight != null ? highlight : pointer.isOver() ? over : up);
-            super.act(delta);
+        void show(List<UnitStatus> members, String verb) {
+            clearChildren();
+            boolean closed = collapsed.contains(name);
+            long left = members.stream().filter(UnitStatus::pending).count();
+            boolean waiting = verb != null && left > 0;
+            Table line = new Table();
+            if (shown.folded()) {
+                // The rail names the group only: a chevron or a count would read as a control, and the pointer
+                // resting on the rail unfolds it anyway.
+                Label label = ui.label(UiTheme.upper(name), "hud-caption", 10, UiTheme.MUTED);
+                label.setEllipsis(true);
+                line.pad(0, 10, 0, 8);
+                line.add(label).growX().minWidth(0).left();
+                add(line).growX().minWidth(0).height(GROUP_HEIGHT);
+            } else {
+                line.add(ui.icon(closed ? "chevron-right" : "chevron-down", 12, UiTheme.MUTED));
+                line.pad(0, 10, 0, 10);
+                Label label = ui.label(UiTheme.upper(name), "hud-caption", 10.5f, UiTheme.MUTED);
+                label.setEllipsis(true);
+                line.add(label).minWidth(0).padLeft(6).left();
+                line.add().growX();
+                count.setText(verb == null ? text("GpuBoard.hud.forces.groupCount", members.size())
+                      : text("GpuBoard.hud.forces.pendingOf", left, members.size(), text(verb)));
+                count.setColor(waiting ? UiTheme.MINT : UiTheme.MUTED);
+                line.add(count).padLeft(6);
+                add(line).growX().minWidth(0).height(GROUP_HEIGHT);
+            }
+            if (!closed) {
+                return;
+            }
+            row();
+            sprites.clearChildren();
+            sprites.padLeft(shown.folded() ? 6 : 28);
+            miniSprites.keySet().retainAll(members.stream().map(UnitStatus::id).toList());
+            for (UnitStatus unit : members) {
+                GpuHudKit.UnitSprite sprite = miniSprites.computeIfAbsent(unit.id(), id -> kit.sprite(18, 14));
+                sprite.set(unit.icon(), UnitRow.spriteColor(unit));
+                sprite.getColor().a = unit.destroyed() ? .4f : .8f;
+                sprites.add(sprite).padRight(3);
+            }
+            add(sprites).growX().minWidth(0).height(STRIP_HEIGHT).top();
         }
 
         @Override
         public void draw(Batch batch, float parentAlpha) {
+            float previous = batch.getPackedColor();
+            float alpha = getColor().a * parentAlpha;
+            ui.fill(batch, GROUP_FILL, alpha, getX(), getY(), getWidth(), getHeight());
+            ui.fill(batch, SEPARATOR_LINE, alpha, getX(), getY(), getWidth(), 1);
+            batch.setPackedColor(previous);
             super.draw(batch, parentAlpha);
-            // .tile i: 6 in from the left and 3 up inside the border, the armor share of the width, 12 short of it.
-            float inside = getWidth() - 2;
-            float width = Math.min(inside * armor, inside - 12);
-            if (width > 0) {
-                float previous = batch.getPackedColor();
-                batch.setColor(barColor.r, barColor.g, barColor.b, barColor.a * getColor().a * parentAlpha);
-                bar.draw(batch, getX() + 7, getY() + 4, width, 2);
-                batch.setPackedColor(previous);
-            }
         }
     }
 
     /**
-     * A unit on the rail: its sprite on a tile with the card's highlight, a bar at its left edge in the status line's
-     * tone while the unit acts or awaits orders, and its armor along the bottom. The tooltip names it and its status;
-     * it selects and opens the menu as a row does.
+     * A unit's row. Open: its sprite, then the name with its duplicate marker, the model and the state tag; the pilot
+     * with gunnery/piloting and the movement; the armor and structure bars and the heat. On the rail: the TMM once it
+     * moved, the sprite, the state dot, the short name with its marker, mini armor and structure bars and a heat strip
+     * along the right edge. Both forms are as tall, so the rail unfolds without moving a row. A click selects, a right
+     * click opens the unit menu.
      */
-    private final class RailItem extends Table {
-        static final float WIDTH = 46;
-        static final float HEIGHT = 40;
-        private final GpuHudKit.UnitSprite sprite = kit.sprite(36, 30);
-        private final Drawable up = ui.skin.getDrawable("row");
-        private final Drawable over = ui.skin.getDrawable("row-over");
-        private final Drawable picked = ui.skin.getDrawable("field-focused");
-        private final Drawable friend = ui.skin.getDrawable("row-friend");
-        private final Drawable bar = ui.skin.getDrawable("white");
+    private final class ForceRow extends Table {
         private final ClickListener pointer;
-        private final Label tip;
-        private Drawable highlight;
-        private float armor;
-        private Color accent;
+        private final Cell<Table> face;
+        // Open form.
+        private final Table open = new Table();
+        private final GpuHudKit.UnitSprite sprite = kit.sprite(36, 28);
+        private final Label name = ui.label("", "hud-name", 13.5f, UiTheme.TEXT);
+        private final Label marker = ui.label("", "hud-name", 13.5f, UiTheme.MINT);
+        private final Label model = ui.label("", "hud-small", 11, UiTheme.MUTED);
+        private final Container<Actor> tag = new Container<>();
+        private final Label pilot = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
+        private final Label skills = ui.label("", "hud-medium", 11.5f, UiTheme.TEXT);
+        private final Label detail = ui.label("", "hud-medium", 11.5f, UiTheme.TEXT);
+        private final GpuHudKit.MeterBar armor = kit.bar(66, 5);
+        private final GpuHudKit.MeterBar structure = kit.bar(46, 5);
+        private final Label structureCaption = ui.label("S", "hud-caption", 10, UiTheme.MUTED);
+        private final Label heat = ui.label("", "hud-medium", 11.5f, UiTheme.AMBER);
+        private final UiKit.Icon flame = ui.icon("flame", 12, UiTheme.AMBER);
+        // Rail form.
+        private final Table rail = new Table();
+        private final GpuHudKit.UnitSprite railSprite = kit.sprite(36, 28);
+        private final Label tmm = ui.label("", "hud-medium", 10, MOVED);
+        private final Container<Actor> dot = new Container<>();
+        private final Label code = ui.label("", "hud-name", 10.5f, UiTheme.TEXT);
+        private final Label codeMarker = ui.label("", "hud-name", 10.5f, UiTheme.MINT);
+        private final GpuHudKit.MeterBar railArmor = kit.bar(40, 3);
+        private final GpuHudKit.MeterBar railStructure = kit.bar(40, 3);
+        private final Cell<GpuHudKit.MeterBar> railStructureCell;
+        private final Color heatColor = new Color();
+        private float heatShare;
+        /** The card's highlight: 0 none, 1 the selected focus, 2 an inspected unit. */
+        private int highlight;
+        /** Why the unit waits for a later deployment turn, while it does; else null. */
+        private TextTooltip waitTip;
 
-        private RailItem(int id) {
-            setName("forces-rail-" + id);
-            setBackground(up);
+        private ForceRow(int id) {
+            setName("forces-unit-" + id);
             setTouchable(Touchable.enabled);
-            add(sprite);
-            tip = ui.tip(this).getActor();
+            face = add(open).grow();
+
+            name.setEllipsis(true);
+            model.setEllipsis(true);
+            pilot.setEllipsis(true);
+            detail.setEllipsis(true);
+            Table line1 = new Table();
+            line1.add(name).minWidth(0);
+            line1.add(marker).padLeft(4);
+            line1.add(model).growX().minWidth(0).padLeft(6).left();
+            line1.add(tag).padLeft(6);
+            Table line2 = new Table();
+            line2.add(pilot).minWidth(0).left();
+            line2.add(skills).padLeft(5);
+            line2.add().growX();
+            line2.add(detail).minWidth(0).padLeft(6).right();
+            Table line3 = new Table();
+            line3.add(ui.label("A", "hud-caption", 10, UiTheme.MUTED)).padRight(4);
+            line3.add(armor).padRight(8);
+            line3.add(structureCaption).padRight(4);
+            line3.add(structure);
+            line3.add().growX();
+            line3.add(flame).padRight(2);
+            line3.add(heat);
+            Table text = new Table();
+            text.defaults().growX().minWidth(0);
+            text.add(line1).height(15).row();
+            text.add(line2).height(14).row();
+            text.add(line3).height(11);
+            open.pad(0, 8, 0, 10);
+            open.add(sprite).width(42).padRight(8);
+            open.add(text).growX().minWidth(0);
+
+            // The sprite sits where the open row has it, so the list unfolds around it without moving it.
+            code.setEllipsis(true);
+            Table codeLine = new Table();
+            codeLine.add(code).minWidth(0);
+            codeLine.add(codeMarker).padLeft(2);
+            codeLine.add().growX();
+            codeLine.add(dot).padLeft(3);
+            Table side = new Table();
+            side.add(codeLine).growX().minWidth(0).height(15).row();
+            side.add(railArmor).growX().height(3).padTop(4).row();
+            railStructureCell = side.add(railStructure).growX().height(3).padTop(2);
+            rail.pad(0, 8, 0, 9);
+            rail.add(railSprite).width(42).padRight(6);
+            rail.add(side).growX().minWidth(0);
+
             pointer = new ClickListener() {
                 @Override
                 public void clicked(InputEvent event, float x, float y) {
@@ -887,36 +740,123 @@ final class GpuForcesPanel implements GpuHud.Component {
             addListener(UnitRow.menuOpener(menu, id, GpuForcesPanel.this::unit));
         }
 
-        void show(UnitStatus unit, Line line) {
-            sprite.set(unit.icon(), UnitRow.spriteColor(unit));
-            tip.setText(unit.chassis() + "\n" + line.text());
-            highlight = unit.id() != shown.card() ? null : unit.id() == shown.focus() ? picked : friend;
-            armor = (float) Math.max(0, unit.armor());
-            accent = line.tone() == Tone.WARN || line.tone() == Tone.OK ? line.tone().color : null;
-            getColor().a = unit.destroyed() ? .4f : 1;
+        void show(UnitStatus unit) {
+            Table wanted = shown.folded() ? rail : open;
+            if (face.getActor() != wanted) {
+                face.setActor(wanted);
+            }
+            State state = stateOf(unit);
+            boolean hasStructure = unit.marks().structureArgb() != 0 || unit.marks().equals(GpuBattleStatus.Marks.NONE);
+            int structureArgb = unit.marks().structureArgb();
+            if (shown.folded()) {
+                railSprite.set(unit.icon(), UnitRow.spriteColor(unit));
+                code.setText(code(unit));
+                codeMarker.setText(marker(unit));
+                // A moved unit's dot gives way to its target movement modifier.
+                boolean showTmm = state == State.DONE && !unit.moved().isEmpty() && unit.tmmShown();
+                tmm.setText(showTmm ? String.format(Locale.ROOT, "%+d", unit.tmm()) : "");
+                dot.setActor(showTmm ? tmm : dot(state));
+                railArmor.set(unit.armor(), unit.marks().armorArgb());
+                railStructure.set(unit.structure(), structureArgb);
+                railStructure.setVisible(hasStructure);
+                railStructureCell.height(hasStructure ? 3 : 0).padTop(hasStructure ? 2 : 0);
+                heatShare = unit.heat() <= 0 ? 0 : Math.min(1, unit.heat() / 30f);
+                heatColor.set(unit.heatEffects().isEmpty() ? UiTheme.AMBER : HOT);
+            } else {
+                sprite.set(unit.icon(), UnitRow.spriteColor(unit));
+                name.setText(UiTheme.upper(unit.chassis()));
+                marker.setText(marker(unit));
+                model.setText(unit.model());
+                tag.setActor(tag(state));
+                pilot.setText(unit.pilot());
+                skills.setText(unit.gunnery() + "/" + unit.piloting());
+                Line line = detail(unit);
+                detail.setText(line.text());
+                detail.setColor(line.tone() == Tone.OK ? MOVED : line.tone() == Tone.NORMAL ? UiTheme.TEXT
+                      : line.tone().color);
+                armor.set(unit.armor(), unit.marks().armorArgb());
+                structure.set(unit.structure(), structureArgb);
+                structure.setVisible(hasStructure);
+                structureCaption.setVisible(hasStructure);
+                boolean hot = !unit.heatEffects().isEmpty();
+                flame.setVisible(unit.heat() > 0);
+                flame.setColor(hot ? HOT : UiTheme.AMBER);
+                heat.setText(unit.heat() > 0 ? String.valueOf(unit.heat()) : "");
+                heat.setColor(hot ? HOT : UiTheme.AMBER);
+                heatShare = 0;
+            }
+            highlight = unit.id() != shown.card() ? 0 : unit.id() == shown.focus() ? 1 : 2;
+            getColor().a = unit.destroyed() ? .38f : state == State.DONE ? .62f : state == State.WAITING ? .5f : 1;
+            showWaitTip(state == State.WAITING ? text("GpuBoard.hud.deploy.waitTip." + unit.deployWait().name()) : null);
         }
 
-        @Override
-        public void act(float delta) {
-            setBackground(highlight != null ? highlight : pointer.isOver() ? over : up);
-            super.act(delta);
+        /** The row's tooltip tells why the unit waits; {@code tip} null removes it. */
+        private void showWaitTip(String tip) {
+            if (tip == null) {
+                if (waitTip != null) {
+                    waitTip.hide();
+                    removeListener(waitTip);
+                    waitTip = null;
+                }
+                return;
+            }
+            if (waitTip == null) {
+                waitTip = ui.tip(this);
+            }
+            waitTip.getActor().setText(tip);
+        }
+
+        private Actor tag(State state) {
+            return switch (state) {
+                case DESTROYED -> ui.label(UiTheme.upper(text("GpuBoard.hud.state.destroyed")), "hud-mini", 10,
+                      UiTheme.CORAL);
+                case NOW -> {
+                    Container<Label> chip = new Container<>(ui.label(UiTheme.upper(text("GpuBoard.hud.forces.now")),
+                          "hud-mini", 10, INK));
+                    chip.setBackground(ui.skin.newDrawable("white", UiTheme.MINT));
+                    chip.pad(0, 5, 0, 5);
+                    yield chip;
+                }
+                case DONE -> ui.icon("check", 14, UiTheme.MUTED);
+                case PENDING -> disc(UiTheme.AMBER);
+                case WAITING, NONE -> null;
+            };
+        }
+
+        private Actor dot(State state) {
+            return switch (state) {
+                case DESTROYED -> ui.icon("close", 11, UiTheme.CORAL);
+                case NOW -> disc(UiTheme.MINT);
+                case DONE -> ui.icon("check", 11, UiTheme.MUTED);
+                case PENDING -> disc(UiTheme.AMBER);
+                case WAITING, NONE -> null;
+            };
         }
 
         @Override
         public void draw(Batch batch, float parentAlpha) {
-            super.draw(batch, parentAlpha);
             float previous = batch.getPackedColor();
-            float alpha = getColor().a * parentAlpha;
-            if (accent != null) {
-                batch.setColor(accent.r, accent.g, accent.b, accent.a * alpha);
-                bar.draw(batch, getX() + 1, getY() + 3, 2, getHeight() - 6);
+            float alpha = parentAlpha;
+            if (highlight == 1) {
+                ui.fill(batch, SELECTED, alpha, getX(), getY(), getWidth(), getHeight());
+                ui.fill(batch, UiTheme.MINT, alpha, getX(), getY(), 3, getHeight());
+            } else if (highlight == 2) {
+                ui.fill(batch, INSPECTED, alpha, getX(), getY(), getWidth(), getHeight());
+                ui.fill(batch, UiTheme.MINT, alpha * .6f, getX(), getY(), 2, getHeight());
             }
-            float width = Math.min((getWidth() - 2) * armor, getWidth() - 10);
-            if (width > 0) {
-                batch.setColor(UiTheme.MINT.r, UiTheme.MINT.g, UiTheme.MINT.b, UiTheme.MINT.a * alpha);
-                bar.draw(batch, getX() + 5, getY() + 3, width, 2);
+            if (pointer.isOver()) {
+                ui.fill(batch, HOVER, alpha, getX(), getY(), getWidth(), getHeight());
+            }
+            ui.fill(batch, SEPARATOR_LINE, alpha, getX(), getY(), getWidth(), 1);
+            if (heatShare > 0) {
+                float top = getY() + getHeight() - 6;
+                float bottom = getY() + 6;
+                float x = getX() + getWidth() - 5;
+                ui.fill(batch, HEAT_TRACK, alpha, x, bottom, 3, top - bottom);
+                ui.fill(batch, heatColor, alpha * getColor().a, x, bottom, 3, (top - bottom) * heatShare);
             }
             batch.setPackedColor(previous);
+            super.draw(batch, parentAlpha);
         }
     }
 }

@@ -128,6 +128,19 @@ class GpuBoardSourceTest {
     }
 
     @Test
+    void aWalkOnEntersFromTheOffBoardNeighbourMostNearlyBehindIt() {
+        java.util.function.Predicate<Coords> onBoard = hex -> hex.getX() >= 0 && hex.getY() >= 0
+              && hex.getX() < 10 && hex.getY() < 10;
+        Coords northEdge = new Coords(5, 0);
+        assertEquals(northEdge.translated(0), GpuBoardSource.offBoardBehind(northEdge, 3, onBoard),
+              "facing south on the north edge it came straight in from the north");
+        Coords westEdge = new Coords(0, 5);
+        assertEquals(westEdge.translated(4), GpuBoardSource.offBoardBehind(westEdge, 0, onBoard),
+              "with the board behind it, the nearest off-board side neighbour");
+        assertNull(GpuBoardSource.offBoardBehind(new Coords(5, 5), 0, onBoard), "an inner hex has no entry");
+    }
+
+    @Test
     void aDeathTheServerReportsBeforeTheFallThatCausedItPlaysAsTheFallLands() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             int id = fixture.entity.getId();

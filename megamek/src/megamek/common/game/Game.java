@@ -670,6 +670,7 @@ public final class Game extends AbstractGame implements Serializable,
     public boolean isCurrentPhasePlayable() {
         return switch (phase) {
             case INITIATIVE, END -> false;
+            case INITIATIVE_REPORT -> !isWalkOnOnlyDeploymentRound();
             case DEPLOYMENT,
                  TARGETING,
                  PREMOVEMENT,
@@ -2211,6 +2212,11 @@ public final class Game extends AbstractGame implements Serializable,
     }
 
     /**
+     * Under walk-on deployment the server counts a deployment-phase turn only for a unit that cannot walk on, but the
+     * turn accepts any undeployed unit. A unit that can walk on is offered only when no unit that cannot is left, as
+     * Princess picks ({@code Princess.getEntityToDeploy}); otherwise the turn would be spent on it and the unit it was
+     * counted for would be left without one.
+     *
      * @param turn the current game turn, which may be null
      * @return the number of the first deployable entity that is valid for the specified turn
      */
@@ -2219,28 +2225,69 @@ public final class Game extends AbstractGame implements Serializable,
         if (turn == null) {
             return -1;
         }
+        int firstWalkOn = -1;
         for (Entity entity : inGameTWEntities()) {
             if (turn.isValidEntity(entity, this) && entity.shouldDeploy(getRoundCount())) {
-                return entity.getId();
+                if (!walksOnInsteadOfDeploying(entity)) {
+                    return entity.getId();
+                }
+                if (firstWalkOn == -1) {
+                    firstWalkOn = entity.getId();
+                }
             }
         }
-        return -1;
+        return firstWalkOn;
     }
 
     /**
-     * @return the number of the next deployable entity that is valid for the specified turn
+     * @return the number of the next deployable entity that is valid for the specified turn; like
+     *       {@link #getFirstDeployableEntityNum(GameTurn)}, a unit that can walk on only when no other is left
      */
     public int getNextDeployableEntityNum(GameTurn turn,
                                           int start) {
         if (start >= 0) {
+            int first = getFirstDeployableEntityNum(turn);
+            boolean walkOnOnly = first != -1 && walksOnInsteadOfDeploying(getEntity(first));
             for (int i = start; i < inGameTWEntities().size(); i++) {
                 final Entity entity = inGameTWEntities().get(i);
-                if (turn.isValidEntity(entity, this) && entity.shouldDeploy(getRoundCount())) {
+                if (turn.isValidEntity(entity, this) && entity.shouldDeploy(getRoundCount())
+                      && (walkOnOnly || !walksOnInsteadOfDeploying(entity))) {
                     return entity.getId();
                 }
             }
         }
         return getFirstDeployableEntityNum(turn);
+    }
+
+    /**
+     * Round 0's initiative only orders its deployment phase. When every unit due then walks on instead, that phase
+     * has no turns, so the roll decides nothing and its report would just be followed by round 1's.
+     *
+     * @return true if this is round 0 and every unit due to deploy in it walks on
+     */
+    private boolean isWalkOnOnlyDeploymentRound() {
+        if (currentRound != 0) {
+            return false;
+        }
+        boolean anyDue = false;
+        for (Deployable unit : deployableInGameObjects()) {
+            if (unit.isDeployed() || (unit.getDeployRound() != currentRound)) {
+                continue;
+            }
+            if (!(unit instanceof Entity entity) || !rulesManager.getRulesGame().canWalkOnThisRound(entity)) {
+                return false;
+            }
+            anyDue = true;
+        }
+        return anyDue;
+    }
+
+    /**
+     * @return true if, in the deployment phase, the unit enters the board by walking on in this round's movement
+     *       phase instead
+     */
+    public boolean walksOnInsteadOfDeploying(Entity entity) {
+        return getPhase().isDeployment() && rulesManager.getRulesGame().canWalkOnThisRound(entity);
     }
 
     /**

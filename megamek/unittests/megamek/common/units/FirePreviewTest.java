@@ -238,6 +238,7 @@ class FirePreviewTest {
         assertEquals(FirePreview.Reason.UNSUPPORTED_STEP, reason(plan(mover, MoveStepType.SHUTDOWN)));
         assertEquals(FirePreview.Reason.UNSUPPORTED_STEP,
               reason(plan(mover, MoveStepType.JUMP_MEK_MECHANICAL_BOOSTER)));
+        assertEquals(FirePreview.Reason.WALK_ON, reason(plan(mover, MoveStepType.DEPLOY, MoveStepType.FORWARDS)));
         for (String file : List.of("SOAR VTOL.blk", "Shadow Hawk LAM SHD-X2.mtf",
               "Light Missile Gun Emplacement 3039.blk")) {
             Entity unit = unit(file, 10, 0, new Coords(1, 1), 0);
