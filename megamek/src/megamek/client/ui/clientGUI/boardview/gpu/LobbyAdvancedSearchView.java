@@ -11,7 +11,9 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
+import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -29,6 +31,8 @@ import megamek.client.lobby.RequisitionAdvancedSearch.Picks;
 import megamek.client.lobby.RequisitionAdvancedSearch.Range;
 import megamek.client.lobby.RequisitionAdvancedSearch.Section;
 import megamek.client.lobby.RequisitionAdvancedSearch.Term;
+import megamek.client.lobby.SavedAdvancedSearches;
+import megamek.client.lobby.SavedAdvancedSearches.Loaded;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
@@ -46,7 +50,8 @@ import megamek.client.ui.gdx.UiVirtualList;
 /**
  * The Requisition view's advanced search (gap analysis L11): the unit selector's Total Warfare, Alpha Strike and
  * Battlefield Support searches rebuilt from the UI kit, in the results' place. A header with the title, the three
- * tabs, the live count of matching units, Clear (this tab's criteria) and Done; under it the tab's criteria in titled
+ * tabs, the live count of matching units, Saved (the searches saved here or in the unit selector, see
+ * {@link LobbySavedSearches}), Clear (this tab's criteria) and Done; under it the tab's criteria in titled
  * blocks that flow into as many columns as the width holds. Every edit goes straight to the search
  * ({@link RequisitionAdvancedSearch}) without rebuilding the controls, so a field keeps its focus; a change from
  * elsewhere (a tag's removal, Reset) rebuilds the page.
@@ -90,10 +95,22 @@ final class LobbyAdvancedSearchView {
             }
             super.layout();
         }
+
+        @Override
+        protected void setStage(Stage stage) {
+            // The saved searches' popover lies on the stage, not in the view: it goes when the view does
+            if (stage == null && saved != null) {
+                saved.close();
+            }
+            super.setStage(stage);
+        }
     };
     private final UiTabs tabs;
     private final Label matches;
     private final UiButton clear;
+    private final LobbySavedSearches saved;
+    private final Label notice;
+    private final Cell<Label> noticeCell;
     private final Table page = new Table();
     private final ScrollPane scroll;
     private final List<Table> blocks = new ArrayList<>();
@@ -106,6 +123,11 @@ final class LobbyAdvancedSearchView {
     private EquipmentEditor editor;
 
     LobbyAdvancedSearchView(UiKit kit, Host host) {
+        this(kit, host, new SavedAdvancedSearches());
+    }
+
+    /** The view, saving its searches in {@code store}; a test passes one in a temporary folder. */
+    LobbyAdvancedSearchView(UiKit kit, Host host, SavedAdvancedSearches store) {
         this.kit = kit;
         this.host = host;
         root.setName("lobby-requisition-advanced");
@@ -125,13 +147,22 @@ final class LobbyAdvancedSearchView {
         });
         matches = kit.typeLabel("", "small", "text.secondary");
         matches.setName("lobby-requisition-advanced-matches");
+        saved = new LobbySavedSearches(kit, store, host::criteria, this::loaded);
         clear = kit.button("button-quiet" + UiTheme.COMPACT, "undo",
               Messages.getString("Lobby.requisition.advanced.clear"), null);
         kit.tip(clear, true).getActor().setText(Messages.getString("Lobby.requisition.advanced.clearTip"));
         UiKit.onChange(clear, () -> {
+            if (section == Section.TOTAL_WARFARE) {
+                notice(null);
+                saved.forget();
+            }
             set(host.criteria().without(section));
             build();
         });
+        notice = kit.typeLabel("", "small", "status.warning");
+        notice.setName("lobby-requisition-advanced-notice");
+        notice.setWrap(true);
+        notice.setVisible(false);
         UiButton done = kit.button("button-primary" + UiTheme.COMPACT, "check",
               Messages.getString("Lobby.requisition.advanced.done"), null);
         done.setName("lobby-requisition-advanced-done");
@@ -141,12 +172,15 @@ final class LobbyAdvancedSearchView {
         head.add(kit.roleTypeLabel("title", Messages.getString("Lobby.requisition.advanced.title"), "text.primary"))
               .left().padRight(space("lg"));
         head.add(matches).left().growX().minWidth(0);
+        head.add(saved.button()).right().padLeft(space("sm"));
         head.add(clear).right().padLeft(space("sm"));
         head.add(done).right().padLeft(space("sm"));
         root.add(head).growX().minWidth(0).row();
         root.add(kit.scrollStrip(tabs)).growX().minWidth(0).padTop(space("sm")).row();
         root.add(kit.typeLabel(Messages.getString("Lobby.requisition.advanced.combine"), "small", "text.muted"))
               .left().padTop(space("xs")).row();
+        noticeCell = root.add(notice).growX().minWidth(0);
+        noticeCell.row();
         page.top().left();
         scroll = kit.scrollList(page, true, false);
         scroll.setFadeScrollBars(false);
@@ -208,6 +242,42 @@ final class LobbyAdvancedSearchView {
         shown = next;
         host.criteria(next);
         refreshHead();
+    }
+
+    /** Shows a loaded search's criteria, on the first tab that has some when this one has none. */
+    private void loaded(Loaded search) {
+        set(search.search());
+        if (search.search().count(section) == 0) {
+            for (Section each : Section.values()) {
+                if (search.search().count(each) > 0) {
+                    section = each;
+                    break;
+                }
+            }
+        }
+        tabs.select(section.ordinal());
+        build();
+        notice(search.partial()
+              ? Messages.getString("Lobby.requisition.advanced.saved.partial", search.name()) : null);
+    }
+
+    /** Shows {@code text} under the tabs, or nothing for null. */
+    private void notice(String text) {
+        boolean shows = text != null;
+        notice.setText(shows ? text : "");
+        notice.setVisible(shows);
+        noticeCell.padTop(shows ? space("xs") : 0);
+        root.invalidateHierarchy();
+    }
+
+    /** One Esc step: closes the saved searches' popover, or leaves its rename; true when either happened. */
+    boolean back() {
+        return saved.back();
+    }
+
+    /** The saved searches; a test opens them. */
+    LobbySavedSearches savedSearches() {
+        return saved;
     }
 
     private void update(Field field, RequisitionAdvancedSearch.Value value) {

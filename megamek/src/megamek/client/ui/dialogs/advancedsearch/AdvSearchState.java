@@ -50,9 +50,9 @@ import megamek.common.units.EntityMovementMode;
 import megamek.common.units.UnitRole;
 
 @JsonInclude(JsonInclude.Include.NON_DEFAULT)
-class AdvSearchState {
+public class AdvSearchState {
 
-    static final String CONTENT = "ADVANCED_SEARCH_STATE";
+    public static final String CONTENT = "ADVANCED_SEARCH_STATE";
 
     // === The search state ===
 
@@ -76,7 +76,7 @@ class AdvSearchState {
     // === Substates ===
 
     @JsonInclude(JsonInclude.Include.NON_DEFAULT)
-    static class TwState {
+    public static class TwState {
 
         public UnitTypeState unitTypeState = new UnitTypeState();
         public TransportsState transportsState = new TransportsState();
@@ -86,7 +86,7 @@ class AdvSearchState {
     }
 
     @JsonInclude(JsonInclude.Include.NON_DEFAULT)
-    static class UnitTypeState {
+    public static class UnitTypeState {
 
         public State protoMek = State.UNSELECTED;
         public State mek = State.UNSELECTED;
@@ -128,7 +128,7 @@ class AdvSearchState {
     }
 
     @JsonInclude(JsonInclude.Include.NON_DEFAULT)
-    static class AsState {
+    public static class AsState {
 
         public boolean unitTypeUse = false;
         public boolean unitRoleUse = false;
@@ -186,10 +186,16 @@ class AdvSearchState {
 
         public boolean ability2Use = false;
         public BattleForceSUA ability2Value = BattleForceSUA.UNKNOWN;
+
+        /**
+         * Every special ability a unit must have, as the lobby's advanced search saves them; the dialog reads only the
+         * two above, which hold the first two of these.
+         */
+        public List<BattleForceSUA> abilitiesSelected = new ArrayList<>();
     }
 
     @JsonInclude(JsonInclude.Include.NON_DEFAULT)
-    static class BfsState {
+    public static class BfsState {
 
         public boolean assetTypeUse = false;
         public List<BFSAssetType> assetTypeSelected = new ArrayList<>();
@@ -252,7 +258,7 @@ class AdvSearchState {
     }
 
     @JsonInclude(JsonInclude.Include.NON_DEFAULT)
-    static class TransportsState {
+    public static class TransportsState {
 
         public String startTroopSpace = "";
         public String endTroopSpace = "";
@@ -327,12 +333,12 @@ class AdvSearchState {
     }
 
     @JsonInclude(JsonInclude.Include.NON_DEFAULT)
-    static class TriStateItemListState {
+    public static class TriStateItemListState {
         public Map<String, State> items = new HashMap<>();
     }
 
     @JsonInclude(JsonInclude.Include.NON_DEFAULT)
-    static class QuirksState {
+    public static class QuirksState {
         public int chassisInclude = 0;
         public int chassisExclude = 1;
         public int weaponInclude = 0;
@@ -342,12 +348,15 @@ class AdvSearchState {
     }
 
     @JsonInclude(JsonInclude.Include.NON_DEFAULT)
-    static class MiscState {
+    public static class MiscState {
 
         public String startWalk = "";
         public String endWalk = "";
         public String startJump = "";
         public String endJump = "";
+        /** The run MP span, which the lobby's advanced search has and the dialog does not. */
+        public String startRun = "";
+        public String endRun = "";
         public int armor = 0;
         public int official = 0;
         public int canon = 0;
@@ -382,7 +391,7 @@ class AdvSearchState {
     }
 
     @JsonInclude(JsonInclude.Include.NON_DEFAULT)
-    static class EquipmentState {
+    public static class EquipmentState {
 
         public List<FilterToken> filterTokens = new ArrayList<>();
     }

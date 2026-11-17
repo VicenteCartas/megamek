@@ -35,6 +35,7 @@ package megamek.common.alphaStrike;
 
 import java.io.Serializable;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 import megamek.common.alphaStrike.conversion.ASConverter;
 import megamek.common.alphaStrike.conversion.ASDamageConverter;
@@ -164,6 +165,7 @@ public class ASDamage implements Serializable {
      *
      * @throws IllegalArgumentException When the value cannot be parsed or is less than zero
      */
+    @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
     public static ASDamage parse(String asText) {
         if (asText == null) {
             throw new IllegalArgumentException("Cannot parse null text.");

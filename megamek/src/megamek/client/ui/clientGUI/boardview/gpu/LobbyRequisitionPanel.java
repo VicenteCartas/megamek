@@ -652,6 +652,9 @@ final class LobbyRequisitionPanel {
             return true;
         }
         if (advancedOpen) {
+            if (advanced != null && advanced.back()) {
+                return true;
+            }
             openAdvanced(false);
             return true;
         }

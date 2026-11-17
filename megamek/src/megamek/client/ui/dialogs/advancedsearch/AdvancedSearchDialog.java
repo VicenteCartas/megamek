@@ -49,12 +49,6 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.border.MatteBorder;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.formdev.flatlaf.FlatClientProperties;
 import megamek.client.ui.Messages;
 import megamek.client.ui.buttons.ButtonEsc;
@@ -71,14 +65,8 @@ import megamek.common.loaders.MekSummaryCache;
  */
 public class AdvancedSearchDialog extends AbstractButtonDialog {
 
-    private static final String SEARCH_FOLDER = "mmconf/searches";
-    private static final String RECENT_SEARCH_STORE = "mmconf/recent-advanced-searches.json";
-
-    private static final ObjectMapper MAPPER = JsonMapper.builder()
-          .enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES)
-          .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-          .enable(SerializationFeature.INDENT_OUTPUT)
-          .build();
+    private static final String SEARCH_FOLDER = AdvancedSearchFiles.SEARCH_FOLDER;
+    private static final String RECENT_SEARCH_STORE = AdvancedSearchFiles.RECENT_SEARCH_STORE;
 
     private final TWAdvancedSearchPanel totalWarTab;
     private final ASAdvancedSearchPanel alphaStrikeTab = new ASAdvancedSearchPanel();
@@ -171,7 +159,7 @@ public class AdvancedSearchDialog extends AbstractButtonDialog {
             return;
         }
 
-        String fileName = sanitizeFileName(name);
+        String fileName = AdvancedSearchFiles.sanitizeFileName(name);
         if (fileName == null) {
             JOptionPane.showMessageDialog(this,
                   "Could not create a valid file name", "Error", JOptionPane.ERROR_MESSAGE);
@@ -190,20 +178,6 @@ public class AdvancedSearchDialog extends AbstractButtonDialog {
         saveSearchState(new File(SEARCH_FOLDER, fileName + ".json"), name);
     }
 
-    private static String sanitizeFileName(String name) {
-        if (name == null || name.trim().isEmpty()) {
-            throw new IllegalArgumentException("Cannot create a filename from a null or empty name");
-        }
-        String sanitized = name;
-        sanitized = sanitized.replaceAll("[<>:\"/\\\\|?*\\p{Cntrl}]", "");
-        sanitized = sanitized.replaceAll("[. ]+$", "");
-        sanitized = sanitized.replaceAll("^_|_$", "");
-        if (sanitized.isEmpty()) {
-            return null;
-        }
-        return sanitized;
-    }
-
     private void saveSearchState(File file, String name) {
         var state = new AdvSearchState();
         state.name = name;
@@ -211,7 +185,7 @@ public class AdvancedSearchDialog extends AbstractButtonDialog {
         state.asState = alphaStrikeTab.getState();
         state.bfsState = battlefieldSupportTab.getState();
         try {
-            save(file, state);
+            AdvancedSearchFiles.save(file, state);
         } catch (IOException e) {
             JOptionPane.showMessageDialog(this,
                   "Error saving search state: " + e.getMessage(),
@@ -245,7 +219,7 @@ public class AdvancedSearchDialog extends AbstractButtonDialog {
 
     private void loadSearchState(File file) {
         try {
-            var state = load(file);
+            var state = AdvancedSearchFiles.load(file);
             clearSearches();
             totalWarTab.applyState(state.twState);
             alphaStrikeTab.applyState(state.asState);
@@ -264,7 +238,7 @@ public class AdvancedSearchDialog extends AbstractButtonDialog {
      */
     private void touchSearchFile(File file) {
         try {
-            new RecentFilesStore(Path.of(RECENT_SEARCH_STORE)).touch(file.toPath());
+            AdvancedSearchFiles.touch(Path.of(RECENT_SEARCH_STORE), file.toPath());
         } catch (IOException | IllegalArgumentException e) {
             JOptionPane.showMessageDialog(this, "Failed to update the recent searches list. " + e.getMessage(),
                   "Error", JOptionPane.ERROR_MESSAGE);
@@ -306,10 +280,9 @@ public class AdvancedSearchDialog extends AbstractButtonDialog {
         JPopupMenu popup = new JPopupMenu();
 
         try {
-            var store = new RecentFilesStore(Path.of(RECENT_SEARCH_STORE));
-            List<Path> menuEntries = store.getRecentFiles();
+            List<Path> menuEntries = AdvancedSearchFiles.recentFiles(Path.of(RECENT_SEARCH_STORE));
             for (Path file : menuEntries) {
-                String name = readNameField(file);
+                String name = AdvancedSearchFiles.readName(file);
                 if (name == null || name.isBlank()) {
                     continue;
                 }
@@ -331,36 +304,5 @@ public class AdvancedSearchDialog extends AbstractButtonDialog {
         }
 
         return popup;
-    }
-
-    private String readNameField(Path file) {
-        try {
-            JsonNode root = MAPPER.readTree(file.toFile());
-            JsonNode nameNode = root.get("name");
-            return nameNode != null && nameNode.isTextual() ? nameNode.asText() : null;
-        } catch (IOException e) {
-            return null;
-        }
-    }
-
-    static boolean isAdvancedSearchFile(File file) {
-        try {
-            JsonNode root = MAPPER.readTree(file);
-            JsonNode contentNode = root.get("content");
-            return contentNode != null && contentNode.asText().equals(AdvSearchState.CONTENT);
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
-    static AdvSearchState load(File file) throws IOException, IllegalArgumentException {
-        if (!isAdvancedSearchFile(file)) {
-            throw new IllegalArgumentException("The specified file is not an advanced search file.");
-        }
-        return MAPPER.readValue(file, AdvSearchState.class);
-    }
-
-    private void save(File file, AdvSearchState state) throws IOException {
-        MAPPER.writeValue(file, state);
     }
 }

@@ -4,6 +4,7 @@ package megamek.client.ui.gdx;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -63,6 +64,67 @@ class UiStepperChipSmokeTest {
     }
 
     @Test
+    void aClickOnTheValueTypesItAndEnterSetsItWithinTheBounds() {
+        UiTestStage.run(ui -> {
+            UiStepper stepper = ui.kit.stepper("W", 16, 5, 200);
+            place(ui, stepper);
+            float upAt = stepper.up().getX();
+            AtomicInteger changes = count(stepper);
+            click(ui, stepper.shown());
+            assertTrue(stepper.typing());
+            assertEquals(stepper.field(), ui.stage.getKeyboardFocus(), "the field takes the keys");
+            type(ui, "150");
+            assertEquals(16, stepper.value(), "keys alone do not set the value");
+            assertEquals(0, changes.get());
+            key(ui, Input.Keys.ENTER);
+            assertFalse(stepper.typing());
+            assertEquals(150, stepper.value());
+            assertEquals(1, changes.get(), "one change for the typed value");
+            assertEquals(upAt, stepper.up().getX(), EPSILON, "the buttons are back where they were");
+
+            click(ui, stepper.shown());
+            type(ui, "999");
+            key(ui, Input.Keys.ENTER);
+            assertEquals(200, stepper.value(), "brought within the bounds");
+            assertEquals(2, changes.get());
+        });
+    }
+
+    @Test
+    void escapeKeepsTheValueAndLeavingTheFieldSetsIt() {
+        UiTestStage.run(ui -> {
+            UiStepper stepper = ui.kit.stepper(-1, -3, 5);
+            place(ui, stepper);
+            AtomicInteger changes = count(stepper);
+            click(ui, stepper.shown());
+            type(ui, "4");
+            key(ui, Input.Keys.ESCAPE);
+            assertFalse(stepper.typing());
+            assertEquals(-1, stepper.value());
+            assertEquals(0, changes.get(), "Escape drops the typed value");
+
+            click(ui, stepper.shown());
+            type(ui, "-2");
+            ui.stage.setKeyboardFocus(null);
+            ui.draw();
+            assertFalse(stepper.typing());
+            assertEquals(-2, stepper.value(), "a minus leads a value when the bounds go below zero");
+            assertEquals(1, changes.get());
+        });
+    }
+
+    @Test
+    void aSelectorTakesNoTyping() {
+        UiTestStage.run(ui -> {
+            UiStepper selector = ui.kit.selector(List.of("Low", "High"), 0);
+            place(ui, selector);
+            click(ui, selector.shown());
+            assertFalse(selector.typing());
+            assertNull(selector.field());
+        });
+    }
+
+    @Test
     void aChipsTextIsCentredCheckedOrNot() {
         UiTestStage.run(ui -> {
             UiFilterChip light = ui.kit.filterChip("Light");
@@ -115,6 +177,19 @@ class UiStepperChipSmokeTest {
             }
         });
         return changes;
+    }
+
+    private static void type(UiTestStage ui, String text) {
+        for (char character : text.toCharArray()) {
+            ui.stage.keyTyped(character);
+        }
+        ui.draw();
+    }
+
+    private static void key(UiTestStage ui, int keycode) {
+        ui.stage.keyDown(keycode);
+        ui.stage.keyUp(keycode);
+        ui.draw();
     }
 
     private static void click(UiTestStage ui, Actor actor) {

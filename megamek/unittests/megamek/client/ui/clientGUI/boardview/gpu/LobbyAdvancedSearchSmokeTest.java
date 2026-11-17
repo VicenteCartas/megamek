@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -27,6 +29,7 @@ import megamek.client.lobby.RequisitionRecord;
 import megamek.client.lobby.RequisitionRow;
 import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
+import megamek.client.lobby.SavedAdvancedSearches;
 import megamek.client.ui.gdx.UiPickList;
 import megamek.client.ui.gdx.UiRangeInput;
 import megamek.client.ui.gdx.UiTestStage;
@@ -35,6 +38,7 @@ import megamek.common.loaders.MekSummary;
 import megamek.common.units.UnitType;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Clicks the Requisition's advanced search through the stage, as a pointer would: the filter strip's Advanced opens it
@@ -142,6 +146,101 @@ class LobbyAdvancedSearchSmokeTest {
             assertTrue(requisition.back(), "Escape's step shuts the view");
             assertFalse(requisition.advancedOpen());
             body.remove();
+        });
+    }
+
+    @Test
+    void searchesSaveLoadRenameAndDeleteFromTheSavedPopover(@TempDir Path folder) throws Exception {
+        EquipmentType.initializeTypes();
+        Path searches = folder.resolve("searches");
+        SavedAdvancedSearches store = new SavedAdvancedSearches(searches, folder.resolve("recent.json"));
+        RequisitionAdvancedSearch walking = RequisitionAdvancedSearch.NONE.with(Field.WALK,
+              new RequisitionAdvancedSearch.Range(4, null));
+        UiTestStage.run(ui -> {
+            RequisitionAdvancedSearch[] criteria = { walking };
+            LobbyAdvancedSearchView view = new LobbyAdvancedSearchView(ui.kit, new LobbyAdvancedSearchView.Host() {
+                @Override
+                public RequisitionAdvancedSearch criteria() {
+                    return criteria[0];
+                }
+
+                @Override
+                public void criteria(RequisitionAdvancedSearch next) {
+                    criteria[0] = next;
+                }
+
+                @Override
+                public void done() {
+                }
+            }, store);
+            ui.window.addActor(view.actor());
+            view.actor().setBounds(20, 20, 1400, 900);
+            run(ui, .1f);
+            LobbySavedSearches saved = view.savedSearches();
+
+            click(ui, saved.button());
+            run(ui, .1f);
+            assertNotNull(saved.popover(), "Saved opens its popover");
+            assertTrue(text(saved.popover()).contains("No saved searches yet"), text(saved.popover()));
+            assertTrue(saved.nameField().hasKeyboardFocus(), "the name takes the keys");
+            for (char each : "Fast".toCharArray()) {
+                ui.stage.keyTyped(each);
+            }
+            ui.stage.keyDown(Input.Keys.ENTER);
+            run(ui, .05f);
+            assertTrue(Files.exists(searches.resolve("Fast.json")), "Enter saves the search under its name");
+            assertTrue(saved.status().getText().toString().contains("Fast"), saved.status().getText().toString());
+            assertTrue(button(saved.popover(), "Replace") != null, "the name of a saved search replaces it");
+            ui.draw();
+            ui.capture("lobby-advanced-saved").dispose();
+
+            criteria[0] = RequisitionAdvancedSearch.NONE;
+            view.sync(criteria[0]);
+            click(ui, saved.list().findActor("lobby-requisition-advanced-saved-Fast"));
+            run(ui, .05f);
+            assertEquals(walking, criteria[0], "a saved search's row loads its criteria");
+            assertNull(saved.popover(), "and closes the popover");
+
+            Files.copy(Path.of(getClass().getClassLoader().getResource("searches/DS w Heavy Vee Bay.json").toURI()),
+                  searches.resolve("DS w Heavy Vee Bay.json"));
+            click(ui, saved.button());
+            run(ui, .05f);
+            click(ui, saved.list().findActor("lobby-requisition-advanced-saved-DS w/ Heavy Vee Bay"));
+            run(ui, .05f);
+            Label notice = view.actor().findActor("lobby-requisition-advanced-notice");
+            assertTrue(notice.isVisible(), "a search with criteria the view lacks says so");
+            assertTrue(criteria[0].values().containsKey(Field.UNIT_TYPE), "and loads the criteria it has");
+            ui.draw();
+            ui.capture("lobby-advanced-saved-partial").dispose();
+
+            click(ui, saved.button());
+            run(ui, .05f);
+            click(ui, saved.list().findActor("lobby-requisition-advanced-saved-rename-Fast"));
+            run(ui, .05f);
+            for (char each : "Quick".toCharArray()) {
+                ui.stage.keyTyped(each);
+            }
+            ui.stage.keyDown(Input.Keys.ENTER);
+            run(ui, .05f);
+            assertFalse(Files.exists(searches.resolve("Fast.json")));
+            assertTrue(Files.exists(searches.resolve("Quick.json")), "Enter renames the search");
+            assertNotNull(saved.popover(), "the popover stays open after a rename");
+
+            click(ui, saved.list().findActor("lobby-requisition-advanced-saved-delete-Quick"));
+            run(ui, .05f);
+            assertTrue(Files.exists(searches.resolve("Quick.json")), "a first press only asks");
+            ui.draw();
+            ui.capture("lobby-advanced-saved-delete").dispose();
+            click(ui, saved.list().findActor("lobby-requisition-advanced-saved-delete-Quick"));
+            run(ui, .05f);
+            assertFalse(Files.exists(searches.resolve("Quick.json")), "the second deletes");
+
+            assertTrue(view.back(), "Escape's step closes the popover");
+            assertNull(saved.popover());
+            click(ui, saved.button());
+            run(ui, .05f);
+            view.actor().remove();
+            assertNull(saved.popover(), "the popover goes when the view does");
         });
     }
 
