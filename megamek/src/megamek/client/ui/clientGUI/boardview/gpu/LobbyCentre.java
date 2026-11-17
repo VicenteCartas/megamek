@@ -12,11 +12,12 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiTheme;
 
 /**
  * The lobby's centre column: the forces, or a view that takes their place, such as the folded battlefield and later
- * the map setup and Requisition. A view is a token panel with its title and Back in its header; Back, or Escape
- * (which the screen passes on), shows the forces again.
+ * the map setup and Requisition. A view is a token panel with its title and Back to forces in its header; that, or
+ * Escape (which the screen passes on), shows the forces again.
  */
 final class LobbyCentre extends Container<Actor> {
     private final UiKit kit;
@@ -45,7 +46,10 @@ final class LobbyCentre extends Container<Actor> {
 
     /** Shows {@code body} in the forces' place as the view {@code key}, in a panel titled {@code title} with Back. */
     void show(String key, String title, Actor body) {
-        UiButton back = kit.button("button-quiet-compact", "chevron-left", Messages.getString("Lobby.back"), null);
+        // Bordered, unlike the views' quiet tools, so the way out stands apart from them
+        UiButton back = kit.button("button-secondary" + UiTheme.COMPACT, "chevron-left",
+              Messages.getString("Lobby.backToForces"), null);
+        kit.tip(back, true).getActor().setText(Messages.getString("Lobby.backToForcesTip"));
         UiKit.onChange(back, this::back);
         Table view = kit.panel(true);
         view.add(kit.header(title, null, true, back)).growX().row();
