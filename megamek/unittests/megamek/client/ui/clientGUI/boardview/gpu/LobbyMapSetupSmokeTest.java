@@ -20,6 +20,8 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
@@ -458,6 +460,24 @@ class LobbyMapSetupSmokeTest {
             search.setText("Atlas");
             assertFalse(centre.passesEscape(search), "a search with text keeps the first Escape");
             assertFalse(centre.passesEscape(outside), "a field outside the view keeps it too");
+
+            // The focused field takes every key it is sent; the lobby's keys still get its Escape, and only that
+            List<Boolean> reached = new ArrayList<>();
+            InputListener lobbyKeys = new InputListener() {
+                @Override
+                public boolean keyDown(InputEvent event, int keycode) {
+                    reached.add(GpuLobbyScreen.reachesLobby(event, keycode));
+                    return false;
+                }
+            };
+            ui.window.addActor(centre);
+            ui.stage.addListener(lobbyKeys);
+            ui.stage.setKeyboardFocus(search);
+            ui.stage.keyDown(Input.Keys.LEFT);
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            assertEquals(List.of(false, true), reached, "the field keeps the arrow and lets Escape through");
+            ui.stage.removeListener(lobbyKeys);
+            centre.remove();
         });
     }
 

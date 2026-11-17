@@ -400,7 +400,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             @Override
             public boolean keyDown(InputEvent event, int keycode) {
                 // A dialog over the lobby has the keys: none of them reaches the lobby behind it
-                if (event.isHandled() || nativeDialogs.isOpen()) {
+                if (!reachesLobby(event, keycode) || nativeDialogs.isOpen()) {
                     return false;
                 }
                 if (keycode != Keys.ESCAPE) {
@@ -433,6 +433,16 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     /** GPU thread: opens the system menu, which Esc opens once nothing else is left to close. */
     void openSystemMenu() {
         nativeDialog(dialogs -> dialogs.systemMenu(systemActions()));
+    }
+
+    /**
+     * Whether a key that bubbled up to the stage is the lobby's: one nothing took, or Escape from a text field that still
+     * has the keys. A field takes every key it is sent, Escape too (scene2d's TextField), so the lobby leaves the field
+     * or the view itself; a field whose own Escape already let the focus go, as UiNumber's, has used that Escape.
+     */
+    static boolean reachesLobby(InputEvent event, int keycode) {
+        return !event.isHandled()
+              || keycode == Keys.ESCAPE && event.getTarget() instanceof TextField field && field.hasKeyboardFocus();
     }
 
     /**
