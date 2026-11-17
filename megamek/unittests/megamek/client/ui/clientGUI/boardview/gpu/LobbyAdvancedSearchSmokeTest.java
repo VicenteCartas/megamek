@@ -199,8 +199,7 @@ class LobbyAdvancedSearchSmokeTest {
             run(ui, .05f);
             assertTrue(Files.exists(searches.resolve("Fast.json")), "Enter saves the search under its name");
             assertNull(saved.popover(), "saving closes the popover");
-            Label notice = view.actor().findActor("lobby-requisition-advanced-notice");
-            assertFalse(notice.isVisible(), "and says nothing, so nothing moves");
+            assertNull(view.noticeText(), "and says nothing, so nothing moves");
             click(ui, saved.button());
             run(ui, .05f);
             assertTrue(button(saved.popover(), "Replace") != null, "the name of a saved search replaces it");
@@ -218,9 +217,15 @@ class LobbyAdvancedSearchSmokeTest {
                   searches.resolve("DS w Heavy Vee Bay.json"));
             click(ui, saved.button());
             run(ui, .05f);
+            Actor saveLoad = saved.button();
+            float saveLoadX = saveLoad.localToStageCoordinates(new Vector2()).x;
             click(ui, saved.list().findActor("lobby-requisition-advanced-saved-DS w/ Heavy Vee Bay"));
             run(ui, .05f);
-            assertTrue(notice.isVisible(), "a search with criteria the view lacks says so");
+            String warning = view.noticeText();
+            assertTrue(warning != null && warning.contains("DS w/ Heavy Vee Bay"),
+                  "a search with criteria the view lacks warns by its icon's tooltip: " + warning);
+            assertEquals(saveLoadX, saveLoad.localToStageCoordinates(new Vector2()).x, .5f,
+                  "and the warning icon moves nothing");
             assertTrue(criteria[0].values().containsKey(Field.UNIT_TYPE), "and loads the criteria it has");
             ui.draw();
             ui.capture("lobby-advanced-saved-partial").dispose();

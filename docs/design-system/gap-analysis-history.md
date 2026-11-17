@@ -463,8 +463,9 @@ The open items below were copied to the gap analysis and are tracked there; this
        its recent list), so a search saved here opens in the unit selector of MegaMek, MegaMekLab and MekHQ, and
        back; `AdvancedSearchFiles` holds the file handling both use, and `SavedAdvancedSearches` in
        `megamek.client.lobby` converts between the dialog's state and `RequisitionAdvancedSearch`. A search with
-       criteria the view has no controls for (those left out above) loads without them and says so under the
-       tabs; replacing the file it came from keeps them. Checks: `SavedAdvancedSearchesTest` (with two searches
+       criteria the view has no controls for (those left out above) loads without them and shows a warning icon
+       beside Save / Load whose tooltip says so (its room is kept, so nothing moves); replacing the file it came
+       from keeps them. Checks: `SavedAdvancedSearchesTest` (with two searches
        saved by the Swing dialog) and `LobbyAdvancedSearchSmokeTest`'s saved-search walk.
      - L12 ~~Chat fold and kept filters~~. The chat docked under the players gets a header (Chat, a count badge and,
        folded, the latest line cut with an ellipsis) and a fold chevron at the end of the input row, as the

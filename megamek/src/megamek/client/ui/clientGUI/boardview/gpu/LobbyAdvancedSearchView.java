@@ -13,7 +13,6 @@ import java.util.function.Consumer;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
-import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -109,8 +108,8 @@ final class LobbyAdvancedSearchView {
     private final Label matches;
     private final UiButton clear;
     private final LobbySavedSearches saved;
-    private final Label notice;
-    private final Cell<Label> noticeCell;
+    private final UiKit.Icon notice;
+    private final Label noticeTip;
     private final Table page = new Table();
     private final ScrollPane scroll;
     private final List<Table> blocks = new ArrayList<>();
@@ -159,10 +158,10 @@ final class LobbyAdvancedSearchView {
             set(host.criteria().without(section));
             build();
         });
-        notice = kit.typeLabel("", "small", "status.warning");
+        notice = kit.icon("warn", size("icon.sm"), UiTheme.tokenColor("status.warning"));
         notice.setName("lobby-requisition-advanced-notice");
-        notice.setWrap(true);
         notice.setVisible(false);
+        noticeTip = kit.tip(notice, true).getActor();
         UiButton done = kit.button("button-primary" + UiTheme.COMPACT, "check",
               Messages.getString("Lobby.requisition.advanced.done"), null);
         done.setName("lobby-requisition-advanced-done");
@@ -172,15 +171,15 @@ final class LobbyAdvancedSearchView {
         head.add(kit.roleTypeLabel("title", Messages.getString("Lobby.requisition.advanced.title"), "text.primary"))
               .left().padRight(space("lg"));
         head.add(matches).left().growX().minWidth(0);
-        head.add(saved.button()).right().padLeft(space("sm"));
+        // Its cell keeps its room while the icon hides, so the buttons stay put when a warning comes or goes
+        head.add(notice).size(size("icon.sm")).right().padLeft(space("sm"));
+        head.add(saved.button()).right().padLeft(space("xs"));
         head.add(clear).right().padLeft(space("sm"));
         head.add(done).right().padLeft(space("sm"));
         root.add(head).growX().minWidth(0).row();
         root.add(kit.scrollStrip(tabs)).growX().minWidth(0).padTop(space("sm")).row();
         root.add(kit.typeLabel(Messages.getString("Lobby.requisition.advanced.combine"), "small", "text.muted"))
               .left().padTop(space("xs")).row();
-        noticeCell = root.add(notice).growX().minWidth(0);
-        noticeCell.row();
         page.top().left();
         scroll = kit.scrollList(page, true, false);
         scroll.setFadeScrollBars(false);
@@ -261,13 +260,15 @@ final class LobbyAdvancedSearchView {
               ? Messages.getString("Lobby.requisition.advanced.saved.partial", search.name()) : null);
     }
 
-    /** Shows {@code text} under the tabs, or nothing for null. */
+    /** Shows the warning icon by Save / Load with {@code text} as its tooltip, or hides it for null. */
     private void notice(String text) {
-        boolean shows = text != null;
-        notice.setText(shows ? text : "");
-        notice.setVisible(shows);
-        noticeCell.padTop(shows ? space("xs") : 0);
-        root.invalidateHierarchy();
+        noticeTip.setText(text == null ? "" : text);
+        notice.setVisible(text != null);
+    }
+
+    /** The warning text a hover on the warning icon shows; a test reads it. */
+    String noticeText() {
+        return notice.isVisible() ? noticeTip.getText().toString() : null;
     }
 
     /** One Esc step: closes the saved searches' popover, or leaves its rename; true when either happened. */
