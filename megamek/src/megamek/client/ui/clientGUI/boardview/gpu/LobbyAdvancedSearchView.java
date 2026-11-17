@@ -12,6 +12,7 @@ import java.util.function.Consumer;
 
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
@@ -63,6 +64,8 @@ final class LobbyAdvancedSearchView {
     private static final int MAX_COLUMNS = 3;
     /** The rows of the equipment list shown before it scrolls. */
     private static final int EQUIPMENT_ROWS = 8;
+    /** How long a success shows under the tabs. */
+    private static final float FLASH_SECONDS = 4;
 
     /** What the view asks of the Requisition view. */
     interface Host {
@@ -111,6 +114,8 @@ final class LobbyAdvancedSearchView {
     private final LobbySavedSearches saved;
     private final Label notice;
     private final Cell<Label> noticeCell;
+    /** The warning that stays under the tabs (a loaded search's missing criteria), or null. */
+    private String warning;
     private final Table page = new Table();
     private final ScrollPane scroll;
     private final List<Table> blocks = new ArrayList<>();
@@ -147,7 +152,7 @@ final class LobbyAdvancedSearchView {
         });
         matches = kit.typeLabel("", "small", "text.secondary");
         matches.setName("lobby-requisition-advanced-matches");
-        saved = new LobbySavedSearches(kit, store, host::criteria, this::loaded);
+        saved = new LobbySavedSearches(kit, store, host::criteria, this::loaded, this::flash);
         clear = kit.button("button-quiet" + UiTheme.COMPACT, "undo",
               Messages.getString("Lobby.requisition.advanced.clear"), null);
         kit.tip(clear, true).getActor().setText(Messages.getString("Lobby.requisition.advanced.clearTip"));
@@ -261,10 +266,24 @@ final class LobbyAdvancedSearchView {
               ? Messages.getString("Lobby.requisition.advanced.saved.partial", search.name()) : null);
     }
 
-    /** Shows {@code text} under the tabs, or nothing for null. */
+    /** Shows {@code text} under the tabs as a warning that stays, or nothing for null. */
     private void notice(String text) {
+        warning = text;
+        notice.clearActions();
+        showNotice(text, "status.warning");
+    }
+
+    /** Shows {@code text} under the tabs as a success for a few seconds, then the warning that stays, if any. */
+    private void flash(String text) {
+        notice.clearActions();
+        showNotice(text, "status.success");
+        notice.addAction(Actions.delay(FLASH_SECONDS, Actions.run(() -> showNotice(warning, "status.warning"))));
+    }
+
+    private void showNotice(String text, String role) {
         boolean shows = text != null;
         notice.setText(shows ? text : "");
+        notice.getStyle().fontColor = UiTheme.tokenColor(role);
         notice.setVisible(shows);
         noticeCell.padTop(shows ? space("xs") : 0);
         root.invalidateHierarchy();

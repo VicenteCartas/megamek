@@ -6,6 +6,7 @@ import java.util.List;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Cursor;
+import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
@@ -46,6 +47,8 @@ public final class UiStepper extends Table {
     /** The field a number's value is typed in, in the value's cell while typing; null for a selector. */
     private final UiTextField field;
     private final Cell<Actor> valueCell;
+    /** The field's width while typing. */
+    private float typedWidth;
     private final float valueWidth;
     private boolean typing;
     private int value;
@@ -101,7 +104,7 @@ public final class UiStepper extends Table {
     /**
      * The field a number's value is typed in, and the click on the value that opens it. It sets the value in its own
      * font, with only the {@link #gap()} of its frame round the text, so it fills the value's cell and the gaps beside it
-     * and nothing round it moves.
+     * and nothing round it moves unless the typed number is wider than the cell.
      */
     private UiTextField typingField(UiKit kit) {
         UiTextField typed = kit.input("", true);
@@ -124,6 +127,7 @@ public final class UiStepper extends Table {
             public void changed(ChangeEvent event, Actor actor) {
                 if (actor == typed) {
                     event.stop();
+                    fitTyped();
                 }
             }
         });
@@ -257,16 +261,33 @@ public final class UiStepper extends Table {
         }
         typing = true;
         field.setText(String.valueOf(value));
-        // The field takes the gaps beside the value as its frame, so the stepper keeps its width
         valueCell.setActor(field);
-        valueCell.width(valueWidth + 2 * gap()).padLeft(0).padRight(0);
-        invalidateHierarchy();
+        valueCell.padLeft(0).padRight(0);
+        typedWidth = 0;
+        fitTyped();
         // The value under the pointer is gone, so it never sees the pointer leave
         if (Gdx.graphics != null) {
             Gdx.graphics.setSystemCursor(Cursor.SystemCursor.Arrow);
         }
         field.selectAll();
         stage.setKeyboardFocus(field);
+    }
+
+    /**
+     * Sizes the field to its text: the field takes the gaps beside the value as its frame, so the stepper keeps its
+     * width while the text fits the value's cell, and grows only when the typed number needs more room.
+     */
+    private void fitTyped() {
+        if (!typing) {
+            return;
+        }
+        float needed = (float) Math.ceil(new GlyphLayout(field.getStyle().font, field.getText()).width);
+        float width = Math.max(valueWidth, needed) + 2 * gap();
+        if (width != typedWidth) {
+            typedWidth = width;
+            valueCell.width(width);
+            invalidateHierarchy();
+        }
     }
 
     /**

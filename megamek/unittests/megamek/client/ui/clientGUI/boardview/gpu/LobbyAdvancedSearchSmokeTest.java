@@ -198,7 +198,12 @@ class LobbyAdvancedSearchSmokeTest {
             ui.stage.keyDown(Input.Keys.ENTER);
             run(ui, .05f);
             assertTrue(Files.exists(searches.resolve("Fast.json")), "Enter saves the search under its name");
-            assertTrue(saved.status().getText().toString().contains("Fast"), saved.status().getText().toString());
+            assertNull(saved.popover(), "saving closes the popover");
+            Label notice = view.actor().findActor("lobby-requisition-advanced-notice");
+            assertTrue(notice.isVisible() && notice.getText().toString().contains("Fast"),
+                  "and says so under the tabs: " + notice.getText());
+            click(ui, saved.button());
+            run(ui, .05f);
             assertTrue(button(saved.popover(), "Replace") != null, "the name of a saved search replaces it");
             ui.draw();
             ui.capture("lobby-advanced-saved").dispose();
@@ -216,7 +221,6 @@ class LobbyAdvancedSearchSmokeTest {
             run(ui, .05f);
             click(ui, saved.list().findActor("lobby-requisition-advanced-saved-DS w/ Heavy Vee Bay"));
             run(ui, .05f);
-            Label notice = view.actor().findActor("lobby-requisition-advanced-notice");
             assertTrue(notice.isVisible(), "a search with criteria the view lacks says so");
             assertTrue(criteria[0].values().containsKey(Field.UNIT_TYPE), "and loads the criteria it has");
             ui.draw();

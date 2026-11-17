@@ -53,6 +53,7 @@ final class LobbySavedSearches {
     private final SavedAdvancedSearches store;
     private final Supplier<RequisitionAdvancedSearch> criteria;
     private final Consumer<Loaded> loaded;
+    private final Consumer<String> didSave;
     private final UiButton button;
     private final UiTextField name;
     private final UiButton save;
@@ -69,12 +70,17 @@ final class LobbySavedSearches {
     /** The file the criteria were loaded from, until they are cleared, or null. */
     private @Nullable Path loadedFrom;
 
+    /**
+     * The saved searches of {@code store}; {@code loaded} takes a search loaded from it, and {@code didSave} the line
+     * that confirms a save, which closes the popover.
+     */
     LobbySavedSearches(UiKit kit, SavedAdvancedSearches store, Supplier<RequisitionAdvancedSearch> criteria,
-          Consumer<Loaded> loaded) {
+          Consumer<Loaded> loaded, Consumer<String> didSave) {
         this.kit = kit;
         this.store = store;
         this.criteria = criteria;
         this.loaded = loaded;
+        this.didSave = didSave;
         button = kit.button("button-quiet" + UiTheme.COMPACT, "bookmark", text("open"), null);
         button.setName("lobby-requisition-advanced-saved");
         kit.tip(button, true).getActor().setText(text("openTip"));
@@ -319,11 +325,9 @@ final class LobbySavedSearches {
         String named = name.getText().strip();
         try {
             Saved saved = store.save(named, criteria.get(), loadedFrom);
-            deleting = null;
-            renaming = null;
             name.setText(saved.name());
-            fill();
-            say(Messages.getString(KEY + "didSave", saved.name()), "status.success");
+            close();
+            didSave.accept(Messages.getString(KEY + "didSave", saved.name()));
         } catch (IOException | RuntimeException exception) {
             LOGGER.error(exception, "Saving the advanced search {}", named);
             say(Messages.getString(KEY + "saveFailed", reason(exception)), "status.danger");

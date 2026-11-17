@@ -454,7 +454,8 @@ The open items below were copied to the gap analysis and are tracked there; this
        that Jackson could not read back); `ASDamage.parse` is now its `@JsonCreator`.
        Follow-up, saved searches: the view's header has **Save / Load** (before Clear), a popover (subtitled as shared
        with the unit selector) with a "Save these criteria" section, a name field with Save, or Replace when the name
-       is taken, then "Your searches" with its count (recently used first, a bookmark and hint while empty), per-row
+       is taken (either closes the popover and confirms under the tabs for a few seconds), then "Your searches" with
+       its count (recently used first, a bookmark and hint while empty), per-row
        rename and two-click delete, and **Open file…** under a divider for a search elsewhere; its content is `md`
        from the sides, as the header and the gap between the name and Save, and one Escape closes it, even from the
        name field. Loading one replaces every tab's criteria and shows the
