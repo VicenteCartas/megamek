@@ -9,12 +9,15 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
+import com.badlogic.gdx.utils.Align;
 import jakarta.annotation.Nullable;
 import megamek.client.lobby.RequisitionAdvancedSearch;
 import megamek.client.lobby.SavedAdvancedSearches;
@@ -43,6 +46,8 @@ final class LobbySavedSearches {
     private static final float WIDTH_CONTROLS = 9;
     /** The saved searches listed before the list scrolls. */
     private static final int ROWS = 8;
+    /** The space between the content and the popover's sides, and between the name and Save: md, as the header's. */
+    private static final float SIDE = space("md");
 
     private final UiKit kit;
     private final SavedAdvancedSearches store;
@@ -53,6 +58,7 @@ final class LobbySavedSearches {
     private final UiButton save;
     private final TextTooltip saveTip;
     private final Label status;
+    private final Label count;
     private final UiMenuList list;
     private final Table content = new Table();
     private @Nullable UiPopover popover;
@@ -95,14 +101,43 @@ final class LobbySavedSearches {
 
         Table nameRow = new Table();
         nameRow.add(name).growX().minWidth(0);
-        nameRow.add(save).padLeft(space("sm"));
-        content.top().left();
-        content.add(nameRow).growX().row();
+        nameRow.add(save).padLeft(SIDE);
+        count = kit.typeLabel("", "small", "text.muted");
+        count.setName("lobby-requisition-advanced-saved-count");
+        // The content's sides match the header's and the gap between the name and Save
+        content.top().left().pad(space("xs"), SIDE, SIDE, SIDE);
+        content.add(section(text("saveSection"), null)).growX().row();
+        content.add(nameRow).growX().padTop(space("xs")).row();
         content.add(status).growX().minWidth(0).padTop(space("xs")).row();
         float rowHeight = size("control.sm");
-        content.add(kit.scrollList(list, true, false)).growX().maxHeight(rowHeight * ROWS).padTop(space("sm")).row();
-        content.add(fromFile).left().padTop(space("sm"));
+        content.add(section(text("listSection"), count)).growX().padTop(SIDE).row();
+        content.add(kit.scrollList(list, true, false)).growX().maxHeight(rowHeight * ROWS).padTop(space("xs")).row();
+        content.add(new Image(kit.skin.getDrawable("token-divider"))).growX().height(1).padTop(space("sm")).row();
+        // The quiet button's icon lines up with the rest, its hover reaching into the side space
+        content.add(fromFile).left().padTop(space("sm")).padLeft(-fromFile.getPadLeft());
+        content.addListener(new InputListener() {
+            @Override
+            public boolean keyDown(InputEvent event, int keycode) {
+                // The lobby's own Esc would first only take the focus from the name field
+                if (keycode == Input.Keys.ESCAPE) {
+                    event.stop();
+                    back();
+                    return true;
+                }
+                return false;
+            }
+        });
         say("", null);
+    }
+
+    /** A section's overline title in text.secondary, with {@code trailing} at the right when there is one. */
+    private Table section(String title, @Nullable Actor trailing) {
+        Table section = new Table();
+        section.add(kit.roleTypeLabel("overline", title, "text.secondary")).left().expandX();
+        if (trailing != null) {
+            section.add(trailing).right();
+        }
+        return section;
     }
 
     /** The header button that opens the popover. */
@@ -164,7 +199,7 @@ final class LobbySavedSearches {
         }
         say("", null);
         fill();
-        popover.header(text("title"), null).openedFrom(button).content(content);
+        popover.header(text("title"), text("subtitle")).openedFrom(button).content(content);
         popover.showAnchored(button, Math.max(button.getWidth(), size("control.lg") * WIDTH_CONTROLS));
         if (popover.getStage() != null) {
             popover.getStage().setKeyboardFocus(name);
@@ -177,8 +212,9 @@ final class LobbySavedSearches {
     private void fill() {
         list.clearChildren(true);
         List<Saved> shown = store.list();
+        count.setText(shown.isEmpty() ? "" : String.valueOf(shown.size()));
         if (shown.isEmpty()) {
-            list.add(kit.typeLabel(text("none"), "small", "text.muted")).left().pad(space("xs")).row();
+            list.add(emptyState()).growX().row();
         }
         UiTextField renameField = null;
         for (Saved each : shown) {
@@ -203,6 +239,20 @@ final class LobbySavedSearches {
                 renameField.selectAll();
             }
         }
+    }
+
+    /** The list before anything is saved: a bookmark over what to do to fill it. */
+    private Table emptyState() {
+        Table empty = new Table();
+        empty.setName("lobby-requisition-advanced-saved-empty");
+        empty.pad(SIDE, 0, SIDE, 0);
+        empty.add(kit.icon("bookmark", size("icon.lg"), UiTheme.tokenColor("text.muted"))).row();
+        empty.add(kit.typeLabel(text("none"), "body.strong", "text.secondary")).padTop(space("sm")).row();
+        Label hint = kit.typeLabel(text("noneHint"), "small", "text.muted");
+        hint.setWrap(true);
+        hint.setAlignment(Align.center);
+        empty.add(hint).growX().minWidth(0).padTop(space("xxs"));
+        return empty;
     }
 
     /** A saved search's rename and delete; the delete asks again before it deletes. */

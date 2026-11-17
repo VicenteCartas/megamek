@@ -452,9 +452,12 @@ The open items below were copied to the gap analysis and are tracked there; this
        quirks stay: `MekSearchFilter`'s copy constructor copies only some fields, and its weapon-quirk exclusion
        reads the include list. Its saved Alpha Strike damage choices used to fail to load (`ASDamage` wrote a string
        that Jackson could not read back); `ASDamage.parse` is now its `@JsonCreator`.
-       Follow-up, saved searches: the view's header has **Saved** (before Clear), a popover listing the saved searches
-       (recently used first), a name field with Save, or Replace when the name is taken, per-row rename and two-click
-       delete, and **Open file…** for a search elsewhere. Loading one replaces every tab's criteria and shows the
+       Follow-up, saved searches: the view's header has **Save / Load** (before Clear), a popover (subtitled as shared
+       with the unit selector) with a "Save these criteria" section, a name field with Save, or Replace when the name
+       is taken, then "Your searches" with its count (recently used first, a bookmark and hint while empty), per-row
+       rename and two-click delete, and **Open file…** under a divider for a search elsewhere; its content is `md`
+       from the sides, as the header and the gap between the name and Save, and one Escape closes it, even from the
+       name field. Loading one replaces every tab's criteria and shows the
        first tab that has some. The files are the Swing dialog's (`AdvSearchState` JSON in `mmconf/searches/`, with
        its recent list), so a search saved here opens in the unit selector of MegaMek, MegaMekLab and MekHQ, and
        back; `AdvancedSearchFiles` holds the file handling both use, and `SavedAdvancedSearches` in

@@ -69,10 +69,19 @@ class UiStepperChipSmokeTest {
             UiStepper stepper = ui.kit.stepper("W", 16, 5, 200);
             place(ui, stepper);
             float upAt = stepper.up().getX();
+            float downAt = stepper.down().getX();
+            float width = stepper.getPrefWidth();
             AtomicInteger changes = count(stepper);
             click(ui, stepper.shown());
             assertTrue(stepper.typing());
             assertEquals(stepper.field(), ui.stage.getKeyboardFocus(), "the field takes the keys");
+            ui.draw();
+            assertEquals(width, stepper.getPrefWidth(), EPSILON, "typing keeps the stepper's width");
+            assertEquals(downAt, stepper.down().getX(), EPSILON, "the − stays put while typing");
+            assertEquals(upAt, stepper.up().getX(), EPSILON, "the + stays put while typing");
+            assertEquals(stepper.down().getX() + stepper.down().getWidth(), stepper.field().getX(), EPSILON,
+                  "the field fills the gap after the −");
+            ui.capture("stepper-typing").dispose();
             type(ui, "150");
             assertEquals(16, stepper.value(), "keys alone do not set the value");
             assertEquals(0, changes.get());

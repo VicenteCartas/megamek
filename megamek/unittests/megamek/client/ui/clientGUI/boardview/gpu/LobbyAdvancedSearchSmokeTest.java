@@ -183,6 +183,15 @@ class LobbyAdvancedSearchSmokeTest {
             assertNotNull(saved.popover(), "Saved opens its popover");
             assertTrue(text(saved.popover()).contains("No saved searches yet"), text(saved.popover()));
             assertTrue(saved.nameField().hasKeyboardFocus(), "the name takes the keys");
+            ui.draw();
+            ui.capture("lobby-advanced-saved-empty").dispose();
+            Actor save = saved.popover().findActor("lobby-requisition-advanced-saved-save");
+            float nameLeft = stageX(saved.nameField(), 0);
+            float gap = stageX(save, 0) - stageX(saved.nameField(), saved.nameField().getWidth());
+            float inner = stageX(saved.popover(), saved.popover().getWidth() - saved.popover().getPadRight());
+            assertEquals(gap, inner - stageX(save, save.getWidth()), 1, "Save is as far from the edge as from the name");
+            assertEquals(gap, nameLeft - stageX(saved.popover(), saved.popover().getPadLeft()), 1,
+                  "and so is the name");
             for (char each : "Fast".toCharArray()) {
                 ui.stage.keyTyped(each);
             }
@@ -239,9 +248,20 @@ class LobbyAdvancedSearchSmokeTest {
             assertNull(saved.popover());
             click(ui, saved.button());
             run(ui, .05f);
+            assertTrue(saved.nameField().hasKeyboardFocus());
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            run(ui, .05f);
+            assertNull(saved.popover(), "one Escape in the name closes the popover");
+            click(ui, saved.button());
+            run(ui, .05f);
             view.actor().remove();
             assertNull(saved.popover(), "the popover goes when the view does");
         });
+    }
+
+    /** The stage x of the point {@code x} along {@code actor}. */
+    private static float stageX(Actor actor, float x) {
+        return actor.localToStageCoordinates(new Vector2(x, 0)).x;
     }
 
     private static <T extends Actor> T find(Actor root, Class<T> type) {

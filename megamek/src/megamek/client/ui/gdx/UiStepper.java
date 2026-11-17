@@ -13,10 +13,12 @@ import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.FocusListener;
+import com.badlogic.gdx.scenes.scene2d.utils.NinePatchDrawable;
 import com.badlogic.gdx.utils.Align;
 import megamek.client.ui.design.DesignTokens;
 
@@ -96,9 +98,21 @@ public final class UiStepper extends Table {
         value(value);
     }
 
-    /** The field a number's value is typed in, and the click on the value that opens it. */
+    /**
+     * The field a number's value is typed in, and the click on the value that opens it. It sets the value in its own
+     * font, with only the {@link #gap()} of its frame round the text, so it fills the value's cell and the gaps beside it
+     * and nothing round it moves.
+     */
     private UiTextField typingField(UiKit kit) {
         UiTextField typed = kit.input("", true);
+        TextField.TextFieldStyle style = new TextField.TextFieldStyle(typed.getStyle());
+        style.font = shown.getStyle().font;
+        style.messageFont = style.font;
+        style.fontColor = shown.getStyle().fontColor;
+        style.focusedFontColor = style.fontColor;
+        style.background = inset(style.background, gap());
+        style.focusedBackground = inset(style.focusedBackground, gap());
+        typed.setStyle(style);
         typed.setAlignment(Align.center);
         typed.setMaxLength(Math.max(String.valueOf(min).length(), String.valueOf(max).length()));
         typed.setTextFieldFilter((textField, character) -> Character.isDigit(character)
@@ -160,6 +174,17 @@ public final class UiStepper extends Table {
             }
         });
         return typed;
+    }
+
+    /** {@code frame} with {@code side} between its left and right edges and the text. */
+    private static Drawable inset(Drawable frame, float side) {
+        if (!(frame instanceof NinePatchDrawable patch)) {
+            return frame;
+        }
+        NinePatchDrawable copy = new NinePatchDrawable(patch);
+        copy.setLeftWidth(side);
+        copy.setRightWidth(side);
+        return copy;
     }
 
     /** The space between the caption, the buttons and the value: {@code xs}. */
@@ -232,10 +257,9 @@ public final class UiStepper extends Table {
         }
         typing = true;
         field.setText(String.valueOf(value));
-        Drawable background = field.getStyle().background;
-        float edges = background == null ? 0 : background.getLeftWidth() + background.getRightWidth();
+        // The field takes the gaps beside the value as its frame, so the stepper keeps its width
         valueCell.setActor(field);
-        valueCell.width(valueWidth + edges + gap());
+        valueCell.width(valueWidth + 2 * gap()).padLeft(0).padRight(0);
         invalidateHierarchy();
         // The value under the pointer is gone, so it never sees the pointer leave
         if (Gdx.graphics != null) {
@@ -260,7 +284,7 @@ public final class UiStepper extends Table {
             stage.setKeyboardFocus(this);
         }
         valueCell.setActor(shown);
-        valueCell.width(valueWidth);
+        valueCell.width(valueWidth).padLeft(gap()).padRight(gap());
         invalidateHierarchy();
         if (keep) {
             Integer typed = UiRangeInput.parse(text);
