@@ -441,16 +441,32 @@ The open items below were copied to the gap analysis and are tracked there; this
        equipment is told apart by its base and internal name. Left out, being costly or rare: tank turrets, lower
        arms and hands, transport bays, doors and carried units, source text, rules references, MUL ID, a separate
        quirk-exclude mode (a quirk chip switches to must-not-have instead), the equipment table's tech and unit-type
-       filtering, and saved searches. Kit: `UiRangeInput`, `UiPickList` and the select list's type-ahead. Checks:
-       `RequisitionAdvancedSearchTest`, `AdvancedSearchParityTest` (the Swing panels and the lobby model agree on
-       representative criteria), and the on-demand `LobbyAdvancedSearchSmokeTest` and `UiPickListSmokeTest`, which
-       click the real actors. Probe `lobby+requisition+advanced` (`+as`, `+equip`) clicks Filters, Advanced search
+       filtering, and saved searches (since added, below). Kit: `UiRangeInput`, `UiPickList` and the select list's
+       type-ahead. Checks: `RequisitionAdvancedSearchTest`, `AdvancedSearchParityTest` (the Swing panels and the lobby
+       model agree on representative criteria), and the on-demand `LobbyAdvancedSearchSmokeTest` and
+       `UiPickListSmokeTest`, which click the real actors. Probe `lobby+requisition+advanced` (`+as`, `+equip`) clicks
+       Filters, Advanced search
        and the walk field through the Stage: 6,533 units, then 2,857 with walk ≥ 5, then 50 with Alpha Strike size 4
        or 481 with one PPC; photographed at 2560x1400 and 1100x800. Not checked live: every control on the Battlefield
        Support tab, the expression's brackets, and very long pick lists on a slow machine. The Swing dialog's own
-       quirks stay: its saved Alpha Strike damage choices do not come back (`ASDamage` has no `equals`),
-       `MekSearchFilter`'s copy constructor copies only some fields, and its weapon-quirk exclusion reads the
-       include list.
+       quirks stay: `MekSearchFilter`'s copy constructor copies only some fields, and its weapon-quirk exclusion
+       reads the include list. Its saved Alpha Strike damage choices used to fail to load (`ASDamage` wrote a string
+       that Jackson could not read back); `ASDamage.parse` is now its `@JsonCreator`.
+       Follow-up, saved searches: the view's header has **Save / Load** (before Clear), a popover (subtitled as shared
+       with the unit selector) with a "Save these criteria" section, a name field with Save, or Replace when the name
+       is taken (either closes the popover, without a message), then "Your searches" with
+       its count (recently used first, a bookmark and hint while empty), per-row
+       rename and two-click delete, and **Open file…** under a divider for a search elsewhere; its content is `md`
+       from the sides, as the header and the gap between the name and Save, and one Escape closes it, even from the
+       name field. Loading one replaces every tab's criteria and shows the
+       first tab that has some. The files are the Swing dialog's (`AdvSearchState` JSON in `mmconf/searches/`, with
+       its recent list), so a search saved here opens in the unit selector of MegaMek, MegaMekLab and MekHQ, and
+       back; `AdvancedSearchFiles` holds the file handling both use, and `SavedAdvancedSearches` in
+       `megamek.client.lobby` converts between the dialog's state and `RequisitionAdvancedSearch`. A search with
+       criteria the view has no controls for (those left out above) loads without them and shows a warning icon
+       beside Save / Load whose tooltip says so (its room is kept, so nothing moves); replacing the file it came
+       from keeps them. Checks: `SavedAdvancedSearchesTest` (with two searches
+       saved by the Swing dialog) and `LobbyAdvancedSearchSmokeTest`'s saved-search walk.
      - L12 ~~Chat fold and kept filters~~. The chat docked under the players gets a header (Chat, a count badge and,
        folded, the latest line cut with an ellipsis) and a fold chevron at the end of the input row, as the
        reference's `ChatDock` (6.5): folded, only the header and the input stay and the players list takes the

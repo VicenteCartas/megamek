@@ -211,6 +211,8 @@ public final class UiTheme implements Disposable {
           Map.entry("walk-on", 0xEA77),
           // The lobby's unit cards: hub (a C3 network) and delete
           Map.entry("hub", 0xE9F4), Map.entry("delete", 0xE872),
+          // The advanced search's saved searches: bookmark, save and edit (rename)
+          Map.entry("bookmark", 0xE866), Map.entry("save", 0xE161), Map.entry("edit", 0xE3C9),
           // The lobby's top bar: gavel, Game options (the rules of the game)
           Map.entry("gavel", 0xE90E),
           // The Tactical View's unit badges: power_settings_new, vertical_align_bottom, anchor, sensors_off, sensors,

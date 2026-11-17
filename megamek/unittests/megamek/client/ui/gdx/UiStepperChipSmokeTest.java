@@ -4,6 +4,7 @@ package megamek.client.ui.gdx;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -14,6 +15,7 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -59,6 +61,102 @@ class UiStepperChipSmokeTest {
             stepper.validate();
             assertEquals(upAt, stepper.up().getX(), EPSILON);
             assertTrue(stepper.shown().getPrefWidth() <= stepper.shown().getWidth() + EPSILON);
+        });
+    }
+
+    @Test
+    void aClickOnTheValueTypesItAndEnterSetsItWithinTheBounds() {
+        UiTestStage.run(ui -> {
+            UiStepper stepper = ui.kit.stepper("W", 16, 5, 200);
+            place(ui, stepper);
+            float upAt = stepper.up().getX();
+            float downAt = stepper.down().getX();
+            float width = stepper.getPrefWidth();
+            AtomicInteger changes = count(stepper);
+            click(ui, stepper.shown());
+            assertTrue(stepper.typing());
+            assertEquals(stepper.field(), ui.stage.getKeyboardFocus(), "the field takes the keys");
+            ui.draw();
+            assertEquals(width, stepper.getPrefWidth(), EPSILON, "typing keeps the stepper's width");
+            assertEquals(downAt, stepper.down().getX(), EPSILON, "the − stays put while typing");
+            assertEquals(upAt, stepper.up().getX(), EPSILON, "the + stays put while typing");
+            assertEquals(stepper.down().getX() + stepper.down().getWidth(), stepper.field().getX(), EPSILON,
+                  "the field fills the gap after the −");
+            ui.capture("stepper-typing").dispose();
+            type(ui, "150");
+            assertEquals(16, stepper.value(), "keys alone do not set the value");
+            assertEquals(0, changes.get());
+            key(ui, Input.Keys.ENTER);
+            assertFalse(stepper.typing());
+            assertEquals(150, stepper.value());
+            assertEquals(1, changes.get(), "one change for the typed value");
+            assertEquals(upAt, stepper.up().getX(), EPSILON, "the buttons are back where they were");
+
+            click(ui, stepper.shown());
+            type(ui, "999");
+            key(ui, Input.Keys.ENTER);
+            assertEquals(200, stepper.value(), "brought within the bounds");
+            assertEquals(2, changes.get());
+        });
+    }
+
+    @Test
+    void aTypedValueAsWideAsTheWidestShowsWhole() {
+        UiTestStage.run(ui -> {
+            // The requisition's quantity: its widest value, 12, is typed
+            UiStepper stepper = ui.kit.stepper("Qty", 1, 1, 12);
+            place(ui, stepper);
+            float upAt = stepper.up().getX();
+            click(ui, stepper.shown());
+            type(ui, "12");
+            assertEquals(0, visible(stepper.field(), "visibleTextStart"), "the field shows the first digit");
+            assertEquals(2, visible(stepper.field(), "visibleTextEnd"), "and the last");
+            assertEquals(upAt, stepper.up().getX(), EPSILON, "a value that fits the cell moves nothing");
+        });
+    }
+
+    /** One of a text field's protected bounds of the text it draws. */
+    private static int visible(TextField field, String bound) {
+        try {
+            java.lang.reflect.Field shown = TextField.class.getDeclaredField(bound);
+            shown.setAccessible(true);
+            return shown.getInt(field);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError(exception);
+        }
+    }
+
+    @Test
+    void escapeKeepsTheValueAndLeavingTheFieldSetsIt() {
+        UiTestStage.run(ui -> {
+            UiStepper stepper = ui.kit.stepper(-1, -3, 5);
+            place(ui, stepper);
+            AtomicInteger changes = count(stepper);
+            click(ui, stepper.shown());
+            type(ui, "4");
+            key(ui, Input.Keys.ESCAPE);
+            assertFalse(stepper.typing());
+            assertEquals(-1, stepper.value());
+            assertEquals(0, changes.get(), "Escape drops the typed value");
+
+            click(ui, stepper.shown());
+            type(ui, "-2");
+            ui.stage.setKeyboardFocus(null);
+            ui.draw();
+            assertFalse(stepper.typing());
+            assertEquals(-2, stepper.value(), "a minus leads a value when the bounds go below zero");
+            assertEquals(1, changes.get());
+        });
+    }
+
+    @Test
+    void aSelectorTakesNoTyping() {
+        UiTestStage.run(ui -> {
+            UiStepper selector = ui.kit.selector(List.of("Low", "High"), 0);
+            place(ui, selector);
+            click(ui, selector.shown());
+            assertFalse(selector.typing());
+            assertNull(selector.field());
         });
     }
 
@@ -115,6 +213,19 @@ class UiStepperChipSmokeTest {
             }
         });
         return changes;
+    }
+
+    private static void type(UiTestStage ui, String text) {
+        for (char character : text.toCharArray()) {
+            ui.stage.keyTyped(character);
+        }
+        ui.draw();
+    }
+
+    private static void key(UiTestStage ui, int keycode) {
+        ui.stage.keyDown(keycode);
+        ui.stage.keyUp(keycode);
+        ui.draw();
     }
 
     private static void click(UiTestStage ui, Actor actor) {

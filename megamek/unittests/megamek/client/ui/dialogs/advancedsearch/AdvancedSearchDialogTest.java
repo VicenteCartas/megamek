@@ -32,7 +32,7 @@
  */
 package megamek.client.ui.dialogs.advancedsearch;
 
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -40,7 +40,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
 
 class AdvancedSearchDialogTest {
 
@@ -55,16 +55,13 @@ class AdvancedSearchDialogTest {
         try (Stream<Path> files = Files.walk(resourceDir)) {
             files.filter(Files::isRegularFile)
                   .filter(p -> p.getFileName().toString().endsWith(".json"))
-                  .filter(p -> AdvancedSearchDialog.isAdvancedSearchFile(p.toFile()))
+                  .filter(p -> AdvancedSearchFiles.isAdvancedSearchFile(p.toFile()))
                   .forEach(p ->
                         assertDoesNotThrow(
-                              () -> AdvancedSearchDialog.load(p.toFile()),
+                              () -> AdvancedSearchFiles.load(p.toFile()),
                               () -> "Failed for JSON file: " + p
                         )
                   );
         }
     }
 }
-
-
-
