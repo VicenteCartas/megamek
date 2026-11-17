@@ -53,7 +53,6 @@ final class LobbySavedSearches {
     private final SavedAdvancedSearches store;
     private final Supplier<RequisitionAdvancedSearch> criteria;
     private final Consumer<Loaded> loaded;
-    private final Consumer<String> didSave;
     private final UiButton button;
     private final UiTextField name;
     private final UiButton save;
@@ -71,16 +70,15 @@ final class LobbySavedSearches {
     private @Nullable Path loadedFrom;
 
     /**
-     * The saved searches of {@code store}; {@code loaded} takes a search loaded from it, and {@code didSave} the line
-     * that confirms a save, which closes the popover.
+     * The saved searches of {@code store}; {@code loaded} takes a search loaded from it. A save closes the popover, and
+     * only a failure says anything.
      */
     LobbySavedSearches(UiKit kit, SavedAdvancedSearches store, Supplier<RequisitionAdvancedSearch> criteria,
-          Consumer<Loaded> loaded, Consumer<String> didSave) {
+          Consumer<Loaded> loaded) {
         this.kit = kit;
         this.store = store;
         this.criteria = criteria;
         this.loaded = loaded;
-        this.didSave = didSave;
         button = kit.button("button-quiet" + UiTheme.COMPACT, "bookmark", text("open"), null);
         button.setName("lobby-requisition-advanced-saved");
         kit.tip(button, true).getActor().setText(text("openTip"));
@@ -327,7 +325,6 @@ final class LobbySavedSearches {
             Saved saved = store.save(named, criteria.get(), loadedFrom);
             name.setText(saved.name());
             close();
-            didSave.accept(Messages.getString(KEY + "didSave", saved.name()));
         } catch (IOException | RuntimeException exception) {
             LOGGER.error(exception, "Saving the advanced search {}", named);
             say(Messages.getString(KEY + "saveFailed", reason(exception)), "status.danger");
@@ -366,7 +363,7 @@ final class LobbySavedSearches {
                 loadedFrom = null;
             }
             fill();
-            say(Messages.getString(KEY + "didDelete", saved.name()), "status.success");
+            say("", null);
         } catch (IOException | RuntimeException exception) {
             LOGGER.error(exception, "Deleting the advanced search {}", saved.file());
             say(Messages.getString(KEY + "deleteFailed", reason(exception)), "status.danger");

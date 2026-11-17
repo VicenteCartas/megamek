@@ -200,8 +200,7 @@ class LobbyAdvancedSearchSmokeTest {
             assertTrue(Files.exists(searches.resolve("Fast.json")), "Enter saves the search under its name");
             assertNull(saved.popover(), "saving closes the popover");
             Label notice = view.actor().findActor("lobby-requisition-advanced-notice");
-            assertTrue(notice.isVisible() && notice.getText().toString().contains("Fast"),
-                  "and says so under the tabs: " + notice.getText());
+            assertFalse(notice.isVisible(), "and says nothing, so nothing moves");
             click(ui, saved.button());
             run(ui, .05f);
             assertTrue(button(saved.popover(), "Replace") != null, "the name of a saved search replaces it");
@@ -247,6 +246,7 @@ class LobbyAdvancedSearchSmokeTest {
             click(ui, saved.list().findActor("lobby-requisition-advanced-saved-delete-Quick"));
             run(ui, .05f);
             assertFalse(Files.exists(searches.resolve("Quick.json")), "the second deletes");
+            assertFalse(saved.status().isVisible(), "without a message that moves the list");
 
             assertTrue(view.back(), "Escape's step closes the popover");
             assertNull(saved.popover());

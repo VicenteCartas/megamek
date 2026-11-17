@@ -6,6 +6,7 @@ import java.util.List;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Cursor;
+import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
@@ -48,7 +49,7 @@ public final class UiStepper extends Table {
     private final UiTextField field;
     private final Cell<Actor> valueCell;
     /** The field's width while typing. */
-    private float typedWidth;
+    private float fieldWidth;
     private final float valueWidth;
     private boolean typing;
     private int value;
@@ -191,6 +192,21 @@ public final class UiStepper extends Table {
         return copy;
     }
 
+    /**
+     * The width a text field needs to show {@code text} whole: the sum of its glyphs' advances after the first's offset,
+     * as {@code TextField} lays it out. Less, and the field scrolls a whole character out of view.
+     */
+    private static float typedWidth(BitmapFont font, String text) {
+        GlyphLayout layout = new GlyphLayout(font, text);
+        float width = 0;
+        for (GlyphLayout.GlyphRun run : layout.runs) {
+            for (int i = 1; i < run.xAdvances.size; i++) {
+                width += run.xAdvances.get(i);
+            }
+        }
+        return width;
+    }
+
     /** The space between the caption, the buttons and the value: {@code xs}. */
     public static float gap() {
         return DesignTokens.shipped().space().get("xs");
@@ -204,7 +220,8 @@ public final class UiStepper extends Table {
               "0".repeat(String.valueOf(max).length()));
         for (String text : texts) {
             shown.setText(text);
-            widest = Math.max(widest, shown.getPrefWidth());
+            // A typed value is measured as a text field does, which can be a little wider than the label
+            widest = Math.max(widest, Math.max(shown.getPrefWidth(), typedWidth(shown.getStyle().font, text)));
         }
         shown.setText(saved);
         return (float) Math.ceil(widest);
@@ -263,7 +280,7 @@ public final class UiStepper extends Table {
         field.setText(String.valueOf(value));
         valueCell.setActor(field);
         valueCell.padLeft(0).padRight(0);
-        typedWidth = 0;
+        fieldWidth = 0;
         fitTyped();
         // The value under the pointer is gone, so it never sees the pointer leave
         if (Gdx.graphics != null) {
@@ -281,10 +298,10 @@ public final class UiStepper extends Table {
         if (!typing) {
             return;
         }
-        float needed = (float) Math.ceil(new GlyphLayout(field.getStyle().font, field.getText()).width);
+        float needed = (float) Math.ceil(typedWidth(field.getStyle().font, field.getText()));
         float width = Math.max(valueWidth, needed) + 2 * gap();
-        if (width != typedWidth) {
-            typedWidth = width;
+        if (width != fieldWidth) {
+            fieldWidth = width;
             valueCell.width(width);
             invalidateHierarchy();
         }

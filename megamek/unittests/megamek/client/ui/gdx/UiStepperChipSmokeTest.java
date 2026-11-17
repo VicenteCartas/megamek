@@ -15,6 +15,7 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -97,6 +98,32 @@ class UiStepperChipSmokeTest {
             assertEquals(200, stepper.value(), "brought within the bounds");
             assertEquals(2, changes.get());
         });
+    }
+
+    @Test
+    void aTypedValueAsWideAsTheWidestShowsWhole() {
+        UiTestStage.run(ui -> {
+            // The requisition's quantity: its widest value, 12, is typed
+            UiStepper stepper = ui.kit.stepper("Qty", 1, 1, 12);
+            place(ui, stepper);
+            float upAt = stepper.up().getX();
+            click(ui, stepper.shown());
+            type(ui, "12");
+            assertEquals(0, visible(stepper.field(), "visibleTextStart"), "the field shows the first digit");
+            assertEquals(2, visible(stepper.field(), "visibleTextEnd"), "and the last");
+            assertEquals(upAt, stepper.up().getX(), EPSILON, "a value that fits the cell moves nothing");
+        });
+    }
+
+    /** One of a text field's protected bounds of the text it draws. */
+    private static int visible(TextField field, String bound) {
+        try {
+            java.lang.reflect.Field shown = TextField.class.getDeclaredField(bound);
+            shown.setAccessible(true);
+            return shown.getInt(field);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError(exception);
+        }
     }
 
     @Test
