@@ -8,6 +8,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
@@ -67,6 +68,15 @@ final class LobbyCentre extends Container<Actor> {
         showing = null;
         present(forces);
         changed.accept(null);
+    }
+
+    /**
+     * Whether Escape that takes the keys from {@code field} goes on to the view's own steps and Back: a field of the
+     * view left empty, such as the unit search Add unit focuses, has nothing to keep, so one Escape leaves the view; a
+     * field with text, or outside the view, keeps that Escape for itself.
+     */
+    boolean passesEscape(TextField field) {
+        return showing != null && field.getText().isEmpty() && field.isDescendantOf(this);
     }
 
     private void present(Actor actor) {

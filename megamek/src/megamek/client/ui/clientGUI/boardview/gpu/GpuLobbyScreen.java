@@ -406,13 +406,16 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 if (keycode != Keys.ESCAPE) {
                     return readyKey(keycode);
                 }
-                // Escape closes a menu first, then leaves a text field, so typing never reaches the lobby's keys
+                // Escape closes a menu first, then leaves a text field, so typing never reaches the lobby's keys; an
+                // empty field in a centre view does not hold the Escape, so it goes on to the view's steps and Back
                 if (topBar.back() || players.back() || forces.back()) {
                     return true;
                 }
-                if (stage.getKeyboardFocus() instanceof TextField) {
+                if (stage.getKeyboardFocus() instanceof TextField field) {
                     stage.setKeyboardFocus(null);
-                    return true;
+                    if (!centre.passesEscape(field)) {
+                        return true;
+                    }
                 }
                 if (REQUISITION.equals(centre.showing()) && requisition.back()) {
                     return true;
