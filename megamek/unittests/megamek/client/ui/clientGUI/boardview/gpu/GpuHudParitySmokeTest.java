@@ -110,8 +110,8 @@ class GpuHudParitySmokeTest {
     // The phase header is centred text over the board, sized to its turn order, no longer the mock's frame: reported.
     private static final Region HEADER = free("phase-header", 20, 20, 300, 84);
     private static final Region MINIMAP = top("minimap", 1590, 90, 310, 210);
-    // The forces list is narrower than the mock's column of 300 (the user's request of 2026-10-02).
-    private static final int FORCES_WIDTH = Math.round(GpuHud.FORCES_WIDTH);
+    // The forces list takes the left column's width, as the unit card under it.
+    private static final int FORCES_WIDTH = Math.round(GpuHud.Metrics.of(1920, 1080).forces());
     private static final Region FORCES = top("forces-panel", 20, 116, FORCES_WIDTH, 508);
     private static final Region FORCES_RIBBON = top("forces-panel", 20, 132, FORCES_WIDTH, 508);
     private static final Region CARD = bottom("unit-card", 20, 837, 300, 223);
@@ -148,10 +148,10 @@ class GpuHudParitySmokeTest {
                     publish(live, status -> turn(status, false, Entity.NONE));
                     live.draw(10, .1f);
                     live.zoom(new Coords(13, 10), MOCK_HEX);
-                    // No fire preview in a report phase, so no contacts panel.
-                    shot(live, "01", "01-initiative.jpg", HEADER, MINIMAP, FORCES,
-                          top("initiative-card", 680, 216, 560, 259),
-                          bottom("command-dock", 670, 933, 580, 117));
+                    // No fire preview in a report phase, so no contacts panel. The initiative card names the phase
+                    // and carries its own Continue, so the phase header and the dock wait for the board.
+                    shot(live, "01", "01-initiative.jpg", MINIMAP, FORCES,
+                          top("initiative-card", 680, 216, 560, 259));
                 });
             } finally {
                 onSwing(() -> {
@@ -184,14 +184,10 @@ class GpuHudParitySmokeTest {
             GpuLiveBoardSpaceSmokeTest.run(board.source, live -> {
                 start(live, UnaryOperator.identity());
                 publish(live, UnaryOperator.identity());
+                // The mocks show the contacts open; unpinned, they fold to their rail.
+                live.hud.state.contactsPinned = true;
                 live.draw(10, .1f);
                 live.zoom(ATLAS_MOVED, MOCK_HEX);
-
-                // 11: no route yet, the forces as a grid.
-                live.hud.state.forcesGrid = true;
-                shot(live, "11", "11-force-grid.jpg", HEADER, MINIMAP, top("forces-panel", 20, 132, 630, 282),
-                      top("contacts-panel", 1590, 312, 310, 506), CARD, PLAN_DOCK);
-                live.hud.state.forcesGrid = false;
 
                 // 16: the chat open with a draft.
                 live.hud.state.chatOpen = true;
@@ -201,7 +197,7 @@ class GpuHudParitySmokeTest {
                 field.setCursorPosition(field.getText().length());
                 live.hud.stage.setKeyboardFocus(field);
                 shot(live, "16", "16-chat.jpg", HEADER, MINIMAP, FORCES_RIBBON,
-                      bottom("chat-panel", 1560, 694, 340, 320), CARD, PLAN_DOCK);
+                      top("chat-panel", 1590, 312, 310, 320), CARD, PLAN_DOCK);
                 live.hud.stage.setKeyboardFocus(null);
                 live.hud.state.chatOpen = false;
 
@@ -220,15 +216,13 @@ class GpuHudParitySmokeTest {
                       top("contacts-panel", 1590, 312, 310, 698), CARD, PLAN_DOCK);
                 click(live, "contacts-preview-" + TIMBER_WOLF);
 
-                // 14: 100 v 100, a run of five hexes, the forces as a grid.
+                // 14: 100 v 100, a run of five hexes.
                 plan(live, board, new Coords(13, 10), false);
-                live.hud.state.forcesGrid = true;
                 crowd(live);
                 live.zoom(new Coords(13, 11), 85);
                 shot(live, "14", "14-large-battle-100v100.jpg", HEADER, MINIMAP,
-                      top("forces-panel", 20, 132, 630, 693), top("contacts-panel", 1590, 312, 310, 698), CARD,
+                      top("forces-panel", 20, 132, FORCES_WIDTH, 693), top("contacts-panel", 1590, 312, 310, 698), CARD,
                       bottom("command-dock", 670, 875, 580, 175));
-                live.hud.state.forcesGrid = false;
                 onSwing(() -> {
                     board.source.moves().clearRoute();
                     return null;

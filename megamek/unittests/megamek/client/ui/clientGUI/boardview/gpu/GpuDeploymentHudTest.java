@@ -39,6 +39,6 @@ class GpuDeploymentHudTest {
         return new GpuBattleStatus.UnitStatus(id, side, false, "Unit " + id, "", "", 0, "Medium", "", "", 0, 0, 1, 1,
               0, 0, "", 0, "", 0, "", 0, 0, 0, 0, false, false, false, false, Entity.DMG_NONE, List.of(), "",
               position, 0, null, List.of(), 2, 0, Player.PLAYER_NONE, List.of(), "", GpuBattleStatus.Marks.NONE, -1,
-              0, false, zone, round);
+              0, false, zone, round, GpuBattleStatus.Wait.NONE);
     }
 }

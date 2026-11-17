@@ -121,13 +121,13 @@ class GpuHelpMenuPlayersSmokeTest {
             List<GpuBoardSource.Bind> binds = new ArrayList<>(preferences.binds());
             binds.replaceAll(bind -> bind.command() == KeyCommandBind.KEY_BINDS
                   ? new GpuBoardSource.Bind(bind.command(), bind.keyCode(), bind.modifiers(), "F12")
-                  : bind.command() == KeyCommandBind.FORCES_GRID
+                  : bind.command() == KeyCommandBind.TACTICAL_OVERLAYS
                   ? new GpuBoardSource.Bind(bind.command(), 0, 0, "") : bind);
             GpuBoardSource.UiPreferences changed = GpuHudFixtures.with(preferences, Map.of("binds", binds));
             help.update(inputs(hud, frame(List.of(), GpuPlayers.Snapshot.EMPTY), changed, false));
             lines = lines(root);
             assertPair(lines, "F12", "KeyBinds.cmdNames.toggleKeybinds");
-            assertFalse(lines.contains(Messages.getString("KeyBinds.cmdNames.forcesGrid")));
+            assertFalse(lines.contains(Messages.getString("KeyBinds.cmdNames.tacticalOverlays")));
         });
     }
 
@@ -379,9 +379,9 @@ class GpuHelpMenuPlayersSmokeTest {
                 verify(dialogs.players).setPanelOpen(false);
                 assertTrue(hud.isModal());
                 assertTrue(hud.keyDown(Input.Keys.W, KeyEvent.VK_W, 0), "camera keys stay in the modal");
-                boolean grid = hud.state.forcesGrid;
-                assertTrue(hud.keyDown(Input.Keys.G, KeyEvent.VK_G, 0));
-                assertEquals(grid, hud.state.forcesGrid, "background panel shortcuts stay blocked");
+                boolean overview = hud.state.overview;
+                assertTrue(hud.keyDown(Input.Keys.U, KeyEvent.VK_U, InputEvent.CTRL_DOWN_MASK));
+                assertEquals(overview, hud.state.overview, "background panel shortcuts stay blocked");
                 assertTrue(hud.keyTyped('w'));
                 assertTrue(hud.stage.getKeyboardFocus().isDescendantOf(help.getParent().getParent()));
                 assertTrue(hud.hit(2, 2), "even the board outside the dialog is blocked");

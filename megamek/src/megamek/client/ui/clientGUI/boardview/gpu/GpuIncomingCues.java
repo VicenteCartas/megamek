@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -24,22 +25,26 @@ import megamek.common.board.Board;
 import megamek.common.board.Coords;
 
 /**
- * Walk-on deployment: the player's own units still waiting to walk on, marked at the board edge they enter from with
- * how many and from which round. Other players' reinforcements stay hidden. The mark sits on its edge while the
- * camera shows it and at the window's edge toward it otherwise; a click centres the board on the edge.
+ * Walk-on deployment: the units still waiting to walk on, marked at the board edge they enter from with how many and
+ * from which round: the player's own (named in the tip), and outside double blind the other players' by side. The
+ * mark sits on its edge while the camera shows it and at the window's edge toward it otherwise; a click centres the
+ * board on the edge. Marks of one edge stack.
  */
 final class GpuIncomingCues implements GpuHud.Component {
-    /** Own units entering from one edge: its zone, a hex on that edge, their first and last rounds and lines. */
-    record Edge(int zone, Coords hex, int round, int lastRound, int count, List<String> lines) { }
+    /** Units of one side entering from one edge: its zone, a hex on that edge, their first and last rounds and lines. */
+    record Edge(int zone, Coords hex, GpuBattleStatus.Side side, int round, int lastRound, int count,
+          List<String> lines) { }
 
     /** An edge and where its hex lies in stage units (y up), off the stage when the camera does not show it. */
     record Cue(Edge edge, Vector2 at) { }
 
     private static final float EDGE_INSET = 18;
+    private static final float STACK_GAP = 3;
 
     /**
-     * The own units waiting to walk on, by the edge they enter from. A unit that may enter from any edge has none to
-     * mark. {@code width} and {@code height} are the board's, in hexes.
+     * The units waiting to walk on, by the edge they enter from: the own first, then the other players' by side
+     * ({@code GpuBattleStatus.Snapshot#incoming}). A unit that may enter from any edge has none to mark.
+     * {@code width} and {@code height} are the board's, in hexes.
      */
     static List<Edge> edges(GpuBattleStatus.Snapshot status, int width, int height) {
         Map<Integer, List<GpuBattleStatus.UnitStatus>> byZone = new LinkedHashMap<>();
@@ -49,7 +54,7 @@ final class GpuIncomingCues implements GpuHud.Component {
                 byZone.computeIfAbsent(unit.walkOnZone(), ignored -> new ArrayList<>()).add(unit);
             }
         }
-        List<Edge> edges = new ArrayList<>(byZone.size());
+        List<Edge> edges = new ArrayList<>(byZone.size() + status.incoming().size());
         for (Map.Entry<Integer, List<GpuBattleStatus.UnitStatus>> entry : byZone.entrySet()) {
             List<GpuBattleStatus.UnitStatus> units = new ArrayList<>(entry.getValue());
             units.sort((left, right) -> Integer.compare(left.walkOnRound(), right.walkOnRound()));
@@ -58,8 +63,12 @@ final class GpuIncomingCues implements GpuHud.Component {
                 lines.add(text("GpuBoard.hud.deploy.incomingUnit",
                       unit.label().isEmpty() ? unit.name() : unit.label(), unit.walkOnRound()));
             }
-            edges.add(new Edge(entry.getKey(), edgeHex(entry.getKey(), width, height), units.get(0).walkOnRound(),
-                  units.get(units.size() - 1).walkOnRound(), units.size(), lines));
+            edges.add(new Edge(entry.getKey(), edgeHex(entry.getKey(), width, height), GpuBattleStatus.Side.OWN,
+                  units.get(0).walkOnRound(), units.get(units.size() - 1).walkOnRound(), units.size(), lines));
+        }
+        for (GpuBattleStatus.Incoming other : status.incoming()) {
+            edges.add(new Edge(other.zone(), edgeHex(other.zone(), width, height), other.side(), other.round(),
+                  other.lastRound(), other.count(), List.of()));
         }
         return edges;
     }
@@ -113,20 +122,23 @@ final class GpuIncomingCues implements GpuHud.Component {
         boolean hidden = inputs.dialog() != null || state.overview || width <= 4 * EDGE_INSET
               || height <= 4 * EDGE_INSET;
         int shown = 0;
+        Map<Integer, Integer> stacked = new java.util.HashMap<>();
         for (Cue cue : hidden ? List.<Cue>of() : cues) {
             if (shown == marks.size()) {
                 marks.add(new Mark());
             }
-            marks.get(shown++).show(cue, width, height, inputs.frame().status().round());
+            int below = stacked.merge(cue.edge().zone(), 1, Integer::sum) - 1;
+            marks.get(shown++).show(cue, width, height, inputs.frame().status().round(), below);
         }
         for (int index = shown; index < marks.size(); index++) {
             marks.get(index).plate.setVisible(false);
         }
     }
 
-    /** One edge's plate: the walk-on mark, how many units and from which round. */
+    /** One edge's plate for one side: the walk-on mark in the side's colour, how many units and from which round. */
     private final class Mark {
         private final Table plate = new Table();
+        private final UiKit.Icon icon = ui.icon("walk-on", 14, GpuArrivalCues.ALLY);
         private final Label count = ui.label("", "hud-small", 11.5f, UiTheme.TEXT);
         private final TextTooltip tip;
         private String tipText = "";
@@ -135,7 +147,7 @@ final class GpuIncomingCues implements GpuHud.Component {
         Mark() {
             plate.setBackground(ui.skin.getDrawable("tip"));
             plate.pad(3, 6, 3, 8);
-            plate.add(ui.icon("walk-on", 14, GpuArrivalCues.ALLY)).padRight(4);
+            plate.add(icon).padRight(4);
             plate.add(count);
             plate.setTouchable(Touchable.enabled);
             plate.addListener(new ClickListener() {
@@ -150,12 +162,19 @@ final class GpuIncomingCues implements GpuHud.Component {
             tip = ui.tip(plate);
         }
 
-        void show(Cue cue, float width, float height, int round) {
+        /** {@code below}: how many marks of the same edge come before this one, stacked away from the board. */
+        void show(Cue cue, float width, float height, int round, int below) {
             Edge edge = cue.edge();
             hex = edge.hex();
+            Color color = edge.side() == GpuBattleStatus.Side.ENEMY ? UiTheme.CORAL : GpuArrivalCues.ALLY;
+            icon.setColor(color);
             count.setText(text(edge.round() == edge.lastRound() ? "GpuBoard.hud.deploy.incoming"
                   : "GpuBoard.hud.deploy.incomingFrom", edge.count(), Math.max(edge.round(), round)));
-            String text = text("GpuBoard.hud.deploy.incomingTip") + "\n" + String.join("\n", edge.lines());
+            String text = switch (edge.side()) {
+                case OWN -> text("GpuBoard.hud.deploy.incomingTip") + "\n" + String.join("\n", edge.lines());
+                case ALLY -> text("GpuBoard.hud.deploy.incomingAllyTip");
+                case ENEMY -> text("GpuBoard.hud.deploy.incomingEnemyTip");
+            };
             if (!text.equals(tipText)) {
                 tipText = text;
                 tip.getActor().setText(text);
@@ -174,8 +193,14 @@ final class GpuIncomingCues implements GpuHud.Component {
                       Math.abs((height / 2 - EDGE_INSET) / (toward.y == 0 ? 1e-6f : toward.y)));
                 at.set(toward).scl(reach).add(width / 2, height / 2);
             }
+            // A later mark of the same edge sits beside the earlier ones, away from the window's middle vertically.
+            float lift = below * (plate.getHeight() + STACK_GAP);
+            float y = at.y - plate.getHeight() / 2 + (at.y >= height / 2 ? lift : -lift);
+            if (y < EDGE_INSET || y > height - EDGE_INSET - plate.getHeight()) {
+                y = at.y - plate.getHeight() / 2 + (at.y >= height / 2 ? -lift : lift);
+            }
             plate.setPosition(MathUtils.clamp(at.x - plate.getWidth() / 2, EDGE_INSET, width - EDGE_INSET - plate.getWidth()),
-                  MathUtils.clamp(at.y - plate.getHeight() / 2, EDGE_INSET, height - EDGE_INSET - plate.getHeight()));
+                  MathUtils.clamp(y, EDGE_INSET, height - EDGE_INSET - plate.getHeight()));
             plate.getColor().a = onScreen ? 1 : 0.8f;
             plate.setVisible(true);
         }

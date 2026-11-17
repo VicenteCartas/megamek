@@ -80,7 +80,8 @@ class GpuUtilityMinimapSmokeTest {
                   () -> { }, "", null));
             utilities = new GpuUtilityBar(hud.kit, source, state, camera, new GpuBoardTuning(hud.kit.ui.skin),
                   GpuUtilityBar.utility(hud.kit.ui, "tune", "GpuBoard.hud.tuning.title", "tuning-button"),
-                  () -> camera.fit(scene));
+                  new GpuTacticalOverlays(hud.kit, source, state, mode -> { }),
+                  new GpuChatPanel(hud.kit, source, state).button(), () -> camera.fit(scene));
             hint = new GpuHintLine(hud.kit, source, state, camera);
             minimap = new GpuMinimap(hud.kit, source, state, camera);
             for (Actor actor : List.of(utilities.north(), utilities.actor(), utilities.chip(), hint.actor(),
@@ -278,15 +279,23 @@ class GpuUtilityMinimapSmokeTest {
         assertFalse(parts.state.logOpen());
         List<String> row = new ArrayList<>();
         ((Table) parts.utilities.actor()).getCells().forEach(cell -> row.add(cell.getActor().getName()));
-        assertEquals(List.of("tuning-button", "utility-view", "utility-tactical", "utility-map", "utility-contacts",
-              "utility-log", "utility-menu"), row);
+        assertEquals(List.of("utility-plate", "tuning-button"), row, "The plate, then Tuning on its own line");
+        List<String> plate = new ArrayList<>();
+        ((Table) hud.stage.getRoot().findActor("utility-plate")).getCells().forEach(cell -> {
+            if (cell.getActor().getName() != null) {
+                plate.add(cell.getActor().getName());
+            }
+        });
+        assertEquals(List.of("utility-speeds", "utility-overlays", "utility-view", "utility-map", "utility-contacts",
+              "utility-log", "chat-button", "utility-menu"), plate);
         Actor popover = hud.stage.getRoot().findActor("utility-view-menu");
         assertFalse(popover.isVisible(), "View starts closed");
         click(hud, "utility-view");
         assertTrue(popover.isVisible(), "View opens its popover");
         List<String> items = new ArrayList<>();
         ((Table) popover).getCells().forEach(cell -> items.add(cell.getActor().getName()));
-        assertEquals(List.of("map-view-top", "map-view-isometric", "map-view-fit", "utility-wireframe"), items);
+        assertEquals(List.of("view-mode", "map-view-top", "map-view-isometric", "map-view-fit", "utility-wireframe"),
+              items);
         Rectangle view = GpuHudTestStage.bounds(hud.stage.getRoot().findActor("utility-view"));
         Rectangle hanging = GpuHudTestStage.bounds(popover);
         assertTrue(hanging.y + hanging.height <= view.y, "The popover hangs below the row");
@@ -309,16 +318,14 @@ class GpuUtilityMinimapSmokeTest {
         assertTrue(parts.state.logOpen(), "and still reaches what it pressed");
         click(hud, "utility-log");
 
+        Button isometric = hud.stage.getRoot().findActor("map-view-isometric");
+        click(hud, "utility-view");
         click(hud, "utility-tactical");
         assertTrue(board.camera.tactical(), "Tactical view enters the Tactical View");
         show(hud, board, parts, scene, status, move(), true);
         assertTrue(parts.utilities.chip().isVisible());
-        Button isometric = hud.stage.getRoot().findActor("map-view-isometric");
-        assertTrue(isometric.isDisabled(), "The Tactical View keeps its top-down angle");
-        click(hud, "utility-view");
-        click(hud, "map-view-isometric");
-        assertTrue(board.camera.isTopDown(), "The disabled preset cannot incline the Tactical View");
-        assertTrue(board.camera.tactical(), "Camera presets keep the Tactical View active");
+        assertFalse(isometric.hasParent(), "The Tactical View keeps its top-down angle: no camera presets");
+        assertTrue(board.camera.isTopDown());
         click(hud, "utility-view");
         // The chip names the mode only: the pressed utility switches back.
         List<String> chip = new ArrayList<>();
@@ -331,10 +338,12 @@ class GpuUtilityMinimapSmokeTest {
         }
         assertEquals(List.of(UiTheme.upper(text("GpuBoard.hud.util.tactical"))), chip, "The chip's caption");
         assertFalse(button, "No Back to 3D button");
-        click(hud, "utility-tactical");
-        assertFalse(board.camera.tactical(), "Tactical view again returns to the 3D view");
+        click(hud, "utility-view");
+        click(hud, "view-mode-3d");
+        assertFalse(board.camera.tactical(), "The 3D switch returns to the 3D view");
         show(hud, board, parts, scene, status, move(), false);
-        assertFalse(isometric.isDisabled());
+        assertTrue(isometric.hasParent());
+        click(hud, "utility-view");
         assertFalse(parts.utilities.chip().isVisible());
         verifyNoInteractions(parts.source);
         // The Contacts utility posts the switch of the client's contacts preference to the Swing thread.

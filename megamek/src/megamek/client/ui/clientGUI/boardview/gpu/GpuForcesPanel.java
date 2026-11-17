@@ -490,7 +490,8 @@ final class GpuForcesPanel implements GpuHud.Component {
     }
 
     /** The unit's state, which its tag (open) and dot (rail) show. */
-    private enum State { NONE, NOW, PENDING, DONE, DESTROYED }
+    /** WAITING: it deploys this round, but not in the local player's next turn (GpuDeployment#waits). */
+    private enum State { NONE, NOW, PENDING, WAITING, DONE, DESTROYED }
 
     private State stateOf(UnitStatus unit) {
         GamePhase phase = shown.status().phase();
@@ -500,6 +501,8 @@ final class GpuForcesPanel implements GpuHud.Component {
             return State.NOW;
         } else if (UnitRow.acted(unit, phase) || (phase.isDeployment() && GpuDeployment.placed(unit))) {
             return State.DONE;
+        } else if (phase.isDeployment() && GpuDeployment.waits(unit)) {
+            return State.WAITING;
         } else if (unit.pending() && verb(phase) != null) {
             return State.PENDING;
         }
@@ -530,8 +533,8 @@ final class GpuForcesPanel implements GpuHud.Component {
         if (phase.isDeployment() && !acting && !GpuDeployment.placed(unit)) {
             if (GpuDeployment.later(unit)) {
                 return new Line(text("GpuBoard.hud.deploy.later"), Tone.NORMAL);
-            } else if (GpuDeployment.notThisTurn(unit, !shown.status().myTurn())) {
-                return new Line(text("GpuBoard.hud.deploy.notNow"), Tone.NORMAL);
+            } else if (GpuDeployment.waits(unit)) {
+                return new Line(text("GpuBoard.hud.deploy.wait." + unit.deployWait().name()), Tone.NORMAL);
             }
         }
         if (!unit.moved().isEmpty()) {
@@ -673,6 +676,8 @@ final class GpuForcesPanel implements GpuHud.Component {
         private float heatShare;
         /** The card's highlight: 0 none, 1 the selected focus, 2 an inspected unit. */
         private int highlight;
+        /** Why the unit waits for a later deployment turn, while it does; else null. */
+        private TextTooltip waitTip;
 
         private ForceRow(int id) {
             setName("forces-unit-" + id);
@@ -781,7 +786,24 @@ final class GpuForcesPanel implements GpuHud.Component {
                 heatShare = 0;
             }
             highlight = unit.id() != shown.card() ? 0 : unit.id() == shown.focus() ? 1 : 2;
-            getColor().a = unit.destroyed() ? .38f : state == State.DONE ? .62f : 1;
+            getColor().a = unit.destroyed() ? .38f : state == State.DONE ? .62f : state == State.WAITING ? .5f : 1;
+            showWaitTip(state == State.WAITING ? text("GpuBoard.hud.deploy.waitTip." + unit.deployWait().name()) : null);
+        }
+
+        /** The row's tooltip tells why the unit waits; {@code tip} null removes it. */
+        private void showWaitTip(String tip) {
+            if (tip == null) {
+                if (waitTip != null) {
+                    waitTip.hide();
+                    removeListener(waitTip);
+                    waitTip = null;
+                }
+                return;
+            }
+            if (waitTip == null) {
+                waitTip = ui.tip(this);
+            }
+            waitTip.getActor().setText(tip);
         }
 
         private Actor tag(State state) {
@@ -797,7 +819,7 @@ final class GpuForcesPanel implements GpuHud.Component {
                 }
                 case DONE -> ui.icon("check", 14, UiTheme.MUTED);
                 case PENDING -> disc(UiTheme.AMBER);
-                case NONE -> null;
+                case WAITING, NONE -> null;
             };
         }
 
@@ -807,7 +829,7 @@ final class GpuForcesPanel implements GpuHud.Component {
                 case NOW -> disc(UiTheme.MINT);
                 case DONE -> ui.icon("check", 11, UiTheme.MUTED);
                 case PENDING -> disc(UiTheme.AMBER);
-                case NONE -> null;
+                case WAITING, NONE -> null;
             };
         }
 

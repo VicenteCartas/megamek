@@ -153,7 +153,10 @@ final class GpuHudState {
         unit = presented(ownInspection);
         if (unit != null && unit.side() == GpuBattleStatus.Side.OWN) { return ownInspection; }
         unit = presented(focus);
-        return unit != null && unit.side() == GpuBattleStatus.Side.OWN ? focus : presentedUnits.stream()
+        if (unit != null && unit.side() == GpuBattleStatus.Side.OWN) { return focus; }
+        // Outside the local deployment turn the card waits for a pick rather than showing the first unit.
+        if (focusStatus != null && focusStatus.phase().isDeployment()) { return Entity.NONE; }
+        return presentedUnits.stream()
               .filter(candidate -> candidate.side() == GpuBattleStatus.Side.OWN)
               .mapToInt(GpuBattleStatus.UnitStatus::id).findFirst().orElse(Entity.NONE);
     }
@@ -222,7 +225,8 @@ final class GpuHudState {
             maskedStatus = status;
             presentedStatus = new GpuBattleStatus.Snapshot(status.round(), status.phase(), true,
                   status.localPlayerId(), Entity.NONE, status.turns(), status.turnIndex(), status.units(),
-                  status.initiative(), status.turnOrderHidden());
+                  status.initiative(), status.turnOrderHidden(), List.of(), GpuBattleStatus.Arc.NONE,
+                  status.incoming());
         }
         GpuHudData shown = new GpuHudData(panels.phase(), locked ? GpuMovePlan.Snapshot.EMPTY : panels.move(),
               locked ? GpuFireOrders.Snapshot.EMPTY : panels.fire(),
@@ -362,7 +366,7 @@ final class GpuHudState {
                       held.actorId() == hidden.entityId() ? Entity.NONE : held.actorId(), held.turns(), held.turnIndex(),
                       presentedUnits, held.initiative(), held.turnOrderHidden(),
                       held.links().stream().filter(link -> link.fromId() != hidden.entityId()
-                            && link.toId() != hidden.entityId()).toList(), GpuBattleStatus.Arc.NONE);
+                            && link.toId() != hidden.entityId()).toList(), GpuBattleStatus.Arc.NONE, held.incoming());
             }
         }
         return select;
@@ -373,7 +377,7 @@ final class GpuHudState {
      * phase starts at the first, or at the player's pick while it is a candidate; a finished local turn, or a focus
      * that stops being a candidate without a pick holding it, moves to the next candidate after it; during the local
      * turn the focus is the actor. The actor's commit reaches the status before its turn ends, so the focus waits for
-     * the turn's end and moves on once.
+     * the turn's end and moves on once. Outside the local deployment turn there is no focus unless the player picks one.
      */
     private int updateFocus(GpuBattleStatus.Snapshot previous, GpuBattleStatus.Snapshot next, boolean phaseStart) {
         List<Integer> candidates = next.units().stream()
@@ -408,6 +412,11 @@ final class GpuHudState {
             } else if (own(next, next.actorId())) {
                 focus = next.actorId();
             }
+        }
+        if (next.phase().isDeployment() && !next.myTurn() && !picked) {
+            // Outside the local deployment turn no unit is about to be placed: none is selected until the player
+            // picks one, and the local turn selects the unit it places.
+            focus = Entity.NONE;
         }
         // A cleared selection ends with the next turn, phase or focus unit.
         if (focus != before || phaseStart || turnBegins || turnEnded) { ownInspection = Entity.NONE; }

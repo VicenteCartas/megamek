@@ -117,6 +117,32 @@ class GpuPlaybackSelectionTest {
     }
 
     @Test
+    void deploymentSelectsNoUnitOutsideTheLocalTurnUntilThePlayerPicksOne() {
+        var state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
+        GpuBattleStatus.UnitStatus[] units = { GpuHudFixtures.unit(1, OWN, false, true),
+              GpuHudFixtures.unit(2, OWN, false, true), GpuHudFixtures.unit(9, ENEMY, false, true) };
+        state.update(GpuHudFixtures.status(0, GamePhase.DEPLOYMENT, false, 9, 0, units),
+              GpuUnitRecord.Snapshot.EMPTY, false);
+        assertEquals(Entity.NONE, state.focus());
+        assertEquals(Entity.NONE, state.ownCardUnit(), "the card does not fall back to the first own unit");
+
+        state.update(GpuHudFixtures.status(0, GamePhase.DEPLOYMENT, true, 2, 1, units),
+              GpuUnitRecord.Snapshot.EMPTY, false);
+        assertEquals(2, state.focus(), "the local turn selects the unit it places");
+        assertEquals(2, state.ownCardUnit());
+
+        state.update(GpuHudFixtures.status(0, GamePhase.DEPLOYMENT, false, 9, 2, units),
+              GpuUnitRecord.Snapshot.EMPTY, false);
+        assertEquals(Entity.NONE, state.focus(), "the selection ends with the local turn");
+
+        state.pick(1);
+        state.update(GpuHudFixtures.status(0, GamePhase.DEPLOYMENT, false, 9, 2, units),
+              GpuUnitRecord.Snapshot.EMPTY, false);
+        assertEquals(1, state.focus(), "a pick holds outside the local turn");
+        assertEquals(1, state.ownCardUnit());
+    }
+
+    @Test
     void heldContextKeepsTheOldPreviewButNeverOldOrNextUnitCommands() {
         var state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
         var before = frame(status(GamePhase.MOVEMENT, 1, 1), 1, record(1), preview(1), 0);

@@ -50,7 +50,7 @@ class GpuHudLayoutSmokeTest {
     private static final int UNIT = 1;
 
     /** One screen of the prototype: the panels it shows and the HUD state that shows them. */
-    private record Layout(String name, GamePhase phase, boolean grid, boolean overlays, List<String> panels) { }
+    private record Layout(String name, GamePhase phase, boolean longHint, boolean overlays, List<String> panels) { }
 
     private static final List<String> BASE = List.of("phase-header", "forces-panel", "unit-card", "command-dock",
           "hint-line", "utility-bar", "minimap");
@@ -60,10 +60,12 @@ class GpuHudLayoutSmokeTest {
           new Layout("firing-extras", GamePhase.FIRING, true, false,
                 with("weapons-panel", "solution-card", "conditions-card", "tactical-chip")),
           new Layout("initiative-extras", GamePhase.INITIATIVE, true, false,
-                with("log-panel", "initiative-card", "conditions-card", "tactical-chip")),
+                with("log-panel", "initiative-card", "tactical-chip")),
           new Layout("overlays", GamePhase.MOVEMENT, false, true,
                 List.of("record-sheet", "chat-panel", "help-dialog", "toast-stack")),
           new Layout("overview", GamePhase.MOVEMENT, false, true, List.of("force-overview")));
+    /** The initiative card names the phase and carries its own Continue: these wait for the board meanwhile. */
+    private static final Set<String> HIDDEN_BY_INITIATIVE = Set.of("phase-header", "command-dock");
     /** Every slotted component actor, by name. */
     private static final List<String> SLOTTED = List.of("phase-header", "initiative-card", "conditions-card",
           "forces-panel", "unit-card", "record-sheet", "utility-bar", "tactical-chip", "hint-line",
@@ -101,7 +103,6 @@ class GpuHudLayoutSmokeTest {
     }
 
     private static void show(GpuHud hud, GpuHudTestStage harness, Layout layout, int width, int height) {
-        hud.state.forcesGrid = layout.grid();
         // The stand-ins take the open forces list's and conditions card's slots, not the rail's or the strip's.
         hud.state.forcesPinned = true;
         hud.state.conditionsExpanded = true;
@@ -132,17 +133,20 @@ class GpuHudLayoutSmokeTest {
             // The phase header: at the top gap, or below the utilities where they leave it too little room beside them
             // (the overlap checks below keep it clear of them); between the columns, centred in the window as far as
             // they allow, and no wider than 60 % of the window.
-            float left = layout.grid() ? metrics.grid() : metrics.left();
+            float left = metrics.left();
             float right = hud.state.logOpen() ? metrics.log() : metrics.right();
             float bandLeft = 2 * metrics.gap() + left;
             float bandRight = width - 2 * metrics.gap() - right;
-            float phaseTop = height - phase.y - phase.height;
-            assertTrue(Math.abs(phaseTop - metrics.gap()) < .5f
-                  || Math.abs(phaseTop - (utilities.height + 2 * metrics.gap())) < .5f, "The phase header's top in " + name);
-            assertTrue(phase.x >= bandLeft - .5f && phase.x + phase.width <= bandRight + .5f, "between the columns");
-            assertTrue(Math.abs(phase.x + phase.width / 2 - width / 2f) < .5f || Math.abs(phase.x - bandLeft) < .5f,
-                  "centred in the window where the columns allow, in " + name);
-            assertTrue(phase.width <= width * .6f + .5f, "within 60 % of the window in " + name);
+            if (phase != null) {
+                float phaseTop = height - phase.y - phase.height;
+                assertTrue(Math.abs(phaseTop - metrics.gap()) < .5f
+                      || Math.abs(phaseTop - (utilities.height + 2 * metrics.gap())) < .5f,
+                      "The phase header's top in " + name);
+                assertTrue(phase.x >= bandLeft - .5f && phase.x + phase.width <= bandRight + .5f, "between the columns");
+                assertTrue(Math.abs(phase.x + phase.width / 2 - width / 2f) < .5f || Math.abs(phase.x - bandLeft) < .5f,
+                      "centred in the window where the columns allow, in " + name);
+                assertTrue(phase.width <= width * .6f + .5f, "within 60 % of the window in " + name);
+            }
             // The forces start at the top, below the utilities where they reach over the left column.
             Rectangle forcesArea = slots.get("forces-panel");
             float forcesTop = utilities.x < metrics.left() + 2 * metrics.gap()
@@ -159,11 +163,15 @@ class GpuHudLayoutSmokeTest {
                 }
             }
             Rectangle dock = slots.get("command-dock"), hint = slots.get("hint-line");
-            assertEquals(metrics.gap(), dock.y, .5f);
+            if (dock != null) {
+                assertEquals(metrics.gap(), dock.y, .5f);
+            }
             if (hint != null) {
-                assertEquals(12, hint.y - dock.y - dock.height, .5f, "shortcuts sit above the dock");
-                assertEquals(dock.x + dock.width / 2, hint.x + hint.width / 2, .5f,
-                      "The full shortcut line stays centred on the dock");
+                if (dock != null) {
+                    assertEquals(12, hint.y - dock.y - dock.height, .5f, "shortcuts sit above the dock");
+                    assertEquals(dock.x + dock.width / 2, hint.x + hint.width / 2, .5f,
+                          "The full shortcut line stays centred on the dock");
+                }
                 Actor hintActor = hud.stage.getRoot().findActor("hint-line");
                 Actor dockActor = hud.stage.getRoot().findActor("command-dock");
                 var hintSlot = (Container<?>) hintActor.getParent();
@@ -172,7 +180,7 @@ class GpuHudLayoutSmokeTest {
                 assertEquals(hintSlot.getPrefWidth(), hint.width, .5f, "Keep the complete shortcut line");
                 assertSame(hintLayer.getParent(), dockLayer.getParent());
                 assertTrue(hintLayer.getZIndex() < dockLayer.getZIndex(), "All panels draw above shortcuts");
-                if (layout.grid()) {
+                if (layout.longHint()) {
                     assertTrue(shown.stream().filter(actor -> HINT_COVERING_PANELS.contains(actor.getName()))
                           .map(GpuHudTestStage::bounds).anyMatch(hint::overlaps),
                           "The long-line control must exercise actual panel coverage");
@@ -241,7 +249,7 @@ class GpuHudLayoutSmokeTest {
             case "command-dock" -> new float[] { metrics.dock(),
                   moving ? 174 : layout.phase() == GamePhase.FIRING ? 158 : 116 };
             // The extras also exercise a long shortcut line partially covered by both side columns.
-            case "hint-line" -> new float[] { layout.grid() ? 1500 : 590, 13 };
+            case "hint-line" -> new float[] { layout.longHint() ? 1500 : 590, 13 };
             // Camera presets, labelled utilities, then icon-only Help and Menu.
             case "utility-bar" -> new float[] { 690, 34 };
             // Minimap: the prototype's 210 (180 at 800 or less), which its map fills inside the rails.
@@ -311,7 +319,8 @@ class GpuHudLayoutSmokeTest {
     private static List<Actor> shown(GpuHud hud, Layout layout) {
         List<Actor> shown = new ArrayList<>();
         List<String> expected = layout.overlays() ? layout.panels()
-              : Stream.concat(BASE.stream(), layout.panels().stream()).toList();
+              : Stream.concat(BASE.stream(), layout.panels().stream())
+              .filter(name -> !layout.phase().isInitiative() || !HIDDEN_BY_INITIATIVE.contains(name)).toList();
         for (String name : SLOTTED) {
             Actor actor = hud.stage.getRoot().findActor(name);
             boolean visible = true;

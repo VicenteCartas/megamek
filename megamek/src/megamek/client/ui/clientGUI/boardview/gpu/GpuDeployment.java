@@ -40,11 +40,11 @@ final class GpuDeployment {
     }
 
     /**
-     * In the local turn, the unit deploys this round but this turn takes other units (a turn for another unit type,
-     * or infantry and ProtoMeks moving later).
+     * The unit deploys this round, but not in the local player's next turn, which takes other units (aerospace units
+     * deploy after the ground units, infantry and ProtoMeks moving later after the player's others).
      */
-    static boolean notThisTurn(UnitStatus unit, boolean locked) {
-        return !locked && unit.position() == null && unit.pending() && !unit.canActNow();
+    static boolean waits(UnitStatus unit) {
+        return unit.deployWait() != GpuBattleStatus.Wait.NONE;
     }
 
     /** A unit's chassis and model, as the map's peek heads it. */

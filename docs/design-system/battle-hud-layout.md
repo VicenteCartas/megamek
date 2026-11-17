@@ -54,14 +54,26 @@ Status: **agreed** layout, from the 2026-11-15 tester round of the deployment pr
 | Phase | 6 Units list | 2 Actions | Next to the unit (shortcuts) |
 | --- | --- | --- | --- |
 | Initiative | Status "Ready" | Continue | — |
-| Deployment | Status: to deploy, placed, later round, walks on (round, edge) | Deploy, Clear, facing, elevation, load | Placement ghost; double-click deploys |
-| Movement | Status: pending, moved; walk-on units "Enters from the N edge" | Walk / Run / Jump, turns, Confirm, Hold | Route preview; double-click moves |
+| Deployment | Status: to deploy, placed, later round, walks on (round, edge) | Deploy, Clear, facing, elevation, load | Placement ghost; Deploy / Clear over the placed unit's nameplate (kept expanded so they never move); drag to face; double-click deploys |
+| Movement | Status: pending, moved; walk-on units "Enters from the N edge" | Walk / Run / Jump, turns, Confirm, Hold | Route preview; drag from the destination (or the unit) to face; double-click moves |
 | Firing | Status: drafted, declared | Fire, Skip, twist, next target | Target letters, TN badges |
 | Physical | Status: attack or none | Attack options, Skip | — |
 | End / report | Attacks and hits of the round | Continue | — |
 
-Walk-on deployment adds marks just outside the board edge with the own units still to walk on (count and round). It
-never shows other players' reinforcements.
+**Your unit (zone 1) in deployment:** in the local turn it shows the unit a click places, tagged *Deploying*; outside
+the local turn no unit is selected until the player picks one.
+
+### Walk-on deployment
+
+Walk-on is placed like deployment and moved like movement, in the movement phase (when every unit walks on, the server
+skips the deployment phase and its initiative):
+
+- Marks just outside each board edge show the units still to walk on there, own, allied and enemy (count and round);
+  the own mark lists the units.
+- The player's unit is a hologram on its legal entry hexes until a click places it; it then turns solid, walks in from
+  beyond the edge to that hex, and plots its move from there. Esc on the bare placement takes it back.
+- Another player's walk-on replays from beyond the edge, and its arrival notice marks the hex where its move ends, as
+  soon as its own replay finishes.
 
 ## Known issues from the tester screenshots
 

@@ -644,9 +644,10 @@ final class GpuHud implements GpuBoardHud {
     }
 
     /**
-     * Whether a left press on {@code coords} starts the turning drag of a placement: in the local deployment turn, on
-     * the hex where the acting unit was just placed; in the local movement turn, on the entry hex of the walk-on unit
-     * placed there and not moved on yet.
+     * Whether a left press on {@code coords} starts the turning drag of a placement or a move: in the local deployment
+     * turn, on the hex where the acting unit was just placed; in the local movement turn, on the end of the planned
+     * route, or on the unit while it has none (a walk-on unit on its entry hex included). A release without a drag
+     * stays a click.
      */
     boolean facesFrom(Coords coords) {
         if (inputs == null || coords == null || inputs.dialog() != null || inputs.frame().scene() == null) {
@@ -659,8 +660,11 @@ final class GpuHud implements GpuBoardHud {
         int actorId = status.actorId();
         if (status.phase().isMovement()) {
             GpuMovePlan.Snapshot plan = inputs.frame().panels().move();
-            if (!plan.walkedOn() || !plan.route().isEmpty()) {
+            if (!plan.active() || !plan.planner() || !plan.facingMatters()) {
                 return false;
+            }
+            if (plan.destination() != null) {
+                return coords.equals(plan.destination());
             }
             actorId = plan.entityId();
         } else if (!status.phase().isDeployment()) {
@@ -672,8 +676,8 @@ final class GpuHud implements GpuBoardHud {
     }
 
     /**
-     * Turns the placed unit toward {@code coords}, as MegaMek's Shift+click in deployment does; a walk-on unit on its
-     * entry hex turns through the movement plan, which turns its entry without spending MP.
+     * Turns the placed unit toward {@code coords}, as MegaMek's Shift+click in deployment does; in movement the plan
+     * turns the route's end (G9, at the MP the turn costs), and a walk-on unit's bare entry without spending MP.
      */
     void faceToward(Coords coords) {
         if (coords == null) {
@@ -1593,9 +1597,14 @@ final class GpuHud implements GpuBoardHud {
         float chipLeft = Math.max(gap + leftWidth(), shown(conditionsSlot) ? conditionsX + conditionsWidth : 0) + STACK;
         float chipRight = width - gap - rightWidth() - STACK;
         float chipWidth = chipSlot.getPrefWidth();
+        float chipX = centred(chipWidth, chipLeft, chipRight);
         float chipTop = Math.max(gap, phaseBottom + STACK);
+        // Without the phase header (initiative) a narrow window's utility bar reaches over the chip's place.
+        if (overlapsHorizontally(utilitySlot, chipX, chipWidth)) {
+            chipTop = Math.max(chipTop, utilityHeight + 2 * gap);
+        }
         chipSlot.setVisible(chipRight - chipLeft >= chipWidth);
-        place(chipSlot, centred(chipWidth, chipLeft, chipRight), chipTop, chipWidth, height(chipSlot));
+        place(chipSlot, chipX, chipTop, chipWidth, height(chipSlot));
         // The north mark stays centred under the chip's place, whether or not the chip has room (G4).
         float northWidth = northSlot.getPrefWidth();
         place(northSlot, (width - northWidth) / 2,

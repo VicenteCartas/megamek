@@ -491,14 +491,21 @@ final class GpuBoardSource implements BoardSource {
                 int jumpMP = type == EntityMovementType.MOVE_JUMP ? takeoff.getAnyTypeMaxJumpMP() : 0;
                 Coords at = event.getEntity().getPosition();
                 int elevation = event.getEntity().getElevation();
+                // Another player's walk-on: the client never had the unit on the board before this move.
+                boolean walkedOn = old != null && !old.isDeployed() && event.getEntity().isDeployed()
+                      && eventView.game.getPhase().isMovement();
+                // MovementDisplay places a walk-on unit field by field, each firing this event: until it is deployed
+                // and plotted, a frame would show it standing solid on its entry hex. The placing click refreshes.
+                boolean placingWalkOn = path.isEmpty() && at != null && !event.getEntity().isDeployed()
+                      && eventView.game.getPhase().isMovement();
                 onSwing(() -> {
-                    if (isCurrentView(eventView)) {
+                    if (isCurrentView(eventView) && !placingWalkOn) {
                         if (path.isEmpty()) {
                             // The last update of the move that brought a held collapse down ends its wait at once.
                             if (endsHeldMove(entityId, start, at, elevation)) { releaseCollapse(); }
                             refresh();
                         } else {
-                            captureMovement(entityId, start, path, type, jumpMP, startAltitude, moveMP);
+                            captureMovement(entityId, start, path, type, jumpMP, startAltitude, moveMP, walkedOn);
                         }
                     }
                 });
@@ -598,7 +605,7 @@ final class GpuBoardSource implements BoardSource {
     }
 
     private void captureMovement(int entityId, UnitLocation start, List<UnitLocation> path, EntityMovementType type,
-            int jumpMP, int startAltitude, int movementMP) {
+            int jumpMP, int startAltitude, int movementMP, boolean walkedOn) {
         if (closed || path.isEmpty()) {
             return;
         }
@@ -638,6 +645,16 @@ final class GpuBoardSource implements BoardSource {
                         : points.isEmpty() ? null : points.getLast().hullDown());
             if (points.isEmpty() || !points.getLast().equals(point)) {
                 points.add(point);
+            }
+        }
+        // A walk-on replay starts a hex beyond the board edge, so the unit walks in rather than appearing there.
+        if (walkedOn && start == null && !points.isEmpty() && points.getFirst().footprint().size() <= 1) {
+            BoardScene.Waypoint entry = points.getFirst();
+            Coords beyond = offBoardBehind(entry.coords(), Math.round(entry.facing()), view.getBoard()::contains);
+            if (beyond != null) {
+                points.addFirst(new BoardScene.Waypoint(beyond, entry.elevation(), entry.facing(), entry.proneCause(),
+                      entry.aeroState(), entry.footprint().isEmpty() ? List.of() : List.of(beyond), entry.form(),
+                      entry.fallSide(), entry.hullDown()));
             }
         }
         // An infantry path carries no posture: troops that hit the deck lie down where their movement ends.
@@ -684,6 +701,20 @@ final class GpuBoardSource implements BoardSource {
 
     private static boolean samePlace(BoardScene.Waypoint a, BoardScene.Waypoint b) {
         return a.coords().equals(b.coords()) && a.elevation() == b.elevation() && !UnitMotion.changesPosture(a, b);
+    }
+
+    /**
+     * Walk-on: the hex beyond the board a unit standing on edge hex {@code hex} with {@code facing} enters from, the
+     * neighbour off the board most nearly behind it; null when no neighbour behind or beside it lies off the board.
+     */
+    static Coords offBoardBehind(Coords hex, int facing, java.util.function.Predicate<Coords> onBoard) {
+        for (int turn : new int[] { 0, 1, -1, 2, -2 }) {
+            Coords behind = hex.translated(Math.floorMod(facing + 3 + turn, 6));
+            if (!onBoard.test(behind)) {
+                return behind;
+            }
+        }
+        return null;
     }
 
     /** Split only at observed conversion steps; normal travel keeps its one continuous acceleration interval. */
@@ -1036,7 +1067,9 @@ final class GpuBoardSource implements BoardSource {
                 // unit's placement before its move is sent: its hologram follows the pointer along the edge.
                 if (next.status().phase().isDeployment()) { continue; }
                 Entity placed = view.game.getEntity(unit.id());
-                if (placed != null && !placed.isDeployed()) { continue; }
+                if (placed != null && !placed.isDeployed() || plansWalkOn(frame, unit) || plansWalkOn(next, unit)) {
+                    continue;
+                }
                 if (old != null && !unit.sensorContact() && UnitMotion.changesGear(old.location(), unit.location())) {
                     Entity entity = view.game.getEntity(unit.id());
                     queueAnimation(new BoardScene.Movement(unit.id(), next.scene().boardId(),
@@ -1860,6 +1893,15 @@ final class GpuBoardSource implements BoardSource {
         int shownFacing = facing >= 0 && facing < 6 ? facing
               : DeploymentHelper.startingFacing(entity, view.game.getPlayersList(), hover);
         return unit(entity, -1, hover, false, usedImages).at(unitWaypoint(entity, hover, shownFacing));
+    }
+
+    /**
+     * Whether the frame's move plan places this walk-on unit on its entry hex: MegaMek marks it deployed there at once,
+     * though only this client knows, so its step from the pointer's hologram is no movement.
+     */
+    private static boolean plansWalkOn(Frame frame, BoardScene.Unit unit) {
+        GpuMovePlan.Snapshot plan = frame.panels().move();
+        return plan.walkedOn() && plan.entityId() == unit.id();
     }
 
     private int previewEntityId = Entity.NONE;

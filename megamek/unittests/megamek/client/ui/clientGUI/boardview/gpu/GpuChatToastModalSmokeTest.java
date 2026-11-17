@@ -182,13 +182,15 @@ class GpuChatToastModalSmokeTest {
                 assertEquals(DRAFT, field.getText());
                 assertSame(field, hud.focus());
                 assertEquals(List.of(system, lines.get(0).text(), system, lines.get(1).text()), messages(panel));
-                Actor dock = hud.find("command-dock");
-                Rectangle dockBounds = GpuHudTestStage.bounds(dock);
-                assertEquals(new Rectangle(dockBounds.x, dockBounds.y + dockBounds.height + 12, dockBounds.width, 320),
-                      GpuHudTestStage.bounds(panel), "chat shares the dock's width with the standard panel gap");
-                Rectangle place = GpuHudTestStage.bounds(button);
-                assertTrue(button.isDescendantOf(dock));
-                assertTrue(dockBounds.contains(place), "the icon button stays inside the footer");
+                Actor utilities = hud.find("utility-bar");
+                Rectangle bar = GpuHudTestStage.bounds(utilities);
+                Rectangle chatBounds = GpuHudTestStage.bounds(panel);
+                float gap = harness.height() - bar.y - bar.height;
+                assertEquals(harness.width() - gap, chatBounds.x + chatBounds.width, .51f,
+                      "chat stands at the right edge with the standard panel gap");
+                assertEquals(bar.y - gap, chatBounds.y + chatBounds.height, .51f, "under the utility bar");
+                assertEquals(320, chatBounds.height, .51f);
+                assertTrue(button.isDescendantOf(utilities), "the icon button stays in the utility bar");
                 assertTrue(button.getText().isEmpty(), "chat uses only its icon");
                 UiTestStage.assertTexts(panel);
                 UiTestStage.assertTexts(button);

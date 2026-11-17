@@ -206,7 +206,11 @@ final class GpuNameplates implements GpuHud.Component {
             if (unit.sensorContact()) {
                 plate.tag(Look.CONTACT, hovered || !many ? text(SENSOR_CONTACT) : CONTACT_UNKNOWN, "", "");
             } else if (tag) {
-                boolean expanded = hovered && !unit.destroyed();
+                // The unit placed in the local deployment turn keeps its full plate, so the Deploy pair standing on it
+                // (GpuDeployConfirm) does not jump as the pointer enters and leaves the unit.
+                boolean placed = status.myTurn() && status.phase().isDeployment() && unit.id() == status.actorId()
+                      && unit.position() != null;
+                boolean expanded = (hovered || placed) && !unit.destroyed();
                 plate.tag(unit.id() == state.focus() ? Look.FOCUS : enemy ? Look.ENEMY : Look.FRIEND, unit.label(),
                       sub, chip(unit), expanded ? detail(unit) : "",
                       expanded && status.phase().isDeployment() && unit.damageLevel() > 0

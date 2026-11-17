@@ -33,6 +33,8 @@
 package megamek.common.game;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import megamek.common.Hex;
 import megamek.common.Player;
@@ -94,6 +96,18 @@ class WalkOnDeploymentOrderTest {
 
         placed.setDeployed(true);
         assertEquals(walksOn.getId(), game.getFirstDeployableEntityNum(turn), "only the walk-on unit is left");
+    }
+
+    @Test
+    void roundZeroInitiativeIsSkippedWhenEveryUnitWalksOn() {
+        game.setCurrentRound(0);
+        game.setPhase(GamePhase.INITIATIVE_REPORT);
+        tank(1, Board.START_N);
+
+        assertFalse(game.isCurrentPhasePlayable(), "the deployment phase it orders has no turns");
+
+        tank(2, Board.START_CENTER);
+        assertTrue(game.isCurrentPhasePlayable(), "a unit still deploys in the deployment phase");
     }
 
     private Tank tank(int id, int startingPos) {
