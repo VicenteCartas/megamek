@@ -62,11 +62,11 @@ final class LobbySavedSearches {
     private final UiMenuList list;
     private final Table content = new Table();
     private @Nullable UiPopover popover;
-    /** The search whose name is being edited, or null. */
+    /** The search whose name is being edited, or {@code null}. */
     private @Nullable Saved renaming;
-    /** The search whose delete was pressed once, waiting for the second press, or null. */
+    /** The search whose delete was pressed once, waiting for the second press, or {@code null}. */
     private @Nullable Saved deleting;
-    /** The file the criteria were loaded from, until they are cleared, or null. */
+    /** The file the criteria were loaded from, until they are cleared, or {@code null}. */
     private @Nullable Path loadedFrom;
 
     /**
@@ -149,7 +149,7 @@ final class LobbySavedSearches {
         return button;
     }
 
-    /** The popover while it shows, or null; a test reads it. */
+    /** The popover while it shows, or {@code null}; a test reads it. */
     @Nullable UiPopover popover() {
         return (popover != null) && popover.isVisible() ? popover : null;
     }
@@ -167,7 +167,7 @@ final class LobbySavedSearches {
         return status;
     }
 
-    /** One Esc step: leaves a rename, then closes the popover; true when either happened. */
+    /** One Esc step: leaves a rename, then closes the popover; {@code true} when either happened. */
     boolean back() {
         if (renaming != null) {
             renaming = null;

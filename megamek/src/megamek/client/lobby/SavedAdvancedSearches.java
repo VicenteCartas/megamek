@@ -141,7 +141,7 @@ public final class SavedAdvancedSearches {
         return name;
     }
 
-    /** The file a search named {@code name} is saved to, or null when the name makes no file name. */
+    /** The file a search named {@code name} is saved to, or {@code null} when the name makes no file name. */
     public @Nullable Path fileFor(String name) {
         if ((name == null) || name.isBlank()) {
             return null;

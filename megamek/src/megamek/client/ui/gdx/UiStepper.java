@@ -45,7 +45,7 @@ public final class UiStepper extends Table {
     private final Label caption;
     /** The choices a selector shows for its values, or null for a number. */
     private final List<String> choices;
-    /** The field a number's value is typed in, in the value's cell while typing; null for a selector. */
+    /** The field a number's value is typed in, in the value's cell while typing; {@code null} for a selector. */
     private final UiTextField field;
     private final Cell<Actor> valueCell;
     /** The field's width while typing. */
@@ -260,7 +260,7 @@ public final class UiStepper extends Table {
         up.setDisabled(value >= max);
     }
 
-    /** The field a number's value is typed in, or null for a selector; it stands in the value's cell while typing. */
+    /** The field a number's value is typed in, or {@code null} for a selector; it stands in the value's cell while typing. */
     public UiTextField field() {
         return field;
     }

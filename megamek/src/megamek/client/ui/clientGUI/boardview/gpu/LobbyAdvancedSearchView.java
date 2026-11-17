@@ -260,7 +260,7 @@ final class LobbyAdvancedSearchView {
               ? Messages.getString("Lobby.requisition.advanced.saved.partial", search.name()) : null);
     }
 
-    /** Shows the warning icon by Save / Load with {@code text} as its tooltip, or hides it for null. */
+    /** Shows the warning icon by Save / Load with {@code text} as its tooltip, or hides it for {@code null}. */
     private void notice(String text) {
         noticeTip.setText(text == null ? "" : text);
         notice.setVisible(text != null);
@@ -271,7 +271,7 @@ final class LobbyAdvancedSearchView {
         return notice.isVisible() ? noticeTip.getText().toString() : null;
     }
 
-    /** One Esc step: closes the saved searches' popover, or leaves its rename; true when either happened. */
+    /** One Esc step: closes the saved searches' popover, or leaves its rename; {@code true} when either happened. */
     boolean back() {
         return saved.back();
     }

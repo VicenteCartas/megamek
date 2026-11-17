@@ -33,9 +33,9 @@ public final class AdvancedSearchFiles {
     private AdvancedSearchFiles() { }
 
     /**
-     * {@code name} without the characters a file name may not hold, or null when nothing is left.
+     * {@code name} without the characters a file name may not hold, or {@code null} when nothing is left.
      *
-     * @throws IllegalArgumentException when the name is null or blank
+     * @throws IllegalArgumentException when the name is {@code null} or blank
      */
     public static @Nullable String sanitizeFileName(String name) {
         if (name == null || name.trim().isEmpty()) {
@@ -78,7 +78,7 @@ public final class AdvancedSearchFiles {
         MAPPER.writeValue(file, state);
     }
 
-    /** The search's name as saved in {@code file}, or null when it has none or cannot be read. */
+    /** The search's name as saved in {@code file}, or {@code null} when it has none or cannot be read. */
     public static @Nullable String readName(Path file) {
         try {
             JsonNode root = MAPPER.readTree(file.toFile());
