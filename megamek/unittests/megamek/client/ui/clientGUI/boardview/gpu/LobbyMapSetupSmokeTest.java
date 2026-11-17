@@ -20,11 +20,14 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.lobby.MapSetupForm;
 import megamek.client.lobby.MapSetupForm.Entry;
 import megamek.client.lobby.RandomMapForm;
@@ -440,6 +443,41 @@ class LobbyMapSetupSmokeTest {
                 assertEquals(folded, rail.isVisible());
             }
             columns.remove();
+        });
+    }
+
+    @Test
+    void anEmptyFieldInACentreViewLetsEscapeGoBack() {
+        UiTestStage.run(ui -> {
+            TextField outside = ui.kit.input("", true);
+            LobbyCentre centre = new LobbyCentre(ui.kit, new Table(), false);
+            assertFalse(centre.passesEscape(outside), "with the forces showing, Escape only leaves a field");
+            TextField search = ui.kit.input("", true);
+            Table view = new Table();
+            view.add(search);
+            centre.show("requisition", "Requisition", view);
+            assertTrue(centre.passesEscape(search), "an empty search the view focused does not hold the Escape");
+            search.setText("Atlas");
+            assertFalse(centre.passesEscape(search), "a search with text keeps the first Escape");
+            assertFalse(centre.passesEscape(outside), "a field outside the view keeps it too");
+
+            // The focused field takes every key it is sent; the lobby's keys still get its Escape, and only that
+            List<Boolean> reached = new ArrayList<>();
+            InputListener lobbyKeys = new InputListener() {
+                @Override
+                public boolean keyDown(InputEvent event, int keycode) {
+                    reached.add(GpuLobbyScreen.reachesLobby(event, keycode));
+                    return false;
+                }
+            };
+            ui.window.addActor(centre);
+            ui.stage.addListener(lobbyKeys);
+            ui.stage.setKeyboardFocus(search);
+            ui.stage.keyDown(Input.Keys.LEFT);
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            assertEquals(List.of(false, true), reached, "the field keeps the arrow and lets Escape through");
+            ui.stage.removeListener(lobbyKeys);
+            centre.remove();
         });
     }
 
