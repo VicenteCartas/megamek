@@ -65,6 +65,7 @@ import megamek.client.bot.BotClient;
 import megamek.client.bot.BotFactory;
 import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.ui.swing.BotGUI;
+import megamek.client.generator.RandomNameGenerator;
 import megamek.client.ui.BugReportMessages;
 import megamek.client.ui.CopySystemDataAction;
 import megamek.client.ui.Messages;
@@ -178,6 +179,8 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         GpuStartWindow.install(frame, this::perform, this::host, this::connect, this::load, this::scenario);
         // init the cache
         MekSummaryCache.getInstance();
+        // The names load on a thread of their own and name no one until they have, so they start loading now
+        RandomNameGenerator.getInstance();
 
         if (show) {
             GpuStartWindow.open(true);
