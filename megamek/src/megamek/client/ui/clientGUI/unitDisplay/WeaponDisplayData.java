@@ -278,13 +278,8 @@ public final class WeaponDisplayData {
               && mounted.hasModes()
               && (game != null)
               && game.getOptions().booleanOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_ENERGY_WEAPONS)) {
-            if (mounted.hasChargedCapacitor() == 1) {
-                text = Integer.toString(Compute.dialDownDamage(mounted, weaponType) + 5);
-            } else if (mounted.hasChargedCapacitor() == 2) {
-                text = Integer.toString(Compute.dialDownDamage(mounted, weaponType) + 10);
-            } else {
-                text = Integer.toString(Compute.dialDownDamage(mounted, weaponType));
-            }
+            int capacitorBonus = mounted.hasChargedCapacitor() != 0 ? 5 : 0;
+            text = Integer.toString(Compute.dialDownDamage(mounted, weaponType) + capacitorBonus);
         } else if (mounted.curMode().getName().contains("Dazzle")) {
             // Gothic Dazzle Mode: half damage (rounded down, min 1)
             int baseDamage = weaponType.getDamage();

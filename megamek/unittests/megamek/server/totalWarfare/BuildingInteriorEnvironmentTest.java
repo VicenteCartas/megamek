@@ -744,12 +744,13 @@ class BuildingInteriorEnvironmentTest {
     @Test
     void bayDoorsAndPortalTemplatesRoundTripAndRemapWithoutInventingPlacements() throws Exception {
         var mobile = mobile(3, List.of(CubeCoords.ZERO, NORTH));
+        mobile.setChassis("Mobile hangar");
+        mobile.setModel("");
         mobile.addTransporter(new megamek.common.bays.MekBay(2, 1, 7));
         mobile.getDesign().getBayDoors().add(new BuildingDesign.BayDoor(7, new BuildingDesign.Position(NORTH, 1), 0));
         mobile.getDesign().setPortalHex2(CubeCoords.ZERO);
         mobile.getDesign().setPortalHex3(NORTH);
-        var block = new megamek.common.util.BuildingBlock();
-        megamek.common.loaders.BuildingDesignCodec.write(block, mobile);
+        var block = megamek.common.loaders.BLKFile.getBlock(mobile);
         var loaded = mobile(3, List.of(CubeCoords.ZERO, NORTH));
         loaded.addTransporter(new megamek.common.bays.MekBay(2, 1, 7));
         megamek.common.loaders.BuildingDesignCodec.read(block, loaded);

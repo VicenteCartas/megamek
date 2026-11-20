@@ -58,7 +58,7 @@ public final class BuildingDesignCodec {
 
     private BuildingDesignCodec() { }
 
-    public static void write(BuildingBlock block, AbstractBuildingEntity entity) {
+    static void write(BuildingBlock block, AbstractBuildingEntity entity, List<List<Mounted<?>>> mountsInFileOrder) {
         var design = entity.getDesign();
         List<String> options = new ArrayList<>();
         if (design.hasEnvironmentalSealing()) {
@@ -104,10 +104,10 @@ public final class BuildingDesignCodec {
         write(block, "building_elevators", design.getElevators().stream().map(lift -> cube(lift.hex()) + ";" + lift.capacity() + ";"
               + lift.exits().entrySet().stream().sorted(Map.Entry.comparingByKey())
                     .map(exit -> exit.getKey() + "=" + exit.getValue()).collect(Collectors.joining(","))).toList());
-        Map<Integer, List<Mounted<?>>> mountsByLocation = storedMountsByLocation(entity);
         List<String> equipment = new ArrayList<>();
         for (int location = 0; location < entity.locations(); location++) {
-            addEquipmentLines(equipment, design, location, mountsByLocation.getOrDefault(location, List.of()));
+            addEquipmentLines(equipment, design, location,
+                  mountsInFileOrder.get(location).stream().filter(BuildingDesignCodec::isStoredMount).toList());
         }
         write(block, "building_equipment_space", equipment);
         List<String> bays = new ArrayList<>();
@@ -141,6 +141,10 @@ public final class BuildingDesignCodec {
         }
     }
 
+    private static boolean isStoredMount(Mounted<?> mount) {
+        return !BLKFile.isImplicitEquipment(mount) && !(mount.getType() instanceof BayWeapon);
+    }
+
     /**
      * Groups the entity's stored mounts (everything except implicit equipment and bay weapons) by location in one pass,
      * keeping equipment order within each location so a mount's index matches the ordinal used in the native blocks.
@@ -148,8 +152,7 @@ public final class BuildingDesignCodec {
     private static Map<Integer, List<Mounted<?>>> storedMountsByLocation(AbstractBuildingEntity entity) {
         Map<Integer, List<Mounted<?>>> mountsByLocation = new HashMap<>();
         for (Mounted<?> mount : entity.getEquipment()) {
-            boolean isStored = !BLKFile.isImplicitEquipment(mount) && !(mount.getType() instanceof BayWeapon);
-            if (isStored) {
+            if (isStoredMount(mount)) {
                 mountsByLocation.computeIfAbsent(mount.getLocation(), location -> new ArrayList<>()).add(mount);
             }
         }
