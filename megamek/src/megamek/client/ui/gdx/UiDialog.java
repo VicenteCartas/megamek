@@ -34,7 +34,8 @@ import megamek.client.ui.design.DesignTokens;
  * wider than the window less {@code xxxl} on each side, and as high as its body, never higher than the window less the
  * same margin; the body scrolls in what is left.
  * <p>
- * Keys: Escape and the close button cancel; Enter presses the focused button, or the main one when the focus is
+ * Keys: Escape and the close button cancel, though Escape goes {@link #back} on an inner page; Enter presses the focused
+ * button, or the main one when the focus is
  * elsewhere (a field, or nothing); Space presses the focused button; Tab and Shift+Tab move the focus through the
  * card's controls only, round and round. A click on the scrim does nothing: a dialog wants an answer. The card fades
  * in over {@code motion.fast} unless the player reduces motion, and the first field (or else the main button) takes
@@ -55,6 +56,7 @@ public final class UiDialog {
     private final Table actions = new Table();
     private final List<UiButton> footerButtons = new ArrayList<>();
     private final Runnable cancel;
+    private Runnable back;
     private UiButton primary;
     private float width = size("dialog.md");
     private Actor focusBefore;
@@ -69,7 +71,7 @@ public final class UiDialog {
     public UiDialog(UiKit kit, String title, Runnable cancel) {
         this.kit = kit;
         this.cancel = cancel;
-        layer = new UiModal(kit, cancel, false);
+        layer = new UiModal(kit, this::escape, false);
         layer.setName("dialog-layer");
         layer.setFillParent(true);
         card = kit.dialog(title, cancel, true);
@@ -128,7 +130,7 @@ public final class UiDialog {
                 // A text field takes every key it is sent, so Escape cancels before it reaches one
                 if (keycode == Keys.ESCAPE && event.getTarget() instanceof TextField && inside(event.getTarget())) {
                     event.cancel();
-                    cancel.run();
+                    escape();
                     return true;
                 }
                 if (keycode != Keys.TAB) {
@@ -223,6 +225,18 @@ public final class UiDialog {
         UiKit.onChange(button, action);
         leading.add(button).minWidth(MIN_BUTTON_WIDTH).padRight(space("md"));
         return button;
+    }
+
+    /**
+     * Makes Escape run {@code action} instead of the cancel while it is set, as on an inner page whose Back returns to
+     * the dialog's main page; {@code null} gives Escape back to the cancel. The close button always cancels.
+     */
+    public void back(Runnable action) {
+        back = action;
+    }
+
+    private void escape() {
+        (back != null ? back : cancel).run();
     }
 
     /** Takes every button and tool off the footer, for a dialog whose next step asks something else. */

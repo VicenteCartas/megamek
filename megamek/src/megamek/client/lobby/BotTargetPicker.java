@@ -247,8 +247,11 @@ public final class BotTargetPicker {
     /** The count line under the list. */
     public String count() {
         long convoys = candidates.stream().filter(Candidate::isAlwaysTarget).count();
-        return convoys == 0 ? Messages.getString("BotConfigDialog.pickerCount", picked.size())
-              : Messages.getString("BotConfigDialog.pickerCountConvoy", picked.size(), convoys);
+        if (convoys == 0) {
+            return picked.isEmpty() ? Messages.getString("BotConfigDialog.pickerCountNone")
+                  : Messages.getString("BotConfigDialog.pickerCount", picked.size());
+        }
+        return Messages.getString("BotConfigDialog.pickerCountConvoy", picked.size(), convoys);
     }
 
     // ---- Helpers ----

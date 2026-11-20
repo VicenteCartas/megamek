@@ -1223,6 +1223,22 @@ public final class UiKit {
         return new UiSummaryCard(this, title);
     }
 
+    /**
+     * A card picked from a set ({@link UiTraitCard}), such as a bot's personality: {@code title}, a line
+     * {@code blurb} and the meters added with {@link UiTraitCard#trait}; the view marks the picked one.
+     */
+    public UiTraitCard traitCard(String title, String blurb) {
+        return new UiTraitCard(this, title, blurb);
+    }
+
+    /**
+     * A collapsible section ({@link UiCollapsible}) titled {@code title} over {@code content}, open or not: for what a
+     * screen needs only now and then, below what it always shows.
+     */
+    public UiCollapsible collapsible(String title, Actor content, boolean open) {
+        return new UiCollapsible(this, title, content, open);
+    }
+
     /** Makes radio buttons exclusive: exactly one stays selected, the first checked one or else the first. */
     public com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup<UiChoice> radioGroup(UiChoice... radios) {
         var group = new com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup<UiChoice>();

@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -152,6 +153,11 @@ public final class BotSetupForm {
             return this == FACING_TOLERANCE ? Messages.getString(tip, max) : Messages.getString(tip);
         }
 
+        /** Its value in {@code settings}. */
+        public int of(BehaviorSettings settings) {
+            return read.applyAsInt(settings);
+        }
+
         private int clamp(int value) {
             return Math.max(min, Math.min(max, value));
         }
@@ -219,10 +225,85 @@ public final class BotSetupForm {
         BOT
     }
 
+    /**
+     * A personality the setup offers first, as a card: a friendly name and a line about it over a stored preset, whose
+     * name stays as it is because campaigns and scenarios refer to it. Only the personalities whose presets are stored
+     * show.
+     */
+    public enum Personality {
+        BALANCED(BehaviorSettingsFactory.DEFAULT_BEHAVIOR_DESCRIPTION),
+        CAUTIOUS(BehaviorSettingsFactory.COWARDLY_BEHAVIOR_DESCRIPTION),
+        SNIPER("Sniper (pPT)"),
+        SKIRMISHER("Skirmisher (pPT)"),
+        BRAWLER("Brawler (pPT)"),
+        STRIKER("Striker (pPT)"),
+        BERSERKER(BehaviorSettingsFactory.BERSERK_BEHAVIOR_DESCRIPTION),
+        PIRATE(BehaviorSettingsFactory.PIRATE_BEHAVIOR_DESCRIPTION);
+
+        private final String preset;
+
+        Personality(String preset) {
+            this.preset = preset;
+        }
+
+        /** The stored preset's name. */
+        public String preset() {
+            return preset;
+        }
+
+        public String label() {
+            return Messages.getString("Lobby.bot.personality." + key());
+        }
+
+        /** One line about how the bot fights. */
+        public String blurb() {
+            return Messages.getString("Lobby.bot.personality." + key() + ".blurb");
+        }
+
+        /** Its name for actors and message keys, such as "striker". */
+        public String key() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+
+        /** The personality of the preset named {@code presetName}, if there is one. */
+        public static @Nullable Personality of(@Nullable String presetName) {
+            for (Personality each : values()) {
+                if (each.preset.equals(presetName == null ? null : presetName.strip())) {
+                    return each;
+                }
+            }
+            return null;
+        }
+    }
+
+    /** What the bot does about leaving the board: the forced withdrawal and auto flee switches as one choice. */
+    public enum Retreat {
+        /** Neither: every unit fights on. */
+        FIGHT,
+        /** Forced withdrawal: crippled units head for the retreat edge. */
+        WITHDRAW,
+        /** Auto flee: every unit heads for the edge and leaves. */
+        LEAVE
+    }
+
     /** A line of the presets list: its name (the stored preset's or bot's) and kind. */
     public record Preset(String name, PresetKind kind) {
         public String label() {
-            return kind == PresetKind.PREVIOUS ? Messages.getString("BotConfigDialog.previousConfig") : name;
+            return switch (kind) {
+                case PREVIOUS -> Messages.getString("BotConfigDialog.previousConfig");
+                case STORED -> shownName(name);
+                case BOT -> name;
+            };
+        }
+
+        /**
+         * A stored preset's name as players read it: a shipped preset's tidy name, such as "LRM Missile Boat" for
+         * "LRM Missile Boat (pPT)", or else the name as it was saved. The stored name stays, as campaigns refer to it.
+         */
+        public static String shownName(String stored) {
+            String key = "Lobby.bot.presetLabel." + stored.strip().toLowerCase(Locale.ROOT)
+                  .replaceAll("[^a-z0-9]+", "_").replaceAll("^_|_$", "");
+            return Messages.keyExists(key) ? Messages.getString(key) : stored;
         }
     }
 
@@ -290,6 +371,7 @@ public final class BotSetupForm {
     private final List<Preset> presetList = new ArrayList<>();
     private @Nullable Preset selected;
     private @Nullable BehaviorSettings chosenPreset;
+    private @Nullable Personality basedOn;
     private final @Nullable Board board;
     private final List<Coords> hexTargets = new ArrayList<>();
     private final BotTargetPicker picker;
@@ -329,6 +411,7 @@ public final class BotSetupForm {
         this.picker = picker;
         previous = behavior;
         loadAll(behavior);
+        basedOn = shown(Personality.of(description));
         refreshPresets();
     }
 
@@ -513,6 +596,108 @@ public final class BotSetupForm {
         }
     }
 
+    /** The retreat switches read as one choice: auto flee first, as it moves every unit. */
+    public Retreat retreat() {
+        if (flags.get(Flag.AUTO_FLEE)) {
+            return Retreat.LEAVE;
+        }
+        return flags.get(Flag.FORCED_WITHDRAWAL) ? Retreat.WITHDRAW : Retreat.FIGHT;
+    }
+
+    /** Sets both retreat switches for {@code retreat}, keeping the edge shown ({@link #retreatTo}). */
+    public void retreat(Retreat retreat) {
+        CardinalEdge edge = retreatTo();
+        flags.put(Flag.FORCED_WITHDRAWAL, retreat != Retreat.FIGHT);
+        flags.put(Flag.AUTO_FLEE, retreat == Retreat.LEAVE);
+        retreatTo(edge);
+    }
+
+    /** The edge the retreat choice heads for: the flee edge when the bot leaves, else the retreat edge. */
+    public CardinalEdge retreatTo() {
+        return retreat() == Retreat.LEAVE ? fleeEdge : retreatEdge;
+    }
+
+    /** Sets the edge the retreat choice heads for; leaving sets the flee edge too, so crippled units go the same way. */
+    public void retreatTo(CardinalEdge edge) {
+        if (retreat() == Retreat.LEAVE) {
+            fleeEdge(edge);
+        }
+        retreatEdge(edge);
+    }
+
+    // ---- Personalities ----
+
+    /** The personalities whose presets are stored, in their order. */
+    public List<Personality> personalities() {
+        List<String> names = presets.names();
+        List<Personality> shown = new ArrayList<>();
+        for (Personality each : Personality.values()) {
+            if (names.contains(each.preset())) {
+                shown.add(each);
+            }
+        }
+        return shown;
+    }
+
+    /** The stored preset of {@code personality}, or null when it is gone. */
+    public @Nullable BehaviorSettings preset(Personality personality) {
+        return presets.get(personality.preset());
+    }
+
+    /**
+     * Loads {@code personality}'s preset as {@link #select} loads a stored one, but keeps the combat posture, which is
+     * chosen beside the personalities.
+     */
+    public void choose(Personality personality) {
+        CombatPosture kept = posture;
+        select(new Preset(personality.preset(), PresetKind.STORED));
+        posture = kept;
+    }
+
+    /** The personality whose preset the settings match, the combat posture aside, if any. */
+    public Optional<Personality> personality() {
+        for (Personality each : personalities()) {
+            BehaviorSettings stored = presets.get(each.preset());
+            if (stored != null && sameStyle(stored)) {
+                return Optional.of(each);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * The personality the settings started from: the last one loaded, or the one the opening configuration is named
+     * after; null when they came from elsewhere. Reset goes back to it.
+     */
+    public @Nullable Personality basedOn() {
+        return basedOn;
+    }
+
+    /** Whether the settings started from a personality and no longer match it. */
+    public boolean modified() {
+        return basedOn != null && personality().filter(basedOn::equals).isEmpty();
+    }
+
+    /** {@code personality} when its preset is stored, so it has a card; else null. */
+    private @Nullable Personality shown(@Nullable Personality personality) {
+        return personality != null && presets.get(personality.preset()) != null ? personality : null;
+    }
+
+    /** Whether the preset fields but the posture match {@code stored}. */
+    private boolean sameStyle(BehaviorSettings stored) {
+        for (Slider slider : Slider.values()) {
+            if (slider.clamp(slider.read.applyAsInt(stored)) != sliders.get(slider)) {
+                return false;
+            }
+        }
+        for (Flag flag : Flag.values()) {
+            if (flag.preset() && flag.read.test(stored) != flags.get(flag)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     // ---- Presets ----
 
     /** The presets list: the previous configuration, the stored presets, then the other local bots. */
@@ -551,6 +736,7 @@ public final class BotSetupForm {
                 loadPresetFields(loaded);
             }
         }
+        basedOn = shown(Personality.of(description));
     }
 
     /** Whether a stored preset is chosen and the preset fields now differ from it, which Save writes. */
