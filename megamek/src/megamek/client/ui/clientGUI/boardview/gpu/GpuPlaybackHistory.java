@@ -358,6 +358,12 @@ final class GpuPlaybackHistory {
         return playback.busy() || !held.isEmpty();
     }
 
+    /** The unit whose live movement plays now, or {@code Entity.NONE}; the dock names it. */
+    int moverId() {
+        BoardScene.Movement movement = playback.movement();
+        return movement == null ? Entity.NONE : movement.entityId();
+    }
+
     /** Board effects freeze while the playback is paused or a review runs (overlay.js frozenFx). */
     boolean frozen() {
         return playback.paused() || holding();

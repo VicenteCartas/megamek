@@ -62,6 +62,20 @@ class GpuPlaybackSelectionTest {
     }
 
     @Test
+    void theHistoryNamesTheUnitWhoseLiveMovementPlays() {
+        var playback = new UnitPlayback();
+        var history = new GpuPlaybackHistory(playback);
+        var next = frame(status(GamePhase.MOVEMENT, 2, 2), 2, record(2), preview(2), 0);
+        assertEquals(Entity.NONE, history.moverId());
+        playback.accept(List.of(movement()), next.scene(), ignored -> false);
+        playback.advance(0, UnitMotion.Speed.NORMAL);
+        assertEquals(1, history.moverId());
+        playback.advance(0, UnitMotion.Speed.INSTANT);
+        assertFalse(playback.busy());
+        assertEquals(Entity.NONE, history.moverId());
+    }
+
+    @Test
     void pausedAndQueuedActionsDelayTheNewestPhaseUntilInstantCompletesTheWholeQueue() {
         var playback = new UnitPlayback();
         var state = new GpuHudState(new GpuPlaybackHistory(playback));

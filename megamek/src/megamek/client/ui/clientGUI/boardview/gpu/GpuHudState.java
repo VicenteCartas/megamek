@@ -184,6 +184,11 @@ final class GpuHudState {
         ownInspection = Entity.NONE;
     }
 
+    /** The board plays live events, or reviews or replays them: unit commands wait ({@link #turnLocked}). */
+    boolean playbackBusy() {
+        return playbackBusy;
+    }
+
     /** Unit commands wait for playback, or for the player to restore a cleared local selection. */
     boolean turnLocked(GpuBattleStatus.Snapshot status) {
         return playbackBusy || selectionCleared && status.myTurn();

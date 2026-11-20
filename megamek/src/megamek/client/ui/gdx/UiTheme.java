@@ -235,7 +235,11 @@ public final class UiTheme implements Disposable {
           // A formation's troubles in MekHQ's order of battle: dangerous (out of action), person_off (short of crew),
           // bedtime (fatigued), inventory_2 (mothballed) and rocket_launch (in transit)
           Map.entry("dangerous", 0xE99A), Map.entry("person-off", 0xE510), Map.entry("bedtime", 0xEF44),
-          Map.entry("inventory", 0xE1A1), Map.entry("rocket", 0xEB9B));
+          Map.entry("inventory", 0xE1A1), Map.entry("rocket", 0xEB9B),
+          // The movement dock's context slot: accessibility_new (stand up), security (take cover), construction (dig
+          // in), back_hand (shake off), logout (unload) and download (drop cargo); prone and hull-down are the badges'.
+          Map.entry("stand-up", 0xE92C), Map.entry("cover", 0xE32A), Map.entry("dig-in", 0xEA3C),
+          Map.entry("shake-off", 0xE764), Map.entry("unload", 0xE9BA), Map.entry("drop-cargo", 0xF090));
     /**
      * Icons the prototype draws filled. The shipped font has no filled named instance, so their outlines are closed:
      * every texel that the glyph's outline encloses becomes opaque.

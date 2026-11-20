@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -212,10 +213,11 @@ class GpuCommandDockSmokeTest {
             show(hud, firingMore, weapons(2, true, true));
             hud.capture("g6-more-firing").dispose();
             // More in the dock's drawer.
-            Dock more = dock(hud, movement(atlasRoute(), ATLAS));
-            show(hud, more, movement(atlasRoute(), ATLAS));
+            Shot moreShot = enabling(movement(atlasRoute(), ATLAS), "moveHullDown");
+            Dock more = dock(hud, moreShot);
+            show(hud, more, moreShot);
             click(hud, more.find("dock-more"));
-            show(hud, more, movement(atlasRoute(), ATLAS));
+            show(hud, more, moreShot);
             hud.capture("g6-more-movement").dispose();
 
             // Shot 15 at 1280 x 720: the weapons dock at the narrow width.
@@ -291,24 +293,29 @@ class GpuCommandDockSmokeTest {
             clickAndShow(hud, dock, skipHidden, "dock-secondary");
             assertEquals(List.of(DONE), ran);
 
-            // A unit down stands first: Stand up leads the modes in Jump's place, runs MegaMek's Get Up and leaves
-            // More. Standing, Jump returns and Get Up waits among More's unavailable commands.
+            // A unit down stands first: the context slot, a tool as narrow as the turns, shows Stand up's glyph and
+            // caption and runs MegaMek's Get Up; the gaits keep their places, Jump disabled. Standing, the slot offers
+            // the stance (Prone) in its place and Get Up waits among More's unavailable commands.
             ran.clear();
             Shot down = withGetUp(movement(GpuMovePlan.Snapshot.EMPTY, ATLAS), true);
             show(hud, dock, down);
             hud.capture("g6-stand-up").dispose();
-            assertNotNull(dock.find("dock-stand-up"));
-            assertEquals("Prone", button(dock, "dock-stand-up").details.getFirst().getText().toString());
-            assertNull(dock.find("dock-mode-jump"));
+            Rectangle slot = GpuHudTestStage.bounds(button(dock, "dock-context"));
+            assertEquals("Stand up", button(dock, "dock-context").details.getFirst().getText().toString());
+            assertTrue(slot.width < GpuHudTestStage.bounds(button(dock, "dock-mode-walk")).width,
+                  "the context slot is narrower than a gait");
+            assertTrue(button(dock, "dock-mode-jump").isDisabled());
             assertNotNull(dock.find("dock-mode-walk"));
-            assertTrue(dock.dock().more().items().stream().noneMatch(command -> command.id().equals(GET_UP)));
-            clickAndShow(hud, dock, down, "dock-stand-up");
+            assertTrue(dock.dock().more() == null || Stream.concat(dock.dock().more().items().stream(),
+                  dock.dock().more().commands().stream()).noneMatch(command -> command.id().equals(GET_UP)));
+            clickAndShow(hud, dock, down, "dock-context");
             assertEquals(List.of(GET_UP), ran);
             Shot standing = withGetUp(movement(GpuMovePlan.Snapshot.EMPTY, ATLAS), false);
             show(hud, dock, standing);
-            assertNull(dock.find("dock-stand-up"));
-            assertNotNull(dock.find("dock-mode-jump"));
-            assertTrue(dock.dock().more().commands().stream().anyMatch(command -> command.id().equals(GET_UP)));
+            assertEquals("Prone", button(dock, "dock-context").details.getFirst().getText().toString());
+            assertEquals(slot, GpuHudTestStage.bounds(button(dock, "dock-context")), "the slot does not move");
+            // Get Up and Hull Down unavailable: More holds nothing to use and stays in its place, disabled.
+            assertTrue(button(dock, "dock-more").isDisabled());
 
             // Weapons (H3, H7): the orders' count and the own units left to declare.
             ran.clear();
@@ -586,7 +593,8 @@ class GpuCommandDockSmokeTest {
     @Test
     void moreOpensInTheDrawerWithOnlyUsableCommands() {
         GpuHudTestStage.run(hud -> {
-            Shot plan = movement(atlasRoute(), ATLAS);
+            // Go Prone, the first stance, is the dock's context slot; Hull Down, the second, waits in More.
+            Shot plan = enabling(movement(atlasRoute(), ATLAS), "moveHullDown");
             Dock dock = dock(hud, plan);
             show(hud, dock, plan);
             UiButton more = button(dock, "dock-more");
@@ -594,14 +602,17 @@ class GpuCommandDockSmokeTest {
             show(hud, dock, plan);
             Group drawer = dock.drawer();
             assertTrue(drawer.isVisible());
-            // The panel's movement controls and unit record no longer appear in More.
-            assertEquals(List.of("MORE MOVEMENT", "GO PRONE"), texts(drawer));
+            // The panel's movement controls, its context command and the unit record no longer appear in More.
+            assertEquals(List.of("MORE MOVEMENT", "HULL DOWN"), texts(drawer));
             hud.capture("g6-more-drawer-movement").dispose();
-            click(hud, drawer.findActor("dock-more-moveGoProne"));
-            assertEquals(List.of("moveGoProne"), ran);
+            click(hud, drawer.findActor("dock-more-moveHullDown"));
+            assertEquals(List.of("moveHullDown"), ran);
             assertFalse(dock.dock().drawer().isOpen(), "choosing an item closes the drawer");
-            assertEquals(List.of("Hull Down"), dock.dock().more().commands().stream()
-                  .map(BoardScene.Command::label).toList());
+            // With every stance in the slot or More, the fixture's own Hull Down off leaves More nothing to use: it
+            // stays in its place, disabled.
+            Shot slotOnly = movement(atlasRoute(), ATLAS);
+            show(hud, dock, slotOnly);
+            assertTrue(button(dock, "dock-more").isDisabled());
             ran.clear();
 
             // Without an adjacent enemy, More closes the action row and lists the physical phase's own commands.
@@ -624,17 +635,17 @@ class GpuCommandDockSmokeTest {
             Dock dock = dock(hud, plan);
             show(hud, dock, plan);
             assertEquals("", label(dock, "dock-span"));
-            UiKit.Checkbox backwards = dock.find("dock-backwards");
-            assertFalse(backwards.isTicked());
+            UiButton backwards = button(dock, "dock-mode-back");
+            assertFalse(backwards.isChecked());
             click(hud, backwards);
             verify(moves).setMode(GpuMovePlan.Mode.BACK);
             Shot back = movement(explicit(GpuMovePlan.Mode.BACK, "Walk backwards"), ATLAS);
             show(hud, dock, back);
-            assertTrue(backwards.isTicked());
+            assertTrue(backwards.isChecked());
             click(hud, backwards);
             verify(moves, times(2)).setMode(GpuMovePlan.Mode.BACK);
             show(hud, dock, plan);
-            assertFalse(backwards.isTicked());
+            assertFalse(backwards.isChecked());
             verify(moves, times(2)).setMode(GpuMovePlan.Mode.BACK);
 
             Rectangle hold = GpuHudTestStage.bounds(button(dock, "dock-hold-all"));
@@ -650,7 +661,7 @@ class GpuCommandDockSmokeTest {
             Shot noBack = new Shot(plan.status(), plan.panels(), plan.commands().stream()
                   .filter(command -> !command.id().equals("moveBackUp")).toList());
             show(hud, dock, noBack);
-            assertNull(dock.find("dock-backwards"));
+            assertNull(dock.find("dock-mode-back"));
             assertEquals("", label(dock, "dock-span"));
 
             clickAndShow(hud, dock, plan, "dock-hold-all");
@@ -677,6 +688,33 @@ class GpuCommandDockSmokeTest {
             clickAndShow(hud, dock, plan, "dock-hold-all", "dock-confirm-yes");
             verify(moves).holdAll();
             assertNull(dock.find("dock-confirm"));
+        });
+    }
+
+    @Test
+    void heldCommandsSayWhyInTheWaitingBoxInsteadOfAnEmptyDock() {
+        GpuHudTestStage.run(hud -> {
+            hud.size(1920, 1080);
+            Shot plan = movement(atlasRoute(), ATLAS);
+            Dock dock = dock(hud, plan);
+            show(hud, dock, plan);
+            float height = GpuHudTestStage.bounds(dock.root()).height;
+            dock.state().clearSelection();
+            show(hud, dock, plan);
+            assertNotNull(dock.find("dock-waiting"), "a cleared selection keeps the waiting box");
+            assertNull(dock.find("dock-main"));
+            assertEquals(List.of("YOUR TURN", "SELECT A UNIT TO GIVE ORDERS"),
+                  List.of(label(dock, "dock-title"), label(dock, "dock-waiting-text")));
+            assertTrue(GpuHudTestStage.bounds(dock.root()).height > height / 2, "the dock keeps its frame filled");
+            hud.capture("g6-status-cleared").dispose();
+
+            dock.state().restoreSelection();
+            dock.state().overview = true;
+            show(hud, dock, plan);
+            assertEquals("CLOSE THE OVERVIEW TO GIVE ORDERS", label(dock, "dock-waiting-text"));
+            dock.state().overview = false;
+            show(hud, dock, plan);
+            assertNotNull(dock.find("dock-main"), "the plan returns with the board");
         });
     }
 
@@ -1277,6 +1315,15 @@ class GpuCommandDockSmokeTest {
               command("moveTurn", "Turn", true), command("moveGoProne", "Go Prone", true),
               command("moveHullDown", "Hull Down", false), command(DONE, "Done", true), command(SKIP, "Skip", true),
               command(GpuBoardActions.CLEAR_ID, "Clear", true));
+    }
+
+    /** The shot with the given commands of its own enabled. */
+    private static Shot enabling(Shot shot, String... ids) {
+        List<String> on = List.of(ids);
+        return new Shot(shot.status(), shot.panels(), shot.commands().stream().map(command -> on.contains(command.id())
+              ? new BoardScene.Command(command.id(), command.label(), command.detail(), true, command.commit(),
+              command.boardTool(), command.children(), command.action(), command.shortcut(), command.selected(),
+              command.unitAction()) : command).toList());
     }
 
     /**

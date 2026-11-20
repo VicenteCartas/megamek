@@ -295,6 +295,7 @@ final class GpuHud implements GpuBoardHud {
         GpuNameplates nameplates = new GpuNameplates(kit, source, state);
         deployHeight = new GpuDeployHeight(source);
         GpuDeployConfirm deployConfirm = new GpuDeployConfirm(kit, state, nameplates, deployHeight);
+        GpuMoveConfirm moveConfirm = new GpuMoveConfirm(kit, source, state, camera);
         targetCards = new GpuTargetCards(kit, source, state, contextMenu);
         losPanel = new GpuLosPanel(kit.ui, stage, source, camera);
         phaseHeader = new GpuPhaseHeader(kit);
@@ -336,7 +337,8 @@ final class GpuHud implements GpuBoardHud {
         incomingCues = new GpuIncomingCues(kit, source, state);
         damageNumbers = new GpuDamageNumbers(kit);
         GpuAimDialog aim = new GpuAimDialog(kit, source, state, paperdolls);
-        List<Component> parts = new ArrayList<>(List.of(nameplates, deployConfirm, boardLabels, targetCards, losPanel,
+        List<Component> parts = new ArrayList<>(List.of(nameplates, deployConfirm, moveConfirm, boardLabels,
+              targetCards, losPanel,
               phaseHeader,
               initiativeCard, conditionsCard, forces, unitCard, otherUnitCard, recordSheet, utilities,
               hint,
@@ -352,7 +354,7 @@ final class GpuHud implements GpuBoardHud {
         List<Container<Actor>> spanning = new ArrayList<>(List.of(slot(labels, damageNumbers.actor()),
               slot(labels, boardLabels.fx()),
               slot(labels, nameplates.actor()), slot(labels, boardLabels.actor()), slot(labels, targetCards.actor()), slot(labels, losPanel.actor()),
-              slot(labels, deployConfirm.actor()),
+              slot(labels, deployConfirm.actor()), slot(labels, moveConfirm.actor()),
               slot(popover, hexTip.actor()), slot(popover, incomingCues.actor()), slot(popover, arrivalCues.actor()),
               slot(popover, unitCard.overlay()),
               slot(popover, otherUnitCard.overlay()),
@@ -1547,7 +1549,8 @@ final class GpuHud implements GpuBoardHud {
         // The More panel, sized to its commands: right of the dock, up to the window edge, or up to the right column
         // while one of its panels reaches down beside the dock. It takes the columns that room holds, no more than the
         // dock's height needs, and grows upward from the dock's bottom when they need more rows. Without room for one
-        // column there, it lies above the dock, at most the dock's width, and grows upward over the hint line.
+        // column there, it lies above the dock, at most the dock's width and right-aligned under More, only as tall as
+        // its rows, and grows upward over the hint line.
         GpuMoreDrawer drawer = dock.drawer();
         drawerSlot.setVisible(shown(dockSlot));
         if (!drawerSlot.isVisible() || isModal()) {
@@ -1574,9 +1577,10 @@ final class GpuHud implements GpuBoardHud {
             float room = Math.max(0, dockTop - STACK - gap);
             int columns = Math.max(1, Math.min(GpuMoreDrawer.columnsIn(dockWidth),
                   drawer.columnsAt(Math.min(dockHeight, room))));
-            float aboveHeight = Math.min(Math.max(dockHeight, drawer.height(columns)), room);
-            place(drawerSlot, dockSlot.getX(), dockTop - STACK - aboveHeight, GpuMoreDrawer.width(columns),
-                  aboveHeight);
+            float aboveHeight = Math.min(drawer.height(columns), room);
+            float aboveWidth = GpuMoreDrawer.width(columns);
+            place(drawerSlot, dockSlot.getX() + dockSlot.getWidth() - aboveWidth, dockTop - STACK - aboveHeight,
+                  aboveWidth, aboveHeight);
         }
 
         // Top row: the conditions card beside the left column (the sheet's width while it is open), below the phase

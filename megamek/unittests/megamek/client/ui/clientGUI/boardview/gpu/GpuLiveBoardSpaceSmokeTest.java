@@ -160,6 +160,20 @@ class GpuLiveBoardSpaceSmokeTest {
         assertEquals(waypoint.y + 22, pinCentre.y, 1.5f, "22 units above its hex");
         assertFalse(GpuBoardTestUi.shown(live.hud.stage.getRoot().findActor("pin-2")), "One waypoint, one number");
 
+        // The board's Move and Clear chip, centred over the destination's head as deployment's pair stands over a
+        // placed unit, with the tip above it.
+        Actor move3d = live.actor("move-confirm-done");
+        assertTrue(GpuBoardTestUi.shown(move3d), "The destination's Move button");
+        Actor chip = move3d.getParent();
+        Vector2 chipCorner = chip.localToStageCoordinates(new Vector2());
+        assertEquals(destination.x, chipCorner.x + chip.getWidth() / 2, 1.5f, "The chip is centred on the destination");
+        assertTrue(chipCorner.y > destination.y, "The chip stands over the destination");
+        assertTrue(chipCorner.y + chip.getHeight() < corner.y, "The tip stands over the chip");
+        assertTrue(GpuBoardTestUi.shown(live.actor("move-confirm-clear")), "The chip's Clear");
+        assertFalse(GpuBoardTestUi.shown(live.hud.stage.getRoot().findActor("move-confirm-context")),
+              "A standing unit's chip has no context command");
+        verifyTurnArrows(live, destination, chipCorner.y, "3D");
+
         GpuFirePreview.Snapshot preview = live.frame.get().panels().preview();
         assertTrue(preview.active() && preview.unitId() == SAGITTAIRE, "The Sagittaire's fire preview");
         assertTrue(live.strokes() > 0, "The preview's guides lie in the fx layer");
@@ -202,10 +216,32 @@ class GpuLiveBoardSpaceSmokeTest {
         live.draw(3, 0);
     }
 
+    /** The board's turn arrows: either side of the destination, mirrored about it, below the Move chip. */
+    private static void verifyTurnArrows(Live live, Vector2 destination, float chipBottom, String view) {
+        Actor left = live.actor("move-confirm-turn-left");
+        Actor right = live.actor("move-confirm-turn-right");
+        assertTrue(GpuBoardTestUi.shown(left) && GpuBoardTestUi.shown(right), view + ": the turn arrows");
+        Vector2 leftCorner = left.localToStageCoordinates(new Vector2());
+        Vector2 rightCorner = right.localToStageCoordinates(new Vector2());
+        assertTrue(leftCorner.x + left.getWidth() < destination.x, view + ": Left stands left of the ghost");
+        assertTrue(rightCorner.x > destination.x, view + ": Right stands right of it");
+        assertEquals(destination.x - (leftCorner.x + left.getWidth()), rightCorner.x - destination.x, 1.5f,
+              view + ": the arrows mirror each other about the ghost");
+        assertEquals(leftCorner.y, rightCorner.y, .5f, view + ": at one height");
+        assertTrue(leftCorner.y + left.getHeight() <= chipBottom, view + ": below the Move chip");
+    }
+
     /** The Tactical View: the north mark, the units' bases and their heads, the meeple ghost and the overlay. */
     private static void verifyMovementTactical(Live live) throws Exception {
         live.zoom(new Coords(12, 9), 90);
         live.capture("i1b-movement-tactical.png");
+        // The board's Move chip, centred over the destination as in 3D.
+        Actor chip = live.actor("move-confirm-done").getParent();
+        Vector2 destination = live.hex(DESTINATION);
+        Vector2 chipCorner = chip.localToStageCoordinates(new Vector2());
+        assertEquals(destination.x, chipCorner.x + chip.getWidth() / 2, 1.5f, "The Tactical View's chip is centred");
+        assertTrue(chipCorner.y > destination.y, "and over the destination");
+        verifyTurnArrows(live, destination, chipCorner.y, "Tactical");
         Actor north = live.actor("tactical-north");
         assertTrue(GpuBoardTestUi.shown(north), "The Tactical View's north mark");
         Vector2 corner = north.localToStageCoordinates(new Vector2());

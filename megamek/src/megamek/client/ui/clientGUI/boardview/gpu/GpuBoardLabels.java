@@ -47,9 +47,9 @@ import megamek.common.units.Entity;
 final class GpuBoardLabels implements GpuHud.Component {
     /** overlay.js mid(): a unit's middle at .55 of its height; the tip at .9 of the unit's height over its hex. */
     private static final float MIDDLE = .55f;
-    private static final float TIP_HEIGHT = .9f;
+    static final float TIP_HEIGHT = .9f;
     /** The Tactical View anchors a unit's labels at its base ring's north point, half up its screen square. */
-    private static final float RING_NORTH = .5f;
+    static final float RING_NORTH = .5f;
     /** In the Tactical View lines between units end on a circle just outside their base rings (r .88 apothems). */
     private static final float RING_GAP = .88f / GpuUnitBases.RING;
     /**
@@ -58,9 +58,12 @@ final class GpuBoardLabels implements GpuHud.Component {
      */
     private static final float BADGE_RISE = 4;
     private static final float BADGE_GAP = 6;
-    /** .tip3d: (+56, -34) CSS from the destination's anchor, flipped left over the HUD, 8 inside the window. */
+    /**
+     * .tip3d: 56 CSS right of the destination's anchor, flipped left over the HUD, 8 inside the window. Its bottom
+     * stands over the board's Move chip (GpuMoveConfirm), which sits on the same anchor.
+     */
     private static final float TIP_DX = 56;
-    private static final float TIP_DY = 34;
+    private static final float TIP_RISE = GpuMoveConfirm.HEADROOM;
     private static final float EDGE = 8;
     /** overlay.js refreshHudRects: the HUD rectangles labels keep clear of are 6 units larger on every side. */
     private static final float HUD_MARGIN = 6;
@@ -399,14 +402,14 @@ final class GpuBoardLabels implements GpuHud.Component {
     }
 
     /**
-     * overlay.js placeLabels for the tip: right of the anchor and above it; flipped to its left when it would cover a
-     * HUD panel; kept 8 units inside the window.
+     * overlay.js placeLabels for the tip: right of the anchor and above the board's Move chip; flipped to its left
+     * when it would cover a HUD panel; kept 8 units inside the window.
      */
     private void placeTip(Vector2 anchor, List<Rectangle> panels) {
         float width = tip.getWidth();
         float height = tip.getHeight();
         float x = anchor.x + TIP_DX;
-        float top = anchor.y + TIP_DY;
+        float top = anchor.y + TIP_RISE + height;
         Rectangle area = new Rectangle(x, top - height, width, height);
         for (Rectangle panel : panels) {
             Rectangle keepOut = new Rectangle(panel.x - HUD_MARGIN, panel.y - HUD_MARGIN,

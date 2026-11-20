@@ -129,7 +129,8 @@ class GpuMenuCoverageSmokeTest {
             moving.board.panel = moving.display;
             assertReachable("movement", moving.board.source, Map.of(
                   "moveWalk", "dock-mode-walk", "moveJump", "dock-mode-jump", "moveTurn", "dock-turn-left",
-                  "moveBackUp", "dock-more", "moveNext", "forces-rail-next", "clear", "dock-more"));
+                  "moveBackUp", "dock-mode-back", "moveGoProne", "dock-context", "moveNext", "forces-rail-next",
+                  "clear", "dock-more"));
         }
         try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             // The weapons panel picks the weapon (Skip is MegaMek's next weapon), its target, mode and called shot.
