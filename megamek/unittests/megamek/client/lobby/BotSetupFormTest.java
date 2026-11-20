@@ -19,8 +19,10 @@ import megamek.client.bot.princess.CardinalEdge;
 import megamek.client.bot.princess.CombatPosture;
 import megamek.client.bot.princess.PrincessException;
 import megamek.client.lobby.BotSetupForm.Flag;
+import megamek.client.lobby.BotSetupForm.Personality;
 import megamek.client.lobby.BotSetupForm.Preset;
 import megamek.client.lobby.BotSetupForm.PresetKind;
+import megamek.client.lobby.BotSetupForm.Retreat;
 import megamek.client.lobby.BotSetupForm.Slider;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -144,6 +146,14 @@ class BotSetupFormTest {
     }
 
     @Test
+    void shippedPresetsShowFriendlyNamesAndOwnNamesStay() {
+        assertEquals("LRM Missile Boat", Preset.shownName("LRM Missile Boat (pPT)"));
+        assertEquals("Balanced v2", Preset.shownName("DEFAULT v2 BRAVER"));
+        assertEquals("Escape", new Preset("ESCAPE", PresetKind.STORED).label());
+        assertEquals("My Lance", Preset.shownName("My Lance"));
+    }
+
+    @Test
     void aStoredPresetLoadsOnlyThePresetFields() {
         BotSetupForm form = newBot();
 
@@ -237,6 +247,74 @@ class BotSetupFormTest {
         assertEquals(CardinalEdge.SOUTH, form.retreatEdge());
         assertEquals(CardinalEdge.EAST, form.fleeEdge());
         assertFalse(BotSetupForm.edges().contains(CardinalEdge.NONE));
+    }
+
+    @Test
+    void onlyStoredPersonalitiesShow() {
+        assertEquals(List.of(Personality.CAUTIOUS, Personality.BERSERKER), newBot().personalities());
+        assertEquals(Personality.BERSERKER, Personality.of(" BERSERK "));
+        assertNull(Personality.of("Mine"));
+        assertNull(Personality.of(null));
+    }
+
+    @Test
+    void choosingAPersonalityKeepsThePosture() {
+        BotSetupForm form = newBot();
+        form.posture(CombatPosture.DEFEND);
+
+        form.choose(Personality.BERSERKER);
+
+        assertEquals(9, form.value(Slider.BRAVERY));
+        assertEquals(CombatPosture.DEFEND, form.posture());
+        assertEquals(Optional.of(Personality.BERSERKER), form.personality());
+        assertEquals(Personality.BERSERKER, form.basedOn());
+        assertFalse(form.modified());
+    }
+
+    @Test
+    void aChangedSliderIsModifiedUntilItMatchesAgain() {
+        BotSetupForm form = newBot();
+        assertNull(form.basedOn());
+        assertFalse(form.modified());
+
+        form.choose(Personality.CAUTIOUS);
+        form.value(Slider.BRAVERY, 5);
+        assertTrue(form.modified());
+        assertEquals(Optional.empty(), form.personality());
+
+        form.value(Slider.BRAVERY, 1);
+        assertFalse(form.modified());
+        form.posture(CombatPosture.ATTACK);
+        assertEquals(Optional.of(Personality.CAUTIOUS), form.personality());
+    }
+
+    @Test
+    void aBotNamedAfterAPersonalityStartsFromIt() throws PrincessException {
+        previous = settings("BERSERK", 9, CombatPosture.ATTACK);
+
+        assertEquals(Personality.BERSERKER, newBot().basedOn());
+        previous = settings("DEFAULT", 5, CombatPosture.ATTACK);
+        assertNull(newBot().basedOn(), "a personality without a stored preset has no card to start from");
+    }
+
+    @Test
+    void theRetreatChoiceSetsBothSwitchesAndItsEdge() {
+        BotSetupForm form = newBot();
+        assertEquals(Retreat.WITHDRAW, form.retreat());
+        assertEquals(CardinalEdge.SOUTH, form.retreatTo());
+
+        form.retreat(Retreat.LEAVE);
+        assertTrue(form.flag(Flag.AUTO_FLEE));
+        assertTrue(form.flag(Flag.FORCED_WITHDRAWAL));
+        assertEquals(CardinalEdge.SOUTH, form.retreatTo());
+        form.retreatTo(CardinalEdge.WEST);
+        assertEquals(CardinalEdge.WEST, form.fleeEdge());
+        assertEquals(CardinalEdge.WEST, form.retreatEdge());
+
+        form.retreat(Retreat.FIGHT);
+        assertFalse(form.flag(Flag.AUTO_FLEE));
+        assertFalse(form.flag(Flag.FORCED_WITHDRAWAL));
+        assertEquals(Retreat.FIGHT, form.retreat());
     }
 
     @Test

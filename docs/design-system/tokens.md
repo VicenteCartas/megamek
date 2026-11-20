@@ -959,7 +959,13 @@ gets `label` type in `text.secondary` and a `border.subtle` line after it instea
 and sits about 3px further in than the content. Moving a view to `TokenSections.titled` gives it the true look. The
 settings dialog's `CollapsibleSectionPanel` is the developers' to move to `TokenSections.collapsible`.
 
-**libGDX.** Nothing new yet; hud-v3 has no collapsible section.
+**libGDX.** `UiKit.collapsible(title, content, open)` (`UiCollapsible`) is the collapsible section: a `control.sm`
+row with the chevron, the overline title, the `border.subtle` line and an optional muted `detail(text)` at its trailing
+end (such as "3 targets set"), the `list-row-over` wash on hover and the `token-row-focus` ring inside the row. Closed
+content leaves the actor tree, so Tab and lookups skip it. `open(bool)` opens or closes it without a callback;
+`onToggle` runs when the user does. Name its `header()` for probes and tests. A section the user opens inside a
+scrolling body scrolls just enough to show itself, or its top when it is taller than the view (the bot setup does this
+from `onToggle` with `ScrollPane.scrollTo`, which glides); one already in view does not move.
 
 ## Split panes
 
@@ -1049,7 +1055,12 @@ most the window's height less `xxxl` on each side, the body scrolling. `show(sta
 (at once without motion), focuses the first field, else the primary button, and `close()` gives the focus back. Keys:
 Enter presses the focused button or else the primary (a disabled primary does nothing), Space the focused button,
 Escape and the close button run `cancel`, and Tab and Shift+Tab cycle through the card's enabled buttons, fields,
-selects and sliders only, scrolling the body to the focused one. Actions added to `layer()` before `show` are dropped,
+selects and sliders only, scrolling the body to the focused one. `back(action)` makes Escape run `action` instead of
+`cancel` while an inner page shows (`back(null)` restores it); the close button always cancels. An inner page of a
+dialog (the bot setup's strategic targets) swaps the body and the footer: `clearFooter()`, then Back as the primary
+button where OK was and no Cancel, so no button on it reads as leaving only the page while closing the dialog; the
+main page's footer comes back with it. The inner page takes the height the main page left in the view as its
+preferred height, its list growing to fill it, so the card keeps its size. Actions added to `layer()` before `show` are dropped,
 as showing restarts its fade; put per-frame work on an actor of its own. The lobby opens these only through
 `LobbyNativeDialogs` (camo, player settings, bot setup, planetary conditions, game options, a confirmation and a plain
 message); the bot setup, a confirmation and a message stack over another dialog, which gets its focus back when the top
@@ -1156,8 +1167,32 @@ clicked (the lobby's map): the `token-picture-card` button, `token-card` at rest
 muted line while there is no picture. `UiKit.summaryCard(title)` (`UiSummaryCard`) is a card that sums a setting up and
 opens it when clicked (the lobby's planetary conditions and victory): the same `token-picture-card` button, with the
 overline title and a › `chevron-right` on its first row and the wrapped `body` summary in `text.secondary` under them;
-disabled, the summary turns `text.muted` and the chevron goes. The lobby added the `more-vert`, `add`, `check-circle`, `radio-unchecked`, `hourglass`, `bot`,
+disabled, the summary turns `text.muted` and the chevron goes. `UiKit.traitCard(title, blurb)` (`UiTraitCard`) is a
+choice card, one of a group the user picks from like radio buttons (the bot setup's personalities): the
+`token-choice-card` button, `token-card` at rest, `token-card-over` under the pointer and `token-card-chosen` when
+chosen (a `selected.background` wash over `surface.panel` with a `selection.width` `selected.primary` edge), the
+`token-card-focus` ring outside it. It shows the title in `body.strong` with a `check-circle` while chosen, a wrapped
+`small` blurb in `text.secondary`, then `trait(name, value, max)` rows: a `small` `text.muted` name and a stepped meter
+lit in `accent.primary` over `border.control`. When the chosen card's settings have been changed, `modified(tag)`
+puts a `small` `text.muted` tag after the title and an `undo` reset button where the check was (its click reaches the
+card's listeners, so picking the card again resets it), and `current(values)` shows the new values on the meters:
+steps added above the card's own value fill in `selected.primary`, steps taken away keep a 1 px `accent.primary`
+outline. The check and the reset share one slot, so the card does not move. The lobby added the `more-vert`, `add`, `check-circle`, `radio-unchecked`, `hourglass`, `bot`,
 `palette` and `gavel` glyphs to `UiTheme.ICONS`.
+
+**Good defaults first.** A dialog with many settings leads with the few choices most players make, as picture or
+choice cards with a line on what each does, and folds the rest away: a **Customize** section for tuning what the
+choice set, and an **Advanced** section, closed, for expert switches and rarely used tools. The bot setup is the first:
+a name, the personality cards with the trait meters, combat posture and retreat side by side with a hint under each,
+then Customize (the core sliders and saved presets) and Advanced (the remaining sliders, then three even columns: the
+switches, the bot AI and a summary card that opens the strategic targets as a page of the dialog). A changed
+personality stays chosen, marked Modified on its card with its reset; settings no card explains read "Custom settings"
+beside the Personality caption and open Customize from the start. Shipped presets show friendly names
+(`Lobby.bot.presetLabel.<key>`), the saved ones sorted by name.
+
+**Nothing moves.** What a choice shows or hides never pushes the layout: a hint or a warning that comes and goes sits
+in a slot as tall as its longest text (a `Stack` over hidden copies of each, as `Stack` sizes from invisible children
+too), and a button that does not apply is disabled, not hidden.
 
 The battle HUD's own parts (the HUD parts tab) live in `GpuBoardSkin` and `GpuHudKit`. `GpuHudKit.unitRow(w, h, true)`
 is the unit row as a selectable plain panel: the `token-unit-row` style has a `border.subtle` edge at rest,

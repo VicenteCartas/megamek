@@ -67,6 +67,7 @@ import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
 import megamek.client.ui.design.DesignTokens.Presentation;
 import megamek.client.ui.gdx.DisplayScale;
+import megamek.client.ui.gdx.UiCollapsible;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiRangeInput;
@@ -102,8 +103,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private static final int REQUISITION_SPRITES = 200;
     /** When the developer switch's clicks run, in seconds after the lobby shows. */
     static final double PROBE_CLICK_AT = 1.5;
-    /** The stored behaviour the probe chooses in the bot setup. */
-    private static final String PROBE_PRESET = "COWARDLY";
+    /** The personality the probe chooses in the bot setup. */
+    private static final String PROBE_PRESET = "cautious";
     /** {@code lobby+gm}'s name for a click on the seat itself rather than on its card. */
     private static final String GM_SEAT = "seat";
 
@@ -1360,7 +1361,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                     if (camo) {
                         probeClick(root.findActor("camo:" + Camouflage.COLOUR_CAMOUFLAGE + "/"));
                     } else if (bot) {
-                        probeClick(root.findActor("bot-preset-stored-" + PROBE_PRESET));
+                        probeClick(root.findActor("bot-personality-" + PROBE_PRESET));
                         queueBotClicks(dialog, probe);
                     } else if (conditions) {
                         queueConditionsClicks();
@@ -1411,6 +1412,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
             case 3 -> {
                 if (elapsed > 5.5) {
+                    // The bot setup's targets page shows Back where OK was
+                    if (bot && root.findActor("bot-targets-back") != null) {
+                        probeClick(root.findActor("bot-targets-back"));
+                    }
                     probeClick(root.findActor(camo ? "camo-ok" : bot ? "bot-ok" : conditions ? "conditions-ok"
                           : options ? "options-ok" : "settings-ok"));
                     LOGGER.info("The lobby probe pressed OK: dialog open {}", nativeDialogs.isOpen());
@@ -1430,14 +1435,23 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     }
 
     /**
-     * Queues the bot setup's clicks, one a frame so that each scroll shows before its click: after
-     * {@link #PROBE_PRESET}, the pirate switch and the bravery slider's right end; with {@code +targets} the targets
-     * tab, its first force's first unit and a typed hex.
+     * Queues the bot setup's clicks, one a frame so that each scroll shows before its click: after the
+     * {@link #PROBE_PRESET} personality, Advanced and its pirate switch, Customize and the bravery slider's right end;
+     * with {@code +targets} the targets page, its first force's first unit and a typed hex.
      */
     private void queueBotClicks(UiDialog dialog, GpuLobbyProbe probe) {
         Group root = stage.getRoot();
+        nativeClicks.add(() -> probeReveal(dialog, root.findActor("bot-advanced-header")));
+        nativeClicks.add(() -> probeClick(root.findActor("bot-advanced-header")));
         nativeClicks.add(() -> probeReveal(dialog, root.findActor("bot-flag-pirate")));
         nativeClicks.add(() -> probeClick(root.findActor("bot-flag-pirate")));
+        nativeClicks.add(() -> {
+            Actor customize = root.findActor("bot-customize");
+            if (customize instanceof UiCollapsible section && !section.isOpen()) {
+                probeReveal(dialog, section.header());
+                probeClick(section.header());
+            }
+        });
         nativeClicks.add(() -> probeReveal(dialog, root.findActor("bot-slider-bravery")));
         nativeClicks.add(() -> {
             Actor bravery = root.findActor("bot-slider-bravery");
@@ -1449,8 +1463,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
         });
         if (probe.options().contains("targets")) {
-            nativeClicks.add(() -> probeReveal(dialog, root.findActor("bot-tab-targets")));
-            nativeClicks.add(() -> probeClick(root.findActor("bot-tab-targets")));
+            nativeClicks.add(() -> probeReveal(dialog, root.findActor("bot-targets-open")));
+            nativeClicks.add(() -> probeClick(root.findActor("bot-targets-open")));
             nativeClicks.add(() -> probeClick(firstNamed(root, "bot-fold-force-")));
             nativeClicks.add(() -> probeReveal(dialog, firstNamed(root, "bot-tick-unit-")));
             nativeClicks.add(() -> probeClick(firstNamed(root, "bot-tick-unit-")));
@@ -1462,6 +1476,12 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 }
             });
             nativeClicks.add(() -> probeClick(root.findActor("bot-hex-add")));
+        }
+        // For the shot: +top shows the personality cards, +advanced the end of Advanced
+        if (probe.options().contains("top")) {
+            nativeClicks.add(() -> probeReveal(dialog, root.findActor("bot-personality-" + PROBE_PRESET)));
+        } else if (probe.options().contains("advanced")) {
+            nativeClicks.add(() -> probeReveal(dialog, root.findActor("bot-targets-open")));
         }
         nativeClicks.add(() -> {
             LobbyBotSetupView view = nativeDialogs.botView();

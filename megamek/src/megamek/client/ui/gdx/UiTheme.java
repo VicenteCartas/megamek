@@ -1584,6 +1584,11 @@ public final class UiTheme implements Disposable {
     public static final String TOKEN_SPLIT = "token-split";
     /** The Button style of a card that opens something ({@code UiPictureCard}): its edge in border.strong on hover. */
     public static final String TOKEN_PICTURE_CARD = "token-picture-card";
+    /**
+     * The Button style of a card picked from a set ({@code UiTraitCard}): the picture card's faces, and while checked
+     * the selected.background wash under a selection.width selected.primary edge.
+     */
+    public static final String TOKEN_CHOICE_CARD = "token-choice-card";
 
     /**
      * Token v0 styles for hud-v3's own lists, trees, grids and splits (docs/design-system/tokens.md, Lists and trees,
@@ -1666,6 +1671,19 @@ public final class UiTheme implements Disposable {
         pictureCard.down = pictureCard.over;
         pictureCard.disabled = pictureCard.up;
         skin.add(TOKEN_PICTURE_CARD, pictureCard);
+        // A card picked from a set (a selectable panel): the selection's wash under a selection-wide edge in its color
+        Button.ButtonStyle choiceCard = new Button.ButtonStyle(pictureCard);
+        choiceCard.checked = box("token-card-chosen", token(ColorMath.over(tokens.color("selected.background", mode),
+              tokens.color("surface.panel", mode))), selectedEdge, tokens.size().get("selection.width"),
+              tokens.radius().get("md"), null, 0, 0, 0);
+        choiceCard.checkedOver = choiceCard.checked;
+        choiceCard.checkedDown = choiceCard.checked;
+        skin.add(TOKEN_CHOICE_CARD, choiceCard);
+        // The focus rings of a card and of a section's header row, focus.gap outside the card and inside the row
+        float focusWidth = tokens.size().get("focus.width");
+        Color ring = token(tokens.color("focus.ring", mode));
+        box("token-card-focus", Color.CLEAR, ring, focusWidth, tokens.radius().get("md") + focusWidth, null, 0, 0, 0);
+        box("token-row-focus", Color.CLEAR, ring, focusWidth, radius, null, 0, 0, 0);
 
         float band = md;
         float active = tokens.size().get("selection.width");
