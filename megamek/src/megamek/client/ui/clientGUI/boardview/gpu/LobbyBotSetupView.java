@@ -415,8 +415,7 @@ final class LobbyBotSetupView {
         block.add(toward).padTop(space("sm")).row();
         retreatHint = hint("");
         retreatHint.setName("bot-retreat-hint");
-        pirateNote = kit.typeLabel(Messages.getString("Lobby.bot.retreat.pirate"), "small", "status.warning");
-        pirateNote.setWrap(true);
+        pirateNote = hint(Messages.getString("Lobby.bot.retreat.pirate"));
         pirateNote.setName("bot-retreat-pirate");
         List<String> hints = new ArrayList<>();
         for (Retreat each : choices) {
