@@ -88,6 +88,7 @@ import megamek.common.units.Dropship;
 import megamek.common.units.Entity;
 import megamek.common.units.IAero;
 import megamek.common.units.Infantry;
+import megamek.common.units.StartingModes;
 import megamek.common.units.Tank;
 import megamek.common.units.TrainLayout;
 import megamek.logging.MMLogger;
@@ -474,8 +475,10 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         disableButtons();
 
         int elevationOrAltitude = entity.isAero() ? entity.getAltitude() : entity.getElevation();
+        Integer startingMode = startingModes().isEmpty() ? null : entity.getConversionMode();
         clientgui.getClient().deploy(entity.getId(), entity.getPosition(), entity.getBoardId(), entity.getFacing(),
-                                     elevationOrAltitude, entity.getLoadedUnits(), assaultDropPreference);
+                                     elevationOrAltitude, entity.getLoadedUnits(), assaultDropPreference,
+                                     startingMode);
         entity.setDeployed(true);
 
         if (entity.isWeaponOrderChanged()) {
@@ -644,6 +647,61 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         }
         Collections.sort(heights);
         return heights;
+    }
+
+    /**
+     * The conversion modes the unit deploying now may start the game in, as the lobby offers them (StartingModes): a
+     * LAM's or QuadVee's, before it first deploys and while no map is in space. Empty while it has no choice.
+     */
+    public List<Integer> startingModes() {
+        Entity entity = currentEntity();
+        if (entity == null || !entity.wasNeverDeployed() || !clientgui.getClient().isMyTurn()
+              || game.getBoards().values().stream().anyMatch(Board::isSpace)) {
+            return List.of();
+        }
+        return StartingModes.of(entity);
+    }
+
+    /**
+     * Changes the conversion mode the unit deploying now starts in; the GL HUD's mode switch. A placed unit keeps its
+     * hex at the height there nearest to its new one, or is taken back off the map when the mode can't deploy there.
+     */
+    public void setStartingMode(int mode) {
+        Entity entity = currentEntity();
+        if (isIgnoringEvents() || !startingModes().contains(mode) || mode == entity.getConversionMode()) {
+            return;
+        }
+        int height = entity.isAero() ? entity.getAltitude() : entity.getElevation();
+        StartingModes.apply(entity, mode);
+        lastHexDeploymentOptions.clear();
+        lastDeploymentOption = null;
+        Coords position = entity.getPosition();
+        Board board = position == null ? null : game.getBoard(entity.getBoardId());
+        if (board != null) {
+            DeploymentHelper deploymentHelper = new DeploymentHelper(clientgui);
+            List<ElevationOption> options = deploymentHelper.checkDeployment(board, entity, position,
+                  assaultDropPreference, false)
+                  ? new AllowedDeploymentHelper(entity, position, board, board.getHex(position), game)
+                  .findAllowedElevations() : List.of();
+            if (options.isEmpty()) {
+                entity.setPosition(null);
+                butDone.setEnabled(false);
+                setClearEnabled(false);
+            } else {
+                ElevationOption option = DeploymentHelper.nearestHeightOption(options, height);
+                deploymentHelper.applyDeploymentElevation(entity, board, option.elevation());
+                lastHexDeploymentOptions.addAll(options);
+                lastDeploymentOption = option;
+            }
+        }
+        setAssaultDropEnabled(entity.canAssaultDrop()
+              && game.getOptions().booleanOption(OptionsConstants.ADVANCED_ASSAULT_DROP));
+        markDeploymentHexes(entity);
+        clientgui.boardStates().forEach(BoardClientState::redrawAllEntities);
+        clientgui.getUnitDisplayState().displayEntity(entity);
+        clientgui.updateFiringArc(entity);
+        clientgui.showSensorRanges(entity);
+        clientgui.boardStates().forEach(BoardClientState::repaint);
     }
 
     /** How many elevations above its highest listed one {@link #placedHeights} offers a VTOL. */

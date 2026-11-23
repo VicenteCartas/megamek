@@ -33,6 +33,7 @@
 
 package megamek.server.totalWarfare;
 
+import jakarta.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Vector;
@@ -48,6 +49,7 @@ import megamek.common.options.OptionsConstants;
 import megamek.common.turns.SpecificEntityTurn;
 import megamek.common.units.Entity;
 import megamek.common.units.IAero;
+import megamek.common.units.StartingModes;
 import megamek.logging.MMLogger;
 
 /**
@@ -101,6 +103,12 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
             turn = getGame().getTurnForPlayer(connId);
         }
 
+        // A LAM or QuadVee may change the mode it starts in until it first deploys, and the mode decides where it may deploy
+        Runnable restore = null;
+        if ((packet.data().length > 7 + loadedCount) && (turn != null) && turn.isValid(connId, entity, getGame())) {
+            restore = applyStartingMode(entity, packet.getIntValue(7 + loadedCount));
+        }
+
         DeploymentServerHelper deploymentServerHelper = new DeploymentServerHelper(gameManager);
         boolean isLegalLocation = deploymentServerHelper.isLegalDeployment(coords, boardId, entity, nFacing, elevation);
         Hex destinationHex = getGame().hasBoardLocation(coords, boardId)
@@ -114,6 +122,9 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
               || (assaultDrop && getGame().getOptions().booleanOption(OptionsConstants.ADVANCED_ASSAULT_DROP)
               && entity.canAssaultDrop()))) {
 
+            if (restore != null) {
+                restore.run();
+            }
             String msg = "server got invalid deployment packet from connection " + connId;
             msg += ", Entity: " + entity.getShortName();
             LOGGER.error(msg);
@@ -129,6 +140,9 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
         Entity blocker = deploymentServerHelper.findDeploymentStackingViolation(entity, coords, boardId, elevation,
               assaultDrop);
         if (blocker != null) {
+            if (restore != null) {
+                restore.run();
+            }
             deploymentServerHelper.refuseStackedDeployment(connId, entity, blocker, coords, turn.playerId());
             return;
         }
@@ -157,6 +171,20 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
         }
         TWGameManager.datasetLogger.append(getGame(), true);
         gameManager.endCurrentTurn(entity);
+    }
+
+    /**
+     * Puts the never deployed {@code entity} into the starting {@code mode} its deployment chose (StartingModes), if it
+     * may start in it.
+     *
+     * @return what restores the unit's earlier mode and height, or null when nothing changed
+     */
+    private @Nullable Runnable applyStartingMode(Entity entity, int mode) {
+        if (entity.wasNeverDeployed() && (mode != entity.getConversionMode())
+              && !StartingModes.of(entity).contains(mode)) {
+            LOGGER.error("{} can not start in conversion mode {}", entity.getShortName(), mode);
+        }
+        return StartingModes.choose(entity, mode);
     }
 
     /**

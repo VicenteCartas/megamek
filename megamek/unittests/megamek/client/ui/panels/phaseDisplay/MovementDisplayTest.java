@@ -60,6 +60,7 @@ import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.MoveStepType;
+import megamek.common.equipment.MiscType;
 import megamek.common.game.Game;
 import megamek.common.moves.MovePath;
 import megamek.common.units.AeroSpaceFighter;
@@ -67,6 +68,8 @@ import megamek.common.units.BipedMek;
 import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementMode;
+import megamek.common.units.Mek;
+import megamek.common.units.QuadVee;
 import megamek.common.units.Targetable;
 import megamek.common.units.VTOL;
 import org.junit.jupiter.api.AfterEach;
@@ -482,6 +485,98 @@ class MovementDisplayTest {
         // At depth 1 the unit at -1 sits on the seafloor, where it may not turn: only arriving facing straight is legal
         assertEquals(3, movementDisplay.getLastEnvelope().mp().get(new Coords(2, 1)),
               "Seafloor hex two in: " + movementDisplay.getLastEnvelope().mp());
+    }
+
+    @Test
+    @DisplayName("a walk-on QuadVee placed on its entry hex converts to vehicle mode and back, keeping its placement")
+    void walkOnQuadVeeConvertsAfterPlacement() throws Exception {
+        QuadVee quadVee = new QuadVee();
+        quadVee.setGame(game);
+        quadVee.setBoardId(game.getBoard().getBoardId());
+        quadVee.setDeployed(true);
+        game.addEntity(quadVee);
+        quadVee.setPosition(new Coords(0, 1));
+        movementDisplay.currentEntity = quadVee.getId();
+        MovePath placed = new MovePath(game, quadVee);
+        placed.addStep(MoveStepType.DEPLOY);
+        setField(movementDisplay, "cmd", placed);
+        setField(movementDisplay, "gear", MovementDisplay.GEAR_LAND);
+        setField(movementDisplay, "unloadableUnits", new java.util.ArrayList<>());
+        setField(movementDisplay, "towedUnits", new java.util.ArrayList<>());
+
+        invoke("updateConvertModeButton");
+        assertTrue(movementDisplay.isConvertEnabled(), "A unit only placed on its entry hex may still convert.");
+
+        adjustConvertSteps(EntityMovementMode.TRACKED);
+        MovePath converted = (MovePath) readField(movementDisplay, "cmd");
+        assertEquals(List.of(MoveStepType.DEPLOY, MoveStepType.CONVERT_MODE),
+              converted.getStepVector().stream().map(step -> step.getType()).toList());
+        assertEquals(EntityMovementMode.TRACKED, converted.getFinalConversionMode());
+        assertTrue(quadVee.isConvertingNow());
+        invoke("updateConvertModeButton");
+        assertTrue(movementDisplay.isConvertEnabled(), "A planned conversion may still change its mode.");
+
+        adjustConvertSteps(EntityMovementMode.QUAD);
+        MovePath back = (MovePath) readField(movementDisplay, "cmd");
+        assertEquals(List.of(MoveStepType.DEPLOY), back.getStepVector().stream().map(step -> step.getType()).toList(),
+              "Back in its starting mode, the unit keeps only its placement.");
+        assertFalse(quadVee.isConvertingNow());
+
+        back.addStep(MoveStepType.FORWARDS);
+        invoke("updateConvertModeButton");
+        assertFalse(movementDisplay.isConvertEnabled(), "A unit that has moved converts no more.");
+    }
+
+    @Test
+    @DisplayName("a Mek with tracks takes its tracks and its legs again, and a restored plan converts it as before")
+    void trackedMekConvertsBackToLegs() throws Exception {
+        BipedMek mek = new BipedMek();
+        mek.addEquipment(MiscType.createTracks(), Mek.LOC_RIGHT_LEG);
+        mek.addEquipment(MiscType.createTracks(), Mek.LOC_LEFT_LEG);
+        mek.setGame(game);
+        mek.setBoardId(game.getBoard().getBoardId());
+        game.addEntity(mek);
+        mek.setPosition(new Coords(1, 1));
+        movementDisplay.currentEntity = mek.getId();
+        setField(movementDisplay, "cmd", new MovePath(game, mek));
+        setField(movementDisplay, "gear", MovementDisplay.GEAR_LAND);
+        setField(movementDisplay, "unloadableUnits", new java.util.ArrayList<>());
+        setField(movementDisplay, "towedUnits", new java.util.ArrayList<>());
+        assertTrue(mek.hasTracks());
+
+        adjustConvertSteps(EntityMovementMode.TRACKED);
+        MovePath tracked = ((MovePath) readField(movementDisplay, "cmd")).clone();
+        assertEquals(EntityMovementMode.TRACKED, tracked.getFinalConversionMode());
+        assertEquals(EntityMovementMode.TRACKED, mek.getMovementMode(), "The Mek plans on its tracks.");
+
+        adjustConvertSteps(EntityMovementMode.BIPED);
+        MovePath legs = (MovePath) readField(movementDisplay, "cmd");
+        assertFalse(legs.contains(MoveStepType.CONVERT_MODE), "Back on its legs, the Mek doesn't convert.");
+        assertEquals(EntityMovementMode.BIPED, mek.getMovementMode());
+        assertFalse(mek.isConvertingNow());
+
+        movementDisplay.plotPath(tracked);
+        MovePath restored = (MovePath) readField(movementDisplay, "cmd");
+        assertEquals(EntityMovementMode.TRACKED, restored.getFinalConversionMode(),
+              "A restored conversion compiles from the starting mode.");
+        assertEquals(EntityMovementMode.TRACKED, mek.getMovementMode());
+        assertTrue(mek.isConvertingNow());
+
+        movementDisplay.clear();
+        assertEquals(EntityMovementMode.BIPED, mek.getMovementMode(), "Clear takes the conversion back.");
+        assertFalse(mek.isConvertingNow());
+    }
+
+    private void adjustConvertSteps(EntityMovementMode mode) throws Exception {
+        Method method = MovementDisplay.class.getDeclaredMethod("adjustConvertSteps", EntityMovementMode.class);
+        method.setAccessible(true);
+        method.invoke(movementDisplay, mode);
+    }
+
+    private void invoke(String name) throws Exception {
+        Method method = MovementDisplay.class.getDeclaredMethod(name);
+        method.setAccessible(true);
+        method.invoke(movementDisplay);
     }
 
     private boolean changeEntryHeight(Entity entity, boolean up) throws Exception {

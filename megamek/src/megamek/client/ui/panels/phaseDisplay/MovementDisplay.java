@@ -2126,6 +2126,11 @@ public class MovementDisplay extends ActionPhaseDisplay {
         // Remove Careful stand, in case it was set
         currentlySelectedEntity.setCarefulStand(false);
         currentlySelectedEntity.setIsJumpingNow(false);
+        // A Mek converting to or from tracks plans in its new mode (see adjustConvertSteps): it starts in the other
+        if (currentlySelectedEntity.isConvertingNow() && (currentlySelectedEntity instanceof Mek mek)
+              && mek.hasTracks()) {
+            mek.toggleConversionMode();
+        }
         currentlySelectedEntity.setConvertingNow(false);
         currentlySelectedEntity.setClimbMode(ClimbingHelper.getDefaultClimbMode(currentlySelectedEntity));
 
@@ -2455,6 +2460,79 @@ public class MovementDisplay extends ActionPhaseDisplay {
         lastDeploymentOption = DeploymentHelper.heightOption(options, height);
         cmd = new MovePath(game, entity);
         addDeploymentToMovePath();
+    }
+
+    /**
+     * The modes the selected walk-on unit may still enter the map in, free: until its first step, its mode is the one
+     * it starts the game in ({@link StartingModes}), which it took off the map, as it does its entry height (TW p. 224).
+     * Its entry step carries the mode to the server. Empty when it has no choice now: it moved, converts, or the map
+     * is in space.
+     */
+    public List<Integer> entryModes() {
+        Entity entity = currentEntity();
+        return isChoosingEntryMode(entity) ? StartingModes.of(entity) : List.of();
+    }
+
+    private boolean isChoosingEntryMode(@Nullable Entity entity) {
+        if ((entity == null) || (cmd == null) || !clientgui.getClient().isMyTurn()
+              || !Game.rulesManager.getRulesGame().isWalkOnDeployment()
+              || game.getBoards().values().stream().anyMatch(Board::isSpace)) {
+            return false;
+        }
+        boolean waiting = !entity.isDeployed() && (entity.getPosition() == null)
+              && cmd.getStepVector().stream().allMatch(step -> isJumpDeclaration(step.getType()));
+        boolean placed = entity.isDeployed() && (entity.getPosition() != null) && isDeploymentOnly(cmd);
+        return waiting || placed;
+    }
+
+    /**
+     * Has the selected walk-on unit enter the map in conversion {@code mode} instead, free ({@link #entryModes}). A
+     * placed unit stays on its entry hex at the height there nearest to its earlier one, or is taken back off the map
+     * when the mode can't enter there. EDT only.
+     *
+     * @return {@code false} when the unit may not choose {@code mode} now
+     */
+    public boolean chooseEntryMode(int mode) {
+        Entity entity = currentEntity();
+        if (!entryModes().contains(mode)) {
+            return false;
+        }
+        if (mode == entity.getConversionMode()) {
+            return true;
+        }
+        int height = entity.isAero() ? entity.getAltitude() : entity.getElevation();
+        StartingModes.apply(entity, mode);
+        Coords position = entity.getPosition();
+        if (position != null) {
+            Board board = game.getBoard(entity.getBoardId());
+            DeploymentHelper deploymentHelper = new DeploymentHelper(clientgui);
+            List<ElevationOption> options = deploymentHelper.checkDeployment(board, entity, position, false, false)
+                  ? new AllowedDeploymentHelper(entity, position, board, board.getHex(position), game)
+                  .findAllowedElevations() : List.of();
+            if (options.isEmpty()) {
+                withdrawWalkOn();
+                clientgui.getUnitDisplayState().displayEntity(entity);
+                return true;
+            }
+            ElevationOption option = DeploymentHelper.nearestHeightOption(options, height);
+            deploymentHelper.applyDeploymentElevation(entity, board, option.elevation());
+            lastHexDeploymentOptions.clear();
+            lastHexDeploymentOptions.addAll(options);
+            lastDeploymentOption = option;
+            cmd = new MovePath(game, entity);
+            addDeploymentToMovePath();
+            settleEntryHeight(entity);
+            computeMovementEnvelope(entity);
+        } else {
+            markDeploymentHexes(entity);
+        }
+        clientgui.getUnitDisplayState().displayEntity(entity);
+        clientgui.boardStates().forEach(bv -> bv.redrawEntity(entity));
+        clientgui.updateFiringArc(entity);
+        clientgui.showSensorRanges(entity);
+        clientgui.boardStates().forEach(BoardClientState::repaint);
+        refreshButtons();
+        return true;
     }
 
     /** Redraws the current path, the board cursor and the unit's arcs after steps were removed from the path's end. */
@@ -2962,7 +3040,18 @@ public class MovementDisplay extends ActionPhaseDisplay {
             return;
         }
         cmd = path.clone();
+        // A plan put back from before or after a conversion converts the unit as its steps do (see
+        // adjustConvertSteps). A Mek with tracks compiles from its starting mode, then moves in its planned one.
+        boolean tracks = (entity instanceof Mek mek) && mek.hasTracks();
+        boolean converting = cmd.contains(MoveStepType.CONVERT_MODE);
+        if (tracks && entity.isConvertingNow()) {
+            entity.toggleConversionMode();
+        }
+        entity.setConvertingNow(converting);
         cmd.compile(game, entity, false);
+        if (tracks && converting) {
+            entity.toggleConversionMode();
+        }
         clientgui.showSensorRanges(entity, cmd.getFinalCoords());
         clientgui.updateFiringArc(entity);
         updateMove();
@@ -4706,13 +4795,10 @@ public class MovementDisplay extends ActionPhaseDisplay {
     }
 
     private void updateConvertModeButton() {
-        // Issue #5280 NPE - make sure the move path is valid, and the last step isn't null. MovePath::getLastStep()
-        // can return null.
-        if ((cmd != null) && (cmd.getLastStep() != null)) {
-            if (cmd.length() > 0 && cmd.getLastStep().getType() != MoveStepType.CONVERT_MODE) {
-                setModeConvertEnabled(false);
-                return;
-            }
+        // A unit converts before it moves; a walk-on unit right after it is placed on its entry hex.
+        if ((cmd != null) && !onlyPlacementAndConversion(cmd)) {
+            setModeConvertEnabled(false);
+            return;
         }
 
         final Entity currentEntity = currentEntity();
@@ -8759,14 +8845,21 @@ public class MovementDisplay extends ActionPhaseDisplay {
      * @param endMode The mode to convert to
      */
     private void adjustConvertSteps(EntityMovementMode endMode) {
+        if (cmd.contains(MoveStepType.CONVERT_MODE) && (cmd.getFinalConversionMode() == endMode)) {
+            return;
+        }
+        // A Mek converting to or from tracks moves in its planned mode: back in its starting mode, it compares with it
+        if ((currentEntity() instanceof Mek mek) && mek.hasTracks() && mek.isConvertingNow()) {
+            mek.toggleConversionMode();
+            mek.setConvertingNow(false);
+        }
         // Since conversion is not allowed in water, we shouldn't have to deal with the possibility of `swim` modes.
         // Account for grounded LAMs in fighter mode with movement type wheeled
         if (currentEntity().getMovementMode() == endMode || (currentEntity().isAero()
                                                              && endMode == EntityMovementMode.AERODYNE)) {
-            cmd.clear();
-            return;
-        }
-        if (cmd.getFinalConversionMode() == endMode) {
+            // Back to the starting mode: a walk-on unit keeps its placement
+            clear();
+            updateMove();
             return;
         }
         clear();
@@ -8971,6 +9064,21 @@ public class MovementDisplay extends ActionPhaseDisplay {
     private void setJumpEnabled(boolean enabled) {
         buttons.get(MoveCommand.MOVE_JUMP).setEnabled(enabled);
         clientgui.getMenuBar().setEnabled(MoveCommand.MOVE_JUMP.getCmd(), enabled);
+    }
+
+    /** Whether the unit may change its mode now (MegaMek's Convert command), as the GPU HUD's form switch offers it. */
+    public boolean isConvertEnabled() {
+        MegaMekButton convert = buttons.get(MoveCommand.MOVE_MODE_CONVERT);
+        return (convert != null) && convert.isEnabled();
+    }
+
+    /**
+     * @param path the current path, may be empty
+     * @return {@code true} when the path holds nothing but a walk-on placement and mode conversions
+     */
+    private static boolean onlyPlacementAndConversion(MovePath path) {
+        return path.getStepVector().stream().allMatch(step -> (step.getType() == MoveStepType.DEPLOY)
+              || (step.getType() == MoveStepType.CONVERT_MODE));
     }
 
     private void setModeConvertEnabled(boolean enabled) {

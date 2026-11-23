@@ -74,7 +74,7 @@ final class GpuCommandDock implements GpuHud.Component {
      */
     private record Shape(Variant variant, List<String> buttons, boolean more, boolean primary, boolean secondary,
           boolean stop, boolean legend, boolean steps, boolean back, boolean turns, boolean context,
-          boolean heights, boolean jump, boolean elevation, boolean run) { }
+          boolean heights, boolean jump, boolean elevation, boolean run, List<String> forms) { }
 
     /**
      * The More popover's content (plan A.7 G14, A.8 H38, C.2), which G12 shows above the More button: a title and
@@ -261,6 +261,10 @@ final class GpuCommandDock implements GpuHud.Component {
     private final TextTooltip stepsTip;
     /** The option row's physical options (PHYSICAL) or phase commands (GENERIC), rebuilt with the shape. */
     private final List<UiButton> choices = new ArrayList<>();
+    /** The head's mode switch of a unit that converts, in the order of the plan's forms. */
+    private final List<UiButton> forms = new ArrayList<>();
+    /** The mode switch's tooltips: why a mode is disabled, or what choosing it costs. */
+    private final List<TextTooltip> formTips = new ArrayList<>();
     /** The chosen physical options, for the actor and target they were chosen against. */
     private final Set<String> chosen = new LinkedHashSet<>();
     private int chosenActor = Entity.NONE;
@@ -567,7 +571,9 @@ final class GpuCommandDock implements GpuHud.Component {
               variant == Variant.PLAN && contextCommand() != null,
               variant == Variant.GENERIC && deployHeight.choice(deployingActor()) != null,
               variant == Variant.PLAN && jumpShown(), planned && elevationShown(),
-              variant == Variant.PLAN && panels.move().traits().runs());
+              variant == Variant.PLAN && panels.move().traits().runs(),
+              planned ? panels.move().traits().forms().stream().map(GpuMovePlan.Form::label).toList()
+                    : variant == Variant.GENERIC && startForms() != null ? startForms().labels() : List.of());
         if (!shape.equals(shown)) {
             shown = shape;
             layout(shape);
@@ -689,7 +695,19 @@ final class GpuCommandDock implements GpuHud.Component {
         head.clearChildren();
         head.add(title).left().minWidth(0);
         head.add().expandX();
-        head.add(span).right().padLeft(10).minWidth(0);
+        head.add(span).right().minWidth(0);
+        // A unit that converts (a LAM, a QuadVee, a Mek with tracks) chooses its mode in the head, before it moves,
+        // at the head's right edge, in line with More below.
+        forms.clear();
+        formTips.clear();
+        for (int i = 0; i < shape.forms().size(); i++) {
+            UiButton button = button("hud-mini", null, UiTheme.upper(shape.forms().get(i)), null, "dock-form-" + i);
+            int index = i;
+            onChange(button, () -> convert(index));
+            forms.add(button);
+            formTips.add(ui.tip(button));
+            head.add(button).padLeft(i == 0 ? 10 : SEGMENT);
+        }
         if (shape.stop()) {
             head.add(stop).padLeft(8);
         }
@@ -935,13 +953,14 @@ final class GpuCommandDock implements GpuHud.Component {
             }
         }
         undo.setDisabled(!move.canUndo());
+        showForms(move, entering);
         if (shown.elevation()) {
             showElevation(move);
         }
         if (shown.context()) {
             showContext();
         }
-        main(text("GpuBoard.hud.dock.confirmMove"), route && enabled(done()));
+        main(text("GpuBoard.hud.dock.confirmMove"), (route || move.traits().converting()) && enabled(done()));
         secondary(text("GpuBoard.hud.dock.holdPosition"), enabled(command(holdId())));
         waypoint.setDisabled(!move.canPin());
         clearRoute.setDisabled(!route && !move.walkedOn());
@@ -993,6 +1012,7 @@ final class GpuCommandDock implements GpuHud.Component {
         turnLeft.setDisabled(!turns);
         turnRight.setDisabled(!turns);
         undo.setDisabled(!move.canUndo());
+        showForms(move, entering);
         if (shown.elevation()) {
             showElevation(move);
         }
@@ -1250,7 +1270,7 @@ final class GpuCommandDock implements GpuHud.Component {
         }
         head(headline, false);
         span(line, UiTheme.MINT);
-        boolean headed = !headline.isEmpty() || !line.isEmpty();
+        boolean headed = !headline.isEmpty() || !line.isEmpty() || !forms.isEmpty();
         if ((headCell.getActor() == head) != headed) {
             headCell.setActor(headed ? head : null).padBottom(headed ? 7 : 0);
         }
@@ -1273,6 +1293,7 @@ final class GpuCommandDock implements GpuHud.Component {
         if (choice != null) {
             height.setText(UiTheme.upper(deployHeight.label(choice)));
         }
+        showStartForms(startForms());
         if (deploying) {
             // Placing is local until Deploy (Done) sends the unit, so the foot names the confirmation once it can.
             foot("", done != null && done.enabled()
@@ -1295,7 +1316,7 @@ final class GpuCommandDock implements GpuHud.Component {
             return;
         }
         GpuHudData panels = inputs.frame().panels();
-        if (variant == Variant.PLAN && panels.move().route().isEmpty()) {
+        if (variant == Variant.PLAN && panels.move().route().isEmpty() && !panels.move().traits().converting()) {
             source.toasts().post(ToastLevel.INFO, text("GpuBoard.hud.move.plotFirst"));
             return;
         }
@@ -1668,12 +1689,111 @@ final class GpuCommandDock implements GpuHud.Component {
         return variant == Variant.PLAN ? GpuMoveContext.pick(commands()) : null;
     }
 
+    /**
+     * The head's mode switch: the planned mode pressed, a mode the unit can't take now (it has moved, or a damaged LAM)
+     * disabled.
+     */
+    private void showForms(GpuMovePlan.Snapshot move, boolean entering) {
+        GpuBoardSource.FormChoice starting = startForms();
+        if (starting != null) {
+            showStartForms(starting);
+            return;
+        }
+        List<GpuMovePlan.Form> planned = move.traits().forms();
+        for (int i = 0; i < forms.size() && i < planned.size(); i++) {
+            GpuMovePlan.Form form = planned.get(i);
+            UiButton button = forms.get(i);
+            button.pressed(form.planned());
+            boolean disabled = entering || !form.enabled() && !form.planned();
+            button.setDisabled(disabled);
+            String tip = disabled ? (form.why() != null ? form.why()
+                  : text(entering ? "GpuBoard.hud.dock.form.entering" : "GpuBoard.hud.dock.form.moved"))
+                  : form.planned() ? null
+                  : form.cost() > 0 ? text("GpuBoard.hud.dock.form.convertCost", form.label(), form.cost())
+                  : text("GpuBoard.hud.dock.form.convert", form.label());
+            TextTooltip formTip = i < formTips.size() ? formTips.get(i) : null;
+            if (formTip == null) {
+                continue;
+            }
+            if (tip != null) {
+                formTip.getActor().setText(tip);
+                if (!button.getListeners().contains(formTip, true)) {
+                    button.addListener(formTip);
+                }
+            } else if (button.removeListener(formTip)) {
+                formTip.hide();
+            }
+        }
+    }
+
+    /**
+     * The acting unit's starting mode choice (a LAM's, a QuadVee's): while it deploys, or walks on until its first
+     * step; null while it has none.
+     */
+    private GpuBoardSource.FormChoice startForms() {
+        GpuBoardSource.FormChoice choice = source == null ? null : source.formChoice();
+        GpuBattleStatus.Snapshot status = inputs == null ? null : inputs.frame().status();
+        boolean choosing = status != null && status.myTurn()
+              && (status.phase().isDeployment() || status.phase().isMovement());
+        return choice != null && choosing && choice.unitId() == status.actorId() && choice.modes().size() > 1
+              ? choice : null;
+    }
+
+    /**
+     * The head's mode switch while the unit chooses the mode it starts in: that mode pressed, each other one a click
+     * away, free.
+     */
+    private void showStartForms(GpuBoardSource.FormChoice choice) {
+        boolean entering = inputs.frame().status().phase().isMovement();
+        for (int i = 0; i < forms.size(); i++) {
+            UiButton button = forms.get(i);
+            boolean current = choice != null && i < choice.modes().size() && choice.modes().get(i) == choice.mode();
+            button.pressed(current);
+            button.setDisabled(choice == null);
+            TextTooltip formTip = i < formTips.size() ? formTips.get(i) : null;
+            if (formTip == null) {
+                continue;
+            }
+            if (!current && choice != null && i < choice.labels().size()) {
+                formTip.getActor().setText(text(entering ? "GpuBoard.hud.move.entry.form" : "GpuBoard.hud.deploy.form",
+                      choice.labels().get(i)));
+                if (!button.getListeners().contains(formTip, true)) {
+                    button.addListener(formTip);
+                }
+            } else if (button.removeListener(formTip)) {
+                formTip.hide();
+            }
+        }
+    }
+
+    /**
+     * A mode of the head's switch: MegaMek converts to it, or back to the starting mode; while the unit chooses its
+     * starting mode (deploying, or walking on before its first step), it starts in it instead.
+     */
+    private void convert(int index) {
+        GpuBoardSource.FormChoice starting = startForms();
+        if (starting != null) {
+            if (index < starting.modes().size() && starting.modes().get(index) != starting.mode()) {
+                source.setStartingMode(starting.unitId(), starting.modes().get(index));
+            }
+            return;
+        }
+        List<GpuMovePlan.Form> planned = inputs == null ? List.of() : inputs.frame().panels().move().traits().forms();
+        if (index < planned.size() && !planned.get(index).planned()) {
+            source.moves().convert(planned.get(index).command());
+        }
+    }
+
     /** The movement commands the dock shows: its own controls' and the context slot's. */
     private Set<String> moveShown() {
         Set<String> shown = new HashSet<>(MOVE_SHOWN);
         BoardScene.Command shownContext = contextCommand();
         if (shownContext != null) {
             shown.add(shownContext.id());
+        }
+        if ((variant == Variant.PLAN || variant == Variant.FLIGHT)
+              && !inputs.frame().panels().move().traits().forms().isEmpty()) {
+            shown.add(MoveCommand.MOVE_MODE_CONVERT.getCmd());
         }
         if ((variant == Variant.PLAN || variant == Variant.FLIGHT) && elevationShown()) {
             shown.add(GO_UP);

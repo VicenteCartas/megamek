@@ -35,6 +35,7 @@
 
 package megamek.client;
 
+import jakarta.annotation.Nullable;
 import java.awt.Image;
 import java.awt.image.BufferedImage;
 import java.io.BufferedOutputStream;
@@ -341,7 +342,17 @@ public class Client extends AbstractClient {
      */
     public void deploy(int id, Coords coords, int boardId, int nFacing, int elevation, List<Entity> loadedUnits,
           boolean assaultDrop) {
-        int packetCount = 7 + loadedUnits.size();
+        deploy(id, coords, boardId, nFacing, elevation, loadedUnits, assaultDrop, null);
+    }
+
+    /**
+     * Deploys an entity as {@link #deploy(int, Coords, int, int, int, List, boolean)} does, in the conversion mode it
+     * starts the game in (a LAM's or QuadVee's mode, see {@link megamek.common.units.StartingModes}); null keeps the
+     * mode chosen in the lobby.
+     */
+    public void deploy(int id, Coords coords, int boardId, int nFacing, int elevation, List<Entity> loadedUnits,
+          boolean assaultDrop, @Nullable Integer startingMode) {
+        int packetCount = 7 + loadedUnits.size() + (startingMode == null ? 0 : 1);
         int index = 0;
         Object[] data = new Object[packetCount];
         data[index++] = id;
@@ -354,6 +365,9 @@ public class Client extends AbstractClient {
 
         for (Entity ent : loadedUnits) {
             data[index++] = ent.getId();
+        }
+        if (startingMode != null) {
+            data[index] = startingMode;
         }
 
         send(new Packet(PacketCommand.ENTITY_DEPLOY, data));

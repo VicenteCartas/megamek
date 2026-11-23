@@ -174,7 +174,7 @@ final class GpuMoveConfirm implements GpuHud.Component {
         if (ghost == null) {
             return;
         }
-        boolean staying = move.route().isEmpty();
+        boolean staying = move.route().isEmpty() && !move.traits().converting();
         mainId = staying ? holdId() : doneId();
         confirm.setText(UiTheme.upper(text(staying ? "GpuBoard.hud.move.hold" : "GpuBoard.hud.move.confirm")));
         confirmTip.setText(staying ? text("GpuBoard.hud.move.holdTip") : text("GpuBoard.hud.move.confirmTip",
@@ -289,7 +289,7 @@ final class GpuMoveConfirm implements GpuHud.Component {
         boolean home;
         if (move.route().isEmpty()) {
             BoardScene.Unit drawn = drawn(scene, move.entityId());
-            BoardScene.Command hold = command(holdId());
+            BoardScene.Command hold = command(move.traits().converting() ? doneId() : holdId());
             if (move.traits().entering() || !onBoard || drawn == null || hold == null || !hold.enabled()) {
                 return null;
             }

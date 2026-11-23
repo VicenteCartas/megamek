@@ -80,7 +80,9 @@ import megamek.common.units.EntityMovementMode;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.EntityVisibilityUtils;
 import megamek.common.units.Infantry;
+import megamek.common.units.LandAirMek;
 import megamek.common.units.Mek;
+import megamek.common.units.QuadVee;
 import megamek.common.units.Targetable;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -328,6 +330,72 @@ final class GpuBoardSource implements BoardSource {
         }
         return new HeightChoice(entity.getId(), entity.isAero() ? entity.getAltitude() : entity.getElevation(),
               heights, entity.isAero());
+    }
+
+    /**
+     * The modes the unit deploying now may start the game in (a LAM's, a QuadVee's), offered in the dock until it
+     * deploys, and so are those a walk-on unit may enter the map in until its first step: {@code labels} name
+     * {@code modes}, and {@code mode} is the one it starts in now.
+     */
+    record FormChoice(int unitId, List<Integer> modes, List<String> labels, int mode) {
+        static final FormChoice NONE = new FormChoice(Entity.NONE, List.of(), List.of(), 0);
+    }
+
+    private volatile FormChoice formChoice = FormChoice.NONE;
+
+    /** GL thread: the deploying or entering unit's starting mode choice, {@link FormChoice#NONE} while there is none. */
+    FormChoice formChoice() {
+        return formChoice;
+    }
+
+    private static FormChoice captureFormChoice(JComponent panel) {
+        Entity entity;
+        List<Integer> modes;
+        if (panel instanceof DeploymentDisplay deployment) {
+            entity = deployment.currentEntity();
+            modes = deployment.startingModes();
+        } else if (panel instanceof MovementDisplay movement) {
+            entity = movement.currentEntity();
+            modes = movement.entryModes();
+        } else {
+            return FormChoice.NONE;
+        }
+        if (entity == null || modes.size() < 2) {
+            return FormChoice.NONE;
+        }
+        List<String> labels = modes.stream().map(mode -> Messages.getString(formKey(entity, mode))).toList();
+        return new FormChoice(entity.getId(), modes, labels, entity.getConversionMode());
+    }
+
+    private static String formKey(Entity entity, int mode) {
+        if (entity instanceof LandAirMek) {
+            return mode == LandAirMek.CONV_MODE_FIGHTER ? "MovementDisplay.moveModeFighter"
+                  : mode == LandAirMek.CONV_MODE_AIR_MEK ? "MovementDisplay.moveModeAirMek"
+                  : "MovementDisplay.moveModeMek";
+        }
+        return mode == QuadVee.CONV_MODE_VEHICLE ? "MovementDisplay.moveModeVee" : "MovementDisplay.moveModeMek";
+    }
+
+    /**
+     * GL thread: starts the deploying unit {@code unitId} in conversion {@code mode} instead, if it still deploys, or
+     * has the walk-on unit enter in it, if it still may choose.
+     */
+    void setStartingMode(int unitId, int mode) {
+        SwingUtilities.invokeLater(() -> {
+            if (!acceptsInput()) {
+                return;
+            }
+            JComponent panel = phasePanel.get();
+            if (panel instanceof DeploymentDisplay deployment
+                  && deployment.currentEntity() != null && deployment.currentEntity().getId() == unitId) {
+                deployment.setStartingMode(mode);
+                refresh();
+            } else if (panel instanceof MovementDisplay movement
+                  && movement.currentEntity() != null && movement.currentEntity().getId() == unitId
+                  && movement.chooseEntryMode(mode)) {
+                refresh();
+            }
+        });
     }
 
     /** GL thread: deploys the placed unit {@code unitId} at {@code height} instead, if it is still the one placed. */
@@ -1599,6 +1667,7 @@ final class GpuBoardSource implements BoardSource {
         JComponent panel = phasePanel.get();
         holdPlacedFacing(panel, units);
         heightChoice = captureHeightChoice(panel);
+        formChoice = captureFormChoice(panel);
         DeployPin pin = deployPin;
         BoardScene.Unit placing = previewHeld ? null
               : pin != null ? deploymentPreview(panel, pin.hex(), pin.facing(), usedImages)

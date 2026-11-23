@@ -611,7 +611,7 @@ final class GpuBattleStatus {
               entity.getInternalRemainingPercent(), entity.heat,
               tracksHeat ? GUIPreferences.getInstance().getColorForHeat(entity.heat).getRGB() : 0,
               tracksHeat ? UnitToolTip.getHeatCapacityForDisplay(entity).heatCapacityStr : "", entity.getWalkMP(),
-              entity.getRunMPasString(), entity.getJumpMPWithTerrain(),
+              entity.getRunMPasString(false), entity.getJumpMPWithTerrain(),
               entity.moved == EntityMovementType.MOVE_NONE ? "" : entity.getMovementString(entity.moved),
               entity.mpUsed, entity.delta_distance, entity.getFacing(),
               Compute.getTargetMovementModifier(game, entity.getId()).getValue(), canActNow, pending,

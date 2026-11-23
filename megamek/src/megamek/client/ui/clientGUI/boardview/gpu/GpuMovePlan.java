@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.event.ActionEvent;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -43,6 +44,7 @@ import megamek.common.units.EntityMovementMode;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.IAero;
 import megamek.common.units.Infantry;
+import megamek.common.units.LandAirMek;
 import megamek.common.units.Mek;
 import megamek.common.units.QuadVee;
 import megamek.common.units.Tank;
@@ -59,7 +61,7 @@ final class GpuMovePlan implements AutoCloseable {
     private static final int NO_TURN = Integer.MIN_VALUE;
     /** The step types a path may start with before its route (see {@link #base}). */
     private static final Set<MoveStepType> START_STEPS = EnumSet.of(MoveStepType.START_JUMP,
-          MoveStepType.JUMP_MEK_MECHANICAL_BOOSTER, MoveStepType.DEPLOY);
+          MoveStepType.JUMP_MEK_MECHANICAL_BOOSTER, MoveStepType.DEPLOY, MoveStepType.CONVERT_MODE);
 
     /**
      * The gear the planner uses; AUTO lets the route choose walking, running or jumping. Outside the planner, TARGET is
@@ -85,10 +87,12 @@ final class GpuMovePlan implements AutoCloseable {
      * it has a faster gait than its walk (infantry and battle armor move at one speed, unless TacOps fast infantry
      * movement gives them a run). {@code dives}: it moves under water (a submarine, SCUBA infantry or UMU battle
      * armor), so its elevation reads as a depth. {@code walk}: its walk MP where the plan ends, which under water is a
-     * UMU or SCUBA unit's UMU MP; -1 when the unit's walk MP stands.
+     * UMU or SCUBA unit's UMU MP and on the ground a glider ProtoMek's or WiGE vehicle's 1 MP, which also leaves it
+     * no run; -1 when the unit's walk MP stands. {@code forms}: the modes a unit that converts
+     * (a LAM, a QuadVee, a Mek with tracks) chooses between before it moves ({@link Form}), empty for every other unit.
      */
     record Traits(boolean vehicle, boolean jumps, boolean elevates, int elevation, boolean entering,
-          @Nullable Flight flight, boolean runs, boolean dives, int walk) {
+          @Nullable Flight flight, boolean runs, boolean dives, int walk, List<Form> forms) {
        /** A Mek with jump jets: the gaits Walk, Run and Jump. */
        static final Traits MEK = new Traits(false, true, false, 0, false);
 
@@ -102,11 +106,34 @@ final class GpuMovePlan implements AutoCloseable {
            this(vehicle, jumps, elevates, elevation, entering, flight, true, false, -1);
        }
 
+       /** A unit that doesn't convert. */
+       Traits(boolean vehicle, boolean jumps, boolean elevates, int elevation, boolean entering,
+             @Nullable Flight flight, boolean runs, boolean dives, int walk) {
+           this(vehicle, jumps, elevates, elevation, entering, flight, runs, dives, walk, List.of());
+       }
+
+       Traits {
+           forms = List.copyOf(forms);
+       }
+
+       /**
+        * @param convertible whether MegaMek's Convert command is enabled now (the unit may still change its mode)
+        */
        static Traits of(Entity entity, MovePath path, boolean entering, @Nullable Flight flight) {
+           return of(entity, path, entering, flight, false);
+       }
+
+       static Traits of(Entity entity, MovePath path, boolean entering, @Nullable Flight flight,
+             boolean convertible) {
+           List<Form> forms = Form.of(entity, path, convertible && !entering);
            if (flight != null) {
-               return new Traits(false, false, true, path.getFinalAltitude(), entering, flight);
+               return new Traits(false, false, true, path.getFinalAltitude(), entering, flight, true, false, -1,
+                     forms);
            }
-           EntityMovementMode movement = entity.getMovementMode();
+           // A QuadVee or tracked Mek moves in the mode it converts to; a LAM converts at the end of the phase and
+           // moves in its starting mode, at half MP, so it doesn't rise the round it becomes an AirMek
+           boolean startMode = forms.isEmpty() || entity instanceof LandAirMek;
+           EntityMovementMode movement = startMode ? entity.getMovementMode() : path.getFinalConversionMode();
            boolean dives = movement.isSubmarine() || movement.isUMUInfantry();
            // A UMU or SCUBA unit's jump MP is its UMU MP, which it never jumps with
            boolean jumps = !(dives && entity instanceof Infantry) && (entity.getOriginalJumpMP() > 0
@@ -116,9 +143,14 @@ final class GpuMovePlan implements AutoCloseable {
            // A diving unit only changes depth in water; before its entry hex its stepper waits, disabled
            boolean elevates = movement.isVTOLOrWiGE() || dives && ((end == null) || water(entity, end,
                  path.getFinalBoardId()));
-           int walk = dives ? GpuBoardSource.walkMP(entity, end, path.getFinalBoardId()) : -1;
-           return new Traits(vehicle(entity), jumps, elevates, path.getFinalElevation(), entering, null, runs, dives,
-                 walk);
+           // A glider ProtoMek or WiGE vehicle on the ground has 1 MP there, and no faster gait, until it rises
+           boolean grounded = movement == EntityMovementMode.WIGE && !(entity instanceof LandAirMek)
+                 && path.getFinalElevation() <= 0;
+           int walk = grounded ? 1 : dives ? GpuBoardSource.walkMP(entity, end, path.getFinalBoardId()) : -1;
+           boolean vehicle = forms.isEmpty() ? vehicle(entity)
+                 : entity instanceof QuadVee && movement.isTrackedOrWheeled();
+           return new Traits(vehicle, jumps, elevates, path.getFinalElevation(), entering, null, runs && !grounded,
+                 dives, walk, forms);
        }
 
         static boolean vehicle(Entity entity) {
@@ -134,6 +166,85 @@ final class GpuMovePlan implements AutoCloseable {
         /** The stepper's read-out: the elevation or altitude, or a diving unit's depth under the surface. */
         int shownLevel() {
             return dives ? Math.max(0, -elevation) : elevation;
+        }
+
+        /** Whether the plan converts the unit to another mode, which is a move to confirm even without a route. */
+        boolean converting() {
+            return forms.stream().anyMatch(form -> form.planned() && !form.start());
+        }
+    }
+
+    /**
+     * One mode of a unit that converts (TW, TO:AUE): a LAM's Mek, AirMek and Fighter, a QuadVee's Mek and Vehicle, a
+     * tracked Mek's legs and tracks. {@code command} is MegaMek's movement command that converts to it, {@code start}
+     * marks the mode the unit starts its move in and {@code planned} the one the plan ends in. {@code enabled}: the
+     * unit may convert to it now (MegaMek's Convert command is enabled, so the path holds no move yet, and a damaged
+     * LAM may take that mode). {@code cost} is the MP the conversion costs from the starting mode, 0 for free.
+     * {@code why}: why a LAM can't take the mode at all this round, null when it can or the unit isn't a LAM.
+     */
+    record Form(String command, String label, boolean start, boolean planned, boolean enabled, int cost,
+          @Nullable String why) {
+        Form(String command, String label, boolean start, boolean planned, boolean enabled, int cost) {
+            this(command, label, start, planned, enabled, cost, null);
+        }
+
+        static List<Form> of(Entity entity, MovePath path, boolean convertible) {
+            EntityMovementMode end = path.getFinalConversionMode();
+            String leg = MoveCommand.MOVE_MODE_LEG.getCmd();
+            String vee = MoveCommand.MOVE_MODE_VEE.getCmd();
+            if (entity instanceof LandAirMek lam) {
+                int from = lam.getConversionMode();
+                int planned = lam.getConversionModeFor(end);
+                List<Form> forms = new ArrayList<>();
+                forms.add(lamForm(lam, leg, "MovementDisplay.moveModeMek", LandAirMek.CONV_MODE_MEK, from, planned,
+                      convertible));
+                if (lam.getLAMType() == LandAirMek.LAM_STANDARD) {
+                    forms.add(lamForm(lam, vee, "MovementDisplay.moveModeAirMek", LandAirMek.CONV_MODE_AIR_MEK, from,
+                          planned, convertible));
+                }
+                forms.add(lamForm(lam, MoveCommand.MOVE_MODE_AIR.getCmd(), "MovementDisplay.moveModeFighter",
+                      LandAirMek.CONV_MODE_FIGHTER, from, planned, convertible));
+                return forms;
+            } else if (entity instanceof QuadVee quadVee) {
+                boolean startsVehicle = quadVee.getConversionMode() == QuadVee.CONV_MODE_VEHICLE;
+                boolean endsVehicle = end.isTrackedOrWheeled();
+                int cost = quadVee.conversionCost();
+                return List.of(new Form(leg, Messages.getString("MovementDisplay.moveModeMek"), !startsVehicle,
+                            !endsVehicle, convertible, startsVehicle ? cost : 0),
+                      new Form(vee, Messages.getString("MovementDisplay.moveModeVee"), startsVehicle, endsVehicle,
+                            convertible, startsVehicle ? 0 : cost));
+            } else if ((entity instanceof Mek mek) && mek.hasTracks()) {
+                boolean startsTracked = entity.getMovementMode() == EntityMovementMode.TRACKED;
+                boolean endsTracked = end == EntityMovementMode.TRACKED;
+                // A tracked Mek's planned mode is the entity's own while it converts (MovementDisplay sets it)
+                if (entity.isConvertingNow()) {
+                    startsTracked = !startsTracked;
+                }
+                return List.of(new Form(leg, Messages.getString("GpuBoard.hud.dock.form.legs"), !startsTracked,
+                            !endsTracked, convertible, 0),
+                      new Form(vee, Messages.getString("GpuBoard.hud.dock.form.tracks"), startsTracked, endsTracked,
+                            convertible, 0));
+            }
+            return List.of();
+        }
+
+        private static Form lamForm(LandAirMek lam, String command, String key, int mode, int from, int planned,
+              boolean convertible) {
+            boolean reachable = (mode == from) || lam.canConvertTo(from, mode);
+            return new Form(command, Messages.getString(key), mode == from, mode == planned,
+                  convertible && reachable, 0, reachable ? null : why(lam, from, mode));
+        }
+
+        /** Why a LAM can't convert from one mode to another this round (TW: one step a round on a ground map). */
+        private static String why(LandAirMek lam, int from, int to) {
+            boolean acrossAirMek = from != to && from != LandAirMek.CONV_MODE_AIR_MEK
+                  && to != LandAirMek.CONV_MODE_AIR_MEK;
+            if (acrossAirMek && lam.getLAMType() == LandAirMek.LAM_STANDARD && !lam.isSpaceborne()
+                  && lam.canConvertTo(from, LandAirMek.CONV_MODE_AIR_MEK)
+                  && lam.canConvertTo(LandAirMek.CONV_MODE_AIR_MEK, to)) {
+                return Messages.getString("GpuBoard.hud.dock.form.throughAirMek");
+            }
+            return Messages.getString("GpuBoard.hud.dock.form.damaged");
         }
     }
 
@@ -235,8 +346,12 @@ final class GpuMovePlan implements AutoCloseable {
         }
     }
 
-    /** One path step as the plan compares paths. */
-    private record StepKey(MoveStepType type, Coords coords, int boardId, int facing, int elevation, int altitude) { }
+    /**
+     * One path step as the plan compares paths; its movement mode tells a walk-on unit's entry in another starting mode
+     * from the same entry.
+     */
+    private record StepKey(MoveStepType type, Coords coords, int boardId, int facing, int elevation, int altitude,
+          EntityMovementMode mode) { }
 
     /** A path's gear and steps: what tells the plan's own changes from changes made elsewhere. */
     private record PathKey(int gear, List<StepKey> steps) { }
@@ -329,7 +444,7 @@ final class GpuMovePlan implements AutoCloseable {
         boolean explicit = planner && (mode != Mode.AUTO);
         Flight flight = flight(entity, path);
         Traits traits = Traits.of(entity, path, !planner && (flight != null
-              ? !entity.isDeployed() && !md.isSelectingHex() : entering(md, entity)), flight);
+              ? !entity.isDeployed() && !md.isSelectingHex() : entering(md, entity)), flight, md.isConvertEnabled());
         Snapshot next = new Snapshot(true, planner, planner && external, entityId, mode, explicit,
               label(mode, traits.vehicle()), shown.route(), hovered, planner ? pinned(path) : List.of(),
               shown.destination(), shown.facing(), shown.cost(), shown.budget(), shown.type(),
@@ -422,6 +537,21 @@ final class GpuMovePlan implements AutoCloseable {
     /** Esc and "Clear route": back to the mode's start. */
     void clearRoute() {
         command(this::clear);
+    }
+
+    /**
+     * Converts the unit to a mode before it moves ({@link Form}): MegaMek's command for that mode, which clears the
+     * route; the unit's starting mode takes the conversion back. In flight, the same through MegaMek's plot.
+     */
+    void convert(String formCommand) {
+        command(md -> {
+            Entry before = entry(md);
+            md.actionPerformed(new ActionEvent(md, ActionEvent.ACTION_PERFORMED, formCommand));
+            pins = List.of();
+            external = false;
+            record(md, before);
+        });
+        flight(md -> md.actionPerformed(new ActionEvent(md, ActionEvent.ACTION_PERFORMED, formCommand)));
     }
 
     /** Esc on a walk-on unit's bare placement: the unit leaves its entry hex to be placed again. */
@@ -1101,7 +1231,7 @@ final class GpuMovePlan implements AutoCloseable {
     private static List<StepKey> steps(MovePath path) {
         return path.getStepVector().stream()
               .map(step -> new StepKey(step.getType(), step.getPosition(), step.getBoardId(), step.getFacing(),
-                    step.getElevation(), step.getAltitude()))
+                    step.getElevation(), step.getAltitude(), step.getMovementMode()))
               .toList();
     }
 
