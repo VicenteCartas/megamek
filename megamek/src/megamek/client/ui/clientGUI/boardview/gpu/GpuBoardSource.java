@@ -76,8 +76,10 @@ import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.Aero;
 import megamek.common.units.BulldozerRules;
 import megamek.common.units.Entity;
+import megamek.common.units.EntityMovementMode;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.EntityVisibilityUtils;
+import megamek.common.units.Infantry;
 import megamek.common.units.Mek;
 import megamek.common.units.Targetable;
 import megamek.common.units.Terrain;
@@ -1329,6 +1331,24 @@ final class GpuBoardSource implements BoardSource {
         return -1;
     }
 
+    /**
+     * The walk MP the unit moves with in the hex {@code at}: under water, a UMU or SCUBA unit moves with its UMU MP
+     * (as MoveStep counts it), anywhere else with its walk MP.
+     */
+    static int walkMP(Entity entity, @Nullable Coords at, int boardId) {
+        EntityMovementMode mode = entity.getMovementMode();
+        boolean swims = mode.isUMUInfantry() || (mode == EntityMovementMode.BIPED_SWIM)
+              || (mode == EntityMovementMode.QUAD_SWIM) || (entity instanceof Infantry && mode.isSubmarine());
+        Game game = entity.getGame();
+        if (!swims || (at == null) || (game == null)) {
+            return entity.getWalkMP();
+        }
+        Hex hex = game.getHex(at, boardId);
+        boolean submerged = (hex != null) && (hex.terrainLevel(Terrains.WATER) > 0)
+              && (!mode.isUMUInfantry() || (entity.relHeight() < hex.getLevel()));
+        return submerged ? entity.getActiveUMUCount() : entity.getWalkMP();
+    }
+
     /** Copy the game's current capability once at the event boundary; the renderer never recalculates MP rules. */
     static int movementMP(Entity entity, EntityMovementType type) {
         if (entity instanceof Aero aero && aero.isAirborne()) {
@@ -1627,7 +1647,7 @@ final class GpuBoardSource implements BoardSource {
               firingLines(), view.getWeaponRanges().stream().map(range -> new BoardScene.RangeBorder(
                     range.coords(), range.borders(), TacticalStyle.rangeColor(range.bracket()).getRGB(),
                     TacticalStyle.rangeText(range.bracket()))).toList(),
-              view.getBoardMarkers(), tacticalMarks.capture(view, move.planner()).withRuler(rulerSnapshot.ruler()),
+              view.getBoardMarkers(), tacticalMarks.capture(view, GpuMovePlan.drawsRoute(move)).withRuler(rulerSnapshot.ruler()),
               view.getRangeLabels().stream().map(label -> new BoardScene.RangeLabel(label.coords(),
                     TacticalStyle.rangeColor(label.bracket()).getRGB(),
                     TacticalStyle.rangeText(label.bracket()))).toList(), fieldOfView,

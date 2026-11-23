@@ -137,12 +137,13 @@ final class GpuBattleStatus {
     enum Side { OWN, ALLY, ENEMY }
 
     /**
-     * Why an own unit still to deploy this round cannot deploy in the local player's next turn: aerospace units have
-     * turns of their own after every ground turn ({@code AFTER_GROUND}), infantry and ProtoMeks moving later wait for
-     * the player's other units ({@code AFTER_OTHERS}), any other unit for another turn ({@code LATER}). {@code NONE}:
-     * it can, or the question does not arise.
+     * Why an own unit still to deploy or move this phase cannot act in the local player's next turn: aerospace units
+     * have turns of their own after every ground turn ({@code AFTER_GROUND}), infantry and ProtoMeks moving later wait
+     * for the player's other units ({@code AFTER_OTHERS}), any other unit for another turn ({@code LATER}). A unit
+     * aboard a carrier ({@code CARRIED}) deploys, walks on and moves with it, never on its own.
+     * {@code NONE}: it can, or the question does not arise.
      */
-    enum Wait { NONE, AFTER_GROUND, AFTER_OTHERS, LATER }
+    enum Wait { NONE, AFTER_GROUND, AFTER_OTHERS, LATER, CARRIED }
 
     /**
      * One listed unit as the Swing client shows it. {@code name} is the client's unique short name, {@code chassis}
@@ -168,7 +169,7 @@ final class GpuBattleStatus {
      * has no status words or tiles and its marks are {@link Marks#NONE}. {@code walkOnZone} is the zone of the edge the
      * unit walks on from under walk-on deployment ({@code Board.START_NONE} for a unit that deploys or stands on the
      * board) and {@code walkOnRound} the round in whose movement phase it enters. {@code deployWait} is why an own unit to
-     * deploy waits for a later turn of the deployment phase ({@link Wait}).
+          * deploy or move waits for a later turn of the deployment or movement phase ({@link Wait}).
      */
     record UnitStatus(int id, Side side, boolean sensorContact, String name, String chassis, String model,
           double tons, String weightClass, String formation, String pilot, int gunnery, int piloting, double armor,
@@ -299,8 +300,10 @@ final class GpuBattleStatus {
               : Entity.NONE;
         boolean turnTakesWalkOn = firstDeployable != Entity.NONE
               && game.walksOnInsteadOfDeploying(game.getEntity(firstDeployable));
-        // The local player's current or next deployment turn: a unit it does not take waits, whoever's turn it is now.
-        GameTurn nextLocal = !game.getPhase().isDeployment() ? null
+        // The local player's current or next deployment or movement turn: a unit it does not take waits, whoever's turn
+        // it is now (aerospace units also move only after every ground unit).
+        boolean deploying = game.getPhase().isDeployment();
+        GameTurn nextLocal = !deploying && !game.getPhase().isMovement() ? null
               : remaining.stream().filter(turn -> turn.isValid(localId, game)).findFirst().orElse(null);
         List<UnitStatus> units = new ArrayList<>();
         for (Entity entity : listed) {
@@ -317,13 +320,16 @@ final class GpuBattleStatus {
             boolean pending = remaining.stream().anyMatch(turn -> turn.isValidEntity(entity, game)
                   || turn.isValidEntity(entity, game, false));
             boolean canActNow = activeTurn != null && activeTurn.isValidEntity(entity, game);
-            boolean walksOn = game.walksOnInsteadOfDeploying(entity);
+            boolean carried = entity.getTransportId() != Entity.NONE;
+            boolean walksOn = !carried && game.walksOnInsteadOfDeploying(entity);
             if (walksOn) {
                 canActNow &= turnTakesWalkOn;
                 pending = canActNow;
             }
-            Wait wait = side != Side.OWN || walksOn || !pending || entity.getPosition() != null || nextLocal == null
-                  || nextLocal.isValidEntity(entity, game) ? Wait.NONE : waitOf(entity);
+            Wait wait = side == Side.OWN && carried ? Wait.CARRIED
+                  : side != Side.OWN || walksOn || !pending || (deploying && entity.getPosition() != null)
+                  || nextLocal == null || nextLocal.isValidEntity(entity, game) ? Wait.NONE
+                  : waitOf(entity, nextLocal);
             // The local player's view adds the scan and recon camera words (upstream), as the board labels show them.
             List<UnitStatusWords.StatusWord> words = UnitStatusWords.statusWords(entity,
                   ComputeECM.isAffectedByECM(entity, entity.getPosition(), entity.getPosition(), ecm),
@@ -619,14 +625,19 @@ final class GpuBattleStatus {
               walkOnZone(entity), Math.max(Math.max(1, entity.getDeployRound()), game.getRoundCount()), wait);
     }
 
-    /** Why a unit waits for a later deployment turn, by the turn classes TWGameManager deals out. */
-    private static Wait waitOf(Entity entity) {
+    /**
+     * Why a unit waits for a later deployment or movement turn than {@code next}, by the turn classes TWGameManager
+     * deals out: an aerospace unit waits for the ground units only while {@code next} is a ground turn (on a space map
+     * a fighter can wait for a DropShip's turn instead).
+     */
+    private static Wait waitOf(Entity entity, GameTurn next) {
         int classCode = EntityClassTurn.getClassCode(entity);
         int aerospace = EntityClassTurn.CLASS_AERO | EntityClassTurn.CLASS_SMALL_CRAFT
               | EntityClassTurn.CLASS_DROPSHIP | EntityClassTurn.CLASS_JUMPSHIP | EntityClassTurn.CLASS_WARSHIP
               | EntityClassTurn.CLASS_SPACE_STATION;
         if ((classCode & aerospace) != 0) {
-            return Wait.AFTER_GROUND;
+            return next instanceof EntityClassTurn classTurn && classTurn.isValidClass(aerospace) ? Wait.LATER
+                  : Wait.AFTER_GROUND;
         }
         return (classCode & (EntityClassTurn.CLASS_INFANTRY | EntityClassTurn.CLASS_PROTOMEK)) != 0
               ? Wait.AFTER_OTHERS : Wait.LATER;
@@ -661,7 +672,9 @@ final class GpuBattleStatus {
     private static int walkOnZone(Entity entity) {
         RulesGame rules = Game.rulesManager.getRulesGame();
         int zone = entity.getStartingPos();
+        // A carried unit enters aboard its carrier, not from an edge of its own.
         return !entity.isDeployed() && entity.getDeployRound() >= 0 && rules.isWalkOnDeployment()
+              && entity.getTransportId() == Entity.NONE
               && rules.restrictDeploymentWidth(entity.getOwner(), zone) ? zone : Board.START_NONE;
     }
 }

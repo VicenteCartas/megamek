@@ -201,6 +201,8 @@ public class MoveStep implements Serializable {
      */
     private boolean isJumpingPath = false;
     private boolean isUsingMekJumpBooster = false;
+    /** Whether this step's path walks the unit on (starts with a DEPLOY step onto its entry hex). */
+    private boolean isWalkOnPath = false;
 
     /**
      * Determines if this MoveStep is part of a MovePath that is moving carefully.
@@ -280,6 +282,7 @@ public class MoveStep implements Serializable {
             entity = path.getEntity();
             isJumpingPath = path.isJumping();
             isUsingMekJumpBooster = path.contains(MoveStepType.JUMP_MEK_MECHANICAL_BOOSTER);
+            isWalkOnPath = path.contains(MoveStepType.DEPLOY);
             isCarefulPath = path.isCareful();
             boardId = path.getFinalBoardId();
         }
@@ -2626,11 +2629,13 @@ public class MoveStep implements Serializable {
                     // tank on a road can move 5/7, **not** 5/8.
                 }
             } else if ((entity instanceof Infantry) &&
+                       !isWalkOnPath &&
                        (curPos.distance(entity.getPosition()) == 1) &&
                        (lastPos.equals(entity.getPosition()))) {
                 // This ensures that Infantry always get their minimum 1 hex movement when TO fast infantry movement
                 // is on. A MovePath that consists of a single step from one hex to the next should always be a walk,
-                // since it's covered under the infantry's 1 free movement
+                // since it's covered under the infantry's 1 free movement. A walk-on unit's entry into its first hex
+                // is already that movement (minimum movement must be the only MP spent in the turn).
                 // VTOL includes powered flight infantry whose getMovementMode() returns VTOL
                 boolean isVTOLMode = (getEntity().getMovementMode() == EntityMovementMode.VTOL) && getClearance() > 0;
                 if (isVTOLMode) {
@@ -2724,8 +2729,9 @@ public class MoveStep implements Serializable {
              entity.movedLastRound == EntityMovementType.MOVE_JUMP)) {
             movementType = EntityMovementType.MOVE_ILLEGAL;
         }
-        // 0 MP infantry units can move 1 hex
+        // 0 MP infantry units can move 1 hex; a walk-on unit's entry is that hex, so no further hex is free
         if (isInfantry &&
+            (!isWalkOnPath || (type == MoveStepType.DEPLOY)) &&
             (cachedEntityState.getWalkMP() == 0) &&
             getEntity().getPosition().equals(prev.getPosition()) &&
             (prev.getElevation() == entity.getElevation()) &&
@@ -2864,8 +2870,9 @@ public class MoveStep implements Serializable {
             movementType = EntityMovementType.MOVE_ILLEGAL;
         }
 
-        // amnesty for the first step
+        // amnesty for the first step (minimum movement, TW p. 49); a walk-on unit's entry hex already spent MP
         if (isFirstStep() &&
+            !isWalkOnPath &&
             (movementType == EntityMovementType.MOVE_ILLEGAL) &&
             (cachedEntityState.getWalkMP() > 0) &&
             !entity.isProne() &&
@@ -3439,8 +3446,9 @@ public class MoveStep implements Serializable {
 
         mp = 1;
 
-        // 0 MP infantry units can move 1 hex
+        // 0 MP infantry units can move 1 hex (for a walk-on unit, its entry hex)
         if (isInfantry &&
+            !isWalkOnPath &&
             (cachedEntityState.getWalkMP() == 0) &&
             !moveMode.isSubmarine() &&
             !moveMode.isVTOL() &&

@@ -261,7 +261,8 @@ class GpuNameplatesSmokeTest {
                 expected.put(TIMBER_WOLF, List.of("Timber Wolf", ""));
                 expected.put(CONTACT, CONTACT_TAG);
                 assertEquals(expected, plates.markers(roster));
-                assertEquals(UiTheme.CORAL, ((Label) plates.tag(TIMBER_WOLF).getChild(0)).getColor(),
+                Table nameRow = (Table) plates.tag(TIMBER_WOLF).getChild(0);
+                assertEquals(UiTheme.CORAL, ((Label) nameRow.getChild(0)).getColor(),
                       "An enemy's tag is coral");
                 capture(hud, "nameplates-09", SHOT_09, new Crop("target", plates.tag(TIMBER_WOLF), 888, 339),
                       new Crop("tag", plates.tag(ATLAS), 913, 437));
@@ -857,7 +858,8 @@ class GpuNameplatesSmokeTest {
 
     /** A tag's name (0), chip (1: weight class and skills) or sub-line (2). */
     private static String line(Table tag, int index) {
-        return ((Label) tag.getChild(index)).getText().toString();
+        Table nameRow = (Table) tag.getChild(0);
+        return ((Label) nameRow.getChild(index)).getText().toString();
     }
 
     private static GpuHudData panels(GpuFireOrders.Snapshot fire, GpuPhysicalOptions.Snapshot physical) {

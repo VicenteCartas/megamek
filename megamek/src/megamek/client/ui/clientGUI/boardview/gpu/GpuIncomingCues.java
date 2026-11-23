@@ -93,6 +93,8 @@ final class GpuIncomingCues implements GpuHud.Component {
     private final GpuBoardSource source;
     private final GpuHudState state;
     private final Group root = new Group();
+    /** Marks on the board's edge: under the units' labels and the board's move and deploy controls. */
+    private final Group board = new Group();
     private final List<Mark> marks = new ArrayList<>();
     private List<Cue> cues = List.of();
 
@@ -103,6 +105,14 @@ final class GpuIncomingCues implements GpuHud.Component {
         root.setName("incoming-cues");
         root.setTransform(false);
         root.setTouchable(Touchable.childrenOnly);
+        board.setName("incoming-cues-board");
+        board.setTransform(false);
+        board.setTouchable(Touchable.childrenOnly);
+    }
+
+    /** The layer for marks on a visible edge; {@link #actor()} holds the marks pinned to the window's edge. */
+    Actor boardActor() {
+        return board;
     }
 
     @Override
@@ -158,7 +168,7 @@ final class GpuIncomingCues implements GpuHud.Component {
                     }
                 }
             });
-            root.addActor(plate);
+            board.addActor(plate);
             tip = ui.tip(plate);
         }
 
@@ -202,6 +212,11 @@ final class GpuIncomingCues implements GpuHud.Component {
             plate.setPosition(MathUtils.clamp(at.x - plate.getWidth() / 2, EDGE_INSET, width - EDGE_INSET - plate.getWidth()),
                   MathUtils.clamp(y, EDGE_INSET, height - EDGE_INSET - plate.getHeight()));
             plate.getColor().a = onScreen ? 1 : 0.8f;
+            // Pinned marks stay over the side panels; a mark on its edge lies on the board, under its controls.
+            Group layer = onScreen ? board : root;
+            if (plate.getParent() != layer) {
+                layer.addActor(plate);
+            }
             plate.setVisible(true);
         }
     }

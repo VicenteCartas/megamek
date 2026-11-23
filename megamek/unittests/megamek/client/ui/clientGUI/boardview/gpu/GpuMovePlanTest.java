@@ -5,6 +5,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -586,7 +587,10 @@ class GpuMovePlanTest {
             GpuMovePlan plan = plan(moving);
             Snapshot aero = shown(moving);
             assertTrue(aero.active());
-            assertFalse(aero.planner() || aero.canPin() || aero.canUndo());
+            assertFalse(aero.planner() || aero.canPin());
+            assertTrue(aero.canUndo(), "A flight undoes its last step");
+            assertNotNull(aero.traits().flight());
+            assertTrue(GpuMovePlan.drawsRoute(aero), "The board draws the flight's route as the planner's");
             assertEquals(Mode.OTHER, aero.mode());
             List<Coords> path = onSwing(() -> moving.display.getPlannedMovement().getStepVector().stream()
                   .map(MoveStep::getPosition).toList());

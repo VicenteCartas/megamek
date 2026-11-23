@@ -40,9 +40,8 @@ import javax.swing.SwingUtilities;
 import megamek.MMConstants;
 import megamek.MegaMek;
 import megamek.client.bot.BotClient;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
-import megamek.client.ui.dialogs.buttonDialogs.BotReadmeNagDialog;
-import megamek.client.ui.dialogs.helpDialogs.BotHelpDialog;
 import megamek.common.event.*;
 import megamek.common.event.board.GameBoardChangeEvent;
 import megamek.common.event.board.GameBoardNewEvent;
@@ -67,10 +66,10 @@ public record BotGUI(JFrame frame, BotClient bot) implements GameListener {
                   || !NAGGED.compareAndSet(false, true)) {
                 return;
             }
-            // Over a libGDX lobby the question is asked there; otherwise in Swing, as ever
+            // Over the libGDX lobby when one shows, else over the battle window once it shows; never in Swing
             SwingUtilities.invokeLater(() -> {
-                if (!GpuLobbyWindow.nagBotReadme() && new BotReadmeNagDialog(frame()).showDialog().isConfirmed()) {
-                    new BotHelpDialog(frame).setVisible(true);
+                if (!GpuLobbyWindow.nagBotReadme()) {
+                    GpuBoardWindow.nagBotReadme();
                 }
             });
         }

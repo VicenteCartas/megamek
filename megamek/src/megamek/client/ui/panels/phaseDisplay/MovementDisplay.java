@@ -88,6 +88,7 @@ import megamek.common.bays.BattleArmorBay;
 import megamek.common.bays.Bay;
 import megamek.common.bays.CargoBay;
 import megamek.common.bays.InfantryBay;
+import megamek.common.board.AllowedDeploymentHelper;
 import megamek.common.board.Board;
 import megamek.common.board.BoardHelper;
 import megamek.common.board.BoardLocation;
@@ -438,6 +439,11 @@ public class MovementDisplay extends ActionPhaseDisplay {
         shiftHeld = true;
         currentMove(target, finalBoardId);
         shiftHeld = false;
+    }
+
+    /** Undoes the current path's illegal steps, else its last step (the Backspace key). */
+    public void undoStep() {
+        undoIllegalStep();
     }
 
     private void undoIllegalStep() {
@@ -2339,6 +2345,118 @@ public class MovementDisplay extends ActionPhaseDisplay {
         return true;
     }
 
+    /**
+     * Whether {@code entity} is a walk-on ground unit only placed on its entry hex, with no movement after it yet. Its
+     * Go Up and Go Down then choose the height it enters at, free: the off-map hex counts as the entry hex's level,
+     * sublevel or depth (TW p. 224), so any height the unit could deploy at there costs no MP.
+     */
+    private boolean isChoosingEntryHeight(@Nullable Entity entity) {
+        return (entity != null) && !entity.isAero() && entity.isDeployed() && (entity.getPosition() != null)
+              && (cmd != null) && isDeploymentOnly(cmd) && (game.getBoard(entity.getBoardId()) != null)
+              && !game.getBoard(entity.getBoardId()).isSpace();
+    }
+
+    /**
+     * @return the next height above ({@code up}) or below the unit's current one that it may enter its entry hex at,
+     *       or null when there is none or it is not {@link #isChoosingEntryHeight choosing its entry height}
+     */
+    private @Nullable Integer entryHeight(Entity entity, boolean up) {
+        if (!isChoosingEntryHeight(entity)) {
+            return null;
+        }
+        List<ElevationOption> options = entryHeightOptions(entity);
+        if (options.isEmpty()) {
+            return null;
+        }
+        int highest = options.stream().mapToInt(ElevationOption::elevation).max().orElseThrow();
+        int lowest = options.stream().mapToInt(ElevationOption::elevation).min().orElseThrow();
+        int current = entity.getElevation();
+        for (int height = current + (up ? 1 : -1); up ? (height <= Math.max(highest + 1, current + 1))
+              : (height >= lowest); height += up ? 1 : -1) {
+            if ((DeploymentHelper.heightOption(options, height) != null)
+                  && !entity.isLocationProhibited(entity.getPosition(), entity.getBoardId(), height)
+                  && entersAt(entity, height)) {
+                return height;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Whether the engine accepts {@code entity} entering its entry hex at {@code height}: a height it could deploy at
+     * may still be no place to move in from, as a submarine's seafloor (it may only rise from there, TW p. 56).
+     */
+    private boolean entersAt(Entity entity, int height) {
+        int current = entity.getElevation();
+        try {
+            entity.setElevation(height);
+            MovePath entry = new MovePath(game, entity);
+            entry.addStep(MoveStepType.DEPLOY);
+            return entry.getLastStep().getMovementType(false) != EntityMovementType.MOVE_ILLEGAL;
+        } finally {
+            entity.setElevation(current);
+        }
+    }
+
+    private List<ElevationOption> entryHeightOptions(Entity entity) {
+        Board board = game.getBoard(entity.getBoardId());
+        return new AllowedDeploymentHelper(entity, entity.getPosition(), board, board.getHex(entity.getPosition()),
+              game).findAllowedElevations();
+    }
+
+    /**
+     * Moves a walk-on unit only placed on its entry hex to the next height it may enter at, up or down, free; the path
+     * stays a bare placement at the new height.
+     *
+     * @return {@code false} when the unit is not choosing its entry height, so Go Up or Go Down plots a step instead
+     */
+    private boolean changeEntryHeight(@Nullable Entity entity, boolean up) {
+        if (!isChoosingEntryHeight(entity)) {
+            return false;
+        }
+        Integer height = entryHeight(entity, up);
+        if (height == null) {
+            return true;
+        }
+        applyEntryHeight(entity, height);
+        computeMovementEnvelope(entity);
+        clientgui.boardStates().forEach(bv -> bv.redrawEntity(entity));
+        clientgui.updateFiringArc(entity);
+        clientgui.showSensorRanges(entity);
+        clientgui.boardStates().forEach(BoardClientState::repaint);
+        refreshButtons();
+        return true;
+    }
+
+    /**
+     * Moves a walk-on unit just placed at a height it may deploy at but not enter at (a submarine's seafloor) to the
+     * nearest one it may enter at, above first.
+     */
+    private void settleEntryHeight(Entity entity) {
+        if (!isChoosingEntryHeight(entity) || entersAt(entity, entity.getElevation())) {
+            return;
+        }
+        Integer height = entryHeight(entity, true);
+        if (height == null) {
+            height = entryHeight(entity, false);
+        }
+        if (height != null) {
+            applyEntryHeight(entity, height);
+        }
+    }
+
+    /** Puts a walk-on unit only placed on its entry hex at {@code height}; the path stays a bare placement. */
+    private void applyEntryHeight(Entity entity, int height) {
+        Board board = game.getBoard(entity.getBoardId());
+        List<ElevationOption> options = entryHeightOptions(entity);
+        new DeploymentHelper(clientgui).applyDeploymentElevation(entity, board, height);
+        lastHexDeploymentOptions.clear();
+        lastHexDeploymentOptions.addAll(options);
+        lastDeploymentOption = DeploymentHelper.heightOption(options, height);
+        cmd = new MovePath(game, entity);
+        addDeploymentToMovePath();
+    }
+
     /** Redraws the current path, the board cursor and the unit's arcs after steps were removed from the path's end. */
     private void redrawShortenedPath(Entity entity) {
         // clear board cursors
@@ -3204,6 +3322,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
                     currentlySelectedEntity.setDeployed(true);
                     cmd = new MovePath(game, currentlySelectedEntity);
                     addDeploymentToMovePath();
+                    settleEntryHeight(currentlySelectedEntity);
                     deployTrain(currentlySelectedEntity);
                 } else {
                     String msg = Messages.getString("DeploymentDisplay.cantDeployInto",
@@ -3837,6 +3956,13 @@ public class MovementDisplay extends ActionPhaseDisplay {
                   position, facing, elevation, position, facing, elevation + 1) != MobileStructureMovement.PROHIBITED);
             setLowerEnabled(canChangeElevation && MobileStructureMovement.cost(game, mobile,
                   position, facing, elevation, position, facing, elevation - 1) != MobileStructureMovement.PROHIBITED);
+            return;
+        }
+
+        if (isChoosingEntryHeight(currentEntity)) {
+            setRaiseEnabled(entryHeight(currentEntity, true) != null);
+            setLowerEnabled(entryHeight(currentEntity, false) != null);
+            updateLowerButtonLabel(false);
             return;
         }
 
@@ -7331,6 +7457,10 @@ public class MovementDisplay extends ActionPhaseDisplay {
             } else {
                 maxMP = en.getRunMP();
             }
+            // Under water a UMU unit moves with its UMU MP, which may exceed its ground MP; legality decides per path
+            if (en.hasUMU()) {
+                maxMP = Math.max(maxMP, en.getActiveUMUCount());
+            }
         }
 
         return maxMP;
@@ -7462,12 +7592,13 @@ public class MovementDisplay extends ActionPhaseDisplay {
         ShortestPathFinder shortestPathFinder = getShortestPathFinder(entity, maxMP, stepType);
         shortestPathFinder.run(movePath);
 
-        Map<Coords, MovePath> movePathForEachCoordsMap = shortestPathFinder.getAllComputedPaths();
-        Map<Coords, Integer> movementEnvelopeMP = new HashMap<>((int) ((movePathForEachCoordsMap.size() * 1.25) + 1));
-        for (Coords coords : movePathForEachCoordsMap.keySet()) {
-            var candidateMovePath = movePathForEachCoordsMap.get(coords);
+        // The finder keeps one path per hex and facing, and its pick per hex can be one that turns where turning is
+        // illegal (a submarine on the seafloor) while another facing's path is legal; so take the cheapest legal one
+        Map<Coords, Integer> movementEnvelopeMP = new HashMap<>();
+        for (MovePath candidateMovePath : shortestPathFinder.getAllComputedPathsUncategorized()) {
             if (candidateMovePath.isMoveLegal()) {
-                movementEnvelopeMP.put(coords, candidateMovePath.countMp(movementGear == GEAR_JUMP));
+                movementEnvelopeMP.merge(candidateMovePath.getFinalCoords(),
+                      candidateMovePath.countMp(movementGear == GEAR_JUMP), Math::min);
             }
         }
         lastEnvelope = new Envelope(entity.getId(), movementGear, movementEnvelopeMP,
@@ -8132,7 +8263,12 @@ public class MovementDisplay extends ActionPhaseDisplay {
                 }
             }
         }
-        if (actionCmd.equals(MoveCommand.MOVE_RAISE_ELEVATION.getCmd())) {
+        boolean raises = actionCmd.equals(MoveCommand.MOVE_RAISE_ELEVATION.getCmd());
+        if ((raises || actionCmd.equals(MoveCommand.MOVE_LOWER_ELEVATION.getCmd()))
+              && changeEntryHeight(entity, raises)) {
+            return;
+        }
+        if (raises) {
             addStepToMovePath(MoveStepType.UP);
         } else if (actionCmd.equals(MoveCommand.MOVE_DESCEND.getCmd())) {
             // On-demand Descend dialog: only meaningful for a mid-climb / dangling Mek.

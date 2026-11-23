@@ -202,6 +202,11 @@ public final class GpuBoardWindow {
     private static final MMLogger LOGGER = MMLogger.create(GpuBoardWindow.class);
     /** The longest a prompt asked while the board starts waits for it before Swing asks instead. */
     private static final long STARTUP_PROMPT_WAIT_MS = 60_000;
+    /**
+     * Whether Princess's guide question waits for a battle window: a scenario's bots join before it shows. Its first
+     * frame asks it ({@link #nagBotReadme}).
+     */
+    private static final AtomicBoolean BOT_README_DUE = new AtomicBoolean();
     /** Volatile so that {@link #ask} and {@link #dialogPendingFor} read it without the class monitor. */
     private static volatile GpuBoardWindow active;
     /**
@@ -806,6 +811,10 @@ public final class GpuBoardWindow {
                     if (tell && frames() > drawn) {
                         droppedArtDue = false;
                         SwingUtilities.invokeLater(GpuBoardWindow.this::tellDroppedArt);
+                    }
+                    if (BOT_README_DUE.get() && (gui != null) && (editor == null) && !preview
+                          && frames() > drawn) {
+                        SwingUtilities.invokeLater(GpuBoardWindow.this::askBotReadme);
                     }
                     if (!presentationRequested) {
                         presentationRequested = true;
@@ -1680,6 +1689,35 @@ public final class GpuBoardWindow {
     }
 
     /**
+     * Any thread: asks whether to read Princess's guide natively over the battle window, as the lobby asks before the
+     * first bot joins; a scenario's bots join without a lobby, and mostly before the battle window shows, so the
+     * question waits for the window's first drawn frame. The game has no Swing window to ask it in.
+     */
+    public static void nagBotReadme() {
+        BOT_README_DUE.set(true);
+        SwingUtilities.invokeLater(() -> {
+            GpuBoardWindow window = active;
+            if (window != null) {
+                window.askBotReadme();
+            }
+        });
+    }
+
+    /** EDT: asks Princess's guide question when it waits and this battle window asks its prompts. */
+    private void askBotReadme() {
+        if (gui == null || editor != null || preview || !asksPrompts() || (battleView == null)
+              || !BOT_README_DUE.compareAndSet(true, false)) {
+            return;
+        }
+        GpuBattleTools tools = battleTools(gui);
+        if (tools == null) {
+            BOT_README_DUE.set(true);
+        } else {
+            tools.botReadme();
+        }
+    }
+
+    /**
      * EDT: shows Report a Bug natively over the battle window of {@code client}, the client of a menu bar, which knows
      * no {@link ClientGUI}; false, showing nothing, when no battle window of that client asks its prompts.
      */
@@ -1972,8 +2010,8 @@ public final class GpuBoardWindow {
         }
         LOGGER.error("GPU battle view failed", failure);
         // The game has no other board; the player retries or leaves
-        Object[] choices = { Messages.getString("CommonMenuBar.viewGpuBoard"), Messages.getString("MegaMek.Quit.label") };
-        int choice = JOptionPane.showOptionDialog(swingWindow, failureMessage("GpuBoard.unavailable", failure),
+        Object[] choices = { Messages.getString("GpuBoard.reopen"), Messages.getString("MegaMek.Quit.label") };
+        int choice = JOptionPane.showOptionDialog(swingWindow, battleFailureMessage(failure),
               Messages.getString("CommonMenuBar.viewGpuBoard"), JOptionPane.DEFAULT_OPTION, JOptionPane.ERROR_MESSAGE,
               null, choices, choices[0]);
         if (choice == 0) {
@@ -1990,13 +2028,51 @@ public final class GpuBoardWindow {
               Messages.getString("GpuBoard.preview"), JOptionPane.ERROR_MESSAGE);
     }
 
+    private String battleFailureMessage(Throwable failure) {
+        return failureMessage("GpuBoard.unavailable", failure,
+              failure == startupFailure || graphicsFailure(failure));
+    }
+
     private static String failureMessage(String key, Throwable failure) {
-        String message = Messages.getString(key);
-        if (failure.getMessage() != null) { message += "\n\n" + failure.getMessage(); }
-        if (GpuGraphicsCard.applied() == GpuGraphicsCard.DISCRETE && !GpuGraphicsCard.cards().isEmpty()) {
+        return failureMessage(key, failure, true);
+    }
+
+    private static String failureMessage(String key, Throwable failure, boolean graphics) {
+        String message = Messages.getString(key) + "\n\n" + Messages.getString("GpuBoard.failureDetails",
+              failureDetails(failure));
+        if (graphics && GpuGraphicsCard.applied() == GpuGraphicsCard.DISCRETE && !GpuGraphicsCard.cards().isEmpty()) {
             message += "\n\n" + Messages.getString("GpuBoard.graphicsStartupHint", GpuGraphicsCard.DISCRETE);
         }
         return message;
+    }
+
+    /** What failed and where, in one line: the exception's kind and MegaMek's innermost frame, not the JVM's text. */
+    static String failureDetails(Throwable failure) {
+        Throwable root = failure;
+        while (root.getCause() != null && root.getCause() != root) { root = root.getCause(); }
+        String where = "";
+        for (StackTraceElement frame : root.getStackTrace()) {
+            if (frame.getClassName().startsWith("megamek.")) {
+                String type = frame.getClassName().substring(frame.getClassName().lastIndexOf('.') + 1);
+                where = " " + Messages.getString("GpuBoard.failureWhere", type + '.' + frame.getMethodName(),
+                      frame.getLineNumber());
+                break;
+            }
+        }
+        return root.getClass().getSimpleName() + where;
+    }
+
+    /** Whether the failure came from the graphics stack, where another graphics card may help. */
+    static boolean graphicsFailure(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause() == cause ? null : cause.getCause()) {
+            if (cause instanceof LinkageError) { return true; }
+            StackTraceElement[] frames = cause.getStackTrace();
+            if (frames.length > 0 && (frames[0].getClassName().startsWith("org.lwjgl.")
+                  || frames[0].getClassName().startsWith("com.badlogic."))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static synchronized void cameraCommand(ClientGUI gui, megamek.client.ui.util.KeyCommandBind command) {

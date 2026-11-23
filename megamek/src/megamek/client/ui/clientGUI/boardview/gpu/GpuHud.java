@@ -295,7 +295,7 @@ final class GpuHud implements GpuBoardHud {
         GpuNameplates nameplates = new GpuNameplates(kit, source, state);
         deployHeight = new GpuDeployHeight(source);
         GpuDeployConfirm deployConfirm = new GpuDeployConfirm(kit, state, nameplates, deployHeight);
-        GpuMoveConfirm moveConfirm = new GpuMoveConfirm(kit, source, state, camera);
+        GpuMoveConfirm moveConfirm = new GpuMoveConfirm(kit, source, state, camera, nameplates);
         targetCards = new GpuTargetCards(kit, source, state, contextMenu);
         losPanel = new GpuLosPanel(kit.ui, stage, source, camera);
         phaseHeader = new GpuPhaseHeader(kit);
@@ -353,6 +353,8 @@ final class GpuHud implements GpuBoardHud {
         // menu, which opens over them.
         List<Container<Actor>> spanning = new ArrayList<>(List.of(slot(labels, damageNumbers.actor()),
               slot(labels, boardLabels.fx()),
+              // The edges' incoming marks lie on the board, under every unit's label and the move and deploy controls.
+              slot(labels, incomingCues.boardActor()),
               slot(labels, nameplates.actor()), slot(labels, boardLabels.actor()), slot(labels, targetCards.actor()), slot(labels, losPanel.actor()),
               slot(labels, deployConfirm.actor()), slot(labels, moveConfirm.actor()),
               slot(popover, hexTip.actor()), slot(popover, incomingCues.actor()), slot(popover, arrivalCues.actor()),

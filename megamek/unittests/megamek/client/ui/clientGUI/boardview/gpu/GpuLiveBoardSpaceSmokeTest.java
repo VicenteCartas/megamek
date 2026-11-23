@@ -21,6 +21,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -45,6 +46,7 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.UnitAnnotations;
 import megamek.client.ui.gdx.DisplayScale;
+import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.Player;
 import megamek.common.ResolvedAttack;
@@ -173,6 +175,17 @@ class GpuLiveBoardSpaceSmokeTest {
         assertFalse(GpuBoardTestUi.shown(live.hud.stage.getRoot().findActor("move-confirm-context")),
               "A standing unit's chip has no context command");
         verifyTurnArrows(live, destination, chipCorner.y, "3D");
+        // Zoomed out the ghost is small and its middle near its head; zoomed in, the chip may be held in the window.
+        // The arrows keep clear of the chip either way.
+        for (float hexPixels : new float[] { 40, 60, 320 }) {
+            live.zoom(DESTINATION, hexPixels);
+            Vector2 at = live.hex(DESTINATION);
+            Vector2 bottom = chip.localToStageCoordinates(new Vector2());
+            verifyTurnArrows(live, at, bottom.y, "3D at " + hexPixels);
+        }
+        live.zoom(DESTINATION, 120);
+        verifyElevationStepper(live, move);
+        verifyHold(live, move);
 
         GpuFirePreview.Snapshot preview = live.frame.get().panels().preview();
         assertTrue(preview.active() && preview.unitId() == SAGITTAIRE, "The Sagittaire's fire preview");
@@ -229,6 +242,121 @@ class GpuLiveBoardSpaceSmokeTest {
               view + ": the arrows mirror each other about the ghost");
         assertEquals(leftCorner.y, rightCorner.y, .5f, view + ": at one height");
         assertTrue(leftCorner.y + left.getHeight() <= chipBottom, view + ": below the Move chip");
+    }
+
+    /**
+     * The board's elevation stepper: none for the Mek; for a unit that changes elevation, Go down, its elevation and Go
+     * up in a row centred under the ghost and the turn arrows.
+     */
+    private static void verifyElevationStepper(Live live, GpuMovePlan.Snapshot move) throws Exception {
+        assertFalse(GpuBoardTestUi.shown(live.hud.stage.getRoot().findActor("move-confirm-stepper")),
+              "A Mek's elevation stays in More");
+        GpuBoardSource.Frame published = live.frame.get();
+        BoardScene s = published.scene();
+        List<BoardScene.Command> commands = new ArrayList<>(s.commands());
+        commands.removeIf(c -> c.id().equals("moveRaiseElevation") || c.id().equals("moveLowerElevation"));
+        commands.add(new BoardScene.Command("moveRaiseElevation", "Go Up", "", true, false, List.of(), () -> { }));
+        commands.add(new BoardScene.Command("moveLowerElevation", "Go Down", "", false, false, List.of(), () -> { }));
+        GpuMovePlan.Snapshot p = move;
+        GpuMovePlan.Snapshot vtol = new GpuMovePlan.Snapshot(p.active(), p.planner(), p.external(), p.entityId(),
+              p.mode(), p.explicit(), p.gearLabel(), p.route(), p.hover(), p.pins(), p.destination(), p.facing(),
+              p.cost(), p.budget(), p.type(), p.typeLabel(), p.auto(), p.heat(), p.tmm(), p.legal(), p.warnings(),
+              p.canUndo(), p.canPin(), p.facingMatters(), p.envelope(), p.mounts(), p.holdingRemaining(),
+              p.cancellable(), p.walkedOn(), new GpuMovePlan.Traits(true, false, true, 4, false));
+        GpuHudData panels = published.panels();
+        live.show(Live.copy(published, new BoardScene(s.boardId(), s.width(), s.height(), s.tiles(), s.units(),
+              s.plannedPath(), s.selectedId(), s.phase(), commands, s.light(), s.firingLines(), s.rangeBorders(),
+              s.markers(), s.tactical(), s.rangeLabels(), s.fieldOfView()), published.status(),
+              new GpuHudData(panels.phase(), vtol, panels.fire(), panels.physical(), panels.record(),
+                    panels.preview(), panels.chat(), panels.toasts(), panels.los(), panels.players())));
+        try {
+            Actor stepper = live.actor("move-confirm-stepper");
+            assertTrue(GpuBoardTestUi.shown(stepper), "The VTOL's elevation stepper");
+            assertEquals("Elev 4", ((UiButton) live.actor("move-confirm-elevation")).getText().toString());
+            assertFalse(((UiButton) live.actor("move-confirm-go-up")).isDisabled());
+            assertTrue(((UiButton) live.actor("move-confirm-go-down")).isDisabled());
+            Actor right = live.actor("move-confirm-turn-right");
+            Vector2 arrow = right.localToStageCoordinates(new Vector2());
+            Vector2 corner = stepper.localToStageCoordinates(new Vector2());
+            Vector2 destination = live.hex(DESTINATION);
+            assertEquals(destination.x, corner.x + stepper.getWidth() / 2, 1.5f, "Centred over the ghost");
+            Actor chip = live.actor("move-confirm-done").getParent();
+            Vector2 chipCorner = chip.localToStageCoordinates(new Vector2());
+            assertTrue(chipCorner.y >= corner.y + stepper.getHeight(), "The Move chip on the stepper");
+            assertTrue(arrow.y + right.getHeight() <= corner.y, "The turn arrows under the stepper");
+            assertTrue(corner.y >= destination.y, "Over the ghost's feet");
+            live.capture("i1b-movement-3d-elevation.png");
+        } finally {
+            live.show(published);
+        }
+    }
+
+    /**
+     * Before a route, the controls stand on the unit itself: Hold (the dock's Hold position) without Clear, above the
+     * unit's tag, and the turn arrows beside it.
+     */
+    private static void verifyHold(Live live, GpuMovePlan.Snapshot p) throws Exception {
+        GpuMovePlan.Snapshot unmoved = new GpuMovePlan.Snapshot(p.active(), p.planner(), p.external(), p.entityId(),
+              p.mode(), p.explicit(), p.gearLabel(), List.of(), p.hover(), List.of(), null, p.facing(), 0, p.budget(),
+              p.type(), p.typeLabel(), p.auto(), 0, 0, p.legal(), List.of(), false, false, p.facingMatters(),
+              p.envelope(), p.mounts(), p.holdingRemaining(), p.cancellable(), false, p.traits());
+        GpuBoardSource.Frame published = live.frame.get();
+        GpuHudData panels = published.panels();
+        String skip = panels.phase().skipId();
+        assertFalse(skip.isEmpty(), "The movement phase's Hold position command");
+        BoardScene s = published.scene();
+        List<BoardScene.Command> commands = new ArrayList<>(s.commands());
+        commands.removeIf(c -> c.id().equals(skip));
+        commands.add(new BoardScene.Command(skip, "Hold", "", true, false, List.of(), () -> { }));
+        live.show(Live.copy(published, new BoardScene(s.boardId(), s.width(), s.height(), s.tiles(), s.units(),
+              s.plannedPath(), s.selectedId(), s.phase(), commands, s.light(), s.firingLines(), s.rangeBorders(),
+              s.markers(), s.tactical(), s.rangeLabels(), s.fieldOfView()), published.status(),
+              new GpuHudData(panels.phase(), unmoved, panels.fire(), panels.physical(), panels.record(),
+                    panels.preview(), panels.chat(), panels.toasts(), panels.los(), panels.players())));
+        try {
+            UiButton hold = (UiButton) live.actor("move-confirm-done");
+            assertTrue(GpuBoardTestUi.shown(hold), "The unit's own chip before a route");
+            assertEquals("HOLD", hold.getText().toString());
+            assertFalse(GpuBoardTestUi.shown(live.hud.stage.getRoot().findActor("move-confirm-clear")),
+                  "Nothing to clear");
+            assertTrue(GpuBoardTestUi.shown(live.actor("move-confirm-turn-left")), "The turn arrows");
+            Actor chip = hold.getParent();
+            Vector2 chipCorner = chip.localToStageCoordinates(new Vector2());
+            Vector2 unit = live.hex(live.unit(SAGITTAIRE).location().coords());
+            assertEquals(unit.x, chipCorner.x + chip.getWidth() / 2, 1.5f, "Centred on the unit");
+            Actor tag = live.actor("nameplate-" + SAGITTAIRE);
+            Vector2 tagCorner = tag.localToStageCoordinates(new Vector2());
+            assertTrue(chipCorner.y >= tagCorner.y + tag.getHeight() - .5f, "Above the unit's tag");
+            live.capture("i1b-movement-3d-hold.png");
+        } finally {
+            live.show(published);
+        }
+        // A walked-on unit: its path already enters the board, so MegaMek's Skip is off and Done commits the entry.
+        GpuMovePlan.Snapshot walkedOn = new GpuMovePlan.Snapshot(p.active(), p.planner(), p.external(),
+              p.entityId(), p.mode(), p.explicit(), p.gearLabel(), List.of(), p.hover(), List.of(), null, p.facing(),
+              0, p.budget(), p.type(), p.typeLabel(), p.auto(), 0, 0, p.legal(), List.of(), false, false,
+              p.facingMatters(), p.envelope(), p.mounts(), p.holdingRemaining(), p.cancellable(), true, p.traits());
+        String done = panels.phase().doneId();
+        AtomicBoolean entered = new AtomicBoolean();
+        List<BoardScene.Command> entering = new ArrayList<>(s.commands());
+        entering.removeIf(c -> c.id().equals(skip) || c.id().equals(done));
+        entering.add(new BoardScene.Command(skip, "Skip", "", false, false, List.of(), () -> { }));
+        entering.add(new BoardScene.Command(done, "Move", "", true, false, List.of(), () -> entered.set(true)));
+        live.show(Live.copy(published, new BoardScene(s.boardId(), s.width(), s.height(), s.tiles(), s.units(),
+              s.plannedPath(), s.selectedId(), s.phase(), entering, s.light(), s.firingLines(), s.rangeBorders(),
+              s.markers(), s.tactical(), s.rangeLabels(), s.fieldOfView()), published.status(),
+              new GpuHudData(panels.phase(), walkedOn, panels.fire(), panels.physical(), panels.record(),
+                    panels.preview(), panels.chat(), panels.toasts(), panels.los(), panels.players())));
+        try {
+            UiButton hold = (UiButton) live.actor("move-confirm-done");
+            assertTrue(GpuBoardTestUi.shown(hold), "A walked-on unit's own chip");
+            assertEquals("HOLD", hold.getText().toString());
+            assertTrue(GpuBoardTestUi.shown(live.actor("move-confirm-clear")), "Clear withdraws the walk-on");
+            GpuHudParitySmokeTest.click(live, hold);
+            assertTrue(entered.get(), "Hold commits the entry with MegaMek's Done");
+        } finally {
+            live.show(published);
+        }
     }
 
     /** The Tactical View: the north mark, the units' bases and their heads, the meeple ghost and the overlay. */

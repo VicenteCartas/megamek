@@ -82,6 +82,14 @@ final class GpuBoardActions {
               List<String> turnDetails, List<String> conditions) {
             this(status, blocking, doneId, skipId, clearId, turnDetails, conditions, List.of());
         }
+
+        /**
+         * The movement command that holds the unit where it stands: the skip, except for a walked-on unit without a
+         * route, whose path already places it on its entry hex, so MegaMek disables Skip and Done ("Move") commits it.
+         */
+        String holdId(GpuMovePlan.Snapshot move) {
+            return move.route().isEmpty() && move.walkedOn() ? doneId : skipId;
+        }
     }
 
     /**

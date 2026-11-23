@@ -156,6 +156,8 @@ class MovePathHandler extends AbstractTWRuleHandler {
     private final List<Integer> passedThroughFacing = new ArrayList<>();
     private final List<Entity> hiddenEnemies = new ArrayList<>();
     private final Vector<UnitLocation> movePath = new Vector<>();
+    /** Units unloaded on the way, published after the carrier's route (TWGameManager#unloadUnitDuringMovement). */
+    private final List<Integer> unloadedOnTheWay = new ArrayList<>();
 
     private Report report;
     private PilotingRollData rollTarget;
@@ -2085,6 +2087,7 @@ class MovePathHandler extends AbstractTWRuleHandler {
                 gameManager.send(gameManager.createRemoveEntityPacket(entity.getId(), entity.getRemovalCondition()));
             }
         }
+        publishUnloaded();
 
         // If the entity is towing trailers, update the position of those trailers
         if (!entity.getAllTowedUnits().isEmpty()) {
@@ -2299,6 +2302,12 @@ class MovePathHandler extends AbstractTWRuleHandler {
     /**
      * Iterate through the steps of the movement path and handle each step.
      */
+    /** Sends the units unloaded on the way, after their carrier's route, so clients show them as it drops them off. */
+    private void publishUnloaded() {
+        unloadedOnTheWay.forEach(gameManager::entityUpdate);
+        unloadedOnTheWay.clear();
+    }
+
     private void processSteps() {
         MoveStep previousStep = null;
         for (final ListIterator<MoveStep> i = md.getSteps(); i.hasNext(); ) {
@@ -2386,6 +2395,7 @@ class MovePathHandler extends AbstractTWRuleHandler {
                         if (jumping) {
                             break;
                         }
+                        publishUnloaded();
 
                         return;
 
@@ -4645,7 +4655,12 @@ class MovePathHandler extends AbstractTWRuleHandler {
                           step.getAdditionalData(MoveStep.UNLOAD_FACING_KEY));
                 }
 
-                if (!gameManager.unloadUnitDuringMovement(entity, unloaded, unloadPos, unloadFacing, step.getElevation())) {
+                boolean unloadedHere = gameManager.unloadUnitDuringMovement(entity, unloaded, unloadPos, unloadFacing,
+                      step.getElevation());
+                if (unloadedHere) {
+                    unloadedOnTheWay.add(((Entity) unloaded).getId());
+                }
+                if (!unloadedHere) {
                     logger.error("Server was told to unload {} from {} into {}",
                                  unloaded.getDisplayName(),
                                  entity.getDisplayName(),

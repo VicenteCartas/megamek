@@ -839,6 +839,45 @@ class GpuBattleStatusTest {
     }
 
     /**
+     * Ground turns of the movement phase never take an aerospace unit (TWGameManager deals it a turn of its own after
+     * them), so a fighter, on the board or still to walk on, waits for the ground units until its own turn.
+     */
+    @Test
+    void anAerospaceUnitMovesAfterTheGroundUnits() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            AtomicReference<List<GpuBattleStatus.Wait>> waits = new AtomicReference<>(new ArrayList<>());
+            SwingUtilities.invokeAndWait(() -> {
+                Game game = fixture.game;
+                game.setPhase(GamePhase.MOVEMENT);
+                AeroSpaceFighter fighter = new AeroSpaceFighter();
+                fighter.setId(2);
+                fighter.setOwner(fixture.player);
+                fighter.setChassis("Stuka");
+                fighter.setAltitude(5);
+                fighter.setPosition(new Coords(2, 2));
+                fighter.setDeployed(true);
+                game.addEntity(fighter, false);
+                int aerospace = EntityClassTurn.CLASS_AERO | EntityClassTurn.CLASS_SMALL_CRAFT
+                      | EntityClassTurn.CLASS_DROPSHIP | EntityClassTurn.CLASS_JUMPSHIP
+                      | EntityClassTurn.CLASS_WARSHIP | EntityClassTurn.CLASS_SPACE_STATION;
+                game.setTurnVector(List.of(new EntityClassTurn(0, ~aerospace),
+                      new EntityClassTurn(0, EntityClassTurn.CLASS_AERO)));
+                GpuBattleStatus status = new GpuBattleStatus();
+                for (int index = 0; index < 2; index++) {
+                    game.setTurnIndex(index, Player.PLAYER_NONE);
+                    GpuBattleStatus.Snapshot shown = status.capture(game, fixture.player, game.getTurn(),
+                          Entity.NONE, entity -> true, entity -> true, entity -> null);
+                    waits.get().add(unit(shown, 2).deployWait());
+                    waits.get().add(unit(shown, fixture.entity.getId()).deployWait());
+                }
+            });
+            assertEquals(List.of(GpuBattleStatus.Wait.AFTER_GROUND, GpuBattleStatus.Wait.NONE,
+                        GpuBattleStatus.Wait.NONE, GpuBattleStatus.Wait.NONE), waits.get(),
+                  "The ground turn holds the fighter back; its own turn takes it, and the Mek never waits");
+        }
+    }
+
+    /**
      * The own units still to act in the phase, which both the movement plan's hold and the fire orders' resolve mode
      * count: the local player's units MegaMek has not marked done, never another player's.
      */

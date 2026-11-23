@@ -1300,7 +1300,9 @@ class GpuBattleView extends ApplicationAdapter {
                 tactical.prepare();
                 fireControl.prepare();
                 overlay.prepare();
-                scene.units().stream().filter(unit -> !unit.sensorContact() && unit.image() != null).findFirst()
+                // Only sprites are in the atlas: a unit drawn as a model has no slot there.
+                scene.units().stream().filter(unit -> !unit.sensorContact() && unit.image() != null
+                            && unitTextures.holds(Set.of(unit.image()))).findFirst()
                       .ifPresent(unit -> MeepleVisual.prepareIcon(unitBatch, unitTextures.region(unit.image()).getTexture()));
                 // Probing moves the camera: not while the board makes its entrance. An editor loads what its starting view
                 // draws and the rest when it is asked for: a closer view's programs link while the board shows.

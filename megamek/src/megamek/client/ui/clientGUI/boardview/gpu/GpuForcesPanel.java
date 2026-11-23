@@ -468,16 +468,25 @@ final class GpuForcesPanel implements GpuHud.Component {
         return matcher.find() ? matcher.group(1) : "";
     }
 
-    /** The rail's short name: the model code, or the chassis' first word when the code is long or missing. */
+    /**
+     * The rail's short name: the model code when it is a designation (letters and digits, such as STU-K10), else the
+     * chassis' first word: a vehicle's "(SL)" or a ProtoMek's "B" tells nothing on its own.
+     */
     static String code(UnitStatus unit) {
         String model = unit.model().strip();
-        if (!model.isEmpty() && model.length() <= 7) {
+        if (designation(model)) {
             return model.toUpperCase(Locale.ROOT);
         }
         String chassis = unit.chassis().strip();
         int space = chassis.indexOf(' ');
         String word = space < 0 ? chassis : chassis.substring(0, space);
         return word.substring(0, Math.min(7, word.length())).toUpperCase(Locale.ROOT);
+    }
+
+    /** A model name that reads as a designation: at most 7 characters with a letter and a digit, not in brackets. */
+    private static boolean designation(String model) {
+        return model.length() <= 7 && !model.startsWith("(") && model.chars().anyMatch(Character::isLetter)
+              && model.chars().anyMatch(Character::isDigit);
     }
 
     /** The unit the local player acts with, or the own focus unit before its turn (C.5). */
@@ -501,7 +510,7 @@ final class GpuForcesPanel implements GpuHud.Component {
             return State.NOW;
         } else if (UnitRow.acted(unit, phase) || (phase.isDeployment() && GpuDeployment.placed(unit))) {
             return State.DONE;
-        } else if (phase.isDeployment() && GpuDeployment.waits(unit)) {
+        } else if (GpuDeployment.waits(unit)) {
             return State.WAITING;
         } else if (unit.pending() && verb(phase) != null) {
             return State.PENDING;
@@ -523,6 +532,10 @@ final class GpuForcesPanel implements GpuHud.Component {
             return new Line(text("GpuBoard.hud.state.prone"), Tone.BAD);
         }
         boolean acting = unit.id() == acting();
+        if (phase.isMovement() && !acting && GpuDeployment.waits(unit)) {
+            // An aerospace unit moves, or walks on, only after every ground unit: it is no unit to pick now.
+            return new Line(text("GpuBoard.hud.deploy.wait." + unit.deployWait().name()), Tone.NORMAL);
+        }
         if (unit.walksOn() && unit.position() == null && !acting) {
             // Under walk-on deployment the unit enters from its edge in a movement phase instead of being placed.
             return phase.isMovement() && unit.pending()
@@ -787,7 +800,9 @@ final class GpuForcesPanel implements GpuHud.Component {
             }
             highlight = unit.id() != shown.card() ? 0 : unit.id() == shown.focus() ? 1 : 2;
             getColor().a = unit.destroyed() ? .38f : state == State.DONE ? .62f : state == State.WAITING ? .5f : 1;
-            showWaitTip(state == State.WAITING ? text("GpuBoard.hud.deploy.waitTip." + unit.deployWait().name()) : null);
+            String tips = shown.status().phase().isMovement() ? "GpuBoard.hud.move.waitTip."
+                  : "GpuBoard.hud.deploy.waitTip.";
+            showWaitTip(state == State.WAITING ? text(tips + unit.deployWait().name()) : null);
         }
 
         /** The row's tooltip tells why the unit waits; {@code tip} null removes it. */

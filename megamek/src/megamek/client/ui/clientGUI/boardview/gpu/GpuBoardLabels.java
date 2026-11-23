@@ -242,7 +242,7 @@ final class GpuBoardLabels implements GpuHud.Component {
         Set<Integer> badged = new LinkedHashSet<>();
         strokes.round = view.tactical();
         rear(scene, inputs.frame().status(), view);
-        plan(scene, panels.move(), view, inputs.panelBounds());
+        plan(scene, inputs.frame().status(), panels.move(), view, inputs.panelBounds());
         preview(scene, panels.preview(), panels.move(), view, badged);
         fire(panels.fire(), view, badged);
         if (inputs.preferences().overlays().unitLinks()) {
@@ -339,12 +339,23 @@ final class GpuBoardLabels implements GpuHud.Component {
 
     // The movement plan: the destination tip and the waypoint numbers (A.7 G5, G8).
 
-    private void plan(BoardScene scene, GpuMovePlan.Snapshot move, GpuHud.HudView view, List<Rectangle> panels) {
+    private void plan(BoardScene scene, GpuBattleStatus.Snapshot status, GpuMovePlan.Snapshot move,
+          GpuHud.HudView view, List<Rectangle> panels) {
         // Only a plotted route of a unit the HUD plans (the hover route has no tip), on the board shown.
         boolean planned = scene != null && move.active() && move.planner() && move.destination() != null
               && !move.route().isEmpty() && move.route().getLast().boardId() == scene.boardId();
         Vector2 anchor = planned ? lifted(plannedPoint(scene, move.route().getLast(), view),
               move.entityId(), TIP_HEIGHT, view) : null;
+        GpuBattleStatus.UnitStatus unit = planned ? GpuHudState.unit(status, move.entityId()) : null;
+        if (anchor != null && unit != null && move.route().getLast().coords().equals(unit.position())
+              && unit.boardId() == scene.boardId()) {
+            // A route that ends on the unit's own hex (a turn in place): the Move chip stands on the unit's tag.
+            anchor.y = Math.max(anchor.y, nameplates.top(move.entityId(), anchor.y));
+        }
+        if (anchor != null && GpuMoveConfirm.steps(scene, move)) {
+            // The Move chip stands on the elevation stepper's row.
+            anchor.y += GpuMoveConfirm.STEPPER_ROOM;
+        }
         tip.setVisible(anchor != null);
         if (anchor != null) {
             showTip(move);

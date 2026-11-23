@@ -11,8 +11,9 @@ import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 /**
  * The movement plan's context command: the one MegaMek movement command the dock's context slot and the route's
  * on-board chip offer besides the gaits. A unit's own situation leads (standing up, unjamming, shaking off a swarm,
- * unloading); without one, its stance (going prone or hull down, an infantry unit's cover). The slot keeps its place
- * for the turn: when nothing applies it shows the unit's stance disabled.
+ * unloading); without one, its stance (going prone or hull down, an infantry unit's cover). A unit with a stance keeps
+ * the slot for the turn, the stance disabled when nothing applies; one without a stance (a VTOL) shows the slot only
+ * while a situation is at hand.
  */
 final class GpuMoveContext {
     static final String GET_UP = MoveCommand.MOVE_GET_UP.getCmd();
@@ -48,17 +49,15 @@ final class GpuMoveContext {
 
     /**
      * The context command among the phase commands: the first available situation, else the first available stance,
-     * else the first stance (or situation) the unit has at all, disabled; null when the unit has none of them.
+     * else the first stance the unit has at all, disabled; null when the unit has none of them. A situation the unit
+     * isn't in (a VTOL's Unjam with nothing jammed) never takes the slot.
      */
     static BoardScene.Command pick(List<BoardScene.Command> commands) {
         BoardScene.Command found = first(commands, SITUATIONS, true);
         if (found == null) {
             found = first(commands, STANCES, true);
         }
-        if (found == null) {
-            found = first(commands, STANCES, false);
-        }
-        return found != null ? found : first(commands, SITUATIONS, false);
+        return found != null ? found : first(commands, STANCES, false);
     }
 
     /** Whether the command answers the unit's situation, which the dock outlines; a stance is a plain choice. */

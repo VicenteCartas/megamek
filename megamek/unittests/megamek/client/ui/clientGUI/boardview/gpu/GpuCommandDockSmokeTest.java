@@ -692,6 +692,143 @@ class GpuCommandDockSmokeTest {
     }
 
     @Test
+    void vehiclesCruiseAndFlankAndVtolsStepTheirElevation() {
+        GpuHudTestStage.run(hud -> {
+            hud.size(1920, 1080);
+            // A tank: Cruise and Flank, no Jump (MegaMek still lists it, without jump MP), no elevation stepper.
+            List<BoardScene.Command> tankCommands = List.of(command("moveNext", "Next Unit", true),
+                  command("moveWalk", "Walk", true), command("moveJump", "Jump", false),
+                  command("moveBackUp", "Back Up", true), command("moveTurn", "Turn", true),
+                  command("moveRaiseElevation", "Go Up", false), command("moveLowerElevation", "Go Down", false),
+                  command("moveHullDown", "Hull Down", false), command(DONE, "Done", true),
+                  command(GpuBoardActions.CLEAR_ID, "Clear", true));
+            GpuMovePlan.Traits tankTraits = new GpuMovePlan.Traits(true, false, false, 0, false);
+            Shot tank = withPlan(movement(atlasRoute(), ATLAS), traits(atlasRoute(), tankTraits), tankCommands);
+            Dock dock = dock(hud, tank);
+            show(hud, dock, tank);
+            assertEquals("CRUISE", button(dock, "dock-mode-walk").getText().toString());
+            assertEquals("FLANK", button(dock, "dock-mode-run").getText().toString());
+            assertEquals("BACK UP", button(dock, "dock-mode-back").getText().toString());
+            assertNull(dock.find("dock-mode-jump"), "a tank without jump MP has no Jump gait");
+            assertNull(dock.find("dock-elevation"));
+            hud.assertLayout(dock.dock().actor(), neighbours(hud, dock));
+            hud.capture("g6-movement-tank").dispose();
+
+            // The tank walking on, before MegaMek's click on its entry hex: the plan's layout, its gaits and turns
+            // disabled until it enters, and the prompt in the span.
+            GpuMovePlan.Snapshot waiting = new GpuMovePlan.Snapshot(true, false, false, ATLAS,
+                  GpuMovePlan.Mode.OTHER, false, "", List.of(), List.of(), List.of(), null, 0, 0, 3,
+                  EntityMovementType.MOVE_NONE, "", false, 0, 0, true, List.of(), false, false, true, Map.of(),
+                  Set.of(), 0, false, false, new GpuMovePlan.Traits(true, false, false, 0, true));
+            Shot entering = withPlan(movement(atlasRoute(), ATLAS), waiting, tankCommands);
+            show(hud, dock, entering);
+            assertNotNull(dock.find("dock-mode-walk"), "the plan's layout before the unit enters");
+            assertTrue(button(dock, "dock-mode-walk").isDisabled());
+            assertTrue(button(dock, "dock-turn-left").isDisabled());
+            assertEquals(Messages.getString("GpuBoard.hud.dock.walkOnPick"), label(dock, "dock-span"));
+            hud.capture("g6-movement-walk-on").dispose();
+
+            // A VTOL: no Jump, the elevation stepper with its read-out, no context slot (Unjam isn't its situation),
+            // and Go up and Go down no longer in More.
+            List<BoardScene.Command> vtolCommands = List.of(command("moveNext", "Next Unit", true),
+                  command("moveWalk", "Walk", true), command("moveBackUp", "Back Up", true),
+                  command("moveTurn", "Turn", true), command("moveRaiseElevation", "Go Up", true),
+                  command("moveLowerElevation", "Go Down", false), command("moveUnjam", "Unjam", false),
+                  command("moveFlee", "Flee", true), command(DONE, "Done", true),
+                  command(GpuBoardActions.CLEAR_ID, "Clear", true));
+            GpuMovePlan.Traits vtolTraits = new GpuMovePlan.Traits(true, false, true, 3, false);
+            Shot vtol = withPlan(movement(atlasRoute(), ATLAS), traits(atlasRoute(), vtolTraits), vtolCommands);
+            dock = dock(hud, vtol);
+            show(hud, dock, vtol);
+            assertNull(dock.find("dock-mode-jump"));
+            assertNull(dock.find("dock-context"));
+            assertEquals("3", label(dock, "dock-elevation-value"));
+            assertFalse(button(dock, "dock-go-up").isDisabled());
+            assertTrue(button(dock, "dock-go-down").isDisabled());
+            hud.assertLayout(dock.dock().actor(), neighbours(hud, dock));
+            hud.capture("g6-movement-vtol").dispose();
+            click(hud, button(dock, "dock-go-up"));
+            assertEquals(List.of("moveRaiseElevation"), ran);
+            ran.clear();
+            click(hud, button(dock, "dock-more"));
+            show(hud, dock, vtol);
+            assertEquals(List.of("MORE MOVEMENT", "FLEE"), texts(dock.drawer()));
+        });
+    }
+
+    @Test
+    void aerospaceFliesByVelocityThrustTurnsAndAltitude() {
+        GpuHudTestStage.run(hud -> {
+            hud.size(1920, 1080);
+            // An airborne fighter (TW aerospace movement): MegaMek plots its path, the dock sets its velocity, turns
+            // and altitude; Accelerate, Decelerate, Turn and the altitude steps are not in More.
+            List<BoardScene.Command> aeroCommands = List.of(command("moveNext", "Next Unit", true),
+                  command("moveTurn", "Turn", true), command("MoveAccelerate", "Accelerate", true),
+                  command("MoveDecelerate", "Decelerate", false), command("MoveAccNext", "Accelerate next", true),
+                  command("moveRaiseElevation", "Go Up", true), command("moveLowerElevation", "Go Down", true),
+                  command("MoveEvadeAero", "Evade", true), command(DONE, "Move", true),
+                  command(GpuBoardActions.CLEAR_ID, "Clear", true));
+            GpuMovePlan.Traits flying = new GpuMovePlan.Traits(false, false, true, 5, false,
+                  new GpuMovePlan.Flight(3, 4, 4, 1, 5, 8, 40));
+            GpuMovePlan.Snapshot flight = new GpuMovePlan.Snapshot(true, false, false, ATLAS,
+                  GpuMovePlan.Mode.OTHER, false, "", List.of(), List.of(), List.of(), null, 2, 1, 5,
+                  EntityMovementType.MOVE_NONE, "", false, 0, 0, true, List.of(), true, false, true, Map.of(),
+                  Set.of(), 0, true, false, flying);
+            Shot aero = withPlan(movement(atlasRoute(), ATLAS), flight, aeroCommands);
+            Dock dock = dock(hud, aero);
+            show(hud, dock, aero);
+            assertNull(dock.find("dock-mode-walk"), "a flight has no gaits");
+            assertEquals("3\u21924", label(dock, "dock-velocity-value"));
+            assertFalse(button(dock, "dock-accelerate").isDisabled());
+            assertTrue(button(dock, "dock-decelerate").isDisabled());
+            assertFalse(button(dock, "dock-turn-left").isDisabled());
+            assertEquals("5", label(dock, "dock-elevation-value"));
+            assertFalse(button(dock, "dock-undo").isDisabled());
+            assertFalse(button(dock, "dock-main").isDisabled());
+            assertEquals(Messages.getString("GpuBoard.hud.dock.flightCost", 1, 5), label(dock, "dock-foot-bold"));
+            assertEquals(Messages.getString("GpuBoard.hud.dock.flightToGo", 40), label(dock, "dock-span"));
+            hud.assertLayout(dock.dock().actor(), neighbours(hud, dock));
+            hud.capture("g6-movement-flight").dispose();
+            for (int[] size : new int[][] { { 1280, 720 }, { 1600, 900 }, { 1920, 1080 } }) {
+                hud.size(size[0], size[1]);
+                show(hud, dock, aero);
+                for (String name : List.of("dock-accelerate", "dock-decelerate")) {
+                    Label caption = button(dock, name).getLabel();
+                    assertTrue(caption.getPrefWidth() <= caption.getWidth() + .5f,
+                          name + " fits its caption at " + size[0] + "x" + size[1] + ": " + caption.getPrefWidth()
+                                + " in " + caption.getWidth() + ", dock " + dock.root().getWidth());
+                }
+            }
+            hud.size(1920, 1080);
+            show(hud, dock, aero);
+            click(hud, button(dock, "dock-accelerate"));
+            assertEquals(List.of("MoveAccelerate"), ran);
+            ran.clear();
+            click(hud, button(dock, "dock-main"));
+            assertEquals(List.of(DONE), ran);
+            ran.clear();
+            click(hud, button(dock, "dock-more"));
+            show(hud, dock, aero);
+            assertEquals(List.of("MORE MOVEMENT", "ACCELERATE NEXT", "EVADE"), texts(dock.drawer()));
+        });
+    }
+
+    /** The plan with {@code traits}: the unit's kind, gaits and elevation. */
+    private static GpuMovePlan.Snapshot traits(GpuMovePlan.Snapshot p, GpuMovePlan.Traits traits) {
+        return new GpuMovePlan.Snapshot(p.active(), p.planner(), p.external(), p.entityId(), p.mode(), p.explicit(),
+              p.gearLabel(), p.route(), p.hover(), p.pins(), p.destination(), p.facing(), p.cost(), p.budget(),
+              p.type(), p.typeLabel(), p.auto(), p.heat(), p.tmm(), p.legal(), p.warnings(), p.canUndo(), p.canPin(),
+              p.facingMatters(), p.envelope(), p.mounts(), p.holdingRemaining(), p.cancellable(), p.walkedOn(),
+              traits);
+    }
+
+    /** The shot with another plan and commands. */
+    private Shot withPlan(Shot shot, GpuMovePlan.Snapshot move, List<BoardScene.Command> commands) {
+        return new Shot(shot.status(), panels(info(), move, GpuFireOrders.Snapshot.EMPTY,
+              GpuPhysicalOptions.Snapshot.EMPTY), commands);
+    }
+
+    @Test
     void heldCommandsSayWhyInTheWaitingBoxInsteadOfAnEmptyDock() {
         GpuHudTestStage.run(hud -> {
             hud.size(1920, 1080);

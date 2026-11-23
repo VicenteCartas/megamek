@@ -28,6 +28,7 @@ import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.common.Hex;
 import megamek.common.ManeuverType;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.enums.MoveStepType;
@@ -40,7 +41,11 @@ import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementMode;
 import megamek.common.units.EntityMovementType;
+import megamek.common.units.IAero;
 import megamek.common.units.Infantry;
+import megamek.common.units.Mek;
+import megamek.common.units.QuadVee;
+import megamek.common.units.Tank;
 import megamek.common.units.Terrains;
 
 /**
@@ -69,6 +74,90 @@ final class GpuMovePlan implements AutoCloseable {
     record Step(Coords coords, int boardId, float level, int facing, Band band, boolean airborne) { }
 
     /**
+     * What the dock's movement controls depend on for the unit. {@code vehicle}: it moves as a vehicle (a tank or VTOL,
+     * a QuadVee in vehicle mode), whose gaits TW calls cruising and flanking. {@code jumps}: it has jump MP at all, its
+     * own or a mechanical booster's, even while destroyed jets take them away now. {@code elevates}: it flies or dives
+     * (VTOL, WiGE, submarine movement), so it changes elevation as part of its move; {@code elevation} is the plan's
+     * final elevation. {@code entering}: a walk-on unit not on the board yet, in a planner gear; MegaMek's click on an
+     * entry hex places it, and the planner takes over from there. {@code flight}: an airborne aerospace unit's
+     * velocity and thrust ({@link Flight}), null for every other unit; it elevates, and {@code elevation} is the
+     * plan's final altitude. Its {@code entering} needs no planner gear: MegaMek plots its whole move. {@code runs}:
+     * it has a faster gait than its walk (infantry and battle armor move at one speed, unless TacOps fast infantry
+     * movement gives them a run). {@code dives}: it moves under water (a submarine, SCUBA infantry or UMU battle
+     * armor), so its elevation reads as a depth. {@code walk}: its walk MP where the plan ends, which under water is a
+     * UMU or SCUBA unit's UMU MP; -1 when the unit's walk MP stands.
+     */
+    record Traits(boolean vehicle, boolean jumps, boolean elevates, int elevation, boolean entering,
+          @Nullable Flight flight, boolean runs, boolean dives, int walk) {
+       /** A Mek with jump jets: the gaits Walk, Run and Jump. */
+       static final Traits MEK = new Traits(false, true, false, 0, false);
+
+       /** A ground unit's traits, without flight, that runs and doesn't dive. */
+       Traits(boolean vehicle, boolean jumps, boolean elevates, int elevation, boolean entering) {
+           this(vehicle, jumps, elevates, elevation, entering, null);
+       }
+
+       Traits(boolean vehicle, boolean jumps, boolean elevates, int elevation, boolean entering,
+             @Nullable Flight flight) {
+           this(vehicle, jumps, elevates, elevation, entering, flight, true, false, -1);
+       }
+
+       static Traits of(Entity entity, MovePath path, boolean entering, @Nullable Flight flight) {
+           if (flight != null) {
+               return new Traits(false, false, true, path.getFinalAltitude(), entering, flight);
+           }
+           EntityMovementMode movement = entity.getMovementMode();
+           boolean dives = movement.isSubmarine() || movement.isUMUInfantry();
+           // A UMU or SCUBA unit's jump MP is its UMU MP, which it never jumps with
+           boolean jumps = !(dives && entity instanceof Infantry) && (entity.getOriginalJumpMP() > 0
+                 || entity.getJumpMP() > 0 || entity instanceof Mek mek && mek.getMechanicalJumpBoosterMP() > 0);
+           boolean runs = !(entity instanceof Infantry) || entity.getRunMP() > entity.getWalkMP();
+           Coords end = path.getFinalCoords() != null ? path.getFinalCoords() : entity.getPosition();
+           // A diving unit only changes depth in water; before its entry hex its stepper waits, disabled
+           boolean elevates = movement.isVTOLOrWiGE() || dives && ((end == null) || water(entity, end,
+                 path.getFinalBoardId()));
+           int walk = dives ? GpuBoardSource.walkMP(entity, end, path.getFinalBoardId()) : -1;
+           return new Traits(vehicle(entity), jumps, elevates, path.getFinalElevation(), entering, null, runs, dives,
+                 walk);
+       }
+
+        static boolean vehicle(Entity entity) {
+            return entity instanceof Tank
+                  || entity instanceof QuadVee && entity.getConversionMode() == QuadVee.CONV_MODE_VEHICLE;
+        }
+
+        private static boolean water(Entity entity, Coords at, int boardId) {
+            Hex hex = (entity.getGame() == null) ? null : entity.getGame().getHex(at, boardId);
+            return (hex != null) && (hex.terrainLevel(Terrains.WATER) > 0);
+        }
+
+        /** The stepper's read-out: the elevation or altitude, or a diving unit's depth under the surface. */
+        int shownLevel() {
+            return dives ? Math.max(0, -elevation) : elevation;
+        }
+    }
+
+    /**
+     * An airborne aerospace unit's flight in the plan (TW aerospace movement): {@code start} is its velocity before
+     * the move and {@code velocity} the path's final one, of which {@code left} is still to be flown (on a ground map
+     * a velocity point is 16 hexes); {@code thrust} is the thrust the path spends of {@code safe} (the safe thrust)
+     * and {@code max} (the maximum, overthrust beyond the safe). {@code togo} is the hexes the velocity still carries
+     * it, as MegaMek's flight path indicator counts them.
+     */
+    record Flight(int start, int velocity, int left, int thrust, int safe, int max, int togo) {
+        static Flight of(IAero aero, Entity entity, MovePath path, boolean ground) {
+            int hexes = path.getFinalVelocity() * (ground ? 16 : 1) - path.getHexesMoved();
+            return new Flight(aero.getCurrentVelocity(), path.getFinalVelocity(), path.getFinalVelocityLeft(),
+                  path.getMpUsed(), entity.getWalkMP(), entity.getRunMP(), Math.max(0, hexes));
+        }
+    }
+
+    /** Whether the plan draws its route on the board: the planner's and a flight's, which MegaMek plots. */
+    static boolean drawsRoute(Snapshot move) {
+        return move.active() && (move.planner() || move.traits().flight() != null);
+    }
+
+    /**
      * The plan of the acting unit during the local movement turn; otherwise {@link #idle} (EMPTY unless a hold is on).
      * {@code route} is a copy of the phase display's planned path after the initial mode markers;
      * {@code hover} has the same shape while {@code route} is empty.
@@ -88,13 +177,14 @@ final class GpuMovePlan implements AutoCloseable {
      * drop (a step of the path, a walk-on unit's placement and a jump's start included; a gear other than walking; a
      * hex pick); always false in the planner, whose route the HUD clears itself. {@code walkedOn}: the path places a
      * walk-on unit on its entry hex (MegaMek's DEPLOY step), which {@link #withdrawWalkOn} takes back.
+     * {@code traits} are what the dock's controls depend on for the unit ({@link Traits}).
      */
     record Snapshot(boolean active, boolean planner, boolean external, int entityId, Mode mode, boolean explicit,
           String gearLabel, List<Step> route, List<Step> hover, List<Step> pins, Coords destination, int facing,
           int cost, int budget, EntityMovementType type, String typeLabel, boolean auto, int heat, int tmm,
           boolean legal, List<String> warnings, boolean canUndo, boolean canPin, boolean facingMatters,
           Map<Coords, Band> envelope, Set<Integer> mounts, int holdingRemaining, boolean cancellable,
-          boolean walkedOn) {
+          boolean walkedOn, Traits traits) {
         static final Snapshot EMPTY = idle(0);
 
         /** A plan that places no walk-on unit. */
@@ -106,6 +196,18 @@ final class GpuMovePlan implements AutoCloseable {
             this(active, planner, external, entityId, mode, explicit, gearLabel, route, hover, pins, destination,
                   facing, cost, budget, type, typeLabel, auto, heat, tmm, legal, warnings, canUndo, canPin,
                   facingMatters, envelope, mounts, holdingRemaining, cancellable, false);
+        }
+
+        /** A plan of a Mek with jump jets ({@link Traits#MEK}). */
+        Snapshot(boolean active, boolean planner, boolean external, int entityId, Mode mode, boolean explicit,
+              String gearLabel, List<Step> route, List<Step> hover, List<Step> pins, Coords destination, int facing,
+              int cost, int budget, EntityMovementType type, String typeLabel, boolean auto, int heat, int tmm,
+              boolean legal, List<String> warnings, boolean canUndo, boolean canPin, boolean facingMatters,
+              Map<Coords, Band> envelope, Set<Integer> mounts, int holdingRemaining, boolean cancellable,
+              boolean walkedOn) {
+            this(active, planner, external, entityId, mode, explicit, gearLabel, route, hover, pins, destination,
+                  facing, cost, budget, type, typeLabel, auto, heat, tmm, legal, warnings, canUndo, canPin,
+                  facingMatters, envelope, mounts, holdingRemaining, cancellable, walkedOn, Traits.MEK);
         }
 
         /** No plan (not the local movement turn, or no unit selected), with the hold's count. */
@@ -122,6 +224,14 @@ final class GpuMovePlan implements AutoCloseable {
             warnings = List.copyOf(warnings);
             envelope = Map.copyOf(envelope);
             mounts = Set.copyOf(mounts);
+        }
+
+        /**
+         * Whether the unit is a walk-on ground unit only placed on its entry hex, whose Go up and Go down then choose
+         * the height it enters at, free (MegaMek's {@code MovementDisplay}, TW p. 224).
+         */
+        boolean choosesEntryHeight() {
+            return planner && walkedOn && route.isEmpty() && (traits.flight() == null);
         }
     }
 
@@ -217,13 +327,18 @@ final class GpuMovePlan implements AutoCloseable {
         Integer elevation = floorElevation(hover, source.currentView().getBoardId(), pointedZ);
         List<Step> hovered = (planner && shown.route().isEmpty()) ? hover(md, key, hover, elevation, reach) : List.of();
         boolean explicit = planner && (mode != Mode.AUTO);
-        Snapshot next = new Snapshot(true, planner, planner && external, entityId, mode, explicit, label(mode),
-              shown.route(), hovered, planner ? pinned(path) : List.of(), shown.destination(), shown.facing(),
-              shown.cost(), shown.budget(), shown.type(), typeLabel(shown.type(), mode), planner && (mode == Mode.AUTO),
-              shown.heat(), shown.tmm(), shown.legal(), shown.warnings(), planner && canUndo(path),
+        Flight flight = flight(entity, path);
+        Traits traits = Traits.of(entity, path, !planner && (flight != null
+              ? !entity.isDeployed() && !md.isSelectingHex() : entering(md, entity)), flight);
+        Snapshot next = new Snapshot(true, planner, planner && external, entityId, mode, explicit,
+              label(mode, traits.vehicle()), shown.route(), hovered, planner ? pinned(path) : List.of(),
+              shown.destination(), shown.facing(), shown.cost(), shown.budget(), shown.type(),
+              typeLabel(shown.type(), mode, traits.vehicle()), planner && (mode == Mode.AUTO),
+              shown.heat(), shown.tmm(), shown.legal(), shown.warnings(),
+              planner ? canUndo(path) : (flight != null) && (path.length() > base(path)),
               planner && pinnable(md, path), facingMatters(entity), reach, planner ? mounts(md, entity) : Set.of(),
               held, !planner && (path.length() > 0 || md.getGear() != MovementDisplay.GEAR_LAND
-                    || md.isSelectingHex()), placesWalkOn(path));
+                    || md.isSelectingHex()), placesWalkOn(path), traits);
         if (!next.equals(published)) {
             published = next;
         }
@@ -263,9 +378,19 @@ final class GpuMovePlan implements AutoCloseable {
         command(this::pin);
     }
 
-    /** G9: turns the final facing one hexside, left for a negative {@code direction}. */
+    /** G9: turns the final facing one hexside, left for a negative {@code direction}; in flight, as MegaMek turns. */
     void turn(int direction) {
         command(md -> face(md, (md.getPlannedMovement().getFinalFacing() + (direction < 0 ? 5 : 1)) % 6));
+        flight(md -> {
+            if (md.getPlannedMovement().getFinalCoords() == null) {
+                return;
+            }
+            if (direction < 0) {
+                md.turnLeft();
+            } else {
+                md.turnRight();
+            }
+        });
     }
 
     /** Orient the route's endpoint toward the clicked hex, preserving its destination and pinned waypoints. */
@@ -283,9 +408,15 @@ final class GpuMovePlan implements AutoCloseable {
         command(md -> switchMode(md, mode));
     }
 
-    /** G11: undoes the last plan command. */
+    /** G11: undoes the last plan command; in flight, MegaMek's last step (its Backspace). */
     void undo() {
         command(this::undoStep);
+        flight(md -> {
+            MovePath path = md.getPlannedMovement();
+            if (path.length() > base(path)) {
+                md.undoStep();
+            }
+        });
     }
 
     /** Esc and "Clear route": back to the mode's start. */
@@ -298,7 +429,7 @@ final class GpuMovePlan implements AutoCloseable {
         command(this::withdraw);
     }
 
-    /** The dock's ✕: the route back to the mode's start, else a walk-on unit's placement. */
+    /** The dock's ✕: the route back to the mode's start, else a walk-on unit's placement; in flight, the same. */
     void clearOrWithdraw() {
         command(md -> {
             MovePath path = md.getPlannedMovement();
@@ -306,6 +437,14 @@ final class GpuMovePlan implements AutoCloseable {
                 clear(md);
             } else {
                 withdraw(md);
+            }
+        });
+        flight(md -> {
+            MovePath path = md.getPlannedMovement();
+            if (path.length() > base(path)) {
+                md.clear();
+            } else {
+                md.withdrawWalkOn();
             }
         });
     }
@@ -381,6 +520,22 @@ final class GpuMovePlan implements AutoCloseable {
     }
 
     /**
+     * Runs a flight command body on the EDT behind the source's input guard, while the plan's unit still flies in the
+     * local movement turn. MegaMek plots a flight, so the path it leaves is MegaMek's, as after its own buttons.
+     */
+    private void flight(Consumer<MovementDisplay> body) {
+        source.command(() -> {
+            MovementDisplay md = display;
+            Entity entity = acting(md);
+            if ((entity == null) || (entity.getId() != entityId) || (md.getPlannedMovement() == null)
+                  || !flies(entity) || md.isSelectingHex()) {
+                return;
+            }
+            body.accept(md);
+        });
+    }
+
+    /**
      * G6, G7: cuts the path back to the last pin and plots to the hex as a click does. A click on the hex the route
      * continues from is ignored unless another floor is selected. An explicit floor must be reached legally;
      * otherwise the previous draft stays. Without a picked floor an illegal tail is cut off with a toast.
@@ -430,9 +585,10 @@ final class GpuMovePlan implements AutoCloseable {
         }
         path = md.getPlannedMovement();
         Mode mode = mode(md);
+        boolean vehicle = Traits.vehicle(path.getEntity());
         if ((path.length() > anchor) && !allowed(mode, path.getLastStepMovementType())) {
             restore(md, before);
-            toast(md, "GpuBoard.hud.move.notReachable", label(mode).toUpperCase(Locale.ROOT));
+            toast(md, "GpuBoard.hud.move.notReachable", label(mode, vehicle).toUpperCase(Locale.ROOT));
             return;
         }
         // A click on a transport: MegaMek's click stopped the path beside it, where its Mount command boards it.
@@ -442,9 +598,9 @@ final class GpuMovePlan implements AutoCloseable {
             if (occupied) {
                 toast(md, "GpuBoard.hud.move.hexOccupied", blocked.getPosition().getBoardNum());
             } else if (mode == Mode.AUTO) {
-                toast(md, "GpuBoard.hud.move.beyondRunningMp");
+                toast(md, vehicle ? "GpuBoard.hud.move.beyondFlankingMp" : "GpuBoard.hud.move.beyondRunningMp");
             } else {
-                toast(md, "GpuBoard.hud.move.notReachable", label(mode).toUpperCase(Locale.ROOT));
+                toast(md, "GpuBoard.hud.move.notReachable", label(mode, vehicle).toUpperCase(Locale.ROOT));
             }
         } else if (pin) {
             addPin(md, path);
@@ -735,9 +891,34 @@ final class GpuMovePlan implements AutoCloseable {
      * entry hex places it first, and the plan then continues from there.
      */
     private static boolean planner(MovementDisplay md, Entity entity) {
+        return !entity.isAero() && entity.isDeployed() && plannerGear(md);
+    }
+
+    /** A walk-on unit that waits for MegaMek's click on its entry hex, after which the planner plots its move. */
+    private static boolean entering(MovementDisplay md, Entity entity) {
+        return !entity.isAero() && !entity.isDeployed() && plannerGear(md);
+    }
+
+    /**
+     * The flight of an airborne aerospace unit that moves by TW's velocity and thrust (MegaMek's CMD_AERO buttons),
+     * null for every other unit, a landed one and vector movement (advanced, its own buttons). MegaMek plots its path.
+     */
+    private @Nullable Flight flight(Entity entity, @Nullable MovePath path) {
+        if ((path == null) || !flies(entity)) {
+            return null;
+        }
+        Board board = source.currentView().game.getBoard(entity);
+        return Flight.of((IAero) entity, entity, path, (board == null) || board.isGround());
+    }
+
+    private boolean flies(Entity entity) {
+        return entity.isAero() && (entity instanceof IAero) && entity.isAirborne()
+              && !source.currentView().game.useVectorMove();
+    }
+
+    private static boolean plannerGear(MovementDisplay md) {
         int gear = md.getGear();
-        return !entity.isAero() && entity.isDeployed() && !md.isSelectingHex()
-              && ((gear == MovementDisplay.GEAR_LAND) || (gear == MovementDisplay.GEAR_JUMP)
+        return !md.isSelectingHex() && ((gear == MovementDisplay.GEAR_LAND) || (gear == MovementDisplay.GEAR_JUMP)
               || (gear == MovementDisplay.GEAR_BACKUP));
     }
 
@@ -930,8 +1111,11 @@ final class GpuMovePlan implements AutoCloseable {
             List<Step> route = route(path);
             EntityMovementType type = path.getLastStepMovementType();
             boolean moved = !route.isEmpty();
+            int budget = (type == EntityMovementType.MOVE_WALK)
+                  ? GpuBoardSource.walkMP(entity, path.getFinalCoords(), path.getFinalBoardId())
+                  : GpuBoardSource.movementMP(entity, type);
             facts = new Facts(route, moved ? path.getFinalCoords() : null, path.getFinalFacing(), path.getMpUsed(),
-                  GpuBoardSource.movementMP(entity, type), type, MovePathSummary.heat(path),
+                  budget, type, MovePathSummary.heat(path),
                   MovePathSummary.tmm(path).getValue(), path.isMoveLegal(), moved ? warnings(path) : List.of());
             factsKey = key;
         }
@@ -957,8 +1141,9 @@ final class GpuMovePlan implements AutoCloseable {
         EntityMovementMode movement = step.getMovementMode();
         boolean flying = (step.getAltitude() > 0)
               || ((movement.isVTOL() || movement.isWiGE()) && (step.getClearance() > 0));
-        float level = (step.getAltitude() > 0) ? step.getAltitude()
-              : (step.getElevation() + ((hex == null) ? 0 : hex.getLevel()));
+        // As GpuBoardSource's unitWaypoint places them: an aerospace flies its altitude above the hex.
+        float level = ((step.getAltitude() > 0) ? step.getAltitude() : step.getElevation())
+              + ((hex == null) ? 0 : hex.getLevel());
         EntityMovementType type = step.getMovementType(last);
         // Match StepSprite: the movement compiler marks each boosted step, including VTOL jet boosters.
         Band band = switch (type) {
@@ -989,22 +1174,27 @@ final class GpuMovePlan implements AutoCloseable {
         return SharedUtility.getPSRList(path.clone()).stream().map(TargetRoll::getLastPlainDesc).distinct().toList();
     }
 
-    /** The explicit mode's word, also in its refusal toasts; empty for automatic movement and other gears. */
-    private static String label(Mode mode) {
+    /**
+     * The explicit mode's word, also in its refusal toasts; empty for automatic movement and other gears. A vehicle
+     * cruises and flanks (TW), and backs up.
+     */
+    static String label(Mode mode, boolean vehicle) {
         return switch (mode) {
-            case WALK -> Messages.getString("GpuBoard.hud.move.walk");
-            case RUN -> Messages.getString("GpuBoard.hud.move.run");
+            case WALK -> Messages.getString(vehicle ? "GpuBoard.hud.move.cruise" : "GpuBoard.hud.move.walk");
+            case RUN -> Messages.getString(vehicle ? "GpuBoard.hud.move.flank" : "GpuBoard.hud.move.run");
             case JUMP -> Messages.getString("GpuBoard.hud.move.jump");
-            case BACK -> Messages.getString("GpuBoard.hud.dock.walkBackwards");
+            case BACK -> Messages.getString(vehicle ? "GpuBoard.hud.dock.backUp" : "GpuBoard.hud.dock.walkBackwards");
             default -> "";
         };
     }
 
     /** The route's movement as the dock foot and the tip name it; a walking route in an explicit run says so (G10). */
-    private static String typeLabel(EntityMovementType type, Mode mode) {
+    private static String typeLabel(EntityMovementType type, Mode mode, boolean vehicle) {
         return Messages.getString(switch (band(type)) {
-            case WALK, BACK -> (mode == Mode.RUN) ? "GpuBoard.hud.move.walkRunOnly" : "GpuBoard.hud.move.walk";
-            case RUN, BOOST -> "GpuBoard.hud.move.run";
+            case WALK, BACK -> (mode == Mode.RUN)
+                  ? (vehicle ? "GpuBoard.hud.move.cruiseFlankOnly" : "GpuBoard.hud.move.walkRunOnly")
+                  : (vehicle ? "GpuBoard.hud.move.cruise" : "GpuBoard.hud.move.walk");
+            case RUN, BOOST -> vehicle ? "GpuBoard.hud.move.flank" : "GpuBoard.hud.move.run";
             case SPRINT -> "GpuBoard.hud.move.sprint";
             case JUMP -> "GpuBoard.hud.move.jump";
             case ILLEGAL -> "GpuBoard.hud.move.illegal";
@@ -1034,7 +1224,8 @@ final class GpuMovePlan implements AutoCloseable {
         if ((searched != bandsSource) || (mode != bandsMode)) {
             Map<Coords, Band> banded = new HashMap<>();
             if (searched.entityId() == entity.getId()) {
-                MovementEnvelopeSpriteHandler.bands(searched.mp(), entity.getWalkMP(), entity.getRunMP(),
+                int walk = GpuBoardSource.walkMP(entity, entity.getPosition(), entity.getBoardId());
+                MovementEnvelopeSpriteHandler.bands(searched.mp(), walk, Math.max(walk, entity.getRunMP()),
                       entity.getAnyTypeMaxJumpMP(), searched.gear()).forEach((coords, swing) -> {
                     Band band = Band.valueOf(swing.name());
                     Band shown = switch (mode) {
