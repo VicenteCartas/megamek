@@ -38,6 +38,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
@@ -513,6 +514,178 @@ class GpuCommandDockSmokeTest {
             show(hud, dock, generic);
             assertNull(dock.find("dock-secondary"));
             assertEquals("MOVE", button(dock, "dock-main").getText().toString());
+        });
+    }
+
+    @Test
+    void deploymentSetupTilesShowTheStartingChoicesAndSetThem() {
+        GpuHudTestStage.run(hud -> {
+            hud.size(1920, 1080);
+            GpuDeploySetup.Tile stance = new GpuDeploySetup.Tile("stance", "Stance", List.of("Standing", "Prone"), 0, 0,
+                  GpuDeploySetup.Kind.PICK, 0, "How the unit starts out");
+            GpuDeploySetup.Tile sinks = new GpuDeploySetup.Tile("sinks", "Heat sinks",
+                  List.of("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"), 8, 10, GpuDeploySetup.Kind.STEP, 0,
+                  "Heat sinks switched on");
+            GpuDeploySetup.Tile capacitor = new GpuDeploySetup.Tile("equip-3", "PPC capacitor",
+                  List.of("Off", "Charge"), 1, 0, GpuDeploySetup.Kind.TOGGLE, 0, "Charged before the game");
+            GpuDeploySetup.Tile ecm = new GpuDeploySetup.Tile("equip-7", "Guardian ECM", List.of("ECM", "ECCM", "Off"),
+                  0, 0, GpuDeploySetup.Kind.PICK, 2, "The suite's mode");
+            GpuDeploySetup.Tile power = new GpuDeploySetup.Tile("power", "Power", List.of("On", "Shut down"), 0, 0,
+                  GpuDeploySetup.Kind.TOGGLE, 1, "Start the battle shut down");
+            GpuDeploySetup.Tile searchlight = new GpuDeploySetup.Tile("light", "Searchlight", List.of("Off", "On"), 0,
+                  0, GpuDeploySetup.Kind.TOGGLE, 0, "Lit from the start");
+            GpuDeploySetup.Choice setup = new GpuDeploySetup.Choice(ATLAS,
+                  List.of(stance, sinks, capacitor, ecm, power, searchlight), 2,
+                  List.of("PPC capacitor +5 heat each turn"), "2 CHANGES");
+            when(source.setupChoice()).thenReturn(setup);
+            try {
+                Shot deploy = deployment();
+                Dock dock = dock(hud, deploy);
+                show(hud, dock, deploy);
+                show(hud, dock, deploy);
+                hud.capture("g6-deploy-setup").dispose();
+                assertEquals(List.of("dock-setup-stance", "dock-setup-sinks", "dock-setup-equip-3",
+                      "dock-setup-equip-7", "dock-setup-power"), names(dock.root(), "dock-setup-"));
+                assertTrue(names(dock.root(), "dock-command-").isEmpty(), "the tiles take the command row");
+                click(hud, dock.find("dock-setup-equip-3"));
+                verify(source).setSetup(ATLAS, "equip-3", 0);
+                click(hud, dock.find("dock-setup-power"));
+                verify(source).setSetup(ATLAS, "power", 1);
+                GpuCommandDock.More more = dock.dock().more();
+                assertNotNull(more, "the searchlight and the deploy commands are in More");
+                assertEquals(List.of(searchlight), more.setup(), "More shows the overflow as setup tiles");
+                click(hud, dock.find("dock-setup-equip-7"));
+                show(hud, dock, deploy);
+                hud.capture("g6-deploy-setup-pick").dispose();
+
+                // More: the searchlight as a setup tile atop the panel, a click leaving the panel open.
+                click(hud, button(dock, "dock-more"));
+                show(hud, dock, deploy);
+                UiButton light = dock.drawer().findActor("dock-more-setup-light");
+                assertNotNull(light, "the overflow setup choice is a tile in More");
+                assertTrue(light.getWidth() >= 190, "More widens for setup tiles: " + light.getWidth());
+                hud.capture("g6-deploy-setup-more").dispose();
+                click(hud, light);
+                verify(source).setSetup(ATLAS, "light", 1);
+                assertTrue(dock.dock().drawer().isOpen(), "a setup tile leaves More open");
+                click(hud, dock.drawer().findActor("dock-more-close"));
+                show(hud, dock, deploy);
+
+                // The heat sinks: a slider above the tile, each whole count set as it is reached.
+                click(hud, dock.find("dock-setup-sinks"));
+                show(hud, dock, deploy);
+                Slider slider = hud.stage.getRoot().findActor("setup-sinks-slider");
+                assertNotNull(slider, "the heat sinks open a slider");
+                assertEquals(8, slider.getValue(), 0.001f);
+                assertEquals("8 / 10", ((Label) hud.stage.getRoot().findActor("setup-sinks-value")).getText()
+                      .toString());
+                hud.capture("g6-deploy-setup-sinks").dispose();
+                slider.setValue(5);
+                verify(source).setSetup(ATLAS, "sinks", 5);
+                assertEquals("5 / 10", ((Label) hud.stage.getRoot().findActor("setup-sinks-value")).getText()
+                      .toString());
+            } finally {
+                when(source.setupChoice()).thenReturn(null);
+            }
+        });
+    }
+
+    @Test
+    void aSetupTagNamesTheChangesInShortAndOpensUpwardUnderThePointer() {
+        GpuHudTestStage.run(hud -> {
+            hud.size(1920, 1080);
+            GpuDeploySetup.Tile masc = new GpuDeploySetup.Tile("equip-4", "MASC", List.of("Armed", "Off"), 1, 0,
+                  GpuDeploySetup.Kind.TOGGLE, 1, "");
+            GpuDeploySetup.Tile ecm = new GpuDeploySetup.Tile("equip-7", "ECM Suite (Guardian)", List.of("ECM", "Off"),
+                  1, 0, GpuDeploySetup.Kind.TOGGLE, 1, "");
+            GpuDeploySetup.Tile sinks = new GpuDeploySetup.Tile("sinks", "Heat sinks",
+                  List.of("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"), 8, 10, GpuDeploySetup.Kind.STEP, 0,
+                  "");
+            assertEquals("MASC Off", GpuDeploySetup.brief(List.of(masc)));
+            assertEquals("MASC Off \u00B7 8/10 sinks", GpuDeploySetup.brief(List.of(masc, sinks)));
+            assertEquals("MASC Off \u00B7 +2", GpuDeploySetup.brief(List.of(masc, ecm, sinks)),
+                  "what does not fit is counted");
+            List<GpuDeploySetup.Tile> tiles = List.of(masc, ecm, sinks);
+            GpuDeploySetup.Choice setup = new GpuDeploySetup.Choice(ATLAS, tiles, 3,
+                  List.of("2 heat sinks switched off"), GpuDeploySetup.brief(tiles));
+            GpuSetupTag tag = new GpuSetupTag(hud.kit.ui, "test-setup-tag", null);
+            hud.window.clearChildren();
+            hud.window.addActor(tag);
+            tag.show(setup);
+            tag.setVisible(true);
+            tag.setPosition(900, 500);
+            hud.stage.act(0);
+            assertFalse(tag.isOpen());
+            assertEquals("MASC OFF \u00B7 +2", ((Label) tag.findActor("test-setup-tag")).getText().toString());
+            hud.draw();
+            hud.capture("g6-setup-tag").dispose();
+            float collapsed = tag.getHeight();
+            float middle = tag.getX() + tag.getWidth() / 2;
+            Vector2 point = hud.stage.stageToScreenCoordinates(
+                  tag.localToStageCoordinates(new Vector2(tag.getWidth() / 2, 4)));
+            hud.stage.mouseMoved((int) point.x, (int) point.y);
+            hud.stage.act(0);
+            assertTrue(tag.isOpen(), "the pointer over the tag opens it");
+            assertEquals(collapsed, tag.collapsedHeight(), 0.5f);
+            assertTrue(tag.getHeight() > collapsed, "opened, it lists the changes");
+            assertEquals(500, tag.getY(), 0.5f, "it opens upward: its bottom keeps its place");
+            assertEquals(middle, tag.getX() + tag.getWidth() / 2, 1f, "and keeps its middle");
+            assertEquals("OFF", ((Label) tag.findActor("test-setup-tag-equip-4")).getText().toString());
+            assertEquals("8 / 10", ((Label) tag.findActor("test-setup-tag-sinks")).getText().toString());
+            hud.draw();
+            hud.capture("g6-setup-tag-open").dispose();
+            hud.stage.mouseMoved(1, 1);
+            hud.stage.act(0);
+            assertFalse(tag.isOpen(), "off the tag it closes");
+            assertEquals(collapsed, tag.getHeight(), 0.5f);
+        });
+    }
+
+    @Test
+    void aWalkOnUnitSetsUpItsEntryThenEntersAndCanGoBackToIt() {
+        GpuHudTestStage.run(hud -> {
+            hud.size(1920, 1080);
+            GpuDeploySetup.Tile sinks = new GpuDeploySetup.Tile("sinks", "Heat sinks",
+                  List.of("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"), 10, 10, GpuDeploySetup.Kind.STEP, 0,
+                  "Heat sinks switched on");
+            GpuDeploySetup.Tile power = new GpuDeploySetup.Tile("power", "Power", List.of("On", "Shut down"), 0, 0,
+                  GpuDeploySetup.Kind.TOGGLE, 1, "Start the battle shut down");
+            when(source.setupChoice()).thenReturn(new GpuDeploySetup.Choice(ATLAS, List.of(sinks, power), 0,
+                  List.of(), ""));
+            when(source.walkOnEntry()).thenReturn(
+                  new GpuBoardSource.WalkOnEntry(ATLAS, GpuBoardSource.EntryStage.SETTING_UP, true));
+            try {
+                Shot entry = movement(atlasRoute(), ATLAS);
+                Dock dock = dock(hud, entry);
+                show(hud, dock, entry);
+                show(hud, dock, entry);
+                hud.capture("g6-walk-on-entry").dispose();
+                assertEquals(Messages.getString("GpuBoard.hud.move.entry.enter").toUpperCase(),
+                      button(dock, "dock-main").getText().toString().toUpperCase());
+                assertEquals(List.of("dock-setup-sinks", "dock-setup-power"), names(dock.root(), "dock-setup-"));
+                assertNull(dock.find("dock-mode-back"), "nothing moves before the unit enters");
+                hud.assertLayout(dock.dock().actor(), neighbours(hud, dock));
+                click(hud, dock.find("dock-setup-power"));
+                verify(source).setSetup(ATLAS, "power", 1);
+                clickAndShow(hud, dock, entry, "dock-secondary");
+                verify(moves).clearOrWithdraw();
+                clickAndShow(hud, dock, entry, "dock-main");
+                verify(source).setEntered(ATLAS, true);
+
+                when(source.setupChoice()).thenReturn(null);
+                when(source.walkOnEntry()).thenReturn(
+                      new GpuBoardSource.WalkOnEntry(ATLAS, GpuBoardSource.EntryStage.ENTERED, true));
+                show(hud, dock, entry);
+                show(hud, dock, entry);
+                hud.capture("g6-walk-on-entered").dispose();
+                assertTrue(names(dock.root(), "dock-setup-").isEmpty(), "the plan replaces the setup");
+                assertNotNull(dock.find("dock-mode-back"));
+                click(hud, button(dock, "dock-entry-setup"));
+                verify(source).setEntered(ATLAS, false);
+            } finally {
+                when(source.setupChoice()).thenReturn(null);
+                when(source.walkOnEntry()).thenReturn(null);
+            }
         });
     }
 
@@ -1688,7 +1861,7 @@ class GpuCommandDockSmokeTest {
     }
 
     /** The names under {@code actor} that start with {@code prefix}, in their order. */
-    private static List<String> names(Actor actor, String prefix) {
+   private static List<String> names(Actor actor, String prefix) {
         List<String> names = new ArrayList<>();
         if (actor.getName() != null && actor.getName().startsWith(prefix)) {
             names.add(actor.getName());

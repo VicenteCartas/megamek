@@ -294,7 +294,7 @@ final class GpuHud implements GpuBoardHud {
         contextMenu = new GpuContextMenu(kit, source, state, this::select);
         GpuNameplates nameplates = new GpuNameplates(kit, source, state);
         deployHeight = new GpuDeployHeight(source);
-        GpuDeployConfirm deployConfirm = new GpuDeployConfirm(kit, state, nameplates, deployHeight);
+        GpuDeployConfirm deployConfirm = new GpuDeployConfirm(kit, source, state, nameplates, deployHeight);
         GpuMoveConfirm moveConfirm = new GpuMoveConfirm(kit, source, state, camera, nameplates);
         targetCards = new GpuTargetCards(kit, source, state, contextMenu);
         losPanel = new GpuLosPanel(kit.ui, stage, source, camera);
@@ -1562,25 +1562,25 @@ final class GpuHud implements GpuBoardHud {
               || shown(otherUnitSlot);
         float drawerX = dockSlot.getX() + dockSlot.getWidth() + STACK;
         float drawerRight = rightColumn ? bandRight + gap : width - gap;
-        int besideColumns = Math.min(GpuMoreDrawer.columnsIn(drawerRight - drawerX), drawer.columnsAt(dockHeight));
+        int besideColumns = Math.min(drawer.columnsFor(drawerRight - drawerX), drawer.columnsAt(dockHeight));
         // A short drawer can fit below the minimap, but a taller one must fit to its left or above the dock.
         if (besideColumns > 0 && shown(minimapSlot)
-              && overlapsHorizontally(minimapSlot, drawerX, GpuMoreDrawer.width(besideColumns))
+              && overlapsHorizontally(minimapSlot, drawerX, drawer.widthFor(besideColumns))
               && gap + Math.max(dockHeight, drawer.height(besideColumns)) + STACK > minimapSlot.getY()) {
             besideColumns = Math.min(besideColumns,
-                  GpuMoreDrawer.columnsIn(minimapSlot.getX() - drawerX - STACK));
+                  drawer.columnsFor(minimapSlot.getX() - drawerX - STACK));
         }
         drawer.above(besideColumns == 0);
         if (besideColumns > 0) {
             float drawerHeight = Math.min(Math.max(dockHeight, drawer.height(besideColumns)), dockTop + dockHeight - gap);
-            place(drawerSlot, drawerX, dockTop + dockHeight - drawerHeight, GpuMoreDrawer.width(besideColumns),
+            place(drawerSlot, drawerX, dockTop + dockHeight - drawerHeight, drawer.widthFor(besideColumns),
                   drawerHeight);
         } else {
             float room = Math.max(0, dockTop - STACK - gap);
-            int columns = Math.max(1, Math.min(GpuMoreDrawer.columnsIn(dockWidth),
+            int columns = Math.max(1, Math.min(drawer.columnsFor(dockWidth),
                   drawer.columnsAt(Math.min(dockHeight, room))));
             float aboveHeight = Math.min(drawer.height(columns), room);
-            float aboveWidth = GpuMoreDrawer.width(columns);
+            float aboveWidth = drawer.widthFor(columns);
             place(drawerSlot, dockSlot.getX() + dockSlot.getWidth() - aboveWidth, dockTop - STACK - aboveHeight,
                   aboveWidth, aboveHeight);
         }

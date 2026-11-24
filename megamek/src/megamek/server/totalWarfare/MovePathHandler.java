@@ -375,6 +375,12 @@ class MovePathHandler extends AbstractTWRuleHandler {
                 return;
             }
 
+            // How it starts (stance, power, heat sinks, equipment) was chosen before it entered (Core Rulebook p. 224)
+            if (md.getDeploymentSetup() != null) {
+                Hex entryHex = gameManager.getGame().getBoard(boardId).getHex(position);
+                DeploymentProcessor.applySetup(entity, md.getDeploymentSetup(), entryHex);
+            }
+
             deploymentProcess.processDeployment(entity,
                                                 position,
                                                 boardId,

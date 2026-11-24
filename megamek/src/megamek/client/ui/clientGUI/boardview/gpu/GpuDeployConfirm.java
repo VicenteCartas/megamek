@@ -13,6 +13,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay.DeployCommand;
 import megamek.client.ui.util.KeyCommandBind;
 
@@ -22,7 +23,9 @@ import megamek.client.ui.util.KeyCommandBind;
  * (MegaMek's Done); Clear takes the unit back off the board. They show only in the player's own deployment turn while
  * the placed unit is on screen and MegaMek's Done is enabled. A unit with a choice of heights in its hex (an
  * aerospace unit's altitude, a VTOL's elevation) shows that height above them, stepped by its arrows, a click on it or
- * Ctrl+wheel, as the dock's stepper does.
+ * Ctrl+wheel, as the dock's stepper does. A unit whose starting setup differs from how it began shows an amber tag
+ * ({@link GpuSetupTag}) naming the changes between the two, which opens upward into each change under the pointer, so
+ * the board says what Deploy sends.
  */
 final class GpuDeployConfirm implements GpuHud.Component {
     /** The pair's distance above the nameplate, and from the window's edges. */
@@ -45,10 +48,16 @@ final class GpuDeployConfirm implements GpuHud.Component {
     private final Table heights = new Table();
     private final UiButton height;
     private final Cell<UiButton> heightCell;
+    private final GpuBoardSource source;
+    /** The placed unit's setup tag: the changes in short, opening upward into each under the pointer. */
+    private final GpuSetupTag tag;
+
     private GpuHud.Inputs inputs;
     private int actorId = -1;
 
-    GpuDeployConfirm(GpuHudKit kit, GpuHudState state, GpuNameplates nameplates, GpuDeployHeight deployHeight) {
+    GpuDeployConfirm(GpuHudKit kit, GpuBoardSource source, GpuHudState state, GpuNameplates nameplates,
+          GpuDeployHeight deployHeight) {
+        this.source = source;
         this.nameplates = nameplates;
         this.state = state;
         this.deployHeight = deployHeight;
@@ -85,6 +94,8 @@ final class GpuDeployConfirm implements GpuHud.Component {
         pair.add(clear).size(BUTTON).padLeft(GAP);
         pair.setVisible(false);
         root.addActor(pair);
+        tag = new GpuSetupTag(ui, "deploy-setup-tag", null);
+        root.addActor(tag);
     }
 
     @Override
@@ -99,6 +110,7 @@ final class GpuDeployConfirm implements GpuHud.Component {
         pair.setVisible(at != null);
         if (at == null) {
             heights.setVisible(false);
+            tag.setVisible(false);
             return;
         }
         confirmTip.setText(text("GpuBoard.hud.deploy.confirmTip",
@@ -112,6 +124,26 @@ final class GpuDeployConfirm implements GpuHud.Component {
         float top = parent == null ? Float.MAX_VALUE : parent.getHeight() - MARGIN - pair.getHeight();
         pair.setPosition(MathUtils.clamp(at.x - pair.getWidth() / 2, MARGIN, Math.max(MARGIN, right)),
               MathUtils.clamp(at.y + LIFT, MARGIN, Math.max(MARGIN, top)));
+        // Above the pair the setup tag, then the heights; whatever the window's top has no room for goes below.
+        float ceiling = parent == null ? Float.MAX_VALUE : parent.getHeight() - MARGIN;
+        float above = pair.getY() + pair.getHeight() + GAP;
+        float below = pair.getY() - GAP;
+        GpuDeploySetup.Choice setup = source.setupChoice();
+        boolean tagged = setup != null && setup.unitId() == actorId && !setup.tag().isEmpty();
+        tag.setVisible(tagged);
+        if (tagged) {
+            tag.show(setup);
+            // Laid out by its collapsed height: opened, it grows over what is above it, and nothing moves.
+            float x = Math.round(pair.getX() + (pair.getWidth() - tag.getWidth()) / 2);
+            float height = tag.collapsedHeight();
+            if (above + height <= ceiling) {
+                tag.setPosition(x, above);
+                above += height + GAP;
+            } else {
+                tag.setPosition(x, below - height);
+                below -= height + GAP;
+            }
+        }
         GpuBoardSource.HeightChoice choice = deployHeight.choice(actorId);
         heights.setVisible(choice != null);
         if (choice != null) {
@@ -119,10 +151,8 @@ final class GpuDeployConfirm implements GpuHud.Component {
             heightCell.width(width - 2 * (BUTTON + GAP));
             heights.invalidate();
             heights.setSize(width, heights.getPrefHeight());
-            // Above the pair, unless the window's top pushes it below.
-            float above = pair.getY() + pair.getHeight() + GAP;
-            heights.setPosition(pair.getX(), above + heights.getHeight() <= (parent == null ? Float.MAX_VALUE
-                  : parent.getHeight() - MARGIN) ? above : pair.getY() - GAP - heights.getHeight());
+            heights.setPosition(pair.getX(), above + heights.getHeight() <= ceiling ? above
+                  : below - heights.getHeight());
         }
     }
 

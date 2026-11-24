@@ -47,6 +47,7 @@ import megamek.common.net.packets.InvalidPacketDataException;
 import megamek.common.net.packets.Packet;
 import megamek.common.options.OptionsConstants;
 import megamek.common.turns.SpecificEntityTurn;
+import megamek.common.units.DeploymentSetup;
 import megamek.common.units.Entity;
 import megamek.common.units.IAero;
 import megamek.common.units.StartingModes;
@@ -104,9 +105,18 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
         }
 
         // A LAM or QuadVee may change the mode it starts in until it first deploys, and the mode decides where it may deploy
+        Integer startingMode = null;
+        DeploymentSetup setup = null;
+        for (int index = 7 + loadedCount; index < packet.data().length; index++) {
+            if (packet.data()[index] instanceof Integer mode) {
+                startingMode = mode;
+            } else if (packet.data()[index] instanceof DeploymentSetup chosen) {
+                setup = chosen;
+            }
+        }
         Runnable restore = null;
-        if ((packet.data().length > 7 + loadedCount) && (turn != null) && turn.isValid(connId, entity, getGame())) {
-            restore = applyStartingMode(entity, packet.getIntValue(7 + loadedCount));
+        if ((startingMode != null) && (turn != null) && turn.isValid(connId, entity, getGame())) {
+            restore = applyStartingMode(entity, startingMode);
         }
 
         DeploymentServerHelper deploymentServerHelper = new DeploymentServerHelper(gameManager);
@@ -147,6 +157,10 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
             return;
         }
 
+        if (setup != null) {
+            applySetup(entity, setup, destinationHex);
+        }
+
         // looks like mostly everything's okay
         boolean setDone = true;
         deploymentServerHelper.processDeployment(entity,
@@ -185,6 +199,25 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
             LOGGER.error("{} can not start in conversion mode {}", entity.getShortName(), mode);
         }
         return StartingModes.choose(entity, mode);
+    }
+
+    /**
+     * Puts the never deployed {@code entity} into the {@code setup} its deployment chose in {@code hex}: stance, shutdown,
+     * active heat sinks and activated equipment (Core Rulebook p. 224). A setup the unit may not choose, or one whose
+     * equipment can't run together, is refused and the unit deploys as the lobby left it.
+     */
+    static void applySetup(Entity entity, DeploymentSetup setup, @Nullable Hex hex) {
+        Game game = entity.getGame();
+        if (!entity.wasNeverDeployed() || !setup.isAllowed(game, entity, hex)) {
+            LOGGER.error("{} can not start with setup {}", entity.getShortName(), setup);
+            return;
+        }
+        boolean conflicted = DeploymentSetup.conflict(entity) != null;
+        Runnable restore = setup.apply(game, entity, hex);
+        if (!conflicted && (DeploymentSetup.conflict(entity) != null)) {
+            LOGGER.error("{} can not start with equipment that conflicts: {}", entity.getShortName(), setup);
+            restore.run();
+        }
     }
 
     /**

@@ -365,7 +365,7 @@ class MovementDisplayTest {
         MovePath raised = (MovePath) readField(movementDisplay, "cmd");
         assertEquals(2, vtol.getElevation());
         assertEquals(2, raised.getFinalElevation(), "The deploy step enters at the chosen elevation.");
-        assertEquals(entryCost, raised.getMpUsed(), "Choosing the entry elevation costs no MP (TW p. 224).");
+        assertEquals(entryCost, raised.getMpUsed(), "Choosing the entry elevation costs no MP (Core Rulebook p. 224).");
         assertEquals(1, raised.length(), "The path stays a bare placement.");
 
         assertTrue(changeEntryHeight(vtol, false));

@@ -75,6 +75,7 @@ import megamek.common.preference.PreferenceManager;
 import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.Aero;
 import megamek.common.units.BulldozerRules;
+import megamek.common.units.DeploymentSetup;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementMode;
 import megamek.common.units.EntityMovementType;
@@ -404,6 +405,102 @@ final class GpuBoardSource implements BoardSource {
             if (acceptsInput() && phasePanel.get() instanceof DeploymentDisplay deployment
                   && deployment.currentEntity() != null && deployment.currentEntity().getId() == unitId) {
                 deployment.setPlacedHeight(height);
+                refresh();
+            }
+        });
+    }
+
+    private volatile GpuDeploySetup.Choice setupChoice = GpuDeploySetup.Choice.NONE;
+
+    /**
+     * GL thread: the deploying unit's starting setup tiles, or a walk-on unit's while it sets up its entry;
+     * {@link GpuDeploySetup.Choice#NONE} while it has none.
+     */
+    GpuDeploySetup.Choice setupChoice() {
+        return setupChoice;
+    }
+
+    private GpuDeploySetup.Choice captureSetupChoice(JComponent panel) {
+        if (panel instanceof DeploymentDisplay deployment) {
+            return GpuDeploySetup.capture(view.game, deployment);
+        } else if (panel instanceof MovementDisplay movement) {
+            return GpuDeploySetup.capture(view.game, movement);
+        }
+        return GpuDeploySetup.Choice.NONE;
+    }
+
+    /**
+     * GL thread: sets the deploying unit {@code unitId}'s setup tile {@code tileId} to its state {@code index}, if the
+     * unit still deploys, or still sets up its walk-on entry, and has that choice.
+     */
+    void setSetup(int unitId, String tileId, int index) {
+        SwingUtilities.invokeLater(() -> {
+            if (!acceptsInput()) {
+                return;
+            }
+            JComponent panel = phasePanel.get();
+            if (panel instanceof DeploymentDisplay deployment && deployment.currentEntity() != null
+                  && deployment.currentEntity().getId() == unitId && deployment.currentSetup() != null) {
+                DeploymentSetup setup = GpuDeploySetup.choose(deployment.currentSetup(), deployment.setupOptions(),
+                      tileId, index);
+                if (setup != null) {
+                    deployment.setSetup(setup);
+                    refresh();
+                }
+            } else if (panel instanceof MovementDisplay movement && movement.currentEntity() != null
+                  && movement.currentEntity().getId() == unitId && movement.currentSetup() != null) {
+                DeploymentSetup setup = GpuDeploySetup.choose(movement.currentSetup(), movement.setupOptions(),
+                      tileId, index);
+                if (setup != null) {
+                    movement.setSetup(setup);
+                    refresh();
+                }
+            }
+        });
+    }
+
+    /**
+     * Where a walk-on unit is in its entry: {@code SETTING_UP} while its entry hex, facing, height, form and setup are
+     * free (step 1; {@code placed} once it is on its entry hex), {@code ENTERED} once it plans its move from there
+     * (step 2), {@code NONE} for any other unit.
+     */
+    enum EntryStage { NONE, SETTING_UP, ENTERED }
+
+    /** A walk-on unit's entry: its stage, and whether it is placed on its entry hex. */
+    record WalkOnEntry(int unitId, EntryStage stage, boolean placed) {
+        static final WalkOnEntry NONE = new WalkOnEntry(Entity.NONE, EntryStage.NONE, false);
+    }
+
+    private volatile WalkOnEntry walkOnEntry = WalkOnEntry.NONE;
+
+    /** GL thread: the selected walk-on unit's entry, {@link WalkOnEntry#NONE} for any other unit. */
+    WalkOnEntry walkOnEntry() {
+        return walkOnEntry;
+    }
+
+    private static WalkOnEntry captureWalkOnEntry(JComponent panel) {
+        if (!(panel instanceof MovementDisplay movement) || movement.currentEntity() == null) {
+            return WalkOnEntry.NONE;
+        }
+        Entity entity = movement.currentEntity();
+        if (movement.hasEntered()) {
+            return new WalkOnEntry(entity.getId(), EntryStage.ENTERED, true);
+        } else if (movement.isSettingUpEntry()) {
+            return new WalkOnEntry(entity.getId(), EntryStage.SETTING_UP,
+                  entity.isDeployed() && entity.getPosition() != null);
+        }
+        return WalkOnEntry.NONE;
+    }
+
+    /**
+     * GL thread: has the walk-on unit {@code unitId}, placed on its entry hex, enter, its setup settled, so the move is
+     * planned next; or ({@code enter} false) takes it back to setting up its entry.
+     */
+    void setEntered(int unitId, boolean enter) {
+        SwingUtilities.invokeLater(() -> {
+            if (acceptsInput() && phasePanel.get() instanceof MovementDisplay movement
+                  && movement.currentEntity() != null && movement.currentEntity().getId() == unitId
+                  && (enter ? movement.enter() : movement.reopenEntry())) {
                 refresh();
             }
         });
@@ -1668,6 +1765,8 @@ final class GpuBoardSource implements BoardSource {
         holdPlacedFacing(panel, units);
         heightChoice = captureHeightChoice(panel);
         formChoice = captureFormChoice(panel);
+        setupChoice = captureSetupChoice(panel);
+        walkOnEntry = captureWalkOnEntry(panel);
         DeployPin pin = deployPin;
         BoardScene.Unit placing = previewHeld ? null
               : pin != null ? deploymentPreview(panel, pin.hex(), pin.facing(), usedImages)
@@ -1710,13 +1809,18 @@ final class GpuBoardSource implements BoardSource {
         GpuMovePlan.Snapshot move = moves.capture(panel, hover, pointer.pointedZ());
         Point light = view.getTerrainLightDirection();
         var rulerSnapshot = los.capture();
+        // MegaMek's own path steps stay hidden while the plan draws the route, and while a walk-on unit sets up its entry
+        // (its "+0 Deploy" step is no move yet, even for a landed Fighter LAM the planner leaves to MegaMek).
+        WalkOnEntry entry = walkOnEntry;
+        boolean ownSteps = GpuMovePlan.drawsRoute(move)
+              || entry.stage() == EntryStage.SETTING_UP && entry.unitId() == move.entityId();
         BoardScene scene = new BoardScene(view.getBoardId(), board.getWidth(), board.getHeight(), markedTiles(board, units), units,
               List.of(), actorId, view.game.getPhase().localizedName(), commands,
               light == null || light.x == 0 && light.y == 0 ? null : new BoardScene.Light(light.x, -light.y),
               firingLines(), view.getWeaponRanges().stream().map(range -> new BoardScene.RangeBorder(
                     range.coords(), range.borders(), TacticalStyle.rangeColor(range.bracket()).getRGB(),
                     TacticalStyle.rangeText(range.bracket()))).toList(),
-              view.getBoardMarkers(), tacticalMarks.capture(view, GpuMovePlan.drawsRoute(move)).withRuler(rulerSnapshot.ruler()),
+              view.getBoardMarkers(), tacticalMarks.capture(view, ownSteps).withRuler(rulerSnapshot.ruler()),
               view.getRangeLabels().stream().map(label -> new BoardScene.RangeLabel(label.coords(),
                     TacticalStyle.rangeColor(label.bracket()).getRGB(),
                     TacticalStyle.rangeText(label.bracket()))).toList(), fieldOfView,

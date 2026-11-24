@@ -90,9 +90,11 @@ final class GpuMovePlan implements AutoCloseable {
      * UMU or SCUBA unit's UMU MP and on the ground a glider ProtoMek's or WiGE vehicle's 1 MP, which also leaves it
      * no run; -1 when the unit's walk MP stands. {@code forms}: the modes a unit that converts
      * (a LAM, a QuadVee, a Mek with tracks) chooses between before it moves ({@link Form}), empty for every other unit.
+     * {@code altitude}: its {@code elevation} is an altitude, a flight's or a Fighter LAM's choosing the altitude it
+     * walks on at ({@link #enteringAloft}).
      */
     record Traits(boolean vehicle, boolean jumps, boolean elevates, int elevation, boolean entering,
-          @Nullable Flight flight, boolean runs, boolean dives, int walk, List<Form> forms) {
+          @Nullable Flight flight, boolean runs, boolean dives, int walk, List<Form> forms, boolean altitude) {
        /** A Mek with jump jets: the gaits Walk, Run and Jump. */
        static final Traits MEK = new Traits(false, true, false, 0, false);
 
@@ -114,6 +116,20 @@ final class GpuMovePlan implements AutoCloseable {
 
        Traits {
            forms = List.copyOf(forms);
+       }
+
+       /** A unit whose elevation is an altitude only while it flies. */
+       Traits(boolean vehicle, boolean jumps, boolean elevates, int elevation, boolean entering,
+             @Nullable Flight flight, boolean runs, boolean dives, int walk, List<Form> forms) {
+           this(vehicle, jumps, elevates, elevation, entering, flight, runs, dives, walk, forms, flight != null);
+       }
+
+       /**
+        * These traits for a walk-on Fighter LAM placed on its entry hex: it chooses its entry altitude, landed or
+        * airborne, with the stepper, and sets up its entry as a ground unit does, not as a flight.
+        */
+       Traits enteringAloft(int altitude) {
+           return new Traits(vehicle, jumps, true, altitude, entering, null, runs, false, walk, forms, true);
        }
 
        /**
@@ -339,10 +355,11 @@ final class GpuMovePlan implements AutoCloseable {
 
         /**
          * Whether the unit is a walk-on ground unit only placed on its entry hex, whose Go up and Go down then choose
-         * the height it enters at, free (MegaMek's {@code MovementDisplay}, TW p. 224).
+         * the height it enters at, free (MegaMek's {@code MovementDisplay}, Core Rulebook p. 224); a Fighter LAM its
+         * altitude.
          */
         boolean choosesEntryHeight() {
-            return planner && walkedOn && route.isEmpty() && (traits.flight() == null);
+            return (planner || traits.altitude()) && walkedOn && route.isEmpty() && (traits.flight() == null);
         }
     }
 
@@ -442,15 +459,19 @@ final class GpuMovePlan implements AutoCloseable {
         Integer elevation = floorElevation(hover, source.currentView().getBoardId(), pointedZ);
         List<Step> hovered = (planner && shown.route().isEmpty()) ? hover(md, key, hover, elevation, reach) : List.of();
         boolean explicit = planner && (mode != Mode.AUTO);
-        Flight flight = flight(entity, path);
+        boolean aloft = md.isChoosingEntryAltitude();
+        Flight flight = aloft ? null : flight(entity, path);
         Traits traits = Traits.of(entity, path, !planner && (flight != null
               ? !entity.isDeployed() && !md.isSelectingHex() : entering(md, entity)), flight, md.isConvertEnabled());
+        if (aloft) {
+            traits = traits.enteringAloft(path.getFinalAltitude());
+        }
         Snapshot next = new Snapshot(true, planner, planner && external, entityId, mode, explicit,
               label(mode, traits.vehicle()), shown.route(), hovered, planner ? pinned(path) : List.of(),
               shown.destination(), shown.facing(), shown.cost(), shown.budget(), shown.type(),
               typeLabel(shown.type(), mode, traits.vehicle()), planner && (mode == Mode.AUTO),
               shown.heat(), shown.tmm(), shown.legal(), shown.warnings(),
-              planner ? canUndo(path) : (flight != null) && (path.length() > base(path)),
+              planner ? canUndo(md, path) : (flight != null) && (path.length() > base(path)),
               planner && pinnable(md, path), facingMatters(entity), reach, planner ? mounts(md, entity) : Set.of(),
               held, !planner && (path.length() > 0 || md.getGear() != MovementDisplay.GEAR_LAND
                     || md.isSelectingHex()), placesWalkOn(path), traits);
@@ -573,14 +594,15 @@ final class GpuMovePlan implements AutoCloseable {
             MovePath path = md.getPlannedMovement();
             if (path.length() > base(path)) {
                 md.clear();
-            } else {
+            } else if (!md.hasEntered() || !md.reopenEntry()) {
                 md.withdrawWalkOn();
             }
         });
     }
 
+    /** Takes a walk-on unit that entered back to setting up its entry, else off its entry hex. */
     private void withdraw(MovementDisplay md) {
-        if (md.withdrawWalkOn()) {
+        if (md.hasEntered() ? md.reopenEntry() : md.withdrawWalkOn()) {
             history.clear();
             pins = List.of();
             external = false;
@@ -625,13 +647,17 @@ final class GpuMovePlan implements AutoCloseable {
 
     /**
      * Runs a command body on the EDT behind the source's input guard, while the plan's unit still moves in a planner
-     * gear in the local movement turn (B.5 recheck). Whatever path it leaves is the plan's own.
+     * gear in the local movement turn (B.5 recheck), or, placed on its entry hex, sets up its entry (a landed Fighter
+     * LAM, which the planner leaves to MegaMek's clicks, turns and withdraws there too). Whatever path it leaves is the
+     * plan's own.
      */
     private void command(Consumer<MovementDisplay> body) {
         source.command(() -> {
             MovementDisplay md = display;
             Entity entity = acting(md);
-            if ((entity == null) || (entity.getId() != entityId) || !planner(md, entity)) {
+            if ((entity == null) || (entity.getId() != entityId)
+                  || !planner(md, entity) && !(md.isSettingUpEntry() && entity.isDeployed()
+                        && (!flies(entity) || md.isChoosingEntryAltitude()))) {
                 return;
             }
             follow(md, key(md));
@@ -674,6 +700,17 @@ final class GpuMovePlan implements AutoCloseable {
         if (pin && (md.getGear() == MovementDisplay.GEAR_JUMP)) {
             toast(md, "GpuBoard.hud.move.jumpSingleHex");
             return;
+        }
+        if (md.isSettingUpEntry()) {
+            // A walk-on unit still setting up its entry takes another entry hex instead; a hex past them has it enter
+            // as it is set up, and plans the move there.
+            if (md.placeEntryAt(hex, boardId)) {
+                history.clear();
+                pins = List.of();
+                external = false;
+                return;
+            }
+            md.enter();
         }
         MovePath path = md.getPlannedMovement();
         int anchor = anchor(path);
@@ -763,9 +800,9 @@ final class GpuMovePlan implements AutoCloseable {
      */
     private void face(MovementDisplay md, int wanted) {
         MovePath path = md.getPlannedMovement();
-        if ((path.length() == base(path)) && placesWalkOn(path)) {
-            // A walk-on unit only placed on its entry hex turns there freely, as a deployed unit does.
-            md.turnWalkOnEntry(wanted);
+        if ((path.length() == base(path)) && placesWalkOn(path) && md.turnWalkOnEntry(wanted)) {
+            // A walk-on unit still setting up its entry turns there freely, as a deployed unit does; once it entered,
+            // a turn costs MP.
             return;
         }
         if (wanted == path.getFinalFacing() || !facingMatters(path.getEntity())
@@ -855,7 +892,10 @@ final class GpuMovePlan implements AutoCloseable {
      */
     private void undoStep(MovementDisplay md) {
         MovePath path = md.getPlannedMovement();
-        if (!history.isEmpty()) {
+        if (history.isEmpty() && (path.length() == base(path)) && md.hasEntered()) {
+            // A walk-on unit that entered without a move yet goes back to setting up its entry.
+            md.reopenEntry();
+        } else if (!history.isEmpty()) {
             restore(md, history.pop());
         } else if (external && (path.length() > base(path))) {
             MovePath possible = path.clone();
@@ -1193,8 +1233,10 @@ final class GpuMovePlan implements AutoCloseable {
               .toList();
     }
 
-    private boolean canUndo(MovePath path) {
-        return !history.isEmpty() || (external && (path.length() > base(path)));
+    /** Undo has a step to take back; a walk-on unit that entered without a move yet goes back to its setup. */
+    private boolean canUndo(MovementDisplay md, MovePath path) {
+        return !history.isEmpty() || (external && (path.length() > base(path)))
+              || (md.hasEntered() && (path.length() == base(path)));
     }
 
     private static boolean placesWalkOn(MovePath path) {

@@ -31,7 +31,9 @@ import megamek.common.board.Coords;
  * under its pair: Go down, its elevation, Go up. Before the unit has a route the same controls stand on the unit
  * itself, the chip offering Hold (the dock's Hold position: Done for a walked-on unit, whose entry MegaMek has yet to
  * commit) and, for a walked-on unit, Clear to take the walk-on back; on its own hex the controls stand above the
- * unit's tag. The controls show only in the player's own movement turn while the destination (or the unit)
+  * unit's tag. A walk-on unit setting up its entry (walk-on step 1) gets Enter instead of Hold, and its changed setup
+  * as an amber tag above the chip; once it entered, Clear takes it back to that step. The controls show only in the
+  * player's own movement turn while the destination (or the unit)
  * is on the shown board and on screen, and MegaMek's Done (Hold position before a route) is enabled. The pair keeps
  * the deployment chip's size, so it is not missed.
  */
@@ -63,10 +65,14 @@ final class GpuMoveConfirm implements GpuHud.Component {
     private static final String TURN = MoveCommand.MOVE_TURN.getCmd();
 
     private final GpuHudState state;
+    private final GpuBoardSource source;
     private final BoardCamera camera;
     private final GpuNameplates nameplates;
     private final Group root = new Group();
     private final Table chip = new Table();
+    /** A walk-on unit's setup tag while it sets up its entry, above the chip: deployment's {@link GpuSetupTag}. */
+    private final GpuSetupTag tag;
+
     private final UiButton confirm;
     private final Label confirmTip;
     private final UiButton clear;
@@ -87,10 +93,13 @@ final class GpuMoveConfirm implements GpuHud.Component {
     private GpuHud.Inputs inputs;
     private String contextId = "";
     private String mainId = "";
+    /** Whether the chip's main button enters a walk-on unit (walk-on step 1) instead of MegaMek's command. */
+    private boolean entering;
 
     GpuMoveConfirm(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera,
           GpuNameplates nameplates) {
         this.state = state;
+        this.source = source;
         this.camera = camera;
         this.nameplates = nameplates;
         UiKit ui = kit.ui;
@@ -100,7 +109,7 @@ final class GpuMoveConfirm implements GpuHud.Component {
         confirm = ui.button("hud-confirm", "check", text("GpuBoard.hud.move.confirm"), null);
         confirm.setName("move-confirm-done");
         confirmTip = ui.tip(confirm).getActor();
-        UiKit.onChange(confirm, () -> run(mainId));
+        UiKit.onChange(confirm, this::confirm);
         context = ui.button("hud-confirm-step", null, "", null);
         context.setName("move-confirm-context");
         context.getLabel().setEllipsis(true);
@@ -115,6 +124,8 @@ final class GpuMoveConfirm implements GpuHud.Component {
         clearCell = chip.add(clear).size(BUTTON).padLeft(GAP);
         chip.setVisible(false);
         root.addActor(chip);
+        tag = new GpuSetupTag(ui, "move-confirm-setup-tag", null);
+        root.addActor(tag);
         turnLeft = ui.button("hud-confirm-step", "twist-left", null, null);
         turnLeft.setName("move-confirm-turn-left");
         turnLeftTip = ui.tip(turnLeft).getActor();
@@ -172,12 +183,25 @@ final class GpuMoveConfirm implements GpuHud.Component {
         boolean elevates = ghost != null && steps(inputs.frame().scene(), move);
         stepper.setVisible(elevates);
         if (ghost == null) {
+            tag.setVisible(false);
+            entering = false;
             return;
         }
+        GpuBoardSource.WalkOnEntry entry = source == null ? null : source.walkOnEntry();
+        if (entry == null) {
+            entry = GpuBoardSource.WalkOnEntry.NONE;
+        }
+        boolean ownEntry = entry.unitId() == move.entityId();
+        // Walk-on step 1: Enter settles the entry hex, facing, height, mode and setup; step 2's ✕ goes back to it.
+        entering = ownEntry && entry.stage() == GpuBoardSource.EntryStage.SETTING_UP && entry.placed();
+        boolean entered = ownEntry && entry.stage() == GpuBoardSource.EntryStage.ENTERED;
         boolean staying = move.route().isEmpty() && !move.traits().converting();
         mainId = staying ? holdId() : doneId();
-        confirm.setText(UiTheme.upper(text(staying ? "GpuBoard.hud.move.hold" : "GpuBoard.hud.move.confirm")));
-        confirmTip.setText(staying ? text("GpuBoard.hud.move.holdTip") : text("GpuBoard.hud.move.confirmTip",
+        confirm.setText(UiTheme.upper(text(entering ? "GpuBoard.hud.move.entry.enter"
+              : staying ? "GpuBoard.hud.move.hold" : "GpuBoard.hud.move.confirm")));
+        confirmTip.setText(entering ? text("GpuBoard.hud.move.entry.enterTip",
+              GpuHintLine.key(inputs.preferences(), KeyCommandBind.DONE))
+              : staying ? text("GpuBoard.hud.move.holdTip") : text("GpuBoard.hud.move.confirmTip",
               GpuHintLine.key(inputs.preferences(), KeyCommandBind.DONE)));
         turnLeftTip.setText(text(flight ? "GpuBoard.hud.move.turnLeftFlightTip" : "GpuBoard.hud.move.turnLeftTip",
               GpuHintLine.key(inputs.preferences(), KeyCommandBind.TURN_LEFT)));
@@ -200,16 +224,18 @@ final class GpuMoveConfirm implements GpuHud.Component {
         boolean clears = !staying || move.walkedOn();
         clear.setVisible(clears);
         clearCell.setActor(clears ? clear : null).size(clears ? BUTTON : 0).padLeft(clears ? GAP : 0);
-        clearTip.setText(text(staying ? "GpuBoard.hud.dock.withdrawWalkOn" : "GpuBoard.hud.dock.clearRoute"));
+        clearTip.setText(text(!staying ? "GpuBoard.hud.dock.clearRoute" : entering
+              ? "GpuBoard.hud.move.entry.withdrawTip" : entered ? "GpuBoard.hud.move.entry.setupTip"
+              : "GpuBoard.hud.dock.withdrawWalkOn"));
         chip.invalidate();
         chip.pack();
         if (elevates) {
-            elevation.setText(text(flight ? "GpuBoard.hud.move.altitude" : move.traits().dives()
+            elevation.setText(text(move.traits().altitude() ? "GpuBoard.hud.move.altitude" : move.traits().dives()
                   ? "GpuBoard.hud.move.depth" : "GpuBoard.hud.deploy.elevation", move.traits().shownLevel()));
             step(goUp, goUpTip, up);
             step(goDown, goDownTip, down);
             if (move.choosesEntryHeight()) {
-                String kind = move.traits().dives() ? "depth" : "elevation";
+                String kind = move.traits().altitude() ? "altitude" : move.traits().dives() ? "depth" : "elevation";
                 goUpTip.setText(text("GpuBoard.hud.move.entry." + kind + "UpTip"));
                 goDownTip.setText(text("GpuBoard.hud.move.entry." + kind + "DownTip"));
             }
@@ -221,6 +247,14 @@ final class GpuMoveConfirm implements GpuHud.Component {
         float bottom = ghost.home() ? Math.max(head.y, nameplates.top(move.entityId(), head.y)) : head.y;
         // A unit that changes elevation has its stepper on the head, as deployment's height row, and the chip on it.
         place(chip, head.x - chip.getWidth() / 2, bottom + LIFT + (elevates ? STEPPER_ROOM : 0));
+        // While the unit sets up its entry, a changed setup shows on the chip as deployment's does.
+        GpuDeploySetup.Choice setup = entering ? source.setupChoice() : null;
+        boolean tagged = setup != null && setup.unitId() == move.entityId() && !setup.tag().isEmpty();
+        tag.setVisible(tagged);
+        if (tagged) {
+            tag.show(setup);
+            place(tag, chip.getX() + (chip.getWidth() - tag.getWidth()) / 2, chip.getTop() + GAP);
+        }
         Actor lowest = chip;
         if (elevates) {
             place(stepper, head.x - stepper.getWidth() / 2, chip.getY() - GAP - stepper.getHeight());
@@ -276,9 +310,13 @@ final class GpuMoveConfirm implements GpuHud.Component {
         BoardScene scene = inputs.frame().scene();
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         GpuMovePlan.Snapshot move = inputs.frame().panels().move();
+        GpuBoardSource.WalkOnEntry entry = source == null ? null : source.walkOnEntry();
+        // A unit setting up its entry has the chip even outside the planner (a landed Fighter LAM).
+        boolean settingUp = entry != null && entry.unitId() == move.entityId()
+              && entry.stage() == GpuBoardSource.EntryStage.SETTING_UP;
         if (scene == null || camera == null || inputs.dialog() != null || state.overview || !status.myTurn()
               || !status.phase().isMovement() || state.turnLocked(status) || !move.active()
-              || !move.planner() && move.traits().flight() == null
+              || !move.planner() && move.traits().flight() == null && !settingUp
               || move.holdingRemaining() > 0) {
             return null;
         }
@@ -360,6 +398,15 @@ final class GpuMoveConfirm implements GpuHud.Component {
             }
         }
         return null;
+    }
+
+    /** The chip's main button: Enter for a walk-on unit setting up its entry, else Move or Hold. */
+    private void confirm() {
+        if (entering && inputs != null) {
+            source.setEntered(inputs.frame().panels().move().entityId(), true);
+        } else {
+            run(mainId);
+        }
     }
 
     private void run(String id) {

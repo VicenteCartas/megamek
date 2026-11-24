@@ -84,6 +84,7 @@ import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.options.OptionsConstants;
 import megamek.common.units.AbstractBuildingEntity;
+import megamek.common.units.DeploymentSetup;
 import megamek.common.units.Dropship;
 import megamek.common.units.Entity;
 import megamek.common.units.IAero;
@@ -173,6 +174,11 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
     private boolean assaultDropPreference = false;
     private final Set<ElevationOption> lastHexDeploymentOptions = new HashSet<>();
     private ElevationOption lastDeploymentOption = null;
+    /**
+     * The unit whose starting setup (stance, power, heat sinks, activated equipment) the player is choosing, and the
+     * setup it had when picked: picking another unit puts it back, and deploying sends what differs.
+     */
+    private final DeploymentSetupChoice setupChoice;
 
     private final ClientGUI clientgui;
     private final Game game;
@@ -192,6 +198,7 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         super(clientgui);
         this.clientgui = clientgui;
         game = clientgui.getClient().getGame();
+        setupChoice = new DeploymentSetupChoice(clientgui, game);
         game.addGameListener(this);
         setupStatusBar(Messages.getString("DeploymentDisplay.waitingForDeploymentPhase"));
 
@@ -277,6 +284,7 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         if (entity.isWeaponOrderChanged()) {
             clientgui.getClient().sendEntityWeaponOrderUpdate(entity);
         }
+        setupChoice.pick(entity);
 
         // FIXME: Hack alert: remove C3 sprites from earlier here, or we might crash
         // when
@@ -476,10 +484,12 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
 
         int elevationOrAltitude = entity.isAero() ? entity.getAltitude() : entity.getElevation();
         Integer startingMode = startingModes().isEmpty() ? null : entity.getConversionMode();
+        DeploymentSetup setup = setupChoice.changed(entity);
         clientgui.getClient().deploy(entity.getId(), entity.getPosition(), entity.getBoardId(), entity.getFacing(),
                                      elevationOrAltitude, entity.getLoadedUnits(), assaultDropPreference,
-                                     startingMode);
+                                     startingMode, setup);
         entity.setDeployed(true);
+        setupChoice.forget();
 
         if (entity.isWeaponOrderChanged()) {
             clientgui.getClient().sendEntityWeaponOrderUpdate(entity);
@@ -727,6 +737,42 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         clientgui.updateFiringArc(entity);
         clientgui.showSensorRanges(entity);
         clientgui.boardStates().forEach(BoardClientState::repaint);
+    }
+
+    /**
+     * What the unit deploying now may choose about how it starts (Core Rulebook p. 224): its stance in the hex it is
+     * placed in, power, heat sinks and activated equipment. Empty when it has no choice or it isn't the player's turn.
+     */
+    public DeploymentSetup.Options setupOptions() {
+        Entity entity = currentEntity();
+        if (entity == null || entity.isDeployed() || !clientgui.getClient().isMyTurn()) {
+            return DeploymentSetupChoice.NONE;
+        }
+        return setupChoice.options(entity);
+    }
+
+    /** How the unit deploying now starts, as the player set it so far; null without one. */
+    public @Nullable DeploymentSetup currentSetup() {
+        Entity entity = currentEntity();
+        return entity == null ? null : setupChoice.current(entity);
+    }
+
+    /** How the unit deploying now started out before the player changed its setup; null without one. */
+    public @Nullable DeploymentSetup setupBaseline() {
+        return setupChoice.baseline(currentEntity());
+    }
+
+    /**
+     * Sets how the unit deploying now starts; the GL HUD's setup tiles. It takes effect on the unit at once so the
+     * board and unit card show it, and is sent when the unit deploys. A setup that would put two ECM suites on, or
+     * stealth armor without one, is refused with a toast.
+     */
+    public void setSetup(DeploymentSetup setup) {
+        Entity entity = currentEntity();
+        if (isIgnoringEvents() || entity == null || entity.isDeployed()) {
+            return;
+        }
+        setupChoice.set(entity, setup);
     }
 
     public void die() {

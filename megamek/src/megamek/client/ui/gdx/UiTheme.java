@@ -177,6 +177,8 @@ public final class UiTheme implements Disposable {
           Map.entry("help", 0xF1C0), Map.entry("settings", 0xE8B8), Map.entry("menu", 0xE5D2),
           Map.entry("chat", 0xE0B7), Map.entry("grid", 0xE9B0),
           Map.entry("list", 0xE896), Map.entry("check", 0xE5CA), Map.entry("remove", 0xE15B), Map.entry("flame", 0xEF55),
+          // toggle_on, toggle_off: a switch's two states (the deployment setup's on/off tiles)
+          Map.entry("toggle-on", 0xE9F6), Map.entry("toggle-off", 0xE9F5),
           Map.entry("chevron-down", 0xE5CF), Map.entry("chevron-up", 0xE5CE), Map.entry("twist-left", 0xE419),
           Map.entry("twist-right", 0xE41A), Map.entry("more", 0xE5D3), Map.entry("undo", 0xE166),
           Map.entry("locate", 0xE55C), Map.entry("play", 0xE037), Map.entry("pause", 0xE034),
@@ -401,6 +403,8 @@ public final class UiTheme implements Disposable {
         step.fontColor = MAIN;
         step.overFontColor = Color.WHITE;
         skin.add("hud-confirm-step", step);
+        // The placed unit's setup tag above the pair (GpuDeployConfirm): what differs from how it started, in amber.
+        box("deploy-tag", rgba(12, 17, 19, .9f), alpha(AMBER, .6f), 1, 3, null, 2, 7, 20);
         // ImageTextButton lays out in a row, so a utility places an icon Image above this style's label.
         TextButton.TextButtonStyle utility = utility(hud, "hud-utility", 6, 9, 5, 62, 56);
         skin.add("hud-utility", utility);

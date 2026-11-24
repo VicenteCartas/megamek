@@ -2579,8 +2579,10 @@ public class MoveStep implements Serializable {
             ((tmpWalkMP > 0) || (runMPMax > 0)) &&
             ((getMp() > 0) || (stepType == MoveStepType.BRACE))) {
             // Prone meks can only spend MP to turn or get up. A hull-down Mek may also brace, since TO:AR p.82
-            // bars bracing only after jumping.
+            // bars bracing only after jumping. A walk-on unit enters its entry hex in the stance it chose there
+            // (Core Rulebook p. 224), so its entry step is exempt.
             if ((stepType != MoveStepType.TURN_LEFT) &&
+                (stepType != MoveStepType.DEPLOY) &&
                 (stepType != MoveStepType.TURN_RIGHT) &&
                 (stepType != MoveStepType.GET_UP) &&
                 (stepType != MoveStepType.LOAD) &&
