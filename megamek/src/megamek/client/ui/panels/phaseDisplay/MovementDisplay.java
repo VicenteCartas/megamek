@@ -2434,28 +2434,14 @@ public class MovementDisplay extends ActionPhaseDisplay {
     /**
      * Whether {@code entity} is a walk-on ground unit only placed on its entry hex, with no movement after it yet. Its
      * Go Up and Go Down then choose the height it enters at, free: the off-map hex counts as the entry hex's level,
-     * sublevel or depth (Core Rulebook p. 224), so any height the unit could deploy at there costs no MP. A LAM in
-     * Fighter mode chooses its altitude so, landed or any altitude it could deploy at.
+     * sublevel or depth (Core Rulebook p. 224), so any height the unit could deploy at there costs no MP. An aerospace
+     * unit (a LAM in Fighter mode included) chooses its altitude so, among those it could deploy at.
      */
     private boolean isChoosingEntryHeight(@Nullable Entity entity) {
-        return !entered && (entity != null) && (!entity.isAero() || entersAtAltitude(entity)) && entity.isDeployed()
+        return !entered && (entity != null) && entity.isDeployed()
               && (entity.getPosition() != null)
               && (cmd != null) && isDeploymentOnly(cmd) && (game.getBoard(entity.getBoardId()) != null)
               && !game.getBoard(entity.getBoardId()).isSpace();
-    }
-
-    /** A LAM in Fighter mode, whose entry height is an altitude, 0 landed. */
-    private static boolean entersAtAltitude(Entity entity) {
-        return (entity instanceof LandAirMek) && entity.isAero();
-    }
-
-    /**
-     * Whether the selected walk-on unit is a LAM in Fighter mode only placed on its entry hex, choosing the altitude
-     * it enters at (landed or airborne); until it enters, it sets up its entry as a ground unit does, not as a flight.
-     */
-    public boolean isChoosingEntryAltitude() {
-        Entity entity = currentEntity();
-        return isChoosingEntryHeight(entity) && entersAtAltitude(entity);
     }
 
     private static int entryLevel(Entity entity) {
@@ -5572,6 +5558,16 @@ public class MovementDisplay extends ActionPhaseDisplay {
         updateMountButton();
         updatePickupCargoButton();
         updateDropCargoButton();
+        if (isSettingUpEntry(currentEntity())) {
+            // Loading and unloading are steps of the move; a walk-on unit takes none until it entered
+            setLoadEnabled(false);
+            setUnloadEnabled(false);
+            setTowEnabled(false);
+            setDisconnectEnabled(false);
+            setMountEnabled(false);
+            setPickupCargoEnabled(false);
+            setDropCargoEnabled(false);
+        }
     }
 
     /**

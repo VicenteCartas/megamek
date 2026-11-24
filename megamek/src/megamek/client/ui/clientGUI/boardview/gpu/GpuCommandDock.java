@@ -672,8 +672,8 @@ final class GpuCommandDock implements GpuHud.Component {
             return current() == null ? Variant.GENERIC : Variant.WAITING;
         } else if (phase.isMovement() && panels.move().active() && panels.move().traits().flight() == null
               && settingUpEntry(panels.move().entityId())) {
-            // A walk-on unit sets up its entry first: its entry hex, facing, height, mode and setup are free. A landed
-            // Fighter LAM too, though MegaMek's clicks, not the planner, plot its move once it entered.
+            // A walk-on unit sets up its entry first: its entry hex, facing, height, mode and setup are free. An
+            // aerospace unit too, though MegaMek's clicks, not the planner, plot its flight once it entered.
             return Variant.ENTRY;
         } else if (phase.isMovement() && panels.move().active()
               && (panels.move().planner() || panels.move().traits().entering()

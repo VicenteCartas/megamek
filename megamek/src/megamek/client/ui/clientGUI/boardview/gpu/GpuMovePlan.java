@@ -90,8 +90,8 @@ final class GpuMovePlan implements AutoCloseable {
      * UMU or SCUBA unit's UMU MP and on the ground a glider ProtoMek's or WiGE vehicle's 1 MP, which also leaves it
      * no run; -1 when the unit's walk MP stands. {@code forms}: the modes a unit that converts
      * (a LAM, a QuadVee, a Mek with tracks) chooses between before it moves ({@link Form}), empty for every other unit.
-     * {@code altitude}: its {@code elevation} is an altitude, a flight's or a Fighter LAM's choosing the altitude it
-     * walks on at ({@link #enteringAloft}).
+     * {@code altitude}: its {@code elevation} is an altitude, a flight's or an aerospace unit's (a Fighter LAM
+     * included) choosing the altitude it walks on at ({@link #enteringAloft}).
      */
     record Traits(boolean vehicle, boolean jumps, boolean elevates, int elevation, boolean entering,
           @Nullable Flight flight, boolean runs, boolean dives, int walk, List<Form> forms, boolean altitude) {
@@ -125,8 +125,8 @@ final class GpuMovePlan implements AutoCloseable {
        }
 
        /**
-        * These traits for a walk-on Fighter LAM placed on its entry hex: it chooses its entry altitude, landed or
-        * airborne, with the stepper, and sets up its entry as a ground unit does, not as a flight.
+        * These traits for a walk-on aerospace unit (a Fighter LAM included) setting up its entry: it chooses its entry
+        * altitude with the stepper, and sets up its entry as a ground unit does, not as a flight.
         */
        Traits enteringAloft(int altitude) {
            return new Traits(vehicle, jumps, true, altitude, entering, null, runs, false, walk, forms, true);
@@ -459,9 +459,9 @@ final class GpuMovePlan implements AutoCloseable {
         Integer elevation = floorElevation(hover, source.currentView().getBoardId(), pointedZ);
         List<Step> hovered = (planner && shown.route().isEmpty()) ? hover(md, key, hover, elevation, reach) : List.of();
         boolean explicit = planner && (mode != Mode.AUTO);
-        boolean aloft = md.isChoosingEntryAltitude();
+        boolean aloft = md.isSettingUpEntry() && entity.isAero();
         Flight flight = aloft ? null : flight(entity, path);
-        Traits traits = Traits.of(entity, path, !planner && (flight != null
+        Traits traits = Traits.of(entity, path, !planner && (flight != null || aloft
               ? !entity.isDeployed() && !md.isSelectingHex() : entering(md, entity)), flight, md.isConvertEnabled());
         if (aloft) {
             traits = traits.enteringAloft(path.getFinalAltitude());
@@ -656,8 +656,7 @@ final class GpuMovePlan implements AutoCloseable {
             MovementDisplay md = display;
             Entity entity = acting(md);
             if ((entity == null) || (entity.getId() != entityId)
-                  || !planner(md, entity) && !(md.isSettingUpEntry() && entity.isDeployed()
-                        && (!flies(entity) || md.isChoosingEntryAltitude()))) {
+                  || !planner(md, entity) && !(md.isSettingUpEntry() && entity.isDeployed())) {
                 return;
             }
             follow(md, key(md));
@@ -684,7 +683,7 @@ final class GpuMovePlan implements AutoCloseable {
             MovementDisplay md = display;
             Entity entity = acting(md);
             if ((entity == null) || (entity.getId() != entityId) || (md.getPlannedMovement() == null)
-                  || !flies(entity) || md.isSelectingHex()) {
+                  || !flies(entity) || md.isSelectingHex() || md.isSettingUpEntry()) {
                 return;
             }
             body.accept(md);

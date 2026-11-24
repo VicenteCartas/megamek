@@ -211,7 +211,9 @@ final class GpuMoveConfirm implements GpuHud.Component {
         turnLeft.setDisabled(flight && !turn.enabled());
         turnRight.setDisabled(flight && !turn.enabled());
         BoardScene.Command pick = GpuMoveContext.pick(inputs.frame().scene().commands());
-        boolean pressing = GpuMoveContext.pressing(pick);
+        // Situation commands (Unload, Unjam, ...) are steps of the move; a walk-on unit takes none before it entered
+        boolean pressing = !(ownEntry && entry.stage() == GpuBoardSource.EntryStage.SETTING_UP)
+              && GpuMoveContext.pressing(pick);
         contextId = pressing ? pick.id() : "";
         context.setVisible(pressing);
         if (pressing) {
@@ -311,7 +313,7 @@ final class GpuMoveConfirm implements GpuHud.Component {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         GpuMovePlan.Snapshot move = inputs.frame().panels().move();
         GpuBoardSource.WalkOnEntry entry = source == null ? null : source.walkOnEntry();
-        // A unit setting up its entry has the chip even outside the planner (a landed Fighter LAM).
+        // A unit setting up its entry has the chip even outside the planner (an aerospace unit, a Fighter LAM).
         boolean settingUp = entry != null && entry.unitId() == move.entityId()
               && entry.stage() == GpuBoardSource.EntryStage.SETTING_UP;
         if (scene == null || camera == null || inputs.dialog() != null || state.overview || !status.myTurn()
