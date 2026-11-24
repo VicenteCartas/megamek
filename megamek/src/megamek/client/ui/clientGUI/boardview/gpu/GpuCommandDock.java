@@ -1443,10 +1443,11 @@ final class GpuCommandDock implements GpuHud.Component {
             footText.getStyle().fontColor = UiTheme.AMBER;
         } else if (deploying) {
             // Placing is local until Deploy (Done) sends the unit, so the foot names the confirmation once it can.
+            boolean turns = actor == null || actor.turns();
             foot("", done != null && done.enabled()
-                  ? text("GpuBoard.hud.deploy.footReady", UiTheme.upper(done.label()),
-                        GpuHintLine.key(inputs.preferences(), KeyCommandBind.DONE))
-                  : text("GpuBoard.hud.deploy.footPlace"));
+                  ? text(turns ? "GpuBoard.hud.deploy.footReady" : "GpuBoard.hud.deploy.footReadyFixed",
+                        UiTheme.upper(done.label()), GpuHintLine.key(inputs.preferences(), KeyCommandBind.DONE))
+                  : text(turns ? "GpuBoard.hud.deploy.footPlace" : "GpuBoard.hud.deploy.footPlaceFixed"));
         } else {
             foot("", lines.length > 1 ? lines[1].strip() : "");
         }
@@ -1897,12 +1898,12 @@ final class GpuCommandDock implements GpuHud.Component {
     }
 
 
-    /** Deploy's sub-line: the hex and facing the unit is placed at, and how many setup choices changed. */
+    /** Deploy's sub-line: the hex and, when it means anything, facing the unit is placed at, and the setup changes. */
     private static String deployLine(GpuBattleStatus.UnitStatus actor, GpuDeploySetup.Choice setup) {
         List<String> parts = new ArrayList<>();
         if (actor != null && actor.position() != null) {
             parts.add(actor.position().getBoardNum());
-            String facing = GpuHudKit.facing(actor.facing());
+            String facing = actor.turns() ? GpuHudKit.facing(actor.facing()) : "";
             if (!facing.isEmpty()) {
                 parts.add(facing);
             }
@@ -2147,7 +2148,10 @@ final class GpuCommandDock implements GpuHud.Component {
         String kind = move.traits().altitude() ? "altitude" : move.traits().dives() ? "depth" : "elevation";
         elevationCaption.setText(UiTheme.upper(text("GpuBoard.hud.dock." + kind + "Short")));
         elevationTip.getActor().setText(text("GpuBoard.hud.dock." + kind + "Tip"));
-        elevationValue.setText(String.valueOf(move.traits().shownLevel()));
+        // Altitude 0 is the ground: an aerospace unit there is landed, as deployment's stepper names it.
+        boolean landed = move.traits().altitude() && move.traits().shownLevel() == 0;
+        elevationValue.setText(landed ? UiTheme.upper(GpuDeployHeight.label(true, 0))
+              : String.valueOf(move.traits().shownLevel()));
         // A walk-on unit enters at its deployment elevation, so the stepper waits for its entry hex.
         boolean entering = move.traits().entering() && !flight;
         step(goUp, goUpTip, command(GO_UP), entering);

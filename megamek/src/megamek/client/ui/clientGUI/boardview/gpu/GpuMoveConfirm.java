@@ -203,10 +203,9 @@ final class GpuMoveConfirm implements GpuHud.Component {
               GpuHintLine.key(inputs.preferences(), KeyCommandBind.DONE))
               : staying ? text("GpuBoard.hud.move.holdTip") : text("GpuBoard.hud.move.confirmTip",
               GpuHintLine.key(inputs.preferences(), KeyCommandBind.DONE)));
-        turnLeftTip.setText(text(flight ? "GpuBoard.hud.move.turnLeftFlightTip" : "GpuBoard.hud.move.turnLeftTip",
+        turnLeftTip.setText(text("GpuBoard.hud.move.turnLeftTip",
               GpuHintLine.key(inputs.preferences(), KeyCommandBind.TURN_LEFT)));
-        turnRightTip.setText(text(flight ? "GpuBoard.hud.move.turnRightFlightTip"
-                    : "GpuBoard.hud.move.turnRightTip",
+        turnRightTip.setText(text("GpuBoard.hud.move.turnRightTip",
               GpuHintLine.key(inputs.preferences(), KeyCommandBind.TURN_RIGHT)));
         turnLeft.setDisabled(flight && !turn.enabled());
         turnRight.setDisabled(flight && !turn.enabled());
@@ -232,8 +231,8 @@ final class GpuMoveConfirm implements GpuHud.Component {
         chip.invalidate();
         chip.pack();
         if (elevates) {
-            elevation.setText(text(move.traits().altitude() ? "GpuBoard.hud.move.altitude" : move.traits().dives()
-                  ? "GpuBoard.hud.move.depth" : "GpuBoard.hud.deploy.elevation", move.traits().shownLevel()));
+            elevation.setText(move.traits().dives() ? text("GpuBoard.hud.move.depth", move.traits().shownLevel())
+                  : GpuDeployHeight.label(move.traits().altitude(), move.traits().shownLevel()));
             step(goUp, goUpTip, up);
             step(goDown, goDownTip, down);
             if (move.choosesEntryHeight()) {

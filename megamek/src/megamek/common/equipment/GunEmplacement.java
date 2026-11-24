@@ -55,6 +55,7 @@ import megamek.common.enums.AvailabilityValue;
 import megamek.common.enums.TechBase;
 import megamek.common.enums.TechRating;
 import megamek.common.exceptions.LocationFullException;
+import megamek.common.game.Game;
 import megamek.common.rolls.PilotingRollData;
 import megamek.common.units.BuildingEntity;
 import megamek.common.units.Entity;
@@ -157,6 +158,13 @@ public class GunEmplacement extends Tank {
 
         if (hex.containsTerrain(Terrains.SPACE) && doomedInSpace()) {
             return true;
+        }
+        // Core Rules p.137: an emplacement is an Asset, not a building, so it needs no building hex; only VTOL and
+        // infantry Assets enter a building hex (p.143), and no Asset that cannot treat water as clear terrain enters
+        // Depth 1 or deeper water (p.143). Ice covers the depth.
+        if (Game.rulesManager.getRulesGame().deploysEmplacementsAsAssets()) {
+            return hex.containsTerrain(Terrains.IMPASSABLE) || hex.containsTerrain(Terrains.BUILDING)
+                  || (hex.terrainLevel(Terrains.WATER) > 0 && !hex.containsTerrain(Terrains.ICE));
         }
         // gun emplacements must be placed on a building
         return !hex.containsTerrain(Terrains.BUILDING);

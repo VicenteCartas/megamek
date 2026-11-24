@@ -691,6 +691,8 @@ final class GpuForcesPanel implements GpuHud.Component {
         private int highlight;
         /** Why the unit waits for a later deployment turn, while it does; else null. */
         private TextTooltip waitTip;
+        /** Whether a click picks the unit: not in the local deployment turn while it cannot deploy now. */
+        private boolean pickable = true;
 
         private ForceRow(int id) {
             setName("forces-unit-" + id);
@@ -799,7 +801,9 @@ final class GpuForcesPanel implements GpuHud.Component {
                 heatShare = 0;
             }
             highlight = unit.id() != shown.card() ? 0 : unit.id() == shown.focus() ? 1 : 2;
-            getColor().a = unit.destroyed() ? .38f : state == State.DONE ? .62f : state == State.WAITING ? .5f : 1;
+            pickable = !GpuDeployment.unpickable(shown.status(), unit);
+            getColor().a = unit.destroyed() ? .38f : state == State.DONE ? .62f
+                  : state == State.WAITING || !pickable ? .5f : 1;
             String tips = shown.status().phase().isMovement() ? "GpuBoard.hud.move.waitTip."
                   : "GpuBoard.hud.deploy.waitTip.";
             showWaitTip(state == State.WAITING ? text(tips + unit.deployWait().name()) : null);
@@ -859,7 +863,7 @@ final class GpuForcesPanel implements GpuHud.Component {
                 ui.fill(batch, INSPECTED, alpha, getX(), getY(), getWidth(), getHeight());
                 ui.fill(batch, UiTheme.MINT, alpha * .6f, getX(), getY(), 2, getHeight());
             }
-            if (pointer.isOver()) {
+            if (pointer.isOver() && pickable) {
                 ui.fill(batch, HOVER, alpha, getX(), getY(), getWidth(), getHeight());
             }
             ui.fill(batch, SEPARATOR_LINE, alpha, getX(), getY(), getWidth(), 1);

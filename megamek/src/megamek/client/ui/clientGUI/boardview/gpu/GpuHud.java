@@ -29,6 +29,7 @@ import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiModal;
+import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -650,7 +651,8 @@ final class GpuHud implements GpuBoardHud {
     /**
      * Whether a left press on {@code coords} starts the turning drag of a placement or a move: in the local deployment
      * turn, on the hex where the acting unit was just placed; in the local movement turn, on the end of the planned
-     * route, or on the unit while it has none (a walk-on unit on its entry hex included). A release without a drag
+     * route, or on the unit while it has none (a walk-on unit on its entry hex included). Outside the planner (a
+     * flight, a landed aerospace unit, another gear) it turns while MegaMek's Turn is enabled. A release without a drag
      * stays a click.
      */
     boolean facesFrom(Coords coords) {
@@ -664,7 +666,8 @@ final class GpuHud implements GpuBoardHud {
         int actorId = status.actorId();
         if (status.phase().isMovement()) {
             GpuMovePlan.Snapshot plan = inputs.frame().panels().move();
-            if (!plan.active() || !plan.planner() || !plan.facingMatters()) {
+            if (!plan.active() || !plan.facingMatters()
+                  || !(plan.planner() || plan.setsUpEntry() || turnEnabled(inputs.frame().scene()))) {
                 return false;
             }
             if (plan.destination() != null) {
@@ -675,8 +678,24 @@ final class GpuHud implements GpuBoardHud {
             return false;
         }
         GpuBattleStatus.UnitStatus actor = GpuHudState.unit(status, actorId);
-        return actor != null && coords.equals(actor.position())
+        return actor != null && coords.equals(actor.position()) && (!status.phase().isDeployment() || actor.turns())
               && actor.boardId() == inputs.frame().scene().boardId();
+    }
+
+    /** Whether MegaMek's Turn command is enabled now, which turns a unit the planner leaves to MegaMek. */
+    private static boolean turnEnabled(BoardScene scene) {
+        String turn = MoveCommand.MOVE_TURN.getCmd();
+        return scene.commands().stream().anyMatch(command -> command.id().equals(turn) && command.enabled());
+    }
+
+    /** Whether deployment turns the unit it places: a press-drag aims it, and the hints say so. */
+    boolean deployTurns() {
+        if (inputs == null) {
+            return true;
+        }
+        GpuBattleStatus.Snapshot status = inputs.frame().status();
+        GpuBattleStatus.UnitStatus actor = GpuHudState.unit(status, status.actorId());
+        return actor == null || actor.turns();
     }
 
     /**
@@ -1339,6 +1358,9 @@ final class GpuHud implements GpuBoardHud {
             state.restoreSelection();
             state.inspected = Entity.NONE;
             state.pick(unitId);
+            return;
+        }
+        if (GpuDeployment.unpickable(status, unit)) {
             return;
         }
         boolean ready = acts(status, unit);

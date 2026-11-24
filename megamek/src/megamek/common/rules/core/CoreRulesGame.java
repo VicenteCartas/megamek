@@ -178,6 +178,16 @@ public class CoreRulesGame extends RulesGame {
     }
 
     /**
+     * {@inheritDoc} Core p.137 and p.141
+     *
+     * @return true
+     */
+    @Override
+    public boolean deploysEmplacementsAsAssets() {
+        return true;
+    }
+
+    /**
      * {@inheritDoc} Core omits immobile units from movement/initiative
      *
      * @return false if it should not include them

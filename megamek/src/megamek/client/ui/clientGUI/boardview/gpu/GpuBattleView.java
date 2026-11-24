@@ -3716,7 +3716,7 @@ class GpuBattleView extends ApplicationAdapter {
                 facingFrom = hud.facesFrom(pressed) ? pressed : null;
                 facedHex = null;
                 placingFrom = facingFrom == null && placingGhost != null && pressed != null
-                      && pressed.equals(placingHex) ? pressed : null;
+                      && pressed.equals(placingHex) && hud.deployTurns() ? pressed : null;
             }
             if (button == Input.Buttons.LEFT && source.isEditor() && !measurementGesture && !brushPickerGesture) {
                 // A press on the selection's rotation handle turns the selection.

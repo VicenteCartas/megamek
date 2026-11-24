@@ -52,6 +52,7 @@ import megamek.common.enums.BasementType;
 import megamek.common.enums.GamePhase;
 import megamek.common.enums.MoveStepType;
 import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.GunEmplacement;
 import megamek.common.equipment.MiscType;
 import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
@@ -162,6 +163,38 @@ class GpuMovePlanTest {
             assertEquals(Band.ILLEGAL, shown(moving).route().getLast().band(),
                   "An illegal step must keep its illegal band even after a boosted section");
         }
+    }
+
+    @Test
+    void aTurretedEmplacementsFacingMeansNothingButANoTurretOnesDoes() {
+        GunEmplacement turreted = new GunEmplacement();
+        GunEmplacement fixed = new GunEmplacement();
+        fixed.setHasNoTurret(true);
+        assertFalse(GpuMovePlan.facingMatters(turreted), "A turret fires all around and turns freely");
+        assertTrue(GpuMovePlan.facingMatters(fixed), "A No Turret emplacement keeps the facing it deploys with");
+    }
+
+    @Test
+    void anAerospaceEntryHasNoAltitudeStepperInSpace() {
+        GpuMovePlan.Traits aloft = GpuMovePlan.Traits.MEK.enteringAloft(3, false);
+        assertTrue(aloft.elevates() && aloft.altitude(), "Over a ground map it chooses the altitude it enters at");
+        assertEquals(3, aloft.elevation());
+        GpuMovePlan.Traits space = GpuMovePlan.Traits.MEK.enteringAloft(3, true);
+        assertFalse(space.elevates(), "Space has no altitude to step");
+        assertFalse(space.altitude());
+    }
+
+    @Test
+    void anAerospaceUnitPlacedOnItsEntryHexSetsUpItsEntry() {
+        GpuMovePlan.Traits aloft = GpuMovePlan.Traits.MEK.enteringAloft(0, true);
+        assertTrue(entry(true, aloft).setsUpEntry(), "Placed, it turns freely, by the buttons or a drag");
+        assertFalse(entry(false, aloft).setsUpEntry(), "Off the map, it has no hex to turn on");
+    }
+
+    private static Snapshot entry(boolean walkedOn, GpuMovePlan.Traits traits) {
+        return new Snapshot(true, false, false, 1, Mode.OTHER, false, "", List.of(), List.of(), List.of(),
+              walkedOn ? GpuMovementFixture.START : null, 0, 0, 0, EntityMovementType.MOVE_NONE, "", false, 0, 0,
+              true, List.of(), false, false, true, Map.of(), Set.of(), 0, walkedOn, walkedOn, traits);
     }
 
     @Test
@@ -605,6 +638,39 @@ class GpuMovePlanTest {
     }
 
     /**
+     * Drag turning is generic: a flight, which the planner leaves to MegaMek, turns its path's end toward the dragged
+     * hex as MegaMek's Turn does. Its turns at the end are replaced, so a drag that swings back spends nothing.
+     */
+    @Test
+    void aFlightTurnsTowardTheDraggedHexAndASwingBackSpendsNothing() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            selectAirborneFighter(moving);
+            onSwing(() -> {
+                for (int type : new int[] { BoardViewEvent.BOARD_HEX_DRAGGED, BoardViewEvent.BOARD_HEX_CLICKED }) {
+                    moving.display.hexMoused(new BoardViewEvent(moving.board.view, new Coords(4, 9), type, 0,
+                          MouseEvent.BUTTON1));
+                }
+                return null;
+            });
+            GpuMovePlan plan = plan(moving);
+            Coords end = new Coords(4, 9);
+            int facing = shown(moving).facing();
+            int length = onSwing(() -> moving.display.getPlannedMovement().length());
+
+            plan.faceToward(end.translated((facing + 1) % 6), 0);
+            assertEquals((facing + 1) % 6, shown(moving).facing());
+            plan.faceToward(end.translated((facing + 5) % 6), 0);
+            assertEquals((facing + 5) % 6, shown(moving).facing());
+            assertEquals(length + 1, onSwing(() -> moving.display.getPlannedMovement().length()),
+                  "The right turn is replaced by one left turn");
+            plan.faceToward(end.translated(facing), 0);
+            assertEquals(facing, shown(moving).facing());
+            assertEquals(length, onSwing(() -> moving.display.getPlannedMovement().length()),
+                  "Swinging back leaves no turn");
+        }
+    }
+
+    /**
      * E2d: while the display picks the landing hex of a vehicle's escape pod, the unit is no planner and the plan's
      * commands are dropped; the board click the HUD then sends (MegaMek's board tool) launches the pod to that hex.
      */
@@ -626,6 +692,7 @@ class GpuMovePlanTest {
 
             // A command of an older frame is dropped: nothing is plotted and the pick still waits.
             plan.planTo(BEHIND_TANK, 0, false);
+            plan.faceToward(BEHIND_TANK, 0);
             assertEquals(List.of(), shown(moving).route());
             assertTrue(onSwing(moving.display::isSelectingHex));
 

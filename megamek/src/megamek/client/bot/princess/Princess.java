@@ -1421,6 +1421,10 @@ public class Princess extends BotClient {
             if (!validCoords.isEmpty()) {
                 return validCoords.getFirst();
             }
+            // Core Rules p.137: an emplacement Asset needs no building
+            if (Game.rulesManager.getRulesGame().deploysEmplacementsAsAssets()) {
+                return rankDeploymentCoords(deployedUnit, possibleDeployCoords);
+            }
 
             return null;
         } else if (EmplacementDeployment.isGunEmplacementBuilding(deployedUnit)) {

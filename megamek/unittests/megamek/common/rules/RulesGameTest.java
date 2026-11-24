@@ -19,11 +19,13 @@
 package megamek.common.rules;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.enums.GamePhase;
+import megamek.common.equipment.GunEmplacement;
 import megamek.common.game.Game;
 import megamek.common.rules.core.CoreRulesGame;
 import megamek.common.rules.totalwarfare.TWRulesGame;
@@ -64,5 +66,20 @@ class RulesGameTest {
         assertTrue(total.includeInMovement(GamePhase.MOVEMENT, entity));
         assertEquals(1, core.getDeploymentWidth(player, Board.START_EDGE, 8));
         assertEquals(1, total.getDeploymentWidth(player, Board.START_EDGE, 8));
+    }
+
+    @Test
+    void aGunEmplacementDeploysInsteadOfWalkingOn() {
+        Game game = Mockito.mock(Game.class);
+        Player player = Mockito.mock(Player.class);
+        GunEmplacement emplacement = Mockito.mock(GunEmplacement.class);
+        Mockito.when(emplacement.getGame()).thenReturn(game);
+        Mockito.when(emplacement.getDeployRound()).thenReturn(0);
+        Mockito.when(emplacement.isDeployed()).thenReturn(false);
+        Mockito.when(emplacement.getStartingPos()).thenReturn(Board.START_EDGE);
+        Mockito.when(emplacement.getOwner()).thenReturn(player);
+        Mockito.when(game.getCurrentRound()).thenReturn(1);
+
+        assertFalse(new CoreRulesGame().canWalkOnThisRound(emplacement));
     }
 }

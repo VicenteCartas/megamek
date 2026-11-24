@@ -33,6 +33,7 @@ import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.enums.MoveStepType;
+import megamek.common.equipment.GunEmplacement;
 import megamek.common.game.Game;
 import megamek.common.moves.MountPathHelper;
 import megamek.common.moves.MovePath;
@@ -62,6 +63,7 @@ final class GpuMovePlan implements AutoCloseable {
     /** The step types a path may start with before its route (see {@link #base}). */
     private static final Set<MoveStepType> START_STEPS = EnumSet.of(MoveStepType.START_JUMP,
           MoveStepType.JUMP_MEK_MECHANICAL_BOOSTER, MoveStepType.DEPLOY, MoveStepType.CONVERT_MODE);
+    private static final Set<MoveStepType> TURN_STEPS = EnumSet.of(MoveStepType.TURN_LEFT, MoveStepType.TURN_RIGHT);
 
     /**
      * The gear the planner uses; AUTO lets the route choose walking, running or jumping. Outside the planner, TARGET is
@@ -126,10 +128,12 @@ final class GpuMovePlan implements AutoCloseable {
 
        /**
         * These traits for a walk-on aerospace unit (a Fighter LAM included) setting up its entry: it chooses its entry
-        * altitude with the stepper, and sets up its entry as a ground unit does, not as a flight.
+        * altitude with the stepper, and sets up its entry as a ground unit does, not as a flight. In {@code space}
+        * there is no altitude, so it has no stepper.
         */
-       Traits enteringAloft(int altitude) {
-           return new Traits(vehicle, jumps, true, altitude, entering, null, runs, false, walk, forms, true);
+       Traits enteringAloft(int altitude, boolean space) {
+           return new Traits(vehicle, jumps, !space, space ? 0 : altitude, entering, null, runs, false, walk, forms,
+                 !space);
        }
 
        /**
@@ -361,6 +365,14 @@ final class GpuMovePlan implements AutoCloseable {
         boolean choosesEntryHeight() {
             return (planner || traits.altitude()) && walkedOn && route.isEmpty() && (traits.flight() == null);
         }
+
+        /**
+         * Whether the unit is a walk-on unit placed on its entry hex and not entered yet, which turns there freely
+         * (Core Rulebook p. 224): an aerospace unit as a ground unit, though MegaMek plots its later flight.
+         */
+        boolean setsUpEntry() {
+            return walkedOn && route.isEmpty() && (traits.flight() == null);
+        }
     }
 
     /**
@@ -464,7 +476,8 @@ final class GpuMovePlan implements AutoCloseable {
         Traits traits = Traits.of(entity, path, !planner && (flight != null || aloft
               ? !entity.isDeployed() && !md.isSelectingHex() : entering(md, entity)), flight, md.isConvertEnabled());
         if (aloft) {
-            traits = traits.enteringAloft(path.getFinalAltitude());
+            Board board = source.currentView().game.getBoard(entity.getBoardId());
+            traits = traits.enteringAloft(path.getFinalAltitude(), (board != null) && board.isSpace());
         }
         Snapshot next = new Snapshot(true, planner, planner && external, entityId, mode, explicit,
               label(mode, traits.vehicle()), shown.route(), hovered, planner ? pinned(path) : List.of(),
@@ -514,10 +527,13 @@ final class GpuMovePlan implements AutoCloseable {
         command(this::pin);
     }
 
-    /** G9: turns the final facing one hexside, left for a negative {@code direction}; in flight, as MegaMek turns. */
+    /**
+     * G9: turns the final facing one hexside, left for a negative {@code direction}; outside the planner (a flight, a
+     * landed aerospace unit, another gear), as MegaMek turns.
+     */
     void turn(int direction) {
         command(md -> face(md, (md.getPlannedMovement().getFinalFacing() + (direction < 0 ? 5 : 1)) % 6));
-        flight(md -> {
+        steer(md -> {
             if (md.getPlannedMovement().getFinalCoords() == null) {
                 return;
             }
@@ -529,12 +545,40 @@ final class GpuMovePlan implements AutoCloseable {
         });
     }
 
-    /** Orient the route's endpoint toward the clicked hex, preserving its destination and pinned waypoints. */
+    /**
+     * Orient the route's endpoint toward the clicked hex, preserving its destination and pinned waypoints. Outside the
+     * planner MegaMek turns the path's end, as its Shift+click does: the turns already at the end are replaced, so a
+     * drag that swings back spends nothing on the swing, and a facing it cannot reach keeps the path as it was.
+     */
     void faceToward(Coords hex, int boardId) {
         command(md -> {
             MovePath path = md.getPlannedMovement();
             if (hex != null && boardId == path.getFinalBoardId() && !hex.equals(path.getFinalCoords())) {
                 face(md, path.getFinalCoords().direction(hex));
+            }
+        });
+        steer(md -> {
+            MovePath path = md.getPlannedMovement();
+            Coords end = path.getFinalCoords();
+            if ((hex == null) || (end == null) || (boardId != path.getFinalBoardId()) || hex.equals(end)) {
+                return;
+            }
+            int wanted = end.direction(hex);
+            if (wanted == path.getFinalFacing()) {
+                return;
+            }
+            MovePath bare = path.clone();
+            while ((bare.length() > base(bare)) && TURN_STEPS.contains(bare.getLastStep().getType())) {
+                bare.removeLastStep();
+            }
+            if (bare.length() != path.length()) {
+                md.plotPath(bare);
+            }
+            if (md.getPlannedMovement().getFinalFacing() != wanted) {
+                md.faceToward(end.translated(wanted), boardId);
+            }
+            if (md.getPlannedMovement().getFinalFacing() != wanted) {
+                md.plotPath(path);
             }
         });
     }
@@ -684,6 +728,25 @@ final class GpuMovePlan implements AutoCloseable {
             Entity entity = acting(md);
             if ((entity == null) || (entity.getId() != entityId) || (md.getPlannedMovement() == null)
                   || !flies(entity) || md.isSelectingHex() || md.isSettingUpEntry()) {
+                return;
+            }
+            body.accept(md);
+        });
+    }
+
+    /**
+     * Runs a turning command body on the EDT behind the source's input guard, while the plan's unit moves outside the
+     * planner (a flight, a landed aerospace unit, the charge, DFA or ram gear) in the local movement turn, on the
+     * board, not picking a hex nor setting up its entry, and its facing matters. MegaMek turns it, so the path it
+     * leaves is MegaMek's.
+     */
+    private void steer(Consumer<MovementDisplay> body) {
+        source.command(() -> {
+            MovementDisplay md = display;
+            Entity entity = acting(md);
+            if ((entity == null) || (entity.getId() != entityId) || (md.getPlannedMovement() == null)
+                  || planner(md, entity) || !entity.isDeployed() || md.isSelectingHex() || md.isSettingUpEntry()
+                  || !facingMatters(entity)) {
                 return;
             }
             body.accept(md);
@@ -1165,9 +1228,13 @@ final class GpuMovePlan implements AutoCloseable {
 
     /**
      * Whether turning the unit means anything: not for infantry whose weapons all fire all around (a conventional
-     * platoon's field guns, and one hitting the deck with them, fire forward), which no attack hits by side either.
+     * platoon's field guns, and one hitting the deck with them, fire forward), which no attack hits by side either,
+     * nor for a turreted emplacement, whose single location no attack hits by side and whose turret turns freely.
      */
     static boolean facingMatters(Entity entity) {
+        if (entity instanceof GunEmplacement emplacement) {
+            return !emplacement.isTurret();
+        }
         return !(entity instanceof Infantry) || entity.getWeaponList().stream()
               .anyMatch(weapon -> entity.getWeaponArc(entity.getEquipmentNum(weapon)) != Compute.ARC_360);
     }

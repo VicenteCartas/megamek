@@ -43,9 +43,16 @@ final class GpuDeployHeight {
 
     /** "Alt 3", "Landed" or "Elev 2", as the stepper names the shown height. */
     String label(GpuBoardSource.HeightChoice choice) {
-        int shown = shown(choice);
-        return choice.altitude() ? (shown == 0 ? text("GpuBoard.hud.deploy.landed")
-              : text("GpuBoard.hud.deploy.altitude", shown)) : text("GpuBoard.hud.deploy.elevation", shown);
+        return label(choice.altitude(), shown(choice));
+    }
+
+    /**
+     * How a stepper names a height, in deployment and in movement alike: an altitude ("Alt 3", "Landed" at 0) or an
+     * elevation ("Elev 2").
+     */
+    static String label(boolean altitude, int height) {
+        return altitude ? (height == 0 ? text("GpuBoard.hud.deploy.landed")
+              : text("GpuBoard.hud.deploy.altitude", height)) : text("GpuBoard.hud.deploy.elevation", height);
     }
 
     /**
