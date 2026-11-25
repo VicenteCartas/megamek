@@ -362,9 +362,8 @@ public final class UnitDisplayData {
     public static RowParts rowParts(@Nullable Game game, WeaponMounted mounted) {
         WeaponType weaponType = mounted.getType();
         Entity entityMounted = mounted.getEntity();
-        Mounted<?> linkedBy = mounted.getLinkedBy();
-        String riscModule = ((linkedBy != null) && (linkedBy.getType() instanceof MiscType)
-              && linkedBy.getType().hasFlag(MiscType.F_RISC_LASER_PULSE_MODULE)) ? linkedBy.getShortName() : "";
+        Mounted<?> pulseModule = mounted.getEnhancement(MiscType.F_RISC_LASER_PULSE_MODULE);
+        String riscModule = pulseModule == null ? "" : pulseModule.getShortName();
         String location = entityMounted.getLocationAbbr(mounted.getLocation());
         if (mounted.isSplit()) {
             location += "/" + entityMounted.getLocationAbbr(mounted.getSecondLocation());

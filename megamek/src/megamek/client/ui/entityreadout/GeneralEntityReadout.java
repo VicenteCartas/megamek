@@ -64,6 +64,7 @@ import megamek.common.equipment.Mounted;
 import megamek.common.equipment.enums.BombType.BombTypeEnum;
 import megamek.common.game.Game;
 import megamek.common.options.OptionsConstants;
+import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementMode;
 import megamek.common.units.IBomber;
@@ -892,7 +893,9 @@ class GeneralEntityReadout implements EntityReadout {
             quirksSection.addAll(createQuirksBlock());
             // legacy -- I dont know why these were not kept separate
             //            fluffSection.addAll(quirksSection);
-            fluffSection.addAll(createFluffBlock());
+            if (PreferenceManager.getClientPreferences().getShowUnitFluffText()) {
+                fluffSection.addAll(createFluffBlock());
+            }
             invalidSection.addAll(createInvalidBlock());
         }
     }

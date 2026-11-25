@@ -2476,6 +2476,9 @@ class MovePathHandler extends AbstractTWRuleHandler {
 
             // stop for illegal movement
             if (stepMoveType == EntityMovementType.MOVE_ILLEGAL) {
+                if (md.isEndStep(step)) {
+                    new HiddenFriendlyStackingHandler(gameManager).reportMoveStoppedShort(entity, step);
+                }
                 break;
             }
 

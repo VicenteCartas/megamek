@@ -359,6 +359,19 @@ class BuildingConstructionTest {
     }
 
     @Test
+    void buildingAutomationFollowsItsWeaponWhenAnEnhancementMovesInFileOrder() throws Exception {
+        var building = building(1);
+        var laser = building.addEquipment(EquipmentType.get("ISMediumLaser"), 0);
+        var automated = building.addEquipment(EquipmentType.get("ISLargeLaser"), 0);
+        var insulator = building.addEquipment(EquipmentType.get("ISLaserInsulator"), 0);
+        insulator.setLinked(laser);
+        building.getDesign().getAutomatedWeapons().add(automated);
+
+        var loaded = (BuildingEntity) new BLKStructureFile(BLKFile.getBlock(building)).getEntity();
+        assertEquals(java.util.Set.of(loaded.getWeaponList().get(1)), loaded.getDesign().getAutomatedWeapons());
+    }
+
+    @Test
     void removingAutomatedEquipmentRemovesItsAdditionalCostAndNativeReferences() throws Exception {
         var building = building(1);
         var laser = building.addEquipment(EquipmentType.get("ISMediumLaser"), 0);
