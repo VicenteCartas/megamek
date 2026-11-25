@@ -512,8 +512,10 @@ class GpuCommandDockSmokeTest {
             assertEquals(List.of("deployUnload", DONE), ran);
             GpuCommandDock.More more = dock.dock().more();
             assertNotNull(more, "Turning and removal stay in More");
-            assertTrue(more.commands().stream().map(BoardScene.Command::id).toList()
-                  .containsAll(List.of("deployTurn", "deployRemove")));
+            List<String> inMore = Stream.concat(more.items().stream(), more.commands().stream())
+                  .map(BoardScene.Command::id).toList();
+            assertTrue(inMore.containsAll(List.of("dock.turnLeft", "dock.turnRight", "deployRemove")), inMore.toString());
+            assertFalse(inMore.contains("deployTurn"), "MegaMek's click-to-face Turn gives way to Turn left and right");
             // A display whose Done also skips shows it once.
             Shot generic = withInfo(nonPlanner(), DONE, DONE);
             show(hud, dock, generic);

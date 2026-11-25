@@ -186,6 +186,37 @@ class GpuMovePlanTest {
         GpuMovePlan.Traits diver = new GpuMovePlan.Traits(false, false, true, -2, false, null, true, true, -1);
         assertEquals(GpuDeployHeight.Kind.DEPTH, GpuDeployHeight.Kind.of(diver));
         assertEquals(GpuDeployHeight.Kind.ELEVATION, GpuDeployHeight.Kind.of(GpuMovePlan.Traits.MEK));
+        GpuMovePlan.Traits vtol = new GpuMovePlan.Traits(true, false, true, 0, false, null, true, false, 5);
+        assertEquals(GpuDeployHeight.Kind.LIFT, GpuDeployHeight.Kind.of(vtol));
+        assertTrue(GpuDeployHeight.landed(GpuDeployHeight.Kind.LIFT, 0), "A VTOL at elevation 0 is landed");
+        assertFalse(GpuDeployHeight.landed(GpuDeployHeight.Kind.LIFT, 1));
+        assertFalse(GpuDeployHeight.landed(GpuDeployHeight.Kind.ELEVATION, 0), "A Mek at elevation 0 stands");
+    }
+
+    @Test
+    void aFlightInSpaceHasNoAltitudeToStep() {
+        Board board = new Board(4, 4);
+        for (int x = 0; x < 4; x++) {
+            for (int y = 0; y < 4; y++) {
+                board.setHex(x, y, new Hex());
+            }
+        }
+        Game game = new Game(board);
+        megamek.common.units.AeroSpaceFighter fighter = new megamek.common.units.AeroSpaceFighter();
+        fighter.setGame(game);
+        game.addEntity(fighter);
+        fighter.setBoardId(board.getBoardId());
+        fighter.setPosition(new Coords(1, 1));
+        fighter.setAltitude(0);
+        GpuMovePlan.Flight flight = new GpuMovePlan.Flight(0, 0, 3, 0, 3, 5, 0);
+
+        GpuMovePlan.Traits aloft = GpuMovePlan.Traits.of(fighter, new MovePath(game, fighter), false, flight);
+        assertTrue(aloft.elevates() && aloft.altitude(), "Over a ground map it flies at an altitude");
+
+        board.setBoardType(megamek.common.board.BoardType.FAR_SPACE);
+        GpuMovePlan.Traits space = GpuMovePlan.Traits.of(fighter, new MovePath(game, fighter), false, flight);
+        assertFalse(space.elevates(), "A space map has no altitude, so no stepper");
+        assertFalse(space.altitude(), "Nor an altitude to name Landed");
     }
 
     private static Snapshot entry(boolean walkedOn, GpuMovePlan.Traits traits) {

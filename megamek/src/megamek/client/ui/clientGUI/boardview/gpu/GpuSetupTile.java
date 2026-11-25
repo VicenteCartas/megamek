@@ -75,10 +75,16 @@ final class GpuSetupTile {
         String icon = tile.kind() != GpuDeploySetup.Kind.TOGGLE ? "unfold-more"
               : tile.on() ? "toggle-on" : "toggle-off";
         mark.setDrawable(ui.skin.getDrawable("icon-" + icon));
-        boolean lit = tile.kind() == GpuDeploySetup.Kind.TOGGLE && tile.on();
+        boolean lit = tile.kind() == GpuDeploySetup.Kind.TOGGLE && tile.on() && !tile.isLocked();
         mark.setColor(!lit ? UiTheme.MUTED : tile.changed() ? UiTheme.AMBER : UiTheme.MINT);
+        // A locked switch shows its state, dimmed, and its tip says what frees it.
+        button.setDisabled(tile.isLocked());
+        if (tile.isLocked() && !tile.changed()) {
+            value.setColor(UiTheme.MUTED);
+        }
+        String detail = tile.isLocked() ? tile.locked() : tile.tip();
         // A narrow tile clips long captions and values; the tip names both in full.
-        tip.getActor().setText(tile.caption() + SEPARATOR + value(tile) + (tile.tip().isEmpty() ? "" : "\n" + tile.tip()));
+        tip.getActor().setText(tile.caption() + SEPARATOR + value(tile) + (detail.isEmpty() ? "" : "\n" + detail));
     }
 
     /** A tile's value as it reads: the active count of the heat sinks' step, else the state's name. */

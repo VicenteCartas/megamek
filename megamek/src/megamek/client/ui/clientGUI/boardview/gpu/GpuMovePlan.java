@@ -136,8 +136,10 @@ final class GpuMovePlan implements AutoCloseable {
              boolean convertible) {
            List<Form> forms = Form.of(entity, path, convertible && !entering);
            if (flight != null) {
-               return new Traits(false, false, true, path.getFinalAltitude(), entering, flight, true, false, -1,
-                     forms);
+               // A space map has no altitude, so a flight there neither climbs nor dives
+               boolean space = entity.isSpaceborne();
+               return new Traits(false, false, !space, space ? 0 : path.getFinalAltitude(), entering, flight, true,
+                     false, -1, forms, !space);
            }
            // A QuadVee or tracked Mek moves in the mode it converts to; a LAM converts at the end of the phase and
            // moves in its starting mode, at half MP, so it doesn't rise the round it becomes an AirMek

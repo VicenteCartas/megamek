@@ -397,13 +397,22 @@ final class GpuBoardSource implements BoardSource {
             if (panel instanceof DeploymentDisplay deployment
                   && deployment.currentEntity() != null && deployment.currentEntity().getId() == unitId) {
                 deployment.setStartingMode(mode);
-                refresh();
+                reshape(deployment.currentEntity());
             } else if (panel instanceof MovementDisplay movement
                   && movement.currentEntity() != null && movement.currentEntity().getId() == unitId
                   && movement.chooseEntryMode(mode)) {
-                refresh();
+                reshape(movement.currentEntity());
             }
         });
+    }
+
+    /**
+     * Shows {@code entity} in the mode it starts in now: the tileset caches a unit's sprite (and so its meeple) and
+     * reloads it only for a conversion in movement, which a starting mode chosen locally is not.
+     */
+    private void reshape(Entity entity) {
+        view.getTilesetManager().reloadImage(entity);
+        refresh();
     }
 
     /**

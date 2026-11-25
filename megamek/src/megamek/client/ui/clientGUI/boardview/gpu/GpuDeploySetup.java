@@ -38,12 +38,22 @@ final class GpuDeploySetup {
 
     /**
      * One choice: its caption, its states ({@code values}, or the counts 0..max for a step), the one chosen and the
-     * one it started out with, and for a toggle the state its switch shows as off.
+     * one it started out with, for a toggle the state its switch shows as off, and why it can't change now ({@code
+     * locked}, empty while it can).
      */
     record Tile(String id, String caption, List<String> values, int selected, int baseline, Kind kind, int off,
-          String tip) {
+          String tip, String locked) {
         Tile {
             values = List.copyOf(values);
+        }
+
+        Tile(String id, String caption, List<String> values, int selected, int baseline, Kind kind, int off,
+              String tip) {
+            this(id, caption, values, selected, baseline, kind, off, tip, "");
+        }
+
+        boolean isLocked() {
+            return !locked.isEmpty();
         }
 
         boolean changed() {
@@ -104,7 +114,7 @@ final class GpuDeploySetup {
               movement.setupBaseline());
     }
 
-    private static Choice capture(Game game, @Nullable Entity entity, @Nullable DeploymentSetup current,
+    static Choice capture(Game game, @Nullable Entity entity, @Nullable DeploymentSetup current,
           DeploymentSetup.Options options, @Nullable DeploymentSetup start) {
         if (entity == null || current == null || options.isEmpty()) {
             return Choice.NONE;
@@ -164,18 +174,29 @@ final class GpuDeploySetup {
             return null;
         }
         EquipmentType type = mounted.getType();
-        // Modes the server would refuse now are last, and left out; keep the current one listed all the same.
-        int count = Math.max(UnitEquipmentActions.modeChoices(game, entity, mounted).labels().size(), selected + 1);
-        count = Math.min(count, mounted.getModesCount());
+        int allowed = UnitEquipmentActions.modeChoices(game, entity, mounted).labels().size();
+        int all = Math.min(type.getModesCount(mounted), mounted.getModesCount());
+        int off = DeploymentSetup.modeIndex(mounted, Mounted.MODE_OFF);
+        // An on/off pair stays a switch, locked while the server would refuse the other state (Stealth's ECM).
+        boolean toggle = all == 2 && off >= 0 && off < all && selected < all;
+        // Otherwise modes the server would refuse now are last, and left out; keep the current one listed all the same.
+        int count = toggle ? all : Math.min(Math.max(allowed, selected + 1), mounted.getModesCount());
         List<String> values = new ArrayList<>();
         for (int index = 0; index < count; index++) {
             values.add(mounted.getMode(index).getStateName(type));
         }
-        int off = DeploymentSetup.modeIndex(mounted, Mounted.MODE_OFF);
-        Kind kind = count == 2 && off >= 0 && off < count ? Kind.TOGGLE : Kind.PICK;
+        String locked = toggle && 1 - selected >= allowed ? lockedReason(type) : "";
         int start = baseline.modes().getOrDefault(equipmentNum, selected);
         return new Tile(EQUIPMENT + equipmentNum, caption(entity, mounted), values, selected,
-              start >= 0 && start < count ? start : selected, kind, off, "");
+              start >= 0 && start < count ? start : selected, toggle ? Kind.TOGGLE : Kind.PICK, off, "", locked);
+    }
+
+    /** Why a switch can't change: stealth armor and its ECM suite hold each other. */
+    private static String lockedReason(EquipmentType type) {
+        if (type.hasFlag(MiscType.F_ECM)) {
+            return text("ecmLocked");
+        }
+        return text(type.hasFlag(MiscType.F_STEALTH) ? "stealthLocked" : "locked");
     }
 
     /** The equipment's short name, with its location when the unit has more than one of it. */
