@@ -411,6 +411,86 @@ class MovementDisplayTest {
     }
 
     @Test
+    @DisplayName("a walk-on unit chooses among the heights it could deploy at there, as deployment offers them")
+    void entryHeightsAreTheDeploymentHeights() throws Exception {
+        VTOL vtol = new VTOL();
+        vtol.setMovementMode(EntityMovementMode.VTOL);
+        vtol.setGame(game);
+        vtol.setPosition(new Coords(0, 0));
+        vtol.setBoardId(game.getBoard().getBoardId());
+        vtol.setDeployed(true);
+        vtol.setElevation(0);
+        game.addEntity(vtol);
+        placeForEntry(vtol);
+
+        List<Integer> deployment = DeploymentHelper.placementHeights(vtol, game.getBoard(), vtol.getPosition(), game);
+        assertTrue(deployment.size() > 1, "A VTOL has heights to choose from.");
+        assertEquals(deployment, movementDisplay.entryHeights(), "Walk-on and deployment offer the same heights.");
+
+        assertTrue(movementDisplay.setEntryHeight(3));
+        assertEquals(3, vtol.getElevation());
+        assertEquals(3, ((MovePath) readField(movementDisplay, "cmd")).getFinalElevation());
+        assertFalse(movementDisplay.setEntryHeight(-1), "A height it may not deploy at is refused.");
+        assertEquals(3, vtol.getElevation());
+    }
+
+    @Test
+    @DisplayName("a Mek walking on onto ice may enter on the ice or on the bottom, as it may deploy")
+    void mekOnIceChoosesItsEntryHeight() throws Exception {
+        Hex ice = game.getBoard().getHex(0, 0);
+        ice.addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.WATER, 2));
+        ice.addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.ICE, 1));
+        BipedMek mek = new BipedMek();
+        mek.setGame(game);
+        mek.setPosition(new Coords(0, 0));
+        mek.setBoardId(game.getBoard().getBoardId());
+        mek.setDeployed(true);
+        game.addEntity(mek);
+        placeForEntry(mek);
+
+        List<Integer> deployment = DeploymentHelper.placementHeights(mek, game.getBoard(), mek.getPosition(), game);
+        assertEquals(deployment, movementDisplay.entryHeights());
+        assertTrue(deployment.contains(0) && deployment.contains(-2), "On the ice or on the bottom: " + deployment);
+    }
+
+    @Test
+    @DisplayName("a walk-on submarine's entry heights are its deployment heights but the seafloor")
+    void submarineEntryHeightsLeaveOutTheSeafloor() throws Exception {
+        for (int x = 0; x < game.getBoard().getWidth(); x++) {
+            for (int y = 0; y < game.getBoard().getHeight(); y++) {
+                game.getBoard().getHex(x, y).addTerrain(new megamek.common.units.Terrain(
+                      megamek.common.units.Terrains.WATER, 2));
+            }
+        }
+        ConvInfantry scuba = new ConvInfantry();
+        scuba.setMovementMode(EntityMovementMode.SUBMARINE);
+        scuba.setOriginalJumpMP(3);
+        scuba.setGame(game);
+        scuba.setBoardId(game.getBoard().getBoardId());
+        scuba.setDeployed(true);
+        scuba.setElevation(-1);
+        game.addEntity(scuba);
+        scuba.setPosition(new Coords(0, 1));
+        placeForEntry(scuba);
+
+        List<Integer> deployment = DeploymentHelper.placementHeights(scuba, game.getBoard(), scuba.getPosition(), game);
+        assertTrue(deployment.contains(-2), "It may deploy on the seafloor: " + deployment);
+        List<Integer> expected = deployment.stream().filter(height -> height != -2).toList();
+        assertEquals(expected, movementDisplay.entryHeights(), "It may not enter there (TW p. 56).");
+    }
+
+    /** Makes {@code unit} the selected walk-on unit, only placed on its entry hex. */
+    private void placeForEntry(Entity unit) throws Exception {
+        movementDisplay.currentEntity = unit.getId();
+        MovePath placed = new MovePath(game, unit);
+        placed.addStep(MoveStepType.DEPLOY);
+        setField(movementDisplay, "cmd", placed);
+        setField(movementDisplay, "gear", MovementDisplay.GEAR_LAND);
+        setField(movementDisplay, "unloadableUnits", new java.util.ArrayList<>());
+        setField(movementDisplay, "towedUnits", new java.util.ArrayList<>());
+    }
+
+    @Test
     @DisplayName("the envelope of a UMU unit searches as far as its UMU MP, which may exceed its ground MP")
     void envelopeSearchesUmuMp() throws Exception {
         ConvInfantry scuba = new ConvInfantry();

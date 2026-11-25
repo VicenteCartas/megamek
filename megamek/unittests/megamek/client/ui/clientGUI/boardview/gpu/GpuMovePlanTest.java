@@ -175,20 +175,17 @@ class GpuMovePlanTest {
     }
 
     @Test
-    void anAerospaceEntryHasNoAltitudeStepperInSpace() {
-        GpuMovePlan.Traits aloft = GpuMovePlan.Traits.MEK.enteringAloft(3, false);
-        assertTrue(aloft.elevates() && aloft.altitude(), "Over a ground map it chooses the altitude it enters at");
-        assertEquals(3, aloft.elevation());
-        GpuMovePlan.Traits space = GpuMovePlan.Traits.MEK.enteringAloft(3, true);
-        assertFalse(space.elevates(), "Space has no altitude to step");
-        assertFalse(space.altitude());
+    void aWalkOnUnitPlacedOnItsEntryHexSetsUpItsEntry() {
+        GpuMovePlan.Traits mek = GpuMovePlan.Traits.MEK;
+        assertTrue(entry(true, mek).setsUpEntry(), "Placed, it turns freely, by the buttons or a drag");
+        assertFalse(entry(false, mek).setsUpEntry(), "Off the map, it has no hex to turn on");
     }
 
     @Test
-    void anAerospaceUnitPlacedOnItsEntryHexSetsUpItsEntry() {
-        GpuMovePlan.Traits aloft = GpuMovePlan.Traits.MEK.enteringAloft(0, true);
-        assertTrue(entry(true, aloft).setsUpEntry(), "Placed, it turns freely, by the buttons or a drag");
-        assertFalse(entry(false, aloft).setsUpEntry(), "Off the map, it has no hex to turn on");
+    void movementNamesAHeightAsDeploymentDoes() {
+        GpuMovePlan.Traits diver = new GpuMovePlan.Traits(false, false, true, -2, false, null, true, true, -1);
+        assertEquals(GpuDeployHeight.Kind.DEPTH, GpuDeployHeight.Kind.of(diver));
+        assertEquals(GpuDeployHeight.Kind.ELEVATION, GpuDeployHeight.Kind.of(GpuMovePlan.Traits.MEK));
     }
 
     private static Snapshot entry(boolean walkedOn, GpuMovePlan.Traits traits) {

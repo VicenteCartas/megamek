@@ -34,6 +34,7 @@
 package megamek.client.ui.panels.phaseDisplay;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import javax.swing.JOptionPane;
@@ -56,6 +57,7 @@ import megamek.common.board.Coords;
 import megamek.common.board.DeploymentElevationType;
 import megamek.common.board.ElevationOption;
 import megamek.common.board.FacingOption;
+import megamek.common.game.Game;
 import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.Entity;
 import megamek.common.units.IAero;
@@ -461,6 +463,35 @@ public class DeploymentHelper {
             }
         }
         return null;
+    }
+
+    /** How many elevations above its highest listed one {@link #placementHeights} offers a VTOL. */
+    private static final int HEIGHTS_ABOVE = 5;
+
+    /**
+     * The heights (altitudes for an aerospace unit) {@code entity} may be placed at in {@code coords}, lowest first:
+     * those a unit deploying there chooses between, and a walk-on unit choosing the height it enters at, which the
+     * off-map hex shares with its entry hex (Core Rulebook p. 224). Above a VTOL's highest listed elevation any is
+     * allowed; the list then offers a few more above that or the unit's current one. Empty in space, which has none.
+     */
+    public static List<Integer> placementHeights(Entity entity, Board board, Coords coords, Game game) {
+        if (board.isSpace() || !board.contains(coords)) {
+            return List.of();
+        }
+        List<Integer> heights = new ArrayList<>();
+        for (ElevationOption option : new AllowedDeploymentHelper(entity, coords, board, board.getHex(coords), game)
+              .findAllowedElevations()) {
+            int current = entity.isAero() ? entity.getAltitude() : entity.getElevation();
+            int top = option.type() == DeploymentElevationType.ELEVATIONS_ABOVE
+                  ? Math.max(option.elevation(), current) + HEIGHTS_ABOVE : option.elevation();
+            for (int height = option.elevation(); height <= top; height++) {
+                if (!heights.contains(height) && !entity.isLocationProhibited(coords, board.getBoardId(), height)) {
+                    heights.add(height);
+                }
+            }
+        }
+        Collections.sort(heights);
+        return heights;
     }
 
     private @Nullable ElevationOption showElevationChoiceDialog(List<ElevationOption> elevationOptions) {

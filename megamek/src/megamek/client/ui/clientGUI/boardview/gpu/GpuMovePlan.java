@@ -92,8 +92,7 @@ final class GpuMovePlan implements AutoCloseable {
      * UMU or SCUBA unit's UMU MP and on the ground a glider ProtoMek's or WiGE vehicle's 1 MP, which also leaves it
      * no run; -1 when the unit's walk MP stands. {@code forms}: the modes a unit that converts
      * (a LAM, a QuadVee, a Mek with tracks) chooses between before it moves ({@link Form}), empty for every other unit.
-     * {@code altitude}: its {@code elevation} is an altitude, a flight's or an aerospace unit's (a Fighter LAM
-     * included) choosing the altitude it walks on at ({@link #enteringAloft}).
+     * {@code altitude}: its {@code elevation} is a flight's altitude.
      */
     record Traits(boolean vehicle, boolean jumps, boolean elevates, int elevation, boolean entering,
           @Nullable Flight flight, boolean runs, boolean dives, int walk, List<Form> forms, boolean altitude) {
@@ -124,16 +123,6 @@ final class GpuMovePlan implements AutoCloseable {
        Traits(boolean vehicle, boolean jumps, boolean elevates, int elevation, boolean entering,
              @Nullable Flight flight, boolean runs, boolean dives, int walk, List<Form> forms) {
            this(vehicle, jumps, elevates, elevation, entering, flight, runs, dives, walk, forms, flight != null);
-       }
-
-       /**
-        * These traits for a walk-on aerospace unit (a Fighter LAM included) setting up its entry: it chooses its entry
-        * altitude with the stepper, and sets up its entry as a ground unit does, not as a flight. In {@code space}
-        * there is no altitude, so it has no stepper.
-        */
-       Traits enteringAloft(int altitude, boolean space) {
-           return new Traits(vehicle, jumps, !space, space ? 0 : altitude, entering, null, runs, false, walk, forms,
-                 !space);
        }
 
        /**
@@ -358,15 +347,6 @@ final class GpuMovePlan implements AutoCloseable {
         }
 
         /**
-         * Whether the unit is a walk-on ground unit only placed on its entry hex, whose Go up and Go down then choose
-         * the height it enters at, free (MegaMek's {@code MovementDisplay}, Core Rulebook p. 224); a Fighter LAM its
-         * altitude.
-         */
-        boolean choosesEntryHeight() {
-            return (planner || traits.altitude()) && walkedOn && route.isEmpty() && (traits.flight() == null);
-        }
-
-        /**
          * Whether the unit is a walk-on unit placed on its entry hex and not entered yet, which turns there freely
          * (Core Rulebook p. 224): an aerospace unit as a ground unit, though MegaMek plots its later flight.
          */
@@ -473,12 +453,10 @@ final class GpuMovePlan implements AutoCloseable {
         boolean explicit = planner && (mode != Mode.AUTO);
         boolean aloft = md.isSettingUpEntry() && entity.isAero();
         Flight flight = aloft ? null : flight(entity, path);
+        // An aerospace unit setting up its entry does so as a ground unit does; its altitude is the placement height
+        // the HUD's height stepper chooses (MovementDisplay.entryHeights), as deployment's.
         Traits traits = Traits.of(entity, path, !planner && (flight != null || aloft
               ? !entity.isDeployed() && !md.isSelectingHex() : entering(md, entity)), flight, md.isConvertEnabled());
-        if (aloft) {
-            Board board = source.currentView().game.getBoard(entity.getBoardId());
-            traits = traits.enteringAloft(path.getFinalAltitude(), (board != null) && board.isSpace());
-        }
         Snapshot next = new Snapshot(true, planner, planner && external, entityId, mode, explicit,
               label(mode, traits.vehicle()), shown.route(), hovered, planner ? pinned(path) : List.of(),
               shown.destination(), shown.facing(), shown.cost(), shown.budget(), shown.type(),

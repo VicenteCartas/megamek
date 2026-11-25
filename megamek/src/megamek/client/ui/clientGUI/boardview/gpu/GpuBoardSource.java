@@ -306,11 +306,12 @@ final class GpuBoardSource implements BoardSource {
     }
 
     /**
-     * The heights the placed unit may deploy at in its hex, offered on the unit while it has a choice: an aerospace
-     * unit's altitude, a VTOL's elevation, a mek's ice or sea floor. {@code altitude} tells altitudes from elevations.
+     * The heights the placed unit may deploy at in its hex, or a walk-on unit enter at while it sets up its entry,
+     * offered on the unit while it has a choice: an aerospace unit's altitude, a VTOL's elevation, a mek's ice or sea
+     * floor. Both come from MegaMek's same list ({@code DeploymentHelper.placementHeights}); {@code kind} names them.
      */
-    record HeightChoice(int unitId, int height, List<Integer> heights, boolean altitude) {
-        static final HeightChoice NONE = new HeightChoice(Entity.NONE, 0, List.of(), false);
+    record HeightChoice(int unitId, int height, List<Integer> heights, GpuDeployHeight.Kind kind) {
+        static final HeightChoice NONE = new HeightChoice(Entity.NONE, 0, List.of(), GpuDeployHeight.Kind.ELEVATION);
     }
 
     private volatile HeightChoice heightChoice = HeightChoice.NONE;
@@ -321,16 +322,22 @@ final class GpuBoardSource implements BoardSource {
     }
 
     private HeightChoice captureHeightChoice(JComponent panel) {
-        if (!(panel instanceof DeploymentDisplay deployment)) {
+        Entity entity;
+        List<Integer> heights;
+        if (panel instanceof DeploymentDisplay deployment) {
+            entity = deployment.currentEntity();
+            heights = deployment.placedHeights();
+        } else if (panel instanceof MovementDisplay movement) {
+            entity = movement.currentEntity();
+            heights = movement.entryHeights();
+        } else {
             return HeightChoice.NONE;
         }
-        Entity entity = deployment.currentEntity();
-        List<Integer> heights = deployment.placedHeights();
         if (entity == null || heights.size() < 2) {
             return HeightChoice.NONE;
         }
         return new HeightChoice(entity.getId(), entity.isAero() ? entity.getAltitude() : entity.getElevation(),
-              heights, entity.isAero());
+              heights, GpuDeployHeight.Kind.of(entity));
     }
 
     /**
@@ -399,12 +406,38 @@ final class GpuBoardSource implements BoardSource {
         });
     }
 
-    /** GL thread: deploys the placed unit {@code unitId} at {@code height} instead, if it is still the one placed. */
+    /**
+     * GL thread: deploys the placed unit {@code unitId} at {@code height} instead, if it is still the one placed, or
+     * has the walk-on unit enter at it, if it still may choose.
+     */
     void setPlacedHeight(int unitId, int height) {
         SwingUtilities.invokeLater(() -> {
-            if (acceptsInput() && phasePanel.get() instanceof DeploymentDisplay deployment
+            if (!acceptsInput()) {
+                return;
+            }
+            JComponent panel = phasePanel.get();
+            if (panel instanceof DeploymentDisplay deployment
                   && deployment.currentEntity() != null && deployment.currentEntity().getId() == unitId) {
                 deployment.setPlacedHeight(height);
+                refresh();
+            } else if (panel instanceof MovementDisplay movement
+                  && movement.currentEntity() != null && movement.currentEntity().getId() == unitId
+                  && movement.setEntryHeight(height)) {
+                refresh();
+            }
+        });
+    }
+
+    /** GL thread: turns the placed unit {@code unitId} one hexside, left for a negative step, if it is still placed. */
+    void turnPlaced(int unitId, int step) {
+        SwingUtilities.invokeLater(() -> {
+            if (!acceptsInput()) {
+                return;
+            }
+            JComponent panel = phasePanel.get();
+            if (panel instanceof DeploymentDisplay deployment
+                  && deployment.currentEntity() != null && deployment.currentEntity().getId() == unitId) {
+                deployment.turnPlaced(step);
                 refresh();
             }
         });

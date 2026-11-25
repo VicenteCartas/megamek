@@ -40,7 +40,6 @@ import java.awt.event.InputEvent;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -73,7 +72,6 @@ import megamek.common.board.AllowedDeploymentHelper;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
-import megamek.common.board.DeploymentElevationType;
 import megamek.common.board.ElevationOption;
 import megamek.common.board.FacingOption;
 import megamek.common.equipment.Transporter;
@@ -633,30 +631,17 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
     }
 
     /**
-     * The heights (altitudes for an aerospace unit) the unit placed this turn may deploy at in its hex, lowest first;
-     * empty while none is placed on a map with heights. Above a VTOL's highest listed elevation, any is allowed; the
-     * list then offers a few more.
+     * The heights (altitudes for an aerospace unit) the unit placed this turn may deploy at in its hex, lowest first
+     * ({@link DeploymentHelper#placementHeights}, as a walk-on unit chooses its entry height); empty while none is
+     * placed on a map with heights.
      */
     public List<Integer> placedHeights() {
         Entity entity = currentEntity();
         Board board = entity == null || entity.getPosition() == null ? null : game.getBoard(entity.getBoardId());
-        if (board == null || board.isSpace() || !board.contains(entity.getPosition())
-              || !clientgui.getClient().isMyTurn()) {
+        if (board == null || !clientgui.getClient().isMyTurn()) {
             return List.of();
         }
-        List<Integer> heights = new ArrayList<>();
-        for (ElevationOption option : new AllowedDeploymentHelper(entity, entity.getPosition(), board,
-              board.getHex(entity.getPosition()), game).findAllowedElevations()) {
-            int top = option.type() == DeploymentElevationType.ELEVATIONS_ABOVE
-                  ? Math.max(option.elevation(), entity.getElevation()) + HEIGHTS_ABOVE : option.elevation();
-            for (int height = option.elevation(); height <= top; height++) {
-                if (!heights.contains(height)) {
-                    heights.add(height);
-                }
-            }
-        }
-        Collections.sort(heights);
-        return heights;
+        return DeploymentHelper.placementHeights(entity, board, entity.getPosition(), game);
     }
 
     /**
@@ -714,9 +699,6 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         clientgui.boardStates().forEach(BoardClientState::repaint);
     }
 
-    /** How many elevations above its highest listed one {@link #placedHeights} offers a VTOL. */
-    private static final int HEIGHTS_ABOVE = 5;
-
     /**
      * Deploys the unit placed this turn at {@code height} (its altitude, for an aerospace unit) instead, if its hex
      * allows that height; the GL HUD's height control on the placed unit.
@@ -737,6 +719,20 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         clientgui.updateFiringArc(entity);
         clientgui.showSensorRanges(entity);
         clientgui.boardStates().forEach(BoardClientState::repaint);
+    }
+
+    /**
+     * Turns the unit placed this turn one hexside, left for a negative {@code step}, as a Shift+click on the
+     * neighbouring hex would; the GL HUD's turn arrows on the placed unit.
+     */
+    public void turnPlaced(int step) {
+        Entity entity = currentEntity();
+        if (isIgnoringEvents() || entity == null || entity.getPosition() == null || entity.isDeployed()
+              || !clientgui.getClient().isMyTurn()) {
+            return;
+        }
+        int facing = Math.floorMod(entity.getFacing() + Integer.signum(step), 6);
+        processTurn(entity, entity.getPosition().translated(facing), false);
     }
 
     /**

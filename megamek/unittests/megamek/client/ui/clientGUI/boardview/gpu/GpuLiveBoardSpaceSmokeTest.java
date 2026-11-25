@@ -249,7 +249,7 @@ class GpuLiveBoardSpaceSmokeTest {
      * up in a row centred under the ghost and the turn arrows.
      */
     private static void verifyElevationStepper(Live live, GpuMovePlan.Snapshot move) throws Exception {
-        assertFalse(GpuBoardTestUi.shown(live.hud.stage.getRoot().findActor("move-confirm-stepper")),
+        assertFalse(GpuBoardTestUi.shown(live.hud.stage.getRoot().findActor("move-confirm-height")),
               "A Mek's elevation stays in More");
         GpuBoardSource.Frame published = live.frame.get();
         BoardScene s = published.scene();
@@ -270,11 +270,11 @@ class GpuLiveBoardSpaceSmokeTest {
               new GpuHudData(panels.phase(), vtol, panels.fire(), panels.physical(), panels.record(),
                     panels.preview(), panels.chat(), panels.toasts(), panels.los(), panels.players())));
         try {
-            Actor stepper = live.actor("move-confirm-stepper");
+            Actor stepper = live.actor("move-confirm-height");
             assertTrue(GpuBoardTestUi.shown(stepper), "The VTOL's elevation stepper");
-            assertEquals("Elev 4", ((UiButton) live.actor("move-confirm-elevation")).getText().toString());
-            assertFalse(((UiButton) live.actor("move-confirm-go-up")).isDisabled());
-            assertTrue(((UiButton) live.actor("move-confirm-go-down")).isDisabled());
+            assertEquals("Elev 4", ((UiButton) live.actor("move-confirm-height-readout")).getText().toString());
+            assertFalse(((UiButton) live.actor("move-confirm-height-up")).isDisabled());
+            assertTrue(((UiButton) live.actor("move-confirm-height-down")).isDisabled());
             Actor right = live.actor("move-confirm-turn-right");
             Vector2 arrow = right.localToStageCoordinates(new Vector2());
             Vector2 corner = stepper.localToStageCoordinates(new Vector2());

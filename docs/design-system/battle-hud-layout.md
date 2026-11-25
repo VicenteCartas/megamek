@@ -54,8 +54,8 @@ Status: **agreed** layout, from the 2026-11-15 tester round of the deployment pr
 | Phase | 6 Units list | 2 Actions | Next to the unit (shortcuts) |
 | --- | --- | --- | --- |
 | Initiative | Status "Ready" | Continue | — |
-| Deployment | Status: to deploy, placed, later round, walks on (round, edge) | Deploy, Clear, facing, elevation, load | Placement ghost; Deploy / Clear over the placed unit's nameplate (kept expanded so they never move); drag to face; double-click deploys |
-| Movement | Status: pending, moved; walk-on units "Enters from the N edge" | Walk / Run / Jump, turns, Confirm, Hold | Route preview; drag from the destination (or the unit) to face; double-click moves |
+| Deployment | Status: to deploy, placed, later round, walks on (round, edge) | Deploy, Clear, elevation, setup; Turn left / right in More | Placement ghost; Deploy / Clear over the placed unit's nameplate (kept expanded so they never move), its height row under them on the unit, its setup tag above and turn arrows beside it, the same column and arrows as movement's chip (`GpuBoardChip`); drag to face; double-click deploys |
+| Movement | Status: pending, moved; walk-on units "Enters from the N edge" | Walk / Run / Jump, Confirm, Hold; Turn left / right in More | Route preview; turn arrows beside the ghost; drag from the destination (or the unit) to face; double-click moves |
 | Firing | Status: drafted, declared | Fire, Skip, twist, next target | Target letters, TN badges |
 | Physical | Status: attack or none | Attack options, Skip | — |
 | End / report | Attacks and hits of the round | Continue | — |

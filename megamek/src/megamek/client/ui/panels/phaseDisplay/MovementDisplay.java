@@ -2453,25 +2453,53 @@ public class MovementDisplay extends ActionPhaseDisplay {
      *       or null when there is none or it is not {@link #isChoosingEntryHeight choosing its entry height}
      */
     private @Nullable Integer entryHeight(Entity entity, boolean up) {
-        if (!isChoosingEntryHeight(entity)) {
-            return null;
-        }
-        List<ElevationOption> options = entryHeightOptions(entity);
-        if (options.isEmpty()) {
-            return null;
-        }
-        int highest = options.stream().mapToInt(ElevationOption::elevation).max().orElseThrow();
-        int lowest = options.stream().mapToInt(ElevationOption::elevation).min().orElseThrow();
+        List<Integer> heights = entryHeights(entity);
         int current = entryLevel(entity);
-        for (int height = current + (up ? 1 : -1); up ? (height <= Math.max(highest + 1, current + 1))
-              : (height >= lowest); height += up ? 1 : -1) {
-            if ((DeploymentHelper.heightOption(options, height) != null)
-                  && !entity.isLocationProhibited(entity.getPosition(), entity.getBoardId(), height)
-                  && entersAt(entity, height)) {
-                return height;
+        Integer next = null;
+        for (int height : heights) {
+            if (up ? height > current && (next == null || height < next)
+                  : height < current && (next == null || height > next)) {
+                next = height;
             }
         }
-        return null;
+        return next;
+    }
+
+    /**
+     * The heights the selected walk-on unit may enter its entry hex at, free, lowest first: while it is only placed
+     * there ({@link #isChoosingEntryHeight}), those it could deploy at there ({@link DeploymentHelper#placementHeights},
+     * as deployment offers them) that the engine accepts a unit moving in from (not a submarine's seafloor). Empty
+     * when it has no choice.
+     */
+    public List<Integer> entryHeights() {
+        Entity entity = currentEntity();
+        return entity == null ? List.of() : entryHeights(entity);
+    }
+
+    private List<Integer> entryHeights(Entity entity) {
+        if (!isChoosingEntryHeight(entity)) {
+            return List.of();
+        }
+        return DeploymentHelper.placementHeights(entity, game.getBoard(entity.getBoardId()), entity.getPosition(), game)
+              .stream().filter(height -> entersAt(entity, height)).toList();
+    }
+
+    /**
+     * Has the selected walk-on unit, only placed on its entry hex, enter at {@code height} instead, free, when it may
+     * ({@link #entryHeights}); the GL HUD's height stepper, as deployment's {@code setPlacedHeight}.
+     *
+     * @return whether it now enters at that height
+     */
+    public boolean setEntryHeight(int height) {
+        Entity entity = currentEntity();
+        if (isIgnoringEvents() || (entity == null) || !entryHeights(entity).contains(height)) {
+            return false;
+        }
+        if (height != entryLevel(entity)) {
+            applyEntryHeight(entity, height);
+            redrawEntry(entity);
+        }
+        return true;
     }
 
     /**
@@ -2515,13 +2543,18 @@ public class MovementDisplay extends ActionPhaseDisplay {
             return true;
         }
         applyEntryHeight(entity, height);
+        redrawEntry(entity);
+        return true;
+    }
+
+    /** Shows a walk-on unit at its new entry height: its token, envelope, arcs and the buttons. */
+    private void redrawEntry(Entity entity) {
         computeMovementEnvelope(entity);
         clientgui.boardStates().forEach(bv -> bv.redrawEntity(entity));
         clientgui.updateFiringArc(entity);
         clientgui.showSensorRanges(entity);
         clientgui.boardStates().forEach(BoardClientState::repaint);
         refreshButtons();
-        return true;
     }
 
     /**

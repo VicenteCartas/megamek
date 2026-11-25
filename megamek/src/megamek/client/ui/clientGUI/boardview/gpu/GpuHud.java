@@ -296,7 +296,7 @@ final class GpuHud implements GpuBoardHud {
         GpuNameplates nameplates = new GpuNameplates(kit, source, state);
         deployHeight = new GpuDeployHeight(source);
         GpuDeployConfirm deployConfirm = new GpuDeployConfirm(kit, source, state, nameplates, deployHeight);
-        GpuMoveConfirm moveConfirm = new GpuMoveConfirm(kit, source, state, camera, nameplates);
+        GpuMoveConfirm moveConfirm = new GpuMoveConfirm(kit, source, state, camera, nameplates, deployHeight);
         targetCards = new GpuTargetCards(kit, source, state, contextMenu);
         losPanel = new GpuLosPanel(kit.ui, stage, source, camera);
         phaseHeader = new GpuPhaseHeader(kit);
@@ -727,15 +727,20 @@ final class GpuHud implements GpuBoardHud {
         source.unpinDeploymentPreview();
     }
 
-    /** Ctrl+wheel: steps the placed unit's height by {@code amountY} notches; false while it has no height choice. */
+    /**
+     * Ctrl+wheel: steps the placed unit's height by {@code amountY} notches, the deploying unit's or the walk-on unit's
+     * setting up its entry; false while it has no height choice.
+     */
     boolean wheelHeight(float amountY) {
         if (inputs == null) {
             return false;
         }
         GpuBattleStatus.Snapshot status = inputs.frame().status();
-        boolean deploying = status.myTurn() && status.phase().isDeployment() && !state.turnLocked(status)
-              && inputs.dialog() == null && !state.overview;
-        return deployHeight.wheel(deploying ? status.actorId() : -1, amountY);
+        boolean free = status.myTurn() && !state.turnLocked(status) && inputs.dialog() == null && !state.overview;
+        int unitId = !free ? -1 : status.phase().isDeployment() ? status.actorId()
+              : status.phase().isMovement() ? inputs.frame().panels().move().entityId() : -1;
+        // The movement plan's choice exists only while the unit sets up its entry (MovementDisplay.entryHeights).
+        return deployHeight.wheel(unitId, amountY);
     }
 
     /** Only the highest modal owns focus, including file pickers above a pending game prompt. */
@@ -1113,6 +1118,10 @@ final class GpuHud implements GpuBoardHud {
             source.moves().setMode(mode);
         } else if (moving && (binds.contains(KeyCommandBind.TURN_LEFT) || binds.contains(KeyCommandBind.TURN_RIGHT))) {
             source.moves().turn(binds.contains(KeyCommandBind.TURN_LEFT) ? -1 : 1);
+        } else if (status.myTurn() && phase.isDeployment() && !locked && deployTurns()
+              && (binds.contains(KeyCommandBind.TURN_LEFT) || binds.contains(KeyCommandBind.TURN_RIGHT))) {
+            // The placed unit turns as its arrows turn it; MegaMek ignores a unit not placed yet.
+            source.turnPlaced(status.actorId(), binds.contains(KeyCommandBind.TURN_LEFT) ? -1 : 1);
         } else if (firing
               && (binds.contains(KeyCommandBind.TWIST_LEFT) || binds.contains(KeyCommandBind.TWIST_RIGHT))) {
             dock.twist(binds.contains(KeyCommandBind.TWIST_LEFT) ? -1 : 1);

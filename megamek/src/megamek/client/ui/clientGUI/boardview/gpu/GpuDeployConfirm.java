@@ -3,7 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.gdx.UiKit.text;
 
-import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
@@ -13,7 +13,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
-import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay.DeployCommand;
 import megamek.client.ui.util.KeyCommandBind;
 
@@ -22,19 +21,16 @@ import megamek.client.ui.util.KeyCommandBind;
  * player looks, above the unit's nameplate (battle HUD layout, rule 2). Deploy sends the placement and its facing
  * (MegaMek's Done); Clear takes the unit back off the board. They show only in the player's own deployment turn while
  * the placed unit is on screen and MegaMek's Done is enabled. A unit with a choice of heights in its hex (an
- * aerospace unit's altitude, a VTOL's elevation) shows that height above them, stepped by its arrows, a click on it or
- * Ctrl+wheel, as the dock's stepper does. A unit whose starting setup differs from how it began shows an amber tag
- * ({@link GpuSetupTag}) naming the changes between the two, which opens upward into each change under the pointer, so
- * the board says what Deploy sends.
+ * aerospace unit's altitude, a VTOL's elevation) shows that height on the unit, under them, stepped by its arrows, a
+ * click on it or Ctrl+wheel, as the dock's stepper does. A unit whose starting setup differs from how it began shows an
+ * amber tag ({@link GpuSetupTag}) above them naming the changes between the two, which opens upward into each change
+ * under the pointer, so the board says what Deploy sends. A unit whose facing matters gets the board chip's turn arrows
+ * at its sides, as a moving unit's, beside the drag that faces any hex and MegaMek's Turn in More. The column and the
+ * arrows are the board chip's ({@link GpuBoardChip}), as a walk-on unit's entry chip stacks them.
  */
 final class GpuDeployConfirm implements GpuHud.Component {
-    /** The pair's distance above the nameplate, and from the window's edges. */
-    private static final float LIFT = 4;
-    private static final float MARGIN = 8;
-    /** The buttons' height (and Clear's width), the gap between them, and the pair's least width. */
-    private static final float BUTTON = 28;
-    private static final float GAP = 4;
-    private static final float MIN_WIDTH = 120;
+    private static final float BUTTON = GpuBoardChip.BUTTON;
+    private static final float GAP = GpuBoardChip.GAP;
     private static final String CLEAR = DeployCommand.DEPLOY_CLEAR_DEPLOY.getCmd();
 
     private final GpuNameplates nameplates;
@@ -44,13 +40,13 @@ final class GpuDeployConfirm implements GpuHud.Component {
     private final Label confirmTip;
     private final Cell<UiButton> confirmCell;
     private final GpuDeployHeight deployHeight;
-    /** The placed unit's height (altitude) row above the pair: lower, the height, higher. */
-    private final Table heights = new Table();
-    private final UiButton height;
-    private final Cell<UiButton> heightCell;
+    /** The placed unit's height (altitude) row on the unit, under the pair. */
+    private final GpuBoardChip.HeightRow heights;
     private final GpuBoardSource source;
     /** The placed unit's setup tag: the changes in short, opening upward into each under the pointer. */
     private final GpuSetupTag tag;
+    /** The placed unit's turn arrows, at its sides below the column. */
+    private final GpuBoardChip.TurnArrows turns;
 
     private GpuHud.Inputs inputs;
     private int actorId = -1;
@@ -62,22 +58,8 @@ final class GpuDeployConfirm implements GpuHud.Component {
         this.state = state;
         this.deployHeight = deployHeight;
         UiKit ui = kit.ui;
-        UiButton lower = ui.button("hud-confirm-step", "chevron-down", null, null);
-        lower.setName("deploy-height-down");
-        ui.tip(lower).getActor().setText(text("GpuBoard.hud.deploy.heightDown"));
-        UiKit.onChange(lower, () -> deployHeight.step(actorId, -1, false));
-        height = ui.button("hud-confirm-step", null, "", null);
-        height.setName("deploy-height");
-        ui.tip(height).getActor().setText(text("GpuBoard.hud.deploy.heightTip"));
-        UiKit.onChange(height, () -> deployHeight.step(actorId, 1, true));
-        UiButton higher = ui.button("hud-confirm-step", "chevron-up", null, null);
-        higher.setName("deploy-height-up");
-        ui.tip(higher).getActor().setText(text("GpuBoard.hud.deploy.heightUp"));
-        UiKit.onChange(higher, () -> deployHeight.step(actorId, 1, false));
-        heights.add(lower).size(BUTTON);
-        heightCell = heights.add(height).height(BUTTON).padLeft(GAP);
-        heights.add(higher).size(BUTTON).padLeft(GAP);
-        heights.setVisible(false);
+        heights = new GpuBoardChip.HeightRow(ui, "deploy-height",
+              (step, wrap) -> deployHeight.step(actorId, step, wrap));
         root.addActor(heights);
         root.setName("deploy-confirm");
         root.setTransform(false);
@@ -96,6 +78,7 @@ final class GpuDeployConfirm implements GpuHud.Component {
         root.addActor(pair);
         tag = new GpuSetupTag(ui, "deploy-setup-tag", null);
         root.addActor(tag);
+        turns = new GpuBoardChip.TurnArrows(ui, root, "deploy-confirm-turn", step -> source.turnPlaced(actorId, step));
     }
 
     @Override
@@ -111,49 +94,42 @@ final class GpuDeployConfirm implements GpuHud.Component {
         if (at == null) {
             heights.setVisible(false);
             tag.setVisible(false);
+            turns.hide();
             return;
         }
         confirmTip.setText(text("GpuBoard.hud.deploy.confirmTip",
               GpuHintLine.key(inputs.preferences(), KeyCommandBind.DONE)));
-        float width = Math.max(MIN_WIDTH, nameplates.width(actorId));
+        float width = Math.max(GpuBoardChip.MIN_WIDTH, nameplates.width(actorId));
         confirmCell.width(width - BUTTON - GAP);
         pair.invalidate();
         pair.setSize(width, pair.getPrefHeight());
-        Actor parent = root.getParent();
-        float right = parent == null ? Float.MAX_VALUE : parent.getWidth() - MARGIN - pair.getWidth();
-        float top = parent == null ? Float.MAX_VALUE : parent.getHeight() - MARGIN - pair.getHeight();
-        pair.setPosition(MathUtils.clamp(at.x - pair.getWidth() / 2, MARGIN, Math.max(MARGIN, right)),
-              MathUtils.clamp(at.y + LIFT, MARGIN, Math.max(MARGIN, top)));
-        // Above the pair the setup tag, then the heights; whatever the window's top has no room for goes below.
-        float ceiling = parent == null ? Float.MAX_VALUE : parent.getHeight() - MARGIN;
-        float above = pair.getY() + pair.getHeight() + GAP;
-        float below = pair.getY() - GAP;
+        GpuBoardSource.HeightChoice choice = deployHeight.choice(actorId);
+        heights.setVisible(choice != null);
+        if (choice != null) {
+            heights.show(deployHeight.label(choice), text("GpuBoard.hud.deploy.heightDown"),
+                  text("GpuBoard.hud.deploy.heightTip"), text("GpuBoard.hud.deploy.heightUp"), true, true, width);
+        }
         GpuDeploySetup.Choice setup = source.setupChoice();
         boolean tagged = setup != null && setup.unitId() == actorId && !setup.tag().isEmpty();
         tag.setVisible(tagged);
         if (tagged) {
             tag.show(setup);
-            // Laid out by its collapsed height: opened, it grows over what is above it, and nothing moves.
-            float x = Math.round(pair.getX() + (pair.getWidth() - tag.getWidth()) / 2);
-            float height = tag.collapsedHeight();
-            if (above + height <= ceiling) {
-                tag.setPosition(x, above);
-                above += height + GAP;
-            } else {
-                tag.setPosition(x, below - height);
-                below -= height + GAP;
-            }
         }
-        GpuBoardSource.HeightChoice choice = deployHeight.choice(actorId);
-        heights.setVisible(choice != null);
-        if (choice != null) {
-            height.setText(deployHeight.label(choice));
-            heightCell.width(width - 2 * (BUTTON + GAP));
-            heights.invalidate();
-            heights.setSize(width, heights.getPrefHeight());
-            heights.setPosition(pair.getX(), above + heights.getHeight() <= ceiling ? above
-                  : below - heights.getHeight());
+        GpuBoardChip.stack(root.getParent(), at.x, at.y + GpuBoardChip.LIFT, heights, pair, tag);
+        GpuBattleStatus.UnitStatus actor = GpuHudState.unit(inputs.frame().status(), actorId);
+        Rectangle rect = inputs.view().unitRects().get(actorId);
+        if (actor == null || !actor.turns() || rect == null) {
+            turns.hide();
+            return;
         }
+        // The middle of the placed unit: the Tactical View's ring centre, else .55 up the unit, as a moving unit's.
+        Vector2 middle = inputs.view().tactical() ? rect.getCenter(new Vector2())
+              : new Vector2(rect.x + rect.width / 2, rect.y + GpuBoardChip.TurnArrows.MIDDLE * rect.height);
+        turns.show(text("GpuBoard.hud.deploy.turnLeftTip",
+                    GpuHintLine.key(inputs.preferences(), KeyCommandBind.TURN_LEFT)),
+              text("GpuBoard.hud.deploy.turnRightTip",
+                    GpuHintLine.key(inputs.preferences(), KeyCommandBind.TURN_RIGHT)),
+              true, root.getParent(), middle, rect.width, GpuBoardChip.bottom(heights, pair));
     }
 
     /**

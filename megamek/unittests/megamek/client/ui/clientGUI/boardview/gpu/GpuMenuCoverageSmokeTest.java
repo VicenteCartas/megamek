@@ -128,7 +128,7 @@ class GpuMenuCoverageSmokeTest {
         try (GpuMovementFixture moving = GpuMovementFixture.create()) {
             moving.board.panel = moving.display;
             assertReachable("movement", moving.board.source, Map.of(
-                  "moveWalk", "dock-mode-walk", "moveJump", "dock-mode-jump", "moveTurn", "dock-turn-left",
+                  "moveWalk", "dock-mode-walk", "moveJump", "dock-mode-jump", "moveTurn", "dock.turnLeft",
                   "moveBackUp", "dock-mode-back", "moveGoProne", "dock-context", "moveNext", "forces-rail-next",
                   "clear", "dock-more"));
         }
@@ -204,7 +204,7 @@ class GpuMenuCoverageSmokeTest {
                           : shown(hud, "dock-command-" + id) || shown(hud, "dock-option-" + id)
                                 || inMore.contains(id) || inMore.contains("dock.option." + id)
                                 || CANCEL_KEY.equals(standIn) || WITH_A_CLUB.equals(standIn)
-                                || standIn != null && shown(hud, standIn);
+                                || standIn != null && (shown(hud, standIn) || inMore.contains(standIn));
                     if (!reachable) {
                         missing.add(id + (standIn == null ? "" : " (" + standIn + ")"));
                     }

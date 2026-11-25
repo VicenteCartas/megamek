@@ -251,12 +251,17 @@ class GpuCommandDockSmokeTest {
     @Test
     void buttonsRunTheCommandsOfTheirVariant() {
         GpuHudTestStage.run(hud -> {
-            // Movement plan: modes, turns, undo, confirm, hold and the waypoint reach the plan and the phase.
+            // Movement plan: modes, undo, confirm, hold and the waypoint reach the plan and the phase; the turns, in
+            // More, too.
             Shot plan = movement(atlasRoute(), ATLAS);
             Dock dock = dock(hud, plan);
             show(hud, dock, plan);
-            clickAndShow(hud, dock, plan, "dock-mode-walk", "dock-turn-left", "dock-undo", "dock-waypoint",
-                  "dock-main", "dock-secondary");
+            clickAndShow(hud, dock, plan, "dock-mode-walk", "dock-undo", "dock-waypoint", "dock-main",
+                  "dock-secondary");
+            click(hud, button(dock, "dock-more"));
+            show(hud, dock, plan);
+            click(hud, dock.drawer().findActor("dock-more-dock.turnLeft"));
+            show(hud, dock, plan);
             verify(moves).setMode(GpuMovePlan.Mode.WALK);
             verify(moves).turn(-1);
             verify(moves).undo();
@@ -315,8 +320,8 @@ class GpuCommandDockSmokeTest {
             show(hud, dock, standing);
             assertEquals("Prone", button(dock, "dock-context").details.getFirst().getText().toString());
             assertEquals(slot, GpuHudTestStage.bounds(button(dock, "dock-context")), "the slot does not move");
-            // Get Up and Hull Down unavailable: More holds nothing to use and stays in its place, disabled.
-            assertTrue(button(dock, "dock-more").isDisabled());
+            // Get Up and Hull Down unavailable: More holds only the turns.
+            assertEquals(TURNS, usable(dock));
 
             // Weapons (H3, H7): the orders' count and the own units left to declare.
             ran.clear();
@@ -776,16 +781,15 @@ class GpuCommandDockSmokeTest {
             Group drawer = dock.drawer();
             assertTrue(drawer.isVisible());
             // The panel's movement controls, its context command and the unit record no longer appear in More.
-            assertEquals(List.of("MORE MOVEMENT", "HULL DOWN"), texts(drawer));
+            assertEquals(List.of("MORE MOVEMENT", "TURN LEFT", "TURN RIGHT", "HULL DOWN"), texts(drawer));
             hud.capture("g6-more-drawer-movement").dispose();
             click(hud, drawer.findActor("dock-more-moveHullDown"));
             assertEquals(List.of("moveHullDown"), ran);
             assertFalse(dock.dock().drawer().isOpen(), "choosing an item closes the drawer");
-            // With every stance in the slot or More, the fixture's own Hull Down off leaves More nothing to use: it
-            // stays in its place, disabled.
+            // With every stance in the slot or More, the fixture's own Hull Down off leaves More only the turns.
             Shot slotOnly = movement(atlasRoute(), ATLAS);
             show(hud, dock, slotOnly);
-            assertTrue(button(dock, "dock-more").isDisabled());
+            assertEquals(TURNS, usable(dock));
             ran.clear();
 
             // Without an adjacent enemy, More closes the action row and lists the physical phase's own commands.
@@ -897,7 +901,7 @@ class GpuCommandDockSmokeTest {
             show(hud, dock, entering);
             assertNotNull(dock.find("dock-mode-walk"), "the plan's layout before the unit enters");
             assertTrue(button(dock, "dock-mode-walk").isDisabled());
-            assertTrue(button(dock, "dock-turn-left").isDisabled());
+            assertFalse(turnUsable(dock), "no turn before the unit enters");
             assertEquals(Messages.getString("GpuBoard.hud.dock.walkOnPick"), label(dock, "dock-span"));
             hud.capture("g6-movement-walk-on").dispose();
 
@@ -925,7 +929,7 @@ class GpuCommandDockSmokeTest {
             ran.clear();
             click(hud, button(dock, "dock-more"));
             show(hud, dock, vtol);
-            assertEquals(List.of("MORE MOVEMENT", "FLEE"), texts(dock.drawer()));
+            assertEquals(List.of("MORE MOVEMENT", "TURN LEFT", "TURN RIGHT", "FLEE"), texts(dock.drawer()));
         });
     }
 
@@ -954,7 +958,7 @@ class GpuCommandDockSmokeTest {
             assertEquals("3\u21924", label(dock, "dock-velocity-value"));
             assertFalse(button(dock, "dock-accelerate").isDisabled());
             assertTrue(button(dock, "dock-decelerate").isDisabled());
-            assertFalse(button(dock, "dock-turn-left").isDisabled());
+            assertTrue(turnUsable(dock), "MegaMek's Turn, in More");
             assertEquals("5", label(dock, "dock-elevation-value"));
             assertFalse(button(dock, "dock-undo").isDisabled());
             assertFalse(button(dock, "dock-main").isDisabled());
@@ -982,7 +986,8 @@ class GpuCommandDockSmokeTest {
             ran.clear();
             click(hud, button(dock, "dock-more"));
             show(hud, dock, aero);
-            assertEquals(List.of("MORE MOVEMENT", "ACCELERATE NEXT", "EVADE"), texts(dock.drawer()));
+            assertEquals(List.of("MORE MOVEMENT", "TURN LEFT", "TURN RIGHT", "ACCELERATE NEXT", "EVADE"),
+                  texts(dock.drawer()));
         });
     }
 
@@ -1876,6 +1881,22 @@ class GpuCommandDockSmokeTest {
      * The texts of the visible, non-empty labels under {@code actor}, button captions and details included, top to
      * bottom: a table's in its cells' order (an open popover re-adds a header it hid at the end of its children).
      */
+    private static final List<String> TURNS = List.of("dock.turnLeft", "dock.turnRight");
+
+    /** The ids of More's usable entries. */
+    private static List<String> usable(Dock dock) {
+        GpuCommandDock.More more = dock.dock().more();
+        return more == null ? List.of() : Stream.concat(more.items().stream(), more.commands().stream())
+              .filter(BoardScene.Command::enabled).map(BoardScene.Command::id).toList();
+    }
+
+    /** Whether More's Turn left is there and usable. */
+    private static boolean turnUsable(Dock dock) {
+        GpuCommandDock.More more = dock.dock().more();
+        return more != null && more.items().stream().anyMatch(item -> item.id().equals("dock.turnLeft")
+              && item.enabled());
+    }
+
     private static List<String> texts(Actor actor) {
         if (actor == null || !actor.isVisible()) {
             return List.of();
