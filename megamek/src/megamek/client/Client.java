@@ -35,7 +35,6 @@
 
 package megamek.client;
 
-import jakarta.annotation.Nullable;
 import java.awt.Image;
 import java.awt.image.BufferedImage;
 import java.io.BufferedOutputStream;

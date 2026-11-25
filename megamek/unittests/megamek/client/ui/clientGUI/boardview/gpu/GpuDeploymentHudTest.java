@@ -40,7 +40,7 @@ class GpuDeploymentHudTest {
         assertEquals(List.of("STU-K10", "PXH-1", "SAVANNA", "BASILIS", "BASILIS", "TIMBER", "MANTICO"), List.of(
               GpuForcesPanel.code(named("Stuka", "STU-K10")), GpuForcesPanel.code(named("Phoenix Hawk", "PXH-1")),
               GpuForcesPanel.code(named("Savannah Master Hovercraft", "(SL)")),
-              GpuForcesPanel.code(named("Basilisk ProtoMech", "B")), GpuForcesPanel.code(named("Basilisk", "3")),
+              GpuForcesPanel.code(named("Basilisk ProtoMek", "B")), GpuForcesPanel.code(named("Basilisk", "3")),
               GpuForcesPanel.code(named("Timber Wolf (Mad Cat)", "Prime")),
               GpuForcesPanel.code(named("Manticore Heavy Tank", ""))));
     }

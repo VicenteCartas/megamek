@@ -8,9 +8,9 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
+import jakarta.annotation.Nullable;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
-import jakarta.annotation.Nullable;
 
 /**
  * A unit's changed starting setup on an amber tag. Collapsed, it names the changes in short ("MASC OFF · +1"); while

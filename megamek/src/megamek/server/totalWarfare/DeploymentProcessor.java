@@ -33,11 +33,11 @@
 
 package megamek.server.totalWarfare;
 
-import jakarta.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Vector;
 
+import jakarta.annotation.Nullable;
 import megamek.common.Hex;
 import megamek.common.OffBoardDirection;
 import megamek.common.board.Coords;

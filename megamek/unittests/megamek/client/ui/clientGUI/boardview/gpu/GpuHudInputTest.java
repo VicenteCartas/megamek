@@ -1295,8 +1295,15 @@ class GpuHudInputTest {
     private void updateMore(List<BoardScene.Command> commands, GpuBoardSource.UiPreferences prefs) {
         BoardScene scene = mock(BoardScene.class);
         when(scene.commands()).thenReturn(commands);
+        // A unit whose facing does not matter, so More holds only these commands and no Turn left/right.
+        GpuMovePlan.Snapshot m = GpuHudFixtures.move(true, List.of(STEP));
+        GpuMovePlan.Snapshot move = new GpuMovePlan.Snapshot(m.active(), m.planner(), m.external(), m.entityId(),
+              m.mode(), m.explicit(), m.gearLabel(), m.route(), m.hover(), m.pins(), m.destination(), m.facing(),
+              m.cost(), m.budget(), m.type(), m.typeLabel(), m.auto(), m.heat(), m.tmm(), m.legal(), m.warnings(),
+              m.canUndo(), m.canPin(), false, m.envelope(), m.mounts(), m.holdingRemaining(), m.cancellable(),
+              m.walkedOn(), m.traits());
         GpuBoardSource.Frame frame = GpuHudFixtures.frame(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 0,
-              GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)), GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), scene);
+              GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)), GpuHudFixtures.panels(move, GpuPhysicalOptions.Snapshot.EMPTY), scene);
         for (int pass = 0; pass < 3; pass++) {
             hud.update(frame, GpuHud.HudView.EMPTY, null, prefs);
             validateLayout(hud.stage.getRoot());
