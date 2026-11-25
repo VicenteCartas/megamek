@@ -1077,7 +1077,10 @@ class GpuHudInputTest {
         Actor oldButton = hud.stage.getRoot().findActor("dock-more-extra");
         updateMore(List.of(new BoardScene.Command("extra", "extra", "", false, false, List.of(),
               ran::incrementAndGet)));
-        assertNull(hud.stage.getRoot().findActor("dock-more"), "without a usable command More closes and goes");
+        assertTrue(hud.stage.getRoot().<UiButton>findActor("dock-more").isDisabled(),
+              "without a usable command More stays in place, disabled");
+        hud.stage.act(1);
+        assertFalse(hud.stage.getRoot().findActor("dock-more-drawer").isVisible(), "without a usable command More closes");
         oldButton.fire(new ChangeListener.ChangeEvent());
         assertEquals(0, ran.get(), "a detached button cannot run its old action");
     }
@@ -1166,6 +1169,25 @@ class GpuHudInputTest {
     }
 
     @Test
+    void moreAboveTheDockIsRightAlignedUnderMoreAndOnlyAsTallAsItsRows() {
+        hud.resize(900, 600, 1);
+        List<BoardScene.Command> commands = IntStream.range(0, 2)
+              .mapToObj(index -> extra("extra" + index, () -> { })).toList();
+        updateMore(commands);
+        change("dock-more");
+        updateMore(commands);
+        hud.stage.act(1);
+        validateLayout(hud.stage.getRoot());
+        Rectangle drawer = GpuHudTestStage.bounds(hud.stage.getRoot().findActor("dock-more-drawer").getParent());
+        Rectangle dock = GpuHudTestStage.bounds(hud.stage.getRoot().findActor("command-dock"));
+        assertTrue(drawer.y >= dock.y + dock.height, "a narrow window leaves no room beside the dock");
+        assertEquals(dock.x + dock.width, drawer.x + drawer.width, .5f, "it opens under More, at the dock's right");
+        assertTrue(drawer.height < dock.height, "two commands need less than the dock's height");
+        change("dock-more");
+        hud.stage.act(1);
+    }
+
+    @Test
     void moreStaysClearOfTheMinimapWhenContactsAreHidden() {
         hud.resize(1280, 720, 1);
         GpuBoardSource.UiPreferences prefs = GpuHudFixtures.with(GpuHudFixtures.preferences(), Map.of("contactsEnabled", false));
@@ -1249,12 +1271,16 @@ class GpuHudInputTest {
 
     @Test
     void moreIsOnlyOfferedWithACommandToUse() {
+        // The movement plan reserves its More so the row never moves; it is disabled until something can be used.
         updateMore(List.of());
-        assertNull(hud.stage.getRoot().findActor("dock-more"));
+        assertTrue(hud.stage.getRoot().<UiButton>findActor("dock-more").isDisabled());
         updateMore(List.of(new BoardScene.Command("extra", "extra", "", false, false, List.of(), () -> { })));
-        assertNull(hud.stage.getRoot().findActor("dock-more"), "unavailable commands offer no More");
+        assertTrue(hud.stage.getRoot().<UiButton>findActor("dock-more").isDisabled(),
+              "unavailable commands offer no More");
+        change("dock-more");
+        assertFalse(hud.stage.getRoot().findActor("dock-more-drawer").isVisible(), "a disabled More opens nothing");
         updateMore(List.of(extra("extra", () -> { })));
-        assertNotNull(hud.stage.getRoot().findActor("dock-more"));
+        assertFalse(hud.stage.getRoot().<UiButton>findActor("dock-more").isDisabled());
     }
 
     private static BoardScene.Command extra(String id, Runnable action) {
@@ -1269,8 +1295,15 @@ class GpuHudInputTest {
     private void updateMore(List<BoardScene.Command> commands, GpuBoardSource.UiPreferences prefs) {
         BoardScene scene = mock(BoardScene.class);
         when(scene.commands()).thenReturn(commands);
+        // A unit whose facing does not matter, so More holds only these commands and no Turn left/right.
+        GpuMovePlan.Snapshot m = GpuHudFixtures.move(true, List.of(STEP));
+        GpuMovePlan.Snapshot move = new GpuMovePlan.Snapshot(m.active(), m.planner(), m.external(), m.entityId(),
+              m.mode(), m.explicit(), m.gearLabel(), m.route(), m.hover(), m.pins(), m.destination(), m.facing(),
+              m.cost(), m.budget(), m.type(), m.typeLabel(), m.auto(), m.heat(), m.tmm(), m.legal(), m.warnings(),
+              m.canUndo(), m.canPin(), false, m.envelope(), m.mounts(), m.holdingRemaining(), m.cancellable(),
+              m.walkedOn(), m.traits());
         GpuBoardSource.Frame frame = GpuHudFixtures.frame(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 0,
-              GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)), GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), scene);
+              GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)), GpuHudFixtures.panels(move, GpuPhysicalOptions.Snapshot.EMPTY), scene);
         for (int pass = 0; pass < 3; pass++) {
             hud.update(frame, GpuHud.HudView.EMPTY, null, prefs);
             validateLayout(hud.stage.getRoot());

@@ -19,6 +19,8 @@ import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import jakarta.annotation.Nullable;
+import megamek.MMConstants;
+import megamek.MegaMek;
 import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.PrincessException;
 import megamek.client.event.BoardViewEvent;
@@ -304,6 +306,20 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
     /** Shows About MegaMek. */
     void about() {
         open(LobbyNativeDialogs::about);
+    }
+
+    /**
+     * Asks whether to read Princess's guide, as the lobby asks before the first bot joins: a scenario's bots join
+     * without a lobby. Yes shows the guide, and the box stops the question coming back.
+     */
+    void botReadme() {
+        open(dialogs -> dialogs.botReadme(Messages.getString("chkIgnore.text"), (read, ignore) -> {
+            SwingUtilities.invokeLater(() -> MegaMek.getMMOptions().setNagDialogIgnore(MMConstants.NAG_BOT_README,
+                  ignore));
+            if (read) {
+                tools.princessHelp();
+            }
+        }));
     }
 
     /** Shows Report a Bug; its button packages this client's game and the logs. */

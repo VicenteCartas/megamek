@@ -57,4 +57,17 @@ public interface ActiveHeatSinkController {
      * @param sinks the number of heat sinks that should be active
      */
     void setActiveSinksNextRound(int sinks);
+
+    /**
+     * @return the number of operable heat sinks this control switches
+     */
+    int getSwitchableSinks();
+
+    /**
+     * Makes the given number of heat sinks active at once, without waiting for the End Phase: a unit sets up the heat
+     * sinks it starts the game with as it deploys (Core Rulebook p. 224).
+     *
+     * @param sinks the number of heat sinks that should be active
+     */
+    void setActiveSinks(int sinks);
 }

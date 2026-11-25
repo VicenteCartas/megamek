@@ -63,7 +63,7 @@ final class BoardTacticalMarks {
     private BoardTactical overlays = BoardTactical.EMPTY;
     private BoardTactical previous = BoardTactical.EMPTY;
 
-    /** The markings now, without the move plan's own steps when {@code planner}; equal captures keep one instance. */
+    /** The markings now, without the path's own steps when the move plan draws its route; equal captures keep one. */
     BoardTactical capture(BoardClientState view, boolean planner) {
         Board board = view.getBoard();
         Game game = view.getGame();

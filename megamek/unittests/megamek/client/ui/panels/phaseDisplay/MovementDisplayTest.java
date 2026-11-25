@@ -34,6 +34,7 @@
 package megamek.client.ui.panels.phaseDisplay;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -47,6 +48,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 
 import megamek.client.Client;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -58,11 +60,18 @@ import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.MoveStepType;
+import megamek.common.equipment.MiscType;
 import megamek.common.game.Game;
 import megamek.common.moves.MovePath;
 import megamek.common.units.AeroSpaceFighter;
 import megamek.common.units.BipedMek;
+import megamek.common.units.ConvInfantry;
+import megamek.common.units.Entity;
+import megamek.common.units.EntityMovementMode;
+import megamek.common.units.Mek;
+import megamek.common.units.QuadVee;
 import megamek.common.units.Targetable;
+import megamek.common.units.VTOL;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -328,6 +337,332 @@ class MovementDisplayTest {
         assertNotNull(result, "A valid center deployment should return a facing.");
         assertEquals(unit.getFacing(), result.facing(),
                      "Center deployments do not force a facing override when all facings remain valid.");
+    }
+
+    @Test
+    @DisplayName("a VTOL only placed on its entry hex rises and lowers its entry elevation for free")
+    void entryHeightChangesTheDeployElevationForFree() throws Exception {
+        VTOL vtol = new VTOL();
+        vtol.setMovementMode(EntityMovementMode.VTOL);
+        vtol.setGame(game);
+        vtol.setPosition(new Coords(0, 0));
+        vtol.setBoardId(game.getBoard().getBoardId());
+        vtol.setDeployed(true);
+        vtol.setElevation(0);
+        game.addEntity(vtol);
+        movementDisplay.currentEntity = vtol.getId();
+        MovePath placed = new MovePath(game, vtol);
+        placed.addStep(MoveStepType.DEPLOY);
+        setField(movementDisplay, "cmd", placed);
+        setField(movementDisplay, "gear", MovementDisplay.GEAR_LAND);
+        setField(movementDisplay, "unloadableUnits", new java.util.ArrayList<>());
+        setField(movementDisplay, "towedUnits", new java.util.ArrayList<>());
+        int entryCost = placed.getMpUsed();
+
+        assertTrue(changeEntryHeight(vtol, true), "A bare placement chooses its entry height.");
+        assertTrue(changeEntryHeight(vtol, true), "A VTOL may enter at any elevation above the hex.");
+
+        MovePath raised = (MovePath) readField(movementDisplay, "cmd");
+        assertEquals(2, vtol.getElevation());
+        assertEquals(2, raised.getFinalElevation(), "The deploy step enters at the chosen elevation.");
+        assertEquals(entryCost, raised.getMpUsed(), "Choosing the entry elevation costs no MP (Core Rulebook p. 224).");
+        assertEquals(1, raised.length(), "The path stays a bare placement.");
+
+        assertTrue(changeEntryHeight(vtol, false));
+        assertEquals(1, ((MovePath) readField(movementDisplay, "cmd")).getFinalElevation());
+
+        MovePath moved = ((MovePath) readField(movementDisplay, "cmd")).clone();
+        moved.addStep(MoveStepType.FORWARDS);
+        setField(movementDisplay, "cmd", moved);
+        assertFalse(changeEntryHeight(vtol, true), "Once the unit moves, Go up plots a step that costs MP.");
+    }
+
+    @Test
+    @DisplayName("a walk-on submarine may choose to enter at the surface or submerged, but not on the seafloor")
+    void submarineEntryHeightSkipsTheSeafloor() throws Exception {
+        for (int x = 0; x < game.getBoard().getWidth(); x++) {
+            for (int y = 0; y < game.getBoard().getHeight(); y++) {
+                game.getBoard().getHex(x, y).addTerrain(new megamek.common.units.Terrain(
+                      megamek.common.units.Terrains.WATER, 2));
+            }
+        }
+        ConvInfantry scuba = new ConvInfantry();
+        scuba.setMovementMode(EntityMovementMode.SUBMARINE);
+        scuba.setOriginalJumpMP(3);
+        scuba.setGame(game);
+        scuba.setBoardId(game.getBoard().getBoardId());
+        scuba.setDeployed(true);
+        scuba.setElevation(-1);
+        game.addEntity(scuba);
+        scuba.setPosition(new Coords(0, 1));
+        movementDisplay.currentEntity = scuba.getId();
+        MovePath placed = new MovePath(game, scuba);
+        placed.addStep(MoveStepType.DEPLOY);
+        setField(movementDisplay, "cmd", placed);
+        setField(movementDisplay, "gear", MovementDisplay.GEAR_LAND);
+        setField(movementDisplay, "unloadableUnits", new java.util.ArrayList<>());
+        setField(movementDisplay, "towedUnits", new java.util.ArrayList<>());
+
+        assertTrue(changeEntryHeight(scuba, false));
+        assertEquals(-1, scuba.getElevation(), "On the seafloor a submarine may only rise (TW p. 56): no entry there.");
+        assertTrue(changeEntryHeight(scuba, true));
+        assertEquals(0, scuba.getElevation(), "A submarine may enter surfaced.");
+        assertTrue(((MovePath) readField(movementDisplay, "cmd")).isMoveLegal());
+    }
+
+    @Test
+    @DisplayName("a walk-on unit chooses among the heights it could deploy at there, as deployment offers them")
+    void entryHeightsAreTheDeploymentHeights() throws Exception {
+        VTOL vtol = new VTOL();
+        vtol.setMovementMode(EntityMovementMode.VTOL);
+        vtol.setGame(game);
+        vtol.setPosition(new Coords(0, 0));
+        vtol.setBoardId(game.getBoard().getBoardId());
+        vtol.setDeployed(true);
+        vtol.setElevation(0);
+        game.addEntity(vtol);
+        placeForEntry(vtol);
+
+        List<Integer> deployment = DeploymentHelper.placementHeights(vtol, game.getBoard(), vtol.getPosition(), game);
+        assertTrue(deployment.size() > 1, "A VTOL has heights to choose from.");
+        assertEquals(deployment, movementDisplay.entryHeights(), "Walk-on and deployment offer the same heights.");
+
+        assertTrue(movementDisplay.setEntryHeight(3));
+        assertEquals(3, vtol.getElevation());
+        assertEquals(3, ((MovePath) readField(movementDisplay, "cmd")).getFinalElevation());
+        assertFalse(movementDisplay.setEntryHeight(-1), "A height it may not deploy at is refused.");
+        assertEquals(3, vtol.getElevation());
+    }
+
+    @Test
+    @DisplayName("a Mek walking on onto ice may enter on the ice or on the bottom, as it may deploy")
+    void mekOnIceChoosesItsEntryHeight() throws Exception {
+        Hex ice = game.getBoard().getHex(0, 0);
+        ice.addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.WATER, 2));
+        ice.addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.ICE, 1));
+        BipedMek mek = new BipedMek();
+        mek.setGame(game);
+        mek.setPosition(new Coords(0, 0));
+        mek.setBoardId(game.getBoard().getBoardId());
+        mek.setDeployed(true);
+        game.addEntity(mek);
+        placeForEntry(mek);
+
+        List<Integer> deployment = DeploymentHelper.placementHeights(mek, game.getBoard(), mek.getPosition(), game);
+        assertEquals(deployment, movementDisplay.entryHeights());
+        assertTrue(deployment.contains(0) && deployment.contains(-2), "On the ice or on the bottom: " + deployment);
+    }
+
+    @Test
+    @DisplayName("a walk-on submarine's entry heights are its deployment heights but the seafloor")
+    void submarineEntryHeightsLeaveOutTheSeafloor() throws Exception {
+        for (int x = 0; x < game.getBoard().getWidth(); x++) {
+            for (int y = 0; y < game.getBoard().getHeight(); y++) {
+                game.getBoard().getHex(x, y).addTerrain(new megamek.common.units.Terrain(
+                      megamek.common.units.Terrains.WATER, 2));
+            }
+        }
+        ConvInfantry scuba = new ConvInfantry();
+        scuba.setMovementMode(EntityMovementMode.SUBMARINE);
+        scuba.setOriginalJumpMP(3);
+        scuba.setGame(game);
+        scuba.setBoardId(game.getBoard().getBoardId());
+        scuba.setDeployed(true);
+        scuba.setElevation(-1);
+        game.addEntity(scuba);
+        scuba.setPosition(new Coords(0, 1));
+        placeForEntry(scuba);
+
+        List<Integer> deployment = DeploymentHelper.placementHeights(scuba, game.getBoard(), scuba.getPosition(), game);
+        assertTrue(deployment.contains(-2), "It may deploy on the seafloor: " + deployment);
+        List<Integer> expected = deployment.stream().filter(height -> height != -2).toList();
+        assertEquals(expected, movementDisplay.entryHeights(), "It may not enter there (TW p. 56).");
+    }
+
+    /** Makes {@code unit} the selected walk-on unit, only placed on its entry hex. */
+    private void placeForEntry(Entity unit) throws Exception {
+        movementDisplay.currentEntity = unit.getId();
+        MovePath placed = new MovePath(game, unit);
+        placed.addStep(MoveStepType.DEPLOY);
+        setField(movementDisplay, "cmd", placed);
+        setField(movementDisplay, "gear", MovementDisplay.GEAR_LAND);
+        setField(movementDisplay, "unloadableUnits", new java.util.ArrayList<>());
+        setField(movementDisplay, "towedUnits", new java.util.ArrayList<>());
+    }
+
+    @Test
+    @DisplayName("the envelope of a UMU unit searches as far as its UMU MP, which may exceed its ground MP")
+    void envelopeSearchesUmuMp() throws Exception {
+        ConvInfantry scuba = new ConvInfantry();
+        scuba.setMovementMode(EntityMovementMode.INF_UMU);
+        scuba.setOriginalJumpMP(3);
+        scuba.setGame(game);
+        game.addEntity(scuba);
+        movementDisplay.currentEntity = scuba.getId();
+
+        Method maxMP = MovementDisplay.class.getDeclaredMethod("maxMP", Entity.class, int.class);
+        maxMP.setAccessible(true);
+        assertEquals(3, maxMP.invoke(movementDisplay, scuba, MovementDisplay.GEAR_LAND));
+    }
+
+    @Test
+    @DisplayName("a walk-on submarine infantry's envelope holds every water hex its UMU MP reaches after entering")
+    void walkOnSubmarineInfantryEnvelopeReachesWithUmuMp() throws Exception {
+        for (int x = 0; x < game.getBoard().getWidth(); x++) {
+            for (int y = 0; y < game.getBoard().getHeight(); y++) {
+                game.getBoard().getHex(x, y).addTerrain(new megamek.common.units.Terrain(
+                      megamek.common.units.Terrains.WATER, 2));
+            }
+        }
+        ConvInfantry scuba = new ConvInfantry();
+        scuba.setMovementMode(EntityMovementMode.SUBMARINE);
+        scuba.setOriginalJumpMP(3);
+        scuba.setGame(game);
+        scuba.setBoardId(game.getBoard().getBoardId());
+        scuba.setDeployed(true);
+        scuba.setElevation(-1);
+        game.addEntity(scuba);
+        scuba.setPosition(new Coords(0, 1));
+        movementDisplay.currentEntity = scuba.getId();
+        MovePath placed = new MovePath(game, scuba);
+        placed.addStep(MoveStepType.DEPLOY);
+        setField(movementDisplay, "cmd", placed);
+        setField(movementDisplay, "gear", MovementDisplay.GEAR_LAND);
+
+        movementDisplay.computeMovementEnvelope(placed);
+
+        Map<Coords, Integer> reach = movementDisplay.getLastEnvelope().mp();
+        assertTrue(reach.containsKey(new Coords(1, 1)), "One hex in: " + reach);
+        assertTrue(reach.containsKey(new Coords(2, 1)), "Two hexes in, 3 UMU MP with the entry: " + reach);
+    }
+
+    @Test
+    @DisplayName("the envelope holds a hex whose only legal paths arrive without turning, as on a seafloor")
+    void envelopeKeepsAHexReachedOnlyWithoutTurningOnTheSeafloor() throws Exception {
+        for (int x = 0; x < game.getBoard().getWidth(); x++) {
+            for (int y = 0; y < game.getBoard().getHeight(); y++) {
+                game.getBoard().getHex(x, y).addTerrain(new megamek.common.units.Terrain(
+                      megamek.common.units.Terrains.WATER, ((x == 2) && (y == 1)) ? 1 : 2));
+            }
+        }
+        ConvInfantry scuba = new ConvInfantry();
+        scuba.setMovementMode(EntityMovementMode.SUBMARINE);
+        scuba.setOriginalJumpMP(3);
+        scuba.setGame(game);
+        scuba.setBoardId(game.getBoard().getBoardId());
+        scuba.setDeployed(true);
+        scuba.setElevation(-1);
+        game.addEntity(scuba);
+        scuba.setPosition(new Coords(0, 1));
+        movementDisplay.currentEntity = scuba.getId();
+        MovePath placed = new MovePath(game, scuba);
+        placed.addStep(MoveStepType.DEPLOY);
+        setField(movementDisplay, "cmd", placed);
+        setField(movementDisplay, "gear", MovementDisplay.GEAR_LAND);
+
+        movementDisplay.computeMovementEnvelope(placed);
+
+        // At depth 1 the unit at -1 sits on the seafloor, where it may not turn: only arriving facing straight is legal
+        assertEquals(3, movementDisplay.getLastEnvelope().mp().get(new Coords(2, 1)),
+              "Seafloor hex two in: " + movementDisplay.getLastEnvelope().mp());
+    }
+
+    @Test
+    @DisplayName("a walk-on QuadVee placed on its entry hex converts to vehicle mode and back, keeping its placement")
+    void walkOnQuadVeeConvertsAfterPlacement() throws Exception {
+        QuadVee quadVee = new QuadVee();
+        quadVee.setGame(game);
+        quadVee.setBoardId(game.getBoard().getBoardId());
+        quadVee.setDeployed(true);
+        game.addEntity(quadVee);
+        quadVee.setPosition(new Coords(0, 1));
+        movementDisplay.currentEntity = quadVee.getId();
+        MovePath placed = new MovePath(game, quadVee);
+        placed.addStep(MoveStepType.DEPLOY);
+        setField(movementDisplay, "cmd", placed);
+        setField(movementDisplay, "gear", MovementDisplay.GEAR_LAND);
+        setField(movementDisplay, "unloadableUnits", new java.util.ArrayList<>());
+        setField(movementDisplay, "towedUnits", new java.util.ArrayList<>());
+
+        invoke("updateConvertModeButton");
+        assertTrue(movementDisplay.isConvertEnabled(), "A unit only placed on its entry hex may still convert.");
+
+        adjustConvertSteps(EntityMovementMode.TRACKED);
+        MovePath converted = (MovePath) readField(movementDisplay, "cmd");
+        assertEquals(List.of(MoveStepType.DEPLOY, MoveStepType.CONVERT_MODE),
+              converted.getStepVector().stream().map(step -> step.getType()).toList());
+        assertEquals(EntityMovementMode.TRACKED, converted.getFinalConversionMode());
+        assertTrue(quadVee.isConvertingNow());
+        invoke("updateConvertModeButton");
+        assertTrue(movementDisplay.isConvertEnabled(), "A planned conversion may still change its mode.");
+
+        adjustConvertSteps(EntityMovementMode.QUAD);
+        MovePath back = (MovePath) readField(movementDisplay, "cmd");
+        assertEquals(List.of(MoveStepType.DEPLOY), back.getStepVector().stream().map(step -> step.getType()).toList(),
+              "Back in its starting mode, the unit keeps only its placement.");
+        assertFalse(quadVee.isConvertingNow());
+
+        back.addStep(MoveStepType.FORWARDS);
+        invoke("updateConvertModeButton");
+        assertFalse(movementDisplay.isConvertEnabled(), "A unit that has moved converts no more.");
+    }
+
+    @Test
+    @DisplayName("a Mek with tracks takes its tracks and its legs again, and a restored plan converts it as before")
+    void trackedMekConvertsBackToLegs() throws Exception {
+        BipedMek mek = new BipedMek();
+        mek.addEquipment(MiscType.createTracks(), Mek.LOC_RIGHT_LEG);
+        mek.addEquipment(MiscType.createTracks(), Mek.LOC_LEFT_LEG);
+        mek.setGame(game);
+        mek.setBoardId(game.getBoard().getBoardId());
+        game.addEntity(mek);
+        mek.setPosition(new Coords(1, 1));
+        movementDisplay.currentEntity = mek.getId();
+        setField(movementDisplay, "cmd", new MovePath(game, mek));
+        setField(movementDisplay, "gear", MovementDisplay.GEAR_LAND);
+        setField(movementDisplay, "unloadableUnits", new java.util.ArrayList<>());
+        setField(movementDisplay, "towedUnits", new java.util.ArrayList<>());
+        assertTrue(mek.hasTracks());
+
+        adjustConvertSteps(EntityMovementMode.TRACKED);
+        MovePath tracked = ((MovePath) readField(movementDisplay, "cmd")).clone();
+        assertEquals(EntityMovementMode.TRACKED, tracked.getFinalConversionMode());
+        assertEquals(EntityMovementMode.TRACKED, mek.getMovementMode(), "The Mek plans on its tracks.");
+
+        adjustConvertSteps(EntityMovementMode.BIPED);
+        MovePath legs = (MovePath) readField(movementDisplay, "cmd");
+        assertFalse(legs.contains(MoveStepType.CONVERT_MODE), "Back on its legs, the Mek doesn't convert.");
+        assertEquals(EntityMovementMode.BIPED, mek.getMovementMode());
+        assertFalse(mek.isConvertingNow());
+
+        movementDisplay.plotPath(tracked);
+        MovePath restored = (MovePath) readField(movementDisplay, "cmd");
+        assertEquals(EntityMovementMode.TRACKED, restored.getFinalConversionMode(),
+              "A restored conversion compiles from the starting mode.");
+        assertEquals(EntityMovementMode.TRACKED, mek.getMovementMode());
+        assertTrue(mek.isConvertingNow());
+
+        movementDisplay.clear();
+        assertEquals(EntityMovementMode.BIPED, mek.getMovementMode(), "Clear takes the conversion back.");
+        assertFalse(mek.isConvertingNow());
+    }
+
+    private void adjustConvertSteps(EntityMovementMode mode) throws Exception {
+        Method method = MovementDisplay.class.getDeclaredMethod("adjustConvertSteps", EntityMovementMode.class);
+        method.setAccessible(true);
+        method.invoke(movementDisplay, mode);
+    }
+
+    private void invoke(String name) throws Exception {
+        Method method = MovementDisplay.class.getDeclaredMethod(name);
+        method.setAccessible(true);
+        method.invoke(movementDisplay);
+    }
+
+    private boolean changeEntryHeight(Entity entity, boolean up) throws Exception {
+        Method method = MovementDisplay.class.getDeclaredMethod("changeEntryHeight", Entity.class, boolean.class);
+        method.setAccessible(true);
+        return (boolean) method.invoke(movementDisplay, entity, up);
     }
 
     private static void setField(Object target,

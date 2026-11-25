@@ -47,6 +47,16 @@ final class GpuDeployment {
         return unit.deployWait() != GpuBattleStatus.Wait.NONE;
     }
 
+    /**
+     * In the local deployment turn, an own unit this turn cannot deploy: one that waits for a later turn or round,
+     * walks on, rides a carrier or is placed. It is no unit to pick, so a click leaves the deployment's unit as it is;
+     * the unit menu still views it.
+     */
+    static boolean unpickable(GpuBattleStatus.Snapshot status, UnitStatus unit) {
+        return status.myTurn() && status.phase().isDeployment() && unit.side() == GpuBattleStatus.Side.OWN
+              && !unit.destroyed() && !GpuHud.acts(status, unit);
+    }
+
     /** A unit's chassis and model, as the map's peek heads it. */
     static String title(UnitStatus unit) {
         return unit.chassis() + (unit.model().isEmpty() ? "" : " " + unit.model());

@@ -4033,7 +4033,10 @@ public class TWGameManager extends AbstractGameManager {
         return unloadUnit(unloader, unloaded, pos, facing, elevation, false, false);
     }
 
-    /** The movement handler publishes the carrier with its resolved route after processing the unload step. */
+    /**
+     * The movement handler publishes the carrier with its resolved route, then the unloaded unit, after processing the
+     * move: a client shows the passenger only once the carrier has driven it to where it gets off.
+     */
     boolean unloadUnitDuringMovement(Entity unloader, Targetable unloaded, Coords pos, int facing, int elevation) {
         return unloadUnit(unloader, unloaded, pos, facing, elevation, false, false, false);
     }
@@ -4059,7 +4062,7 @@ public class TWGameManager extends AbstractGameManager {
     }
 
     private boolean unloadUnit(Entity unloader, Targetable unloaded, Coords pos, int facing, int elevation,
-          boolean evacuation, boolean duringDeployment, boolean updateCarrier) {
+          boolean evacuation, boolean duringDeployment, boolean publish) {
 
         // We can only unload Entities.
         Entity unit;
@@ -4281,10 +4284,10 @@ public class TWGameManager extends AbstractGameManager {
             }
         }
 
-        // Update the unloaded unit.
-        entityUpdate(unit.getId());
-        // During movement, an early carrier packet would release exterior riders before its route arrives.
-        if (updateCarrier) {
+        // During movement, an early carrier packet would release exterior riders before its route arrives, and an early
+        // packet of the unloaded unit would show it where it gets off before its carrier has got there.
+        if (publish) {
+            entityUpdate(unit.getId());
             entityUpdate(unloader.getId());
         }
 

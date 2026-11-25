@@ -88,6 +88,7 @@ import megamek.common.bays.BattleArmorBay;
 import megamek.common.bays.Bay;
 import megamek.common.bays.CargoBay;
 import megamek.common.bays.InfantryBay;
+import megamek.common.board.AllowedDeploymentHelper;
 import megamek.common.board.Board;
 import megamek.common.board.BoardHelper;
 import megamek.common.board.BoardLocation;
@@ -187,6 +188,13 @@ public class MovementDisplay extends ActionPhaseDisplay {
     // Deployment settings.
     private final Set<ElevationOption> lastHexDeploymentOptions = new HashSet<>();
     private ElevationOption lastDeploymentOption = null;
+    /** The starting setup the selected walk-on unit enters with, chosen with its entry hex (Core Rulebook p. 224). */
+    private final DeploymentSetupChoice setupChoice;
+    /**
+     * Whether the selected walk-on unit, placed on its entry hex, has entered: its entry hex, facing, height, form and
+     * setup are settled, and the path plans its move. Until then they are free choices (walk-on step 1).
+     */
+    private boolean entered;
 
     /**
      * True when selecting a hex for Combat Vehicle Escape Pod landing (TO:AUE p.121)
@@ -361,6 +369,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
      */
     public MovementDisplay(final ClientGUI clientgui) {
         super(clientgui);
+        setupChoice = new DeploymentSetupChoice(clientgui, game);
 
         if (clientgui != null) {
             game.addGameListener(this);
@@ -440,6 +449,11 @@ public class MovementDisplay extends ActionPhaseDisplay {
         shiftHeld = false;
     }
 
+    /** Undoes the current path's illegal steps, else its last step (the Backspace key). */
+    public void undoStep() {
+        undoIllegalStep();
+    }
+
     private void undoIllegalStep() {
         // Remove all illegal steps, if none, then do a normal backspace function.
         if (!removeIllegalSteps()) {
@@ -462,6 +476,10 @@ public class MovementDisplay extends ActionPhaseDisplay {
 
     private void cancel() {
         boolean keepDeployment = true;
+        // Escape on an entered unit's bare entry takes it back to setting up its entry
+        if ((cmd != null) && isDeploymentOnly(cmd) && reopenEntry()) {
+            return;
+        }
         if (cmd != null) {
             // Escape once drops the movement and keeps the placement; Escape on a bare placement drops it too
             keepDeployment = !isDeploymentOnly(cmd) && (deploymentAnchor(cmd) != null);
@@ -702,6 +720,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
         if (oldEntity != null) {
             clear(false);
         }
+        entered = false;
         final Entity selectedEntity = game.getEntity(entityID);
         lastHexDeploymentOptions.clear();
         lastDeploymentOption = null;
@@ -717,6 +736,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
         }
 
         currentEntity = entityID;
+        setupChoice.pick(selectedEntity);
         clientgui.setSelectedEntityNum(entityID);
         updateUnitDisplay(selectedEntity);
 
@@ -2087,6 +2107,9 @@ public class MovementDisplay extends ActionPhaseDisplay {
      * Clears out the currently selected movement data and resets it.
      */
     private void clear(boolean keepDeployment) {
+        if (!keepDeployment) {
+            entered = false;
+        }
         boolean wasWalkOn = (deploymentAnchor(cmd) != null);
         DeploymentAnchor anchor = keepDeployment ? deploymentAnchor(cmd) : null;
         int savedGear = gear;
@@ -2120,6 +2143,11 @@ public class MovementDisplay extends ActionPhaseDisplay {
         // Remove Careful stand, in case it was set
         currentlySelectedEntity.setCarefulStand(false);
         currentlySelectedEntity.setIsJumpingNow(false);
+        // A Mek converting to or from tracks plans in its new mode (see adjustConvertSteps): it starts in the other
+        if (currentlySelectedEntity.isConvertingNow() && (currentlySelectedEntity instanceof Mek mek)
+              && mek.hasTracks()) {
+            mek.toggleConversionMode();
+        }
         currentlySelectedEntity.setConvertingNow(false);
         currentlySelectedEntity.setClimbMode(ClimbingHelper.getDefaultClimbMode(currentlySelectedEntity));
 
@@ -2260,7 +2288,12 @@ public class MovementDisplay extends ActionPhaseDisplay {
             LOGGER.warn("No steps to remove.");
             return;
         }
+        // Undoing past an entered unit's entry takes it back to setting up its entry
+        if (isDeploymentOnly(cmd) && reopenEntry()) {
+            return;
+        }
         if (cmd.getLastStep().getType() == MoveStepType.DEPLOY) {
+            entered = false;
             currentlySelectedEntity.setDeployed(false);
             currentlySelectedEntity.setPosition(null);
             clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentlySelectedEntity));
@@ -2331,10 +2364,424 @@ public class MovementDisplay extends ActionPhaseDisplay {
      */
     public boolean turnWalkOnEntry(int facing) {
         Entity entity = currentEntity();
-        if ((entity == null) || (cmd == null) || !isDeploymentOnly(cmd) || (entity.getPosition() == null)) {
+        if ((entity == null) || (cmd == null) || entered || !isDeploymentOnly(cmd)
+              || (entity.getPosition() == null)) {
             return false;
         }
         processDeploymentTurn(entity, entity.getPosition().translated(facing));
+        refreshButtons();
+        return true;
+    }
+
+    /** Places the walk-on unit {@code entity}, off the map, on entry hex {@code coords}, as a click there does. */
+    private void placeWalkOn(Entity entity, Coords coords, int boardId) {
+        int tempFacing = entity.getFacing();
+        DeploymentHelper deploymentHelper = new DeploymentHelper(clientgui);
+        if (!deploymentHelper.checkDeployment(game.getBoard(boardId),
+                                              entity,
+                                              coords,
+                                              false, true)) {
+            return;
+        }
+        // If we have not got a stored facing, or the deployment check changed our facing to make it legal
+        if (originalFacing == -1 && tempFacing == entity.getFacing()) {
+            deploymentHelper.setStartingFacing(entity, game.getPlayersList(), coords);
+        }
+        DeploymentPosition deploymentPosition = deploymentHelper.determineDeploymentPosition(
+                entity,
+                coords,
+                game.getBoard(boardId),
+                lastHexDeploymentOptions,
+                lastDeploymentOption);
+        if (deploymentPosition == null) {
+            return;
+        }
+        int elevation = deploymentPosition.elevation();
+        int facing = deploymentPosition.facing();
+        originalFacing = facing;
+        lastDeploymentOption = deploymentPosition.lastDeploymentOption();
+        if (game.getBoard(boardId).isLegalDeployment(coords, entity)
+            && !entity.isLocationProhibited(
+                coords,
+                boardId,
+                elevation)) {
+            deploymentHelper.applyDeploymentElevation(entity,
+                                                      game.getBoard(boardId),
+                                                      elevation);
+            entity.setPosition(coords);
+            entity.setBoardId(boardId);
+            entity.setFacing(facing);
+            entity.setSecondaryFacing(facing);
+            entity.setDeployed(true);
+            cmd = new MovePath(game, entity);
+            addDeploymentToMovePath();
+            settleEntryHeight(entity);
+            deployTrain(entity);
+        } else {
+            String msg = Messages.getString("DeploymentDisplay.cantDeployInto",
+                                            entity.getShortName(),
+                                            coords.getBoardNum());
+            clientgui.addToast(ToastLevel.ERROR, msg, entity);
+        }
+        computeMovementEnvelope(entity);
+        clientgui.boardStates().forEach(bv -> bv.redrawEntity(entity));
+        clientgui.updateFiringArc(entity);
+        clientgui.showSensorRanges(entity);
+        clientgui.boardStates().forEach(BoardClientState::repaint);
+        refreshButtons();
+    }
+
+    /**
+     * Whether {@code entity} is a walk-on ground unit only placed on its entry hex, with no movement after it yet. Its
+     * Go Up and Go Down then choose the height it enters at, free: the off-map hex counts as the entry hex's level,
+     * sublevel or depth (Core Rulebook p. 224), so any height the unit could deploy at there costs no MP. An aerospace
+     * unit (a LAM in Fighter mode included) chooses its altitude so, among those it could deploy at.
+     */
+    private boolean isChoosingEntryHeight(@Nullable Entity entity) {
+        return !entered && (entity != null) && entity.isDeployed()
+              && (entity.getPosition() != null)
+              && (cmd != null) && isDeploymentOnly(cmd) && (game.getBoard(entity.getBoardId()) != null)
+              && !game.getBoard(entity.getBoardId()).isSpace();
+    }
+
+    private static int entryLevel(Entity entity) {
+        return entity.isAero() ? entity.getAltitude() : entity.getElevation();
+    }
+
+    /**
+     * @return the next height above ({@code up}) or below the unit's current one that it may enter its entry hex at,
+     *       or null when there is none or it is not {@link #isChoosingEntryHeight choosing its entry height}
+     */
+    private @Nullable Integer entryHeight(Entity entity, boolean up) {
+        List<Integer> heights = entryHeights(entity);
+        int current = entryLevel(entity);
+        Integer next = null;
+        for (int height : heights) {
+            if (up ? height > current && (next == null || height < next)
+                  : height < current && (next == null || height > next)) {
+                next = height;
+            }
+        }
+        return next;
+    }
+
+    /**
+     * The heights the selected walk-on unit may enter its entry hex at, free, lowest first: while it is only placed
+     * there ({@link #isChoosingEntryHeight}), those it could deploy at there ({@link DeploymentHelper#placementHeights},
+     * as deployment offers them) that the engine accepts a unit moving in from (not a submarine's seafloor). Empty
+     * when it has no choice.
+     */
+    public List<Integer> entryHeights() {
+        Entity entity = currentEntity();
+        return entity == null ? List.of() : entryHeights(entity);
+    }
+
+    private List<Integer> entryHeights(Entity entity) {
+        if (!isChoosingEntryHeight(entity)) {
+            return List.of();
+        }
+        return DeploymentHelper.placementHeights(entity, game.getBoard(entity.getBoardId()), entity.getPosition(), game)
+              .stream().filter(height -> entersAt(entity, height)).toList();
+    }
+
+    /**
+     * Has the selected walk-on unit, only placed on its entry hex, enter at {@code height} instead, free, when it may
+     * ({@link #entryHeights}); the GL HUD's height stepper, as deployment's {@code setPlacedHeight}.
+     *
+     * @return whether it now enters at that height
+     */
+    public boolean setEntryHeight(int height) {
+        Entity entity = currentEntity();
+        if (isIgnoringEvents() || (entity == null) || !entryHeights(entity).contains(height)) {
+            return false;
+        }
+        if (height != entryLevel(entity)) {
+            applyEntryHeight(entity, height);
+            redrawEntry(entity);
+        }
+        return true;
+    }
+
+    /**
+     * Whether the engine accepts {@code entity} entering its entry hex at {@code height}: a height it could deploy at
+     * may still be no place to move in from, as a submarine's seafloor (it may only rise from there, TW p. 56).
+     */
+    private boolean entersAt(Entity entity, int height) {
+        if (entity.isAero()) {
+            // A Fighter's deployment altitudes are its entry altitudes
+            return true;
+        }
+        int current = entity.getElevation();
+        try {
+            entity.setElevation(height);
+            MovePath entry = new MovePath(game, entity);
+            entry.addStep(MoveStepType.DEPLOY);
+            return entry.getLastStep().getMovementType(false) != EntityMovementType.MOVE_ILLEGAL;
+        } finally {
+            entity.setElevation(current);
+        }
+    }
+
+    private List<ElevationOption> entryHeightOptions(Entity entity) {
+        Board board = game.getBoard(entity.getBoardId());
+        return new AllowedDeploymentHelper(entity, entity.getPosition(), board, board.getHex(entity.getPosition()),
+              game).findAllowedElevations();
+    }
+
+    /**
+     * Moves a walk-on unit only placed on its entry hex to the next height it may enter at, up or down, free; the path
+     * stays a bare placement at the new height.
+     *
+     * @return {@code false} when the unit is not choosing its entry height, so Go Up or Go Down plots a step instead
+     */
+    private boolean changeEntryHeight(@Nullable Entity entity, boolean up) {
+        if (!isChoosingEntryHeight(entity)) {
+            return false;
+        }
+        Integer height = entryHeight(entity, up);
+        if (height == null) {
+            return true;
+        }
+        applyEntryHeight(entity, height);
+        redrawEntry(entity);
+        return true;
+    }
+
+    /** Shows a walk-on unit at its new entry height: its token, envelope, arcs and the buttons. */
+    private void redrawEntry(Entity entity) {
+        computeMovementEnvelope(entity);
+        clientgui.boardStates().forEach(bv -> bv.redrawEntity(entity));
+        clientgui.updateFiringArc(entity);
+        clientgui.showSensorRanges(entity);
+        clientgui.boardStates().forEach(BoardClientState::repaint);
+        refreshButtons();
+    }
+
+    /**
+     * Moves a walk-on unit just placed at a height it may deploy at but not enter at (a submarine's seafloor) to the
+     * nearest one it may enter at, above first.
+     */
+    private void settleEntryHeight(Entity entity) {
+        if (!isChoosingEntryHeight(entity) || entersAt(entity, entryLevel(entity))) {
+            return;
+        }
+        Integer height = entryHeight(entity, true);
+        if (height == null) {
+            height = entryHeight(entity, false);
+        }
+        if (height != null) {
+            applyEntryHeight(entity, height);
+        }
+    }
+
+    /** Puts a walk-on unit only placed on its entry hex at {@code height}; the path stays a bare placement. */
+    private void applyEntryHeight(Entity entity, int height) {
+        Board board = game.getBoard(entity.getBoardId());
+        List<ElevationOption> options = entryHeightOptions(entity);
+        new DeploymentHelper(clientgui).applyDeploymentElevation(entity, board, height);
+        lastHexDeploymentOptions.clear();
+        lastHexDeploymentOptions.addAll(options);
+        lastDeploymentOption = DeploymentHelper.heightOption(options, height);
+        cmd = new MovePath(game, entity);
+        addDeploymentToMovePath();
+    }
+
+    /**
+     * The modes the selected walk-on unit may still enter the map in, free: until its first step, its mode is the one
+     * it starts the game in ({@link StartingModes}), which it took off the map, as it does its entry height (Core
+     * Rulebook p. 224). Its entry step carries the mode to the server. Empty when it has no choice now: it moved,
+     * converts, or the map is in space.
+     */
+    public List<Integer> entryModes() {
+        Entity entity = currentEntity();
+        return isChoosingEntryMode(entity) ? StartingModes.of(entity) : List.of();
+    }
+
+    private boolean isChoosingEntryMode(@Nullable Entity entity) {
+        return isSettingUpEntry(entity) && game.getBoards().values().stream().noneMatch(Board::isSpace);
+    }
+
+    /**
+     * Whether the selected walk-on unit is still setting up its entry (walk-on step 1): waiting off the map, or placed
+     * on its entry hex and not yet entered. Its entry hex, facing, height, form and setup (stance, power, heat sinks,
+     * activated equipment) are free choices until it enters (Core Rulebook p. 224).
+     */
+    public boolean isSettingUpEntry() {
+        return isSettingUpEntry(currentEntity());
+    }
+
+    private boolean isSettingUpEntry(@Nullable Entity entity) {
+        if ((entity == null) || (cmd == null) || !clientgui.getClient().isMyTurn()
+              || !Game.rulesManager.getRulesGame().isWalkOnDeployment()) {
+            return false;
+        }
+        boolean waiting = !entity.isDeployed() && (entity.getPosition() == null)
+              && cmd.getStepVector().stream().allMatch(step -> isJumpDeclaration(step.getType()));
+        boolean placed = !entered && entity.isDeployed() && (entity.getPosition() != null) && isDeploymentOnly(cmd);
+        return waiting || placed;
+    }
+
+    /** Whether the selected walk-on unit has entered from its entry hex and plans its move now (walk-on step 2). */
+    public boolean hasEntered() {
+        return entered && (deploymentAnchor(cmd) != null);
+    }
+
+    /**
+     * Has the selected walk-on unit, placed on its entry hex, enter: its entry hex, facing, height, form and setup are
+     * settled, and the path plans its move from there. Nothing is sent yet; Done sends the entry and the move together.
+     * EDT only.
+     *
+     * @return {@code false} when the unit is not placed on its entry hex and setting it up, or may not enter as set up
+     *       (Done disabled)
+     */
+    public boolean enter() {
+        Entity entity = currentEntity();
+        if (!isSettingUpEntry(entity) || !entity.isDeployed() || (cmd == null)) {
+            return false;
+        }
+        MovePath possible = cmd.clone();
+        possible.clipToPossible();
+        if ((possible.length() == 0) || !possible.isMoveLegal()) {
+            return false;
+        }
+        entered = true;
+        computeMovementEnvelope(entity);
+        refreshButtons();
+        return true;
+    }
+
+    /**
+     * Moves the selected walk-on unit, placed on its entry hex and still setting up its entry, to another entry hex
+     * {@code coords} instead, as a click there does. Its setup stays. EDT only.
+     *
+     * @return {@code false} when the unit is not placed and setting up its entry, or {@code coords} is no entry hex
+     */
+    public boolean placeEntryAt(Coords coords, int boardId) {
+        Entity entity = currentEntity();
+        Board board = game.getBoard(boardId);
+        if (!isSettingUpEntry(entity) || !entity.isDeployed() || (board == null)
+              || !board.isLegalDeployment(coords, entity)) {
+            return false;
+        }
+        if (!coords.equals(entity.getPosition()) || (boardId != entity.getBoardId())) {
+            clear(false);
+            placeWalkOn(entity, coords, boardId);
+        }
+        return true;
+    }
+
+    /**
+     * Takes the selected walk-on unit back to setting up its entry (walk-on step 1), dropping any move planned after
+     * it entered; it stays on its entry hex. EDT only.
+     *
+     * @return {@code false} when the unit has not entered
+     */
+    public boolean reopenEntry() {
+        Entity entity = currentEntity();
+        if (!entered || (entity == null) || (deploymentAnchor(cmd) == null)) {
+            return false;
+        }
+        clear(true);
+        entered = false;
+        computeMovementEnvelope(entity);
+        clientgui.updateFiringArc(entity);
+        updateMove();
+        return true;
+    }
+
+    /**
+     * What the selected walk-on unit may choose about how it starts (Core Rulebook p. 224) while it sets up its entry:
+     * its stance in its entry hex, heat sinks and activated equipment. Not power: a shut-down unit can't move, so it
+     * can't walk on; one that started out shut down may only start up. Empty once it entered.
+     */
+    public DeploymentSetup.Options setupOptions() {
+        Entity entity = currentEntity();
+        if (!isSettingUpEntry(entity)) {
+            return DeploymentSetupChoice.NONE;
+        }
+        DeploymentSetup.Options options = setupChoice.options(entity);
+        DeploymentSetup baseline = setupChoice.baseline(entity);
+        boolean power = options.shutdown() && (baseline != null) && baseline.shutdown();
+        return (power == options.shutdown()) ? options
+              : new DeploymentSetup.Options(options.stances(), false, options.sinks(), options.equipment());
+    }
+
+    /** How the selected unit starts, as the player set it so far; null without one. */
+    public @Nullable DeploymentSetup currentSetup() {
+        Entity entity = currentEntity();
+        return (entity == null) ? null : setupChoice.current(entity);
+    }
+
+    /** How the selected walk-on unit started out before the player changed its setup; null without one. */
+    public @Nullable DeploymentSetup setupBaseline() {
+        return setupChoice.baseline(currentEntity());
+    }
+
+    /**
+     * Sets how the selected walk-on unit starts while it sets up its entry; the GL HUD's setup tiles. It takes effect on
+     * the unit at once, and the move sends it with the entry. A setup that would put two ECM suites on, or stealth
+     * armor without one, is refused with a toast. EDT only.
+     */
+    public void setSetup(DeploymentSetup setup) {
+        Entity entity = currentEntity();
+        if (isIgnoringEvents() || !isSettingUpEntry(entity) || (setup.shutdown() && !setupOptions().shutdown())) {
+            return;
+        }
+        setupChoice.set(entity, setup);
+        if (entity.isDeployed()) {
+            cmd = new MovePath(game, entity);
+            addDeploymentToMovePath();
+            computeMovementEnvelope(entity);
+        }
+        refreshButtons();
+    }
+
+    /**
+     * Has the selected walk-on unit enter the map in conversion {@code mode} instead, free ({@link #entryModes}). A
+     * placed unit stays on its entry hex at the height there nearest to its earlier one, or is taken back off the map
+     * when the mode can't enter there. EDT only.
+     *
+     * @return {@code false} when the unit may not choose {@code mode} now
+     */
+    public boolean chooseEntryMode(int mode) {
+        Entity entity = currentEntity();
+        if (!entryModes().contains(mode)) {
+            return false;
+        }
+        if (mode == entity.getConversionMode()) {
+            return true;
+        }
+        int height = entity.isAero() ? entity.getAltitude() : entity.getElevation();
+        StartingModes.apply(entity, mode);
+        Coords position = entity.getPosition();
+        if (position != null) {
+            Board board = game.getBoard(entity.getBoardId());
+            DeploymentHelper deploymentHelper = new DeploymentHelper(clientgui);
+            List<ElevationOption> options = deploymentHelper.checkDeployment(board, entity, position, false, false)
+                  ? new AllowedDeploymentHelper(entity, position, board, board.getHex(position), game)
+                  .findAllowedElevations() : List.of();
+            if (options.isEmpty()) {
+                withdrawWalkOn();
+                clientgui.getUnitDisplayState().displayEntity(entity);
+                return true;
+            }
+            ElevationOption option = DeploymentHelper.nearestHeightOption(options, height);
+            deploymentHelper.applyDeploymentElevation(entity, board, option.elevation());
+            lastHexDeploymentOptions.clear();
+            lastHexDeploymentOptions.addAll(options);
+            lastDeploymentOption = option;
+            cmd = new MovePath(game, entity);
+            addDeploymentToMovePath();
+            settleEntryHeight(entity);
+            computeMovementEnvelope(entity);
+        } else {
+            markDeploymentHexes(entity);
+        }
+        clientgui.getUnitDisplayState().displayEntity(entity);
+        clientgui.boardStates().forEach(bv -> bv.redrawEntity(entity));
+        clientgui.updateFiringArc(entity);
+        clientgui.showSensorRanges(entity);
+        clientgui.boardStates().forEach(BoardClientState::repaint);
         refreshButtons();
         return true;
     }
@@ -2803,6 +3250,11 @@ public class MovementDisplay extends ActionPhaseDisplay {
         if (currentEntity.hasUMU()) {
             clientgui.getClient().sendUpdateEntity(currentEntity);
         }
+        if (deploymentAnchor(cmd) != null) {
+            cmd.setDeploymentSetup(setupChoice.changed(currentEntity));
+        }
+        setupChoice.forget();
+        entered = false;
         clientgui.getClient().moveEntity(this.currentEntity, cmd);
         if (currentEntity.isWeaponOrderChanged()) {
             clientgui.getClient().sendEntityWeaponOrderUpdate(currentEntity);
@@ -2844,7 +3296,18 @@ public class MovementDisplay extends ActionPhaseDisplay {
             return;
         }
         cmd = path.clone();
+        // A plan put back from before or after a conversion converts the unit as its steps do (see
+        // adjustConvertSteps). A Mek with tracks compiles from its starting mode, then moves in its planned one.
+        boolean tracks = (entity instanceof Mek mek) && mek.hasTracks();
+        boolean converting = cmd.contains(MoveStepType.CONVERT_MODE);
+        if (tracks && entity.isConvertingNow()) {
+            entity.toggleConversionMode();
+        }
+        entity.setConvertingNow(converting);
         cmd.compile(game, entity, false);
+        if (tracks && converting) {
+            entity.toggleConversionMode();
+        }
         clientgui.showSensorRanges(entity, cmd.getFinalCoords());
         clientgui.updateFiringArc(entity);
         updateMove();
@@ -3163,62 +3626,22 @@ public class MovementDisplay extends ActionPhaseDisplay {
             }
             Coords coords = boardViewEvent.getCoords();
             int boardId = boardViewEvent.getBoardId();
-            if (!currentlySelectedEntity.isDeployed() && boardViewEvent.getType() == BoardViewEvent.BOARD_HEX_DRAGGED) {
-                int tempFacing = currentlySelectedEntity.getFacing();
-                DeploymentHelper deploymentHelper = new DeploymentHelper(clientgui);
-                if (!deploymentHelper.checkDeployment(game.getBoard(boardId),
-                                                      currentlySelectedEntity,
-                                                      coords,
-                                                      false, true)) {
-                    return;
-                }
-                // If we have not got a stored facing, or the deployment check changed our facing to make it legal
-                if (originalFacing == -1 && tempFacing == currentlySelectedEntity.getFacing()) {
-                    deploymentHelper.setStartingFacing(currentlySelectedEntity, game.getPlayersList(), coords);
-                }
-                DeploymentPosition deploymentPosition = deploymentHelper.determineDeploymentPosition(
-                        currentlySelectedEntity,
-                        coords,
-                        game.getBoard(boardId),
-                        lastHexDeploymentOptions,
-                        lastDeploymentOption);
-                if (deploymentPosition == null) {
-                    return;
-                }
-                int elevation = deploymentPosition.elevation();
-                int facing = deploymentPosition.facing();
-                originalFacing = facing;
-                lastDeploymentOption = deploymentPosition.lastDeploymentOption();
-                if (game.getBoard(boardId).isLegalDeployment(coords, currentlySelectedEntity)
-                    && !currentlySelectedEntity.isLocationProhibited(
-                        coords,
-                        boardId,
-                        elevation)) {
-                    deploymentHelper.applyDeploymentElevation(currentlySelectedEntity,
-                                                              game.getBoard(boardId),
-                                                              elevation);
-                    currentlySelectedEntity.setPosition(coords);
-                    currentlySelectedEntity.setBoardId(boardId);
-                    currentlySelectedEntity.setFacing(facing);
-                    currentlySelectedEntity.setSecondaryFacing(facing);
-                    currentlySelectedEntity.setDeployed(true);
-                    cmd = new MovePath(game, currentlySelectedEntity);
-                    addDeploymentToMovePath();
-                    deployTrain(currentlySelectedEntity);
+            boolean shift = (boardViewEvent.getModifiers() & InputEvent.SHIFT_DOWN_MASK) != 0;
+            if ((boardViewEvent.getType() == BoardViewEvent.BOARD_HEX_DRAGGED) && !shift
+                  && isSettingUpEntry(currentlySelectedEntity) && currentlySelectedEntity.isDeployed()
+                  && !coords.equals(currentlySelectedEntity.getPosition())) {
+                if ((game.getBoard(boardId) != null)
+                      && game.getBoard(boardId).isLegalDeployment(coords, currentlySelectedEntity)) {
+                    // Still setting up its entry: the unit takes this entry hex instead
+                    clear(false);
                 } else {
-                    String msg = Messages.getString("DeploymentDisplay.cantDeployInto",
-                                                    currentlySelectedEntity.getShortName(),
-                                                    coords.getBoardNum());
-                    clientgui.addToast(ToastLevel.ERROR, msg, currentlySelectedEntity);
+                    // A hex past the entry hexes plans the move: the unit enters as it is set up
+                    entered = true;
                 }
-                computeMovementEnvelope(currentlySelectedEntity);
-                clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentlySelectedEntity));
-                clientgui.updateFiringArc(currentlySelectedEntity);
-                clientgui.showSensorRanges(currentlySelectedEntity);
-                clientgui.boardStates().forEach(BoardClientState::repaint);
-                refreshButtons();
+            }
+            if (!currentlySelectedEntity.isDeployed() && boardViewEvent.getType() == BoardViewEvent.BOARD_HEX_DRAGGED) {
+                placeWalkOn(currentlySelectedEntity, coords, boardId);
                 return;
-
             }
         }
 
@@ -3229,6 +3652,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
 
         // Check for deployment and shift held
         if (shiftHeld &&
+            !entered &&
             (cmd != null) &&
             cmd.getLastStep() != null &&
             Game.rulesManager.getRulesGame().isWalkOnDeployment()) {
@@ -3837,6 +4261,13 @@ public class MovementDisplay extends ActionPhaseDisplay {
                   position, facing, elevation, position, facing, elevation + 1) != MobileStructureMovement.PROHIBITED);
             setLowerEnabled(canChangeElevation && MobileStructureMovement.cost(game, mobile,
                   position, facing, elevation, position, facing, elevation - 1) != MobileStructureMovement.PROHIBITED);
+            return;
+        }
+
+        if (isChoosingEntryHeight(currentEntity)) {
+            setRaiseEnabled(entryHeight(currentEntity, true) != null);
+            setLowerEnabled(entryHeight(currentEntity, false) != null);
+            updateLowerButtonLabel(false);
             return;
         }
 
@@ -4580,13 +5011,10 @@ public class MovementDisplay extends ActionPhaseDisplay {
     }
 
     private void updateConvertModeButton() {
-        // Issue #5280 NPE - make sure the move path is valid, and the last step isn't null. MovePath::getLastStep()
-        // can return null.
-        if ((cmd != null) && (cmd.getLastStep() != null)) {
-            if (cmd.length() > 0 && cmd.getLastStep().getType() != MoveStepType.CONVERT_MODE) {
-                setModeConvertEnabled(false);
-                return;
-            }
+        // A unit converts before it moves; a walk-on unit right after it is placed on its entry hex.
+        if ((cmd != null) && !onlyPlacementAndConversion(cmd)) {
+            setModeConvertEnabled(false);
+            return;
         }
 
         final Entity currentEntity = currentEntity();
@@ -5163,6 +5591,16 @@ public class MovementDisplay extends ActionPhaseDisplay {
         updateMountButton();
         updatePickupCargoButton();
         updateDropCargoButton();
+        if (isSettingUpEntry(currentEntity())) {
+            // Loading and unloading are steps of the move; a walk-on unit takes none until it entered
+            setLoadEnabled(false);
+            setUnloadEnabled(false);
+            setTowEnabled(false);
+            setDisconnectEnabled(false);
+            setMountEnabled(false);
+            setPickupCargoEnabled(false);
+            setDropCargoEnabled(false);
+        }
     }
 
     /**
@@ -7331,6 +7769,10 @@ public class MovementDisplay extends ActionPhaseDisplay {
             } else {
                 maxMP = en.getRunMP();
             }
+            // Under water a UMU unit moves with its UMU MP, which may exceed its ground MP; legality decides per path
+            if (en.hasUMU()) {
+                maxMP = Math.max(maxMP, en.getActiveUMUCount());
+            }
         }
 
         return maxMP;
@@ -7462,12 +7904,13 @@ public class MovementDisplay extends ActionPhaseDisplay {
         ShortestPathFinder shortestPathFinder = getShortestPathFinder(entity, maxMP, stepType);
         shortestPathFinder.run(movePath);
 
-        Map<Coords, MovePath> movePathForEachCoordsMap = shortestPathFinder.getAllComputedPaths();
-        Map<Coords, Integer> movementEnvelopeMP = new HashMap<>((int) ((movePathForEachCoordsMap.size() * 1.25) + 1));
-        for (Coords coords : movePathForEachCoordsMap.keySet()) {
-            var candidateMovePath = movePathForEachCoordsMap.get(coords);
+        // The finder keeps one path per hex and facing, and its pick per hex can be one that turns where turning is
+        // illegal (a submarine on the seafloor) while another facing's path is legal; so take the cheapest legal one
+        Map<Coords, Integer> movementEnvelopeMP = new HashMap<>();
+        for (MovePath candidateMovePath : shortestPathFinder.getAllComputedPathsUncategorized()) {
             if (candidateMovePath.isMoveLegal()) {
-                movementEnvelopeMP.put(coords, candidateMovePath.countMp(movementGear == GEAR_JUMP));
+                movementEnvelopeMP.merge(candidateMovePath.getFinalCoords(),
+                      candidateMovePath.countMp(movementGear == GEAR_JUMP), Math::min);
             }
         }
         lastEnvelope = new Envelope(entity.getId(), movementGear, movementEnvelopeMP,
@@ -8132,7 +8575,12 @@ public class MovementDisplay extends ActionPhaseDisplay {
                 }
             }
         }
-        if (actionCmd.equals(MoveCommand.MOVE_RAISE_ELEVATION.getCmd())) {
+        boolean raises = actionCmd.equals(MoveCommand.MOVE_RAISE_ELEVATION.getCmd());
+        if ((raises || actionCmd.equals(MoveCommand.MOVE_LOWER_ELEVATION.getCmd()))
+              && changeEntryHeight(entity, raises)) {
+            return;
+        }
+        if (raises) {
             addStepToMovePath(MoveStepType.UP);
         } else if (actionCmd.equals(MoveCommand.MOVE_DESCEND.getCmd())) {
             // On-demand Descend dialog: only meaningful for a mid-climb / dangling Mek.
@@ -8623,14 +9071,21 @@ public class MovementDisplay extends ActionPhaseDisplay {
      * @param endMode The mode to convert to
      */
     private void adjustConvertSteps(EntityMovementMode endMode) {
+        if (cmd.contains(MoveStepType.CONVERT_MODE) && (cmd.getFinalConversionMode() == endMode)) {
+            return;
+        }
+        // A Mek converting to or from tracks moves in its planned mode: back in its starting mode, it compares with it
+        if ((currentEntity() instanceof Mek mek) && mek.hasTracks() && mek.isConvertingNow()) {
+            mek.toggleConversionMode();
+            mek.setConvertingNow(false);
+        }
         // Since conversion is not allowed in water, we shouldn't have to deal with the possibility of `swim` modes.
         // Account for grounded LAMs in fighter mode with movement type wheeled
         if (currentEntity().getMovementMode() == endMode || (currentEntity().isAero()
                                                              && endMode == EntityMovementMode.AERODYNE)) {
-            cmd.clear();
-            return;
-        }
-        if (cmd.getFinalConversionMode() == endMode) {
+            // Back to the starting mode: a walk-on unit keeps its placement
+            clear();
+            updateMove();
             return;
         }
         clear();
@@ -8835,6 +9290,21 @@ public class MovementDisplay extends ActionPhaseDisplay {
     private void setJumpEnabled(boolean enabled) {
         buttons.get(MoveCommand.MOVE_JUMP).setEnabled(enabled);
         clientgui.getMenuBar().setEnabled(MoveCommand.MOVE_JUMP.getCmd(), enabled);
+    }
+
+    /** Whether the unit may change its mode now (MegaMek's Convert command), as the GPU HUD's form switch offers it. */
+    public boolean isConvertEnabled() {
+        MegaMekButton convert = buttons.get(MoveCommand.MOVE_MODE_CONVERT);
+        return (convert != null) && convert.isEnabled();
+    }
+
+    /**
+     * @param path the current path, may be empty
+     * @return {@code true} when the path holds nothing but a walk-on placement and mode conversions
+     */
+    private static boolean onlyPlacementAndConversion(MovePath path) {
+        return path.getStepVector().stream().allMatch(step -> (step.getType() == MoveStepType.DEPLOY)
+              || (step.getType() == MoveStepType.CONVERT_MODE));
     }
 
     private void setModeConvertEnabled(boolean enabled) {

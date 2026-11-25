@@ -156,6 +156,8 @@ class MovePathHandler extends AbstractTWRuleHandler {
     private final List<Integer> passedThroughFacing = new ArrayList<>();
     private final List<Entity> hiddenEnemies = new ArrayList<>();
     private final Vector<UnitLocation> movePath = new Vector<>();
+    /** Units unloaded on the way, published after the carrier's route (TWGameManager#unloadUnitDuringMovement). */
+    private final List<Integer> unloadedOnTheWay = new ArrayList<>();
 
     private Report report;
     private PilotingRollData rollTarget;
@@ -332,16 +334,27 @@ class MovePathHandler extends AbstractTWRuleHandler {
                 position = step.getPosition();
                 boardId = step.getBoardId();
                 facing = step.getFacing();
-                entityElevation = entity.isAero() ? step.getAltitude() : step.getElevation();
             } else {
                 position = entity.getPosition();
                 boardId = entity.getBoardId();
                 facing = entity.getFacing();
+            }
+            // A walk-on unit enters in the mode it starts the game in, which it chose freely before its first step:
+            // its entry step moves in that mode (StartingModes)
+            Integer startingMode = (step == null) ? null
+                  : StartingModes.forMovementMode(entity, step.getMovementMode());
+            Runnable restoreMode = (startingMode == null) ? null : StartingModes.choose(entity, startingMode);
+            if (step != null) {
+                entityElevation = entity.isAero() ? step.getAltitude() : step.getElevation();
+            } else {
                 entityElevation = entity.getElevation();
             }
 
             boolean isLegalLocation = deploymentProcess.isLegalDeployment(position, boardId, entity, facing, entityElevation);
             if (!isLegalLocation) {
+                if (restoreMode != null) {
+                    restoreMode.run();
+                }
                 String msg = "server got invalid deployment packet from connection " + entity.getOwnerId();
                 msg += ", Entity: " + entity.getShortName();
                 logger.error(msg);
@@ -354,9 +367,18 @@ class MovePathHandler extends AbstractTWRuleHandler {
             Entity blocker = deploymentProcess.findDeploymentStackingViolation(entity, position, boardId,
                   entityElevation, assaultDrop);
             if (blocker != null) {
+                if (restoreMode != null) {
+                    restoreMode.run();
+                }
                 deploymentProcess.refuseStackedDeployment(entity.getOwnerId(), entity, blocker, position,
                       entity.getOwnerId());
                 return;
+            }
+
+            // How it starts (stance, power, heat sinks, equipment) was chosen before it entered (Core Rulebook p. 224)
+            if (md.getDeploymentSetup() != null) {
+                Hex entryHex = gameManager.getGame().getBoard(boardId).getHex(position);
+                DeploymentProcessor.applySetup(entity, md.getDeploymentSetup(), entryHex);
             }
 
             deploymentProcess.processDeployment(entity,
@@ -2085,6 +2107,7 @@ class MovePathHandler extends AbstractTWRuleHandler {
                 gameManager.send(gameManager.createRemoveEntityPacket(entity.getId(), entity.getRemovalCondition()));
             }
         }
+        publishUnloaded();
 
         // If the entity is towing trailers, update the position of those trailers
         if (!entity.getAllTowedUnits().isEmpty()) {
@@ -2299,6 +2322,12 @@ class MovePathHandler extends AbstractTWRuleHandler {
     /**
      * Iterate through the steps of the movement path and handle each step.
      */
+    /** Sends the units unloaded on the way, after their carrier's route, so clients show them as it drops them off. */
+    private void publishUnloaded() {
+        unloadedOnTheWay.forEach(gameManager::entityUpdate);
+        unloadedOnTheWay.clear();
+    }
+
     private void processSteps() {
         MoveStep previousStep = null;
         for (final ListIterator<MoveStep> i = md.getSteps(); i.hasNext(); ) {
@@ -2386,6 +2415,7 @@ class MovePathHandler extends AbstractTWRuleHandler {
                         if (jumping) {
                             break;
                         }
+                        publishUnloaded();
 
                         return;
 
@@ -4648,7 +4678,12 @@ class MovePathHandler extends AbstractTWRuleHandler {
                           step.getAdditionalData(MoveStep.UNLOAD_FACING_KEY));
                 }
 
-                if (!gameManager.unloadUnitDuringMovement(entity, unloaded, unloadPos, unloadFacing, step.getElevation())) {
+                boolean unloadedHere = gameManager.unloadUnitDuringMovement(entity, unloaded, unloadPos, unloadFacing,
+                      step.getElevation());
+                if (unloadedHere) {
+                    unloadedOnTheWay.add(((Entity) unloaded).getId());
+                }
+                if (!unloadedHere) {
                     logger.error("Server was told to unload {} from {} into {}",
                                  unloaded.getDisplayName(),
                                  entity.getDisplayName(),

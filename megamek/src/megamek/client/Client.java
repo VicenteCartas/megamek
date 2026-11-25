@@ -115,6 +115,7 @@ import megamek.common.turns.UnloadStrandedTurn;
 import megamek.common.units.Crew;
 import megamek.common.units.DamageEditSpec;
 import megamek.common.units.DemolitionCharge;
+import megamek.common.units.DeploymentSetup;
 import megamek.common.units.Entity;
 import megamek.common.units.EntitySelector;
 import megamek.common.units.FighterSquadron;
@@ -341,7 +342,26 @@ public class Client extends AbstractClient {
      */
     public void deploy(int id, Coords coords, int boardId, int nFacing, int elevation, List<Entity> loadedUnits,
           boolean assaultDrop) {
-        int packetCount = 7 + loadedUnits.size();
+        deploy(id, coords, boardId, nFacing, elevation, loadedUnits, assaultDrop, null);
+    }
+
+    /**
+     * Deploys an entity as {@link #deploy(int, Coords, int, int, int, List, boolean)} does, in the conversion mode it
+     * starts the game in (a LAM's or QuadVee's mode, see {@link megamek.common.units.StartingModes}); null keeps the
+     * mode chosen in the lobby.
+     */
+    public void deploy(int id, Coords coords, int boardId, int nFacing, int elevation, List<Entity> loadedUnits,
+          boolean assaultDrop, @Nullable Integer startingMode) {
+        deploy(id, coords, boardId, nFacing, elevation, loadedUnits, assaultDrop, startingMode, null);
+    }
+
+    /**
+     * Deploys an entity as {@link #deploy(int, Coords, int, int, int, List, boolean, Integer)} does, starting with the
+     * stance, power, heat sinks and activated equipment of {@code setup}; null keeps those chosen in the lobby.
+     */
+    public void deploy(int id, Coords coords, int boardId, int nFacing, int elevation, List<Entity> loadedUnits,
+          boolean assaultDrop, @Nullable Integer startingMode, @Nullable DeploymentSetup setup) {
+        int packetCount = 7 + loadedUnits.size() + (startingMode == null ? 0 : 1) + (setup == null ? 0 : 1);
         int index = 0;
         Object[] data = new Object[packetCount];
         data[index++] = id;
@@ -354,6 +374,12 @@ public class Client extends AbstractClient {
 
         for (Entity ent : loadedUnits) {
             data[index++] = ent.getId();
+        }
+        if (startingMode != null) {
+            data[index++] = startingMode;
+        }
+        if (setup != null) {
+            data[index] = setup;
         }
 
         send(new Packet(PacketCommand.ENTITY_DEPLOY, data));

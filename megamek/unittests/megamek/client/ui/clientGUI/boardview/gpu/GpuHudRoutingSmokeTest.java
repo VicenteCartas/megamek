@@ -419,8 +419,12 @@ class GpuHudRoutingSmokeTest {
 
             // An outside HUD button also receives its first click.
             routing.press(trigger);
-            routing.press(routing.find("dock-turn-right"));
+            routing.press(routing.find("dock-more"));
             assertFalse(shown(routing.find("dock-confirm")));
+            routing.advance(10, .1f);
+            Actor turnRight = routing.find("dock-more-dock.turnRight");
+            assertTrue(turnRight != null && shown(turnRight), "More opened on the first click");
+            routing.press(turnRight);
             verify(routing.moves).turn(1);
             routing.press(trigger);
             routing.press(trigger);

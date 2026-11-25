@@ -177,6 +177,8 @@ public final class UiTheme implements Disposable {
           Map.entry("help", 0xF1C0), Map.entry("settings", 0xE8B8), Map.entry("menu", 0xE5D2),
           Map.entry("chat", 0xE0B7), Map.entry("grid", 0xE9B0),
           Map.entry("list", 0xE896), Map.entry("check", 0xE5CA), Map.entry("remove", 0xE15B), Map.entry("flame", 0xEF55),
+          // toggle_on, toggle_off: a switch's two states (the deployment setup's on/off tiles)
+          Map.entry("toggle-on", 0xE9F6), Map.entry("toggle-off", 0xE9F5),
           Map.entry("chevron-down", 0xE5CF), Map.entry("chevron-up", 0xE5CE), Map.entry("twist-left", 0xE419),
           Map.entry("twist-right", 0xE41A), Map.entry("more", 0xE5D3), Map.entry("undo", 0xE166),
           Map.entry("locate", 0xE55C), Map.entry("play", 0xE037), Map.entry("pause", 0xE034),
@@ -235,7 +237,11 @@ public final class UiTheme implements Disposable {
           // A formation's troubles in MekHQ's order of battle: dangerous (out of action), person_off (short of crew),
           // bedtime (fatigued), inventory_2 (mothballed) and rocket_launch (in transit)
           Map.entry("dangerous", 0xE99A), Map.entry("person-off", 0xE510), Map.entry("bedtime", 0xEF44),
-          Map.entry("inventory", 0xE1A1), Map.entry("rocket", 0xEB9B));
+          Map.entry("inventory", 0xE1A1), Map.entry("rocket", 0xEB9B),
+          // The movement dock's context slot: accessibility_new (stand up), security (take cover), construction (dig
+          // in), back_hand (shake off), logout (unload) and download (drop cargo); prone and hull-down are the badges'.
+          Map.entry("stand-up", 0xE92C), Map.entry("cover", 0xE32A), Map.entry("dig-in", 0xEA3C),
+          Map.entry("shake-off", 0xE764), Map.entry("unload", 0xE9BA), Map.entry("drop-cargo", 0xF090));
     /**
      * Icons the prototype draws filled. The shipped font has no filled named instance, so their outlines are closed:
      * every texel that the glyph's outline encloses becomes opaque.
@@ -397,6 +403,8 @@ public final class UiTheme implements Disposable {
         step.fontColor = MAIN;
         step.overFontColor = Color.WHITE;
         skin.add("hud-confirm-step", step);
+        // The placed unit's setup tag above the pair (GpuDeployConfirm): what differs from how it started, in amber.
+        box("deploy-tag", rgba(12, 17, 19, .9f), alpha(AMBER, .6f), 1, 3, null, 2, 7, 20);
         // ImageTextButton lays out in a row, so a utility places an icon Image above this style's label.
         TextButton.TextButtonStyle utility = utility(hud, "hud-utility", 6, 9, 5, 62, 56);
         skin.add("hud-utility", utility);

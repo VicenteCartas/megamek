@@ -184,6 +184,11 @@ final class GpuHudState {
         ownInspection = Entity.NONE;
     }
 
+    /** The board plays live events, or reviews or replays them: unit commands wait ({@link #turnLocked}). */
+    boolean playbackBusy() {
+        return playbackBusy;
+    }
+
     /** Unit commands wait for playback, or for the player to restore a cleared local selection. */
     boolean turnLocked(GpuBattleStatus.Snapshot status) {
         return playbackBusy || selectionCleared && status.myTurn();
@@ -226,7 +231,7 @@ final class GpuHudState {
             presentedStatus = new GpuBattleStatus.Snapshot(status.round(), status.phase(), true,
                   status.localPlayerId(), Entity.NONE, status.turns(), status.turnIndex(), status.units(),
                   status.initiative(), status.turnOrderHidden(), List.of(), GpuBattleStatus.Arc.NONE,
-                  status.incoming());
+                  status.incoming(), status.emplacementsOnly());
         }
         GpuHudData shown = new GpuHudData(panels.phase(), locked ? GpuMovePlan.Snapshot.EMPTY : panels.move(),
               locked ? GpuFireOrders.Snapshot.EMPTY : panels.fire(),
@@ -366,7 +371,8 @@ final class GpuHudState {
                       held.actorId() == hidden.entityId() ? Entity.NONE : held.actorId(), held.turns(), held.turnIndex(),
                       presentedUnits, held.initiative(), held.turnOrderHidden(),
                       held.links().stream().filter(link -> link.fromId() != hidden.entityId()
-                            && link.toId() != hidden.entityId()).toList(), GpuBattleStatus.Arc.NONE, held.incoming());
+                            && link.toId() != hidden.entityId()).toList(), GpuBattleStatus.Arc.NONE, held.incoming(),
+                      held.emplacementsOnly());
             }
         }
         return select;

@@ -40,7 +40,6 @@ import java.awt.event.InputEvent;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -73,7 +72,6 @@ import megamek.common.board.AllowedDeploymentHelper;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
-import megamek.common.board.DeploymentElevationType;
 import megamek.common.board.ElevationOption;
 import megamek.common.board.FacingOption;
 import megamek.common.equipment.Transporter;
@@ -84,10 +82,12 @@ import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.options.OptionsConstants;
 import megamek.common.units.AbstractBuildingEntity;
+import megamek.common.units.DeploymentSetup;
 import megamek.common.units.Dropship;
 import megamek.common.units.Entity;
 import megamek.common.units.IAero;
 import megamek.common.units.Infantry;
+import megamek.common.units.StartingModes;
 import megamek.common.units.Tank;
 import megamek.common.units.TrainLayout;
 import megamek.logging.MMLogger;
@@ -172,6 +172,11 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
     private boolean assaultDropPreference = false;
     private final Set<ElevationOption> lastHexDeploymentOptions = new HashSet<>();
     private ElevationOption lastDeploymentOption = null;
+    /**
+     * The unit whose starting setup (stance, power, heat sinks, activated equipment) the player is choosing, and the
+     * setup it had when picked: picking another unit puts it back, and deploying sends what differs.
+     */
+    private final DeploymentSetupChoice setupChoice;
 
     private final ClientGUI clientgui;
     private final Game game;
@@ -191,6 +196,7 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         super(clientgui);
         this.clientgui = clientgui;
         game = clientgui.getClient().getGame();
+        setupChoice = new DeploymentSetupChoice(clientgui, game);
         game.addGameListener(this);
         setupStatusBar(Messages.getString("DeploymentDisplay.waitingForDeploymentPhase"));
 
@@ -276,6 +282,7 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         if (entity.isWeaponOrderChanged()) {
             clientgui.getClient().sendEntityWeaponOrderUpdate(entity);
         }
+        setupChoice.pick(entity);
 
         // FIXME: Hack alert: remove C3 sprites from earlier here, or we might crash
         // when
@@ -474,9 +481,13 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         disableButtons();
 
         int elevationOrAltitude = entity.isAero() ? entity.getAltitude() : entity.getElevation();
+        Integer startingMode = startingModes().isEmpty() ? null : entity.getConversionMode();
+        DeploymentSetup setup = setupChoice.changed(entity);
         clientgui.getClient().deploy(entity.getId(), entity.getPosition(), entity.getBoardId(), entity.getFacing(),
-                                     elevationOrAltitude, entity.getLoadedUnits(), assaultDropPreference);
+                                     elevationOrAltitude, entity.getLoadedUnits(), assaultDropPreference,
+                                     startingMode, setup);
         entity.setDeployed(true);
+        setupChoice.forget();
 
         if (entity.isWeaponOrderChanged()) {
             clientgui.getClient().sendEntityWeaponOrderUpdate(entity);
@@ -620,34 +631,73 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
     }
 
     /**
-     * The heights (altitudes for an aerospace unit) the unit placed this turn may deploy at in its hex, lowest first;
-     * empty while none is placed on a map with heights. Above a VTOL's highest listed elevation, any is allowed; the
-     * list then offers a few more.
+     * The heights (altitudes for an aerospace unit) the unit placed this turn may deploy at in its hex, lowest first
+     * ({@link DeploymentHelper#placementHeights}, as a walk-on unit chooses its entry height); empty while none is
+     * placed on a map with heights.
      */
     public List<Integer> placedHeights() {
         Entity entity = currentEntity();
         Board board = entity == null || entity.getPosition() == null ? null : game.getBoard(entity.getBoardId());
-        if (board == null || board.isSpace() || !board.contains(entity.getPosition())
-              || !clientgui.getClient().isMyTurn()) {
+        if (board == null || !clientgui.getClient().isMyTurn()) {
             return List.of();
         }
-        List<Integer> heights = new ArrayList<>();
-        for (ElevationOption option : new AllowedDeploymentHelper(entity, entity.getPosition(), board,
-              board.getHex(entity.getPosition()), game).findAllowedElevations()) {
-            int top = option.type() == DeploymentElevationType.ELEVATIONS_ABOVE
-                  ? Math.max(option.elevation(), entity.getElevation()) + HEIGHTS_ABOVE : option.elevation();
-            for (int height = option.elevation(); height <= top; height++) {
-                if (!heights.contains(height)) {
-                    heights.add(height);
-                }
-            }
-        }
-        Collections.sort(heights);
-        return heights;
+        return DeploymentHelper.placementHeights(entity, board, entity.getPosition(), game);
     }
 
-    /** How many elevations above its highest listed one {@link #placedHeights} offers a VTOL. */
-    private static final int HEIGHTS_ABOVE = 5;
+    /**
+     * The conversion modes the unit deploying now may start the game in, as the lobby offers them (StartingModes): a
+     * LAM's or QuadVee's, before it first deploys and while no map is in space. Empty while it has no choice.
+     */
+    public List<Integer> startingModes() {
+        Entity entity = currentEntity();
+        if (entity == null || !entity.wasNeverDeployed() || !clientgui.getClient().isMyTurn()
+              || game.getBoards().values().stream().anyMatch(Board::isSpace)) {
+            return List.of();
+        }
+        return StartingModes.of(entity);
+    }
+
+    /**
+     * Changes the conversion mode the unit deploying now starts in; the GL HUD's mode switch. A placed unit keeps its
+     * hex at the height there nearest to its new one, or is taken back off the map when the mode can't deploy there.
+     */
+    public void setStartingMode(int mode) {
+        Entity entity = currentEntity();
+        if (isIgnoringEvents() || !startingModes().contains(mode) || mode == entity.getConversionMode()) {
+            return;
+        }
+        int height = entity.isAero() ? entity.getAltitude() : entity.getElevation();
+        StartingModes.apply(entity, mode);
+        lastHexDeploymentOptions.clear();
+        lastDeploymentOption = null;
+        Coords position = entity.getPosition();
+        Board board = position == null ? null : game.getBoard(entity.getBoardId());
+        if (board != null) {
+            DeploymentHelper deploymentHelper = new DeploymentHelper(clientgui);
+            List<ElevationOption> options = deploymentHelper.checkDeployment(board, entity, position,
+                  assaultDropPreference, false)
+                  ? new AllowedDeploymentHelper(entity, position, board, board.getHex(position), game)
+                  .findAllowedElevations() : List.of();
+            if (options.isEmpty()) {
+                entity.setPosition(null);
+                butDone.setEnabled(false);
+                setClearEnabled(false);
+            } else {
+                ElevationOption option = DeploymentHelper.nearestHeightOption(options, height);
+                deploymentHelper.applyDeploymentElevation(entity, board, option.elevation());
+                lastHexDeploymentOptions.addAll(options);
+                lastDeploymentOption = option;
+            }
+        }
+        setAssaultDropEnabled(entity.canAssaultDrop()
+              && game.getOptions().booleanOption(OptionsConstants.ADVANCED_ASSAULT_DROP));
+        markDeploymentHexes(entity);
+        clientgui.boardStates().forEach(BoardClientState::redrawAllEntities);
+        clientgui.getUnitDisplayState().displayEntity(entity);
+        clientgui.updateFiringArc(entity);
+        clientgui.showSensorRanges(entity);
+        clientgui.boardStates().forEach(BoardClientState::repaint);
+    }
 
     /**
      * Deploys the unit placed this turn at {@code height} (its altitude, for an aerospace unit) instead, if its hex
@@ -669,6 +719,56 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         clientgui.updateFiringArc(entity);
         clientgui.showSensorRanges(entity);
         clientgui.boardStates().forEach(BoardClientState::repaint);
+    }
+
+    /**
+     * Turns the unit placed this turn one hexside, left for a negative {@code step}, as a Shift+click on the
+     * neighbouring hex would; the GL HUD's turn arrows on the placed unit.
+     */
+    public void turnPlaced(int step) {
+        Entity entity = currentEntity();
+        if (isIgnoringEvents() || entity == null || entity.getPosition() == null || entity.isDeployed()
+              || !clientgui.getClient().isMyTurn()) {
+            return;
+        }
+        int facing = Math.floorMod(entity.getFacing() + Integer.signum(step), 6);
+        processTurn(entity, entity.getPosition().translated(facing), false);
+    }
+
+    /**
+     * What the unit deploying now may choose about how it starts (Core Rulebook p. 224): its stance in the hex it is
+     * placed in, power, heat sinks and activated equipment. Empty when it has no choice or it isn't the player's turn.
+     */
+    public DeploymentSetup.Options setupOptions() {
+        Entity entity = currentEntity();
+        if (entity == null || entity.isDeployed() || !clientgui.getClient().isMyTurn()) {
+            return DeploymentSetupChoice.NONE;
+        }
+        return setupChoice.options(entity);
+    }
+
+    /** How the unit deploying now starts, as the player set it so far; null without one. */
+    public @Nullable DeploymentSetup currentSetup() {
+        Entity entity = currentEntity();
+        return entity == null ? null : setupChoice.current(entity);
+    }
+
+    /** How the unit deploying now started out before the player changed its setup; null without one. */
+    public @Nullable DeploymentSetup setupBaseline() {
+        return setupChoice.baseline(currentEntity());
+    }
+
+    /**
+     * Sets how the unit deploying now starts; the GL HUD's setup tiles. It takes effect on the unit at once so the
+     * board and unit card show it, and is sent when the unit deploys. A setup that would put two ECM suites on, or
+     * stealth armor without one, is refused with a toast.
+     */
+    public void setSetup(DeploymentSetup setup) {
+        Entity entity = currentEntity();
+        if (isIgnoringEvents() || entity == null || entity.isDeployed()) {
+            return;
+        }
+        setupChoice.set(entity, setup);
     }
 
     public void die() {

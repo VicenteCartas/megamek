@@ -75,10 +75,15 @@ import megamek.common.preference.PreferenceManager;
 import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.Aero;
 import megamek.common.units.BulldozerRules;
+import megamek.common.units.DeploymentSetup;
 import megamek.common.units.Entity;
+import megamek.common.units.EntityMovementMode;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.EntityVisibilityUtils;
+import megamek.common.units.Infantry;
+import megamek.common.units.LandAirMek;
 import megamek.common.units.Mek;
+import megamek.common.units.QuadVee;
 import megamek.common.units.Targetable;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -301,11 +306,12 @@ final class GpuBoardSource implements BoardSource {
     }
 
     /**
-     * The heights the placed unit may deploy at in its hex, offered on the unit while it has a choice: an aerospace
-     * unit's altitude, a VTOL's elevation, a mek's ice or sea floor. {@code altitude} tells altitudes from elevations.
+     * The heights the placed unit may deploy at in its hex, or a walk-on unit enter at while it sets up its entry,
+     * offered on the unit while it has a choice: an aerospace unit's altitude, a VTOL's elevation, a mek's ice or sea
+     * floor. Both come from MegaMek's same list ({@code DeploymentHelper.placementHeights}); {@code kind} names them.
      */
-    record HeightChoice(int unitId, int height, List<Integer> heights, boolean altitude) {
-        static final HeightChoice NONE = new HeightChoice(Entity.NONE, 0, List.of(), false);
+    record HeightChoice(int unitId, int height, List<Integer> heights, GpuDeployHeight.Kind kind) {
+        static final HeightChoice NONE = new HeightChoice(Entity.NONE, 0, List.of(), GpuDeployHeight.Kind.ELEVATION);
     }
 
     private volatile HeightChoice heightChoice = HeightChoice.NONE;
@@ -316,24 +322,227 @@ final class GpuBoardSource implements BoardSource {
     }
 
     private HeightChoice captureHeightChoice(JComponent panel) {
-        if (!(panel instanceof DeploymentDisplay deployment)) {
+        Entity entity;
+        List<Integer> heights;
+        if (panel instanceof DeploymentDisplay deployment) {
+            entity = deployment.currentEntity();
+            heights = deployment.placedHeights();
+        } else if (panel instanceof MovementDisplay movement) {
+            entity = movement.currentEntity();
+            heights = movement.entryHeights();
+        } else {
             return HeightChoice.NONE;
         }
-        Entity entity = deployment.currentEntity();
-        List<Integer> heights = deployment.placedHeights();
         if (entity == null || heights.size() < 2) {
             return HeightChoice.NONE;
         }
         return new HeightChoice(entity.getId(), entity.isAero() ? entity.getAltitude() : entity.getElevation(),
-              heights, entity.isAero());
+              heights, GpuDeployHeight.Kind.of(entity));
     }
 
-    /** GL thread: deploys the placed unit {@code unitId} at {@code height} instead, if it is still the one placed. */
+    /**
+     * The modes the unit deploying now may start the game in (a LAM's, a QuadVee's), offered in the dock until it
+     * deploys, and so are those a walk-on unit may enter the map in until its first step: {@code labels} name
+     * {@code modes}, and {@code mode} is the one it starts in now.
+     */
+    record FormChoice(int unitId, List<Integer> modes, List<String> labels, int mode) {
+        static final FormChoice NONE = new FormChoice(Entity.NONE, List.of(), List.of(), 0);
+    }
+
+    private volatile FormChoice formChoice = FormChoice.NONE;
+
+    /** GL thread: the deploying or entering unit's starting mode choice, {@link FormChoice#NONE} while there is none. */
+    FormChoice formChoice() {
+        return formChoice;
+    }
+
+    private static FormChoice captureFormChoice(JComponent panel) {
+        Entity entity;
+        List<Integer> modes;
+        if (panel instanceof DeploymentDisplay deployment) {
+            entity = deployment.currentEntity();
+            modes = deployment.startingModes();
+        } else if (panel instanceof MovementDisplay movement) {
+            entity = movement.currentEntity();
+            modes = movement.entryModes();
+        } else {
+            return FormChoice.NONE;
+        }
+        if (entity == null || modes.size() < 2) {
+            return FormChoice.NONE;
+        }
+        List<String> labels = modes.stream().map(mode -> Messages.getString(formKey(entity, mode))).toList();
+        return new FormChoice(entity.getId(), modes, labels, entity.getConversionMode());
+    }
+
+    private static String formKey(Entity entity, int mode) {
+        if (entity instanceof LandAirMek) {
+            return mode == LandAirMek.CONV_MODE_FIGHTER ? "MovementDisplay.moveModeFighter"
+                  : mode == LandAirMek.CONV_MODE_AIR_MEK ? "MovementDisplay.moveModeAirMek"
+                  : "MovementDisplay.moveModeMek";
+        }
+        return mode == QuadVee.CONV_MODE_VEHICLE ? "MovementDisplay.moveModeVee" : "MovementDisplay.moveModeMek";
+    }
+
+    /**
+     * GL thread: starts the deploying unit {@code unitId} in conversion {@code mode} instead, if it still deploys, or
+     * has the walk-on unit enter in it, if it still may choose.
+     */
+    void setStartingMode(int unitId, int mode) {
+        SwingUtilities.invokeLater(() -> {
+            if (!acceptsInput()) {
+                return;
+            }
+            JComponent panel = phasePanel.get();
+            if (panel instanceof DeploymentDisplay deployment
+                  && deployment.currentEntity() != null && deployment.currentEntity().getId() == unitId) {
+                deployment.setStartingMode(mode);
+                reshape(deployment.currentEntity());
+            } else if (panel instanceof MovementDisplay movement
+                  && movement.currentEntity() != null && movement.currentEntity().getId() == unitId
+                  && movement.chooseEntryMode(mode)) {
+                reshape(movement.currentEntity());
+            }
+        });
+    }
+
+    /**
+     * Shows {@code entity} in the mode it starts in now: the tileset caches a unit's sprite (and so its meeple) and
+     * reloads it only for a conversion in movement, which a starting mode chosen locally is not.
+     */
+    private void reshape(Entity entity) {
+        view.getTilesetManager().reloadImage(entity);
+        refresh();
+    }
+
+    /**
+     * GL thread: deploys the placed unit {@code unitId} at {@code height} instead, if it is still the one placed, or
+     * has the walk-on unit enter at it, if it still may choose.
+     */
     void setPlacedHeight(int unitId, int height) {
         SwingUtilities.invokeLater(() -> {
-            if (acceptsInput() && phasePanel.get() instanceof DeploymentDisplay deployment
+            if (!acceptsInput()) {
+                return;
+            }
+            JComponent panel = phasePanel.get();
+            if (panel instanceof DeploymentDisplay deployment
                   && deployment.currentEntity() != null && deployment.currentEntity().getId() == unitId) {
                 deployment.setPlacedHeight(height);
+                refresh();
+            } else if (panel instanceof MovementDisplay movement
+                  && movement.currentEntity() != null && movement.currentEntity().getId() == unitId
+                  && movement.setEntryHeight(height)) {
+                refresh();
+            }
+        });
+    }
+
+    /** GL thread: turns the placed unit {@code unitId} one hexside, left for a negative step, if it is still placed. */
+    void turnPlaced(int unitId, int step) {
+        SwingUtilities.invokeLater(() -> {
+            if (!acceptsInput()) {
+                return;
+            }
+            JComponent panel = phasePanel.get();
+            if (panel instanceof DeploymentDisplay deployment
+                  && deployment.currentEntity() != null && deployment.currentEntity().getId() == unitId) {
+                deployment.turnPlaced(step);
+                refresh();
+            }
+        });
+    }
+
+    private volatile GpuDeploySetup.Choice setupChoice = GpuDeploySetup.Choice.NONE;
+
+    /**
+     * GL thread: the deploying unit's starting setup tiles, or a walk-on unit's while it sets up its entry;
+     * {@link GpuDeploySetup.Choice#NONE} while it has none.
+     */
+    GpuDeploySetup.Choice setupChoice() {
+        return setupChoice;
+    }
+
+    private GpuDeploySetup.Choice captureSetupChoice(JComponent panel) {
+        if (panel instanceof DeploymentDisplay deployment) {
+            return GpuDeploySetup.capture(view.game, deployment);
+        } else if (panel instanceof MovementDisplay movement) {
+            return GpuDeploySetup.capture(view.game, movement);
+        }
+        return GpuDeploySetup.Choice.NONE;
+    }
+
+    /**
+     * GL thread: sets the deploying unit {@code unitId}'s setup tile {@code tileId} to its state {@code index}, if the
+     * unit still deploys, or still sets up its walk-on entry, and has that choice.
+     */
+    void setSetup(int unitId, String tileId, int index) {
+        SwingUtilities.invokeLater(() -> {
+            if (!acceptsInput()) {
+                return;
+            }
+            JComponent panel = phasePanel.get();
+            if (panel instanceof DeploymentDisplay deployment && deployment.currentEntity() != null
+                  && deployment.currentEntity().getId() == unitId && deployment.currentSetup() != null) {
+                DeploymentSetup setup = GpuDeploySetup.choose(deployment.currentSetup(), deployment.setupOptions(),
+                      tileId, index);
+                if (setup != null) {
+                    deployment.setSetup(setup);
+                    refresh();
+                }
+            } else if (panel instanceof MovementDisplay movement && movement.currentEntity() != null
+                  && movement.currentEntity().getId() == unitId && movement.currentSetup() != null) {
+                DeploymentSetup setup = GpuDeploySetup.choose(movement.currentSetup(), movement.setupOptions(),
+                      tileId, index);
+                if (setup != null) {
+                    movement.setSetup(setup);
+                    refresh();
+                }
+            }
+        });
+    }
+
+    /**
+     * Where a walk-on unit is in its entry: {@code SETTING_UP} while its entry hex, facing, height, form and setup are
+     * free (step 1; {@code placed} once it is on its entry hex), {@code ENTERED} once it plans its move from there
+     * (step 2), {@code NONE} for any other unit.
+     */
+    enum EntryStage { NONE, SETTING_UP, ENTERED }
+
+    /** A walk-on unit's entry: its stage, and whether it is placed on its entry hex. */
+    record WalkOnEntry(int unitId, EntryStage stage, boolean placed) {
+        static final WalkOnEntry NONE = new WalkOnEntry(Entity.NONE, EntryStage.NONE, false);
+    }
+
+    private volatile WalkOnEntry walkOnEntry = WalkOnEntry.NONE;
+
+    /** GL thread: the selected walk-on unit's entry, {@link WalkOnEntry#NONE} for any other unit. */
+    WalkOnEntry walkOnEntry() {
+        return walkOnEntry;
+    }
+
+    private static WalkOnEntry captureWalkOnEntry(JComponent panel) {
+        if (!(panel instanceof MovementDisplay movement) || movement.currentEntity() == null) {
+            return WalkOnEntry.NONE;
+        }
+        Entity entity = movement.currentEntity();
+        if (movement.hasEntered()) {
+            return new WalkOnEntry(entity.getId(), EntryStage.ENTERED, true);
+        } else if (movement.isSettingUpEntry()) {
+            return new WalkOnEntry(entity.getId(), EntryStage.SETTING_UP,
+                  entity.isDeployed() && entity.getPosition() != null);
+        }
+        return WalkOnEntry.NONE;
+    }
+
+    /**
+     * GL thread: has the walk-on unit {@code unitId}, placed on its entry hex, enter, its setup settled, so the move is
+     * planned next; or ({@code enter} false) takes it back to setting up its entry.
+     */
+    void setEntered(int unitId, boolean enter) {
+        SwingUtilities.invokeLater(() -> {
+            if (acceptsInput() && phasePanel.get() instanceof MovementDisplay movement
+                  && movement.currentEntity() != null && movement.currentEntity().getId() == unitId
+                  && (enter ? movement.enter() : movement.reopenEntry())) {
                 refresh();
             }
         });
@@ -1329,6 +1538,24 @@ final class GpuBoardSource implements BoardSource {
         return -1;
     }
 
+    /**
+     * The walk MP the unit moves with in the hex {@code at}: under water, a UMU or SCUBA unit moves with its UMU MP
+     * (as MoveStep counts it), anywhere else with its walk MP.
+     */
+    static int walkMP(Entity entity, @Nullable Coords at, int boardId) {
+        EntityMovementMode mode = entity.getMovementMode();
+        boolean swims = mode.isUMUInfantry() || (mode == EntityMovementMode.BIPED_SWIM)
+              || (mode == EntityMovementMode.QUAD_SWIM) || (entity instanceof Infantry && mode.isSubmarine());
+        Game game = entity.getGame();
+        if (!swims || (at == null) || (game == null)) {
+            return entity.getWalkMP();
+        }
+        Hex hex = game.getHex(at, boardId);
+        boolean submerged = (hex != null) && (hex.terrainLevel(Terrains.WATER) > 0)
+              && (!mode.isUMUInfantry() || (entity.relHeight() < hex.getLevel()));
+        return submerged ? entity.getActiveUMUCount() : entity.getWalkMP();
+    }
+
     /** Copy the game's current capability once at the event boundary; the renderer never recalculates MP rules. */
     static int movementMP(Entity entity, EntityMovementType type) {
         if (entity instanceof Aero aero && aero.isAirborne()) {
@@ -1579,6 +1806,9 @@ final class GpuBoardSource implements BoardSource {
         JComponent panel = phasePanel.get();
         holdPlacedFacing(panel, units);
         heightChoice = captureHeightChoice(panel);
+        formChoice = captureFormChoice(panel);
+        setupChoice = captureSetupChoice(panel);
+        walkOnEntry = captureWalkOnEntry(panel);
         DeployPin pin = deployPin;
         BoardScene.Unit placing = previewHeld ? null
               : pin != null ? deploymentPreview(panel, pin.hex(), pin.facing(), usedImages)
@@ -1621,13 +1851,18 @@ final class GpuBoardSource implements BoardSource {
         GpuMovePlan.Snapshot move = moves.capture(panel, hover, pointer.pointedZ());
         Point light = view.getTerrainLightDirection();
         var rulerSnapshot = los.capture();
+        // MegaMek's own path steps stay hidden while the plan draws the route, and while a walk-on unit sets up its entry
+        // (its "+0 Deploy" step is no move yet, even for a landed Fighter LAM the planner leaves to MegaMek).
+        WalkOnEntry entry = walkOnEntry;
+        boolean ownSteps = GpuMovePlan.drawsRoute(move)
+              || entry.stage() == EntryStage.SETTING_UP && entry.unitId() == move.entityId();
         BoardScene scene = new BoardScene(view.getBoardId(), board.getWidth(), board.getHeight(), markedTiles(board, units), units,
               List.of(), actorId, view.game.getPhase().localizedName(), commands,
               light == null || light.x == 0 && light.y == 0 ? null : new BoardScene.Light(light.x, -light.y),
               firingLines(), view.getWeaponRanges().stream().map(range -> new BoardScene.RangeBorder(
                     range.coords(), range.borders(), TacticalStyle.rangeColor(range.bracket()).getRGB(),
                     TacticalStyle.rangeText(range.bracket()))).toList(),
-              view.getBoardMarkers(), tacticalMarks.capture(view, move.planner()).withRuler(rulerSnapshot.ruler()),
+              view.getBoardMarkers(), tacticalMarks.capture(view, ownSteps).withRuler(rulerSnapshot.ruler()),
               view.getRangeLabels().stream().map(label -> new BoardScene.RangeLabel(label.coords(),
                     TacticalStyle.rangeColor(label.bracket()).getRGB(),
                     TacticalStyle.rangeText(label.bracket()))).toList(), fieldOfView,

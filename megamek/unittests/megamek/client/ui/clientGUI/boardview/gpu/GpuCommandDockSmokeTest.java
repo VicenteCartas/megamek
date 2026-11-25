@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -37,6 +38,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
@@ -46,7 +48,6 @@ import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.gdx.UiButton;
-import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.OffBoardDirection;
@@ -212,10 +213,11 @@ class GpuCommandDockSmokeTest {
             show(hud, firingMore, weapons(2, true, true));
             hud.capture("g6-more-firing").dispose();
             // More in the dock's drawer.
-            Dock more = dock(hud, movement(atlasRoute(), ATLAS));
-            show(hud, more, movement(atlasRoute(), ATLAS));
+            Shot moreShot = enabling(movement(atlasRoute(), ATLAS), "moveHullDown");
+            Dock more = dock(hud, moreShot);
+            show(hud, more, moreShot);
             click(hud, more.find("dock-more"));
-            show(hud, more, movement(atlasRoute(), ATLAS));
+            show(hud, more, moreShot);
             hud.capture("g6-more-movement").dispose();
 
             // Shot 15 at 1280 x 720: the weapons dock at the narrow width.
@@ -248,12 +250,17 @@ class GpuCommandDockSmokeTest {
     @Test
     void buttonsRunTheCommandsOfTheirVariant() {
         GpuHudTestStage.run(hud -> {
-            // Movement plan: modes, turns, undo, confirm, hold and the waypoint reach the plan and the phase.
+            // Movement plan: modes, undo, confirm, hold and the waypoint reach the plan and the phase; the turns, in
+            // More, too.
             Shot plan = movement(atlasRoute(), ATLAS);
             Dock dock = dock(hud, plan);
             show(hud, dock, plan);
-            clickAndShow(hud, dock, plan, "dock-mode-walk", "dock-turn-left", "dock-undo", "dock-waypoint",
-                  "dock-main", "dock-secondary");
+            clickAndShow(hud, dock, plan, "dock-mode-walk", "dock-undo", "dock-waypoint", "dock-main",
+                  "dock-secondary");
+            click(hud, button(dock, "dock-more"));
+            show(hud, dock, plan);
+            click(hud, dock.drawer().findActor("dock-more-dock.turnLeft"));
+            show(hud, dock, plan);
             verify(moves).setMode(GpuMovePlan.Mode.WALK);
             verify(moves).turn(-1);
             verify(moves).undo();
@@ -291,24 +298,29 @@ class GpuCommandDockSmokeTest {
             clickAndShow(hud, dock, skipHidden, "dock-secondary");
             assertEquals(List.of(DONE), ran);
 
-            // A unit down stands first: Stand up leads the modes in Jump's place, runs MegaMek's Get Up and leaves
-            // More. Standing, Jump returns and Get Up waits among More's unavailable commands.
+            // A unit down stands first: the context slot, a tool as narrow as the turns, shows Stand up's glyph and
+            // caption and runs MegaMek's Get Up; the gaits keep their places, Jump disabled. Standing, the slot offers
+            // the stance (Prone) in its place and Get Up waits among More's unavailable commands.
             ran.clear();
             Shot down = withGetUp(movement(GpuMovePlan.Snapshot.EMPTY, ATLAS), true);
             show(hud, dock, down);
             hud.capture("g6-stand-up").dispose();
-            assertNotNull(dock.find("dock-stand-up"));
-            assertEquals("Prone", button(dock, "dock-stand-up").details.getFirst().getText().toString());
-            assertNull(dock.find("dock-mode-jump"));
+            Rectangle slot = GpuHudTestStage.bounds(button(dock, "dock-context"));
+            assertEquals("Stand up", button(dock, "dock-context").details.getFirst().getText().toString());
+            assertTrue(slot.width < GpuHudTestStage.bounds(button(dock, "dock-mode-walk")).width,
+                  "the context slot is narrower than a gait");
+            assertTrue(button(dock, "dock-mode-jump").isDisabled());
             assertNotNull(dock.find("dock-mode-walk"));
-            assertTrue(dock.dock().more().items().stream().noneMatch(command -> command.id().equals(GET_UP)));
-            clickAndShow(hud, dock, down, "dock-stand-up");
+            assertTrue(dock.dock().more() == null || Stream.concat(dock.dock().more().items().stream(),
+                  dock.dock().more().commands().stream()).noneMatch(command -> command.id().equals(GET_UP)));
+            clickAndShow(hud, dock, down, "dock-context");
             assertEquals(List.of(GET_UP), ran);
             Shot standing = withGetUp(movement(GpuMovePlan.Snapshot.EMPTY, ATLAS), false);
             show(hud, dock, standing);
-            assertNull(dock.find("dock-stand-up"));
-            assertNotNull(dock.find("dock-mode-jump"));
-            assertTrue(dock.dock().more().commands().stream().anyMatch(command -> command.id().equals(GET_UP)));
+            assertEquals("Prone", button(dock, "dock-context").details.getFirst().getText().toString());
+            assertEquals(slot, GpuHudTestStage.bounds(button(dock, "dock-context")), "the slot does not move");
+            // Get Up and Hull Down unavailable: More holds only the turns.
+            assertEquals(TURNS, usable(dock));
 
             // Weapons (H3, H7): the orders' count and the own units left to declare.
             ran.clear();
@@ -499,13 +511,187 @@ class GpuCommandDockSmokeTest {
             assertEquals(List.of("deployUnload", DONE), ran);
             GpuCommandDock.More more = dock.dock().more();
             assertNotNull(more, "Turning and removal stay in More");
-            assertTrue(more.commands().stream().map(BoardScene.Command::id).toList()
-                  .containsAll(List.of("deployTurn", "deployRemove")));
+            List<String> inMore = Stream.concat(more.items().stream(), more.commands().stream())
+                  .map(BoardScene.Command::id).toList();
+            assertTrue(inMore.containsAll(List.of("dock.turnLeft", "dock.turnRight", "deployRemove")), inMore.toString());
+            assertFalse(inMore.contains("deployTurn"), "MegaMek's click-to-face Turn gives way to Turn left and right");
             // A display whose Done also skips shows it once.
             Shot generic = withInfo(nonPlanner(), DONE, DONE);
             show(hud, dock, generic);
             assertNull(dock.find("dock-secondary"));
             assertEquals("MOVE", button(dock, "dock-main").getText().toString());
+        });
+    }
+
+    @Test
+    void deploymentSetupTilesShowTheStartingChoicesAndSetThem() {
+        GpuHudTestStage.run(hud -> {
+            hud.size(1920, 1080);
+            GpuDeploySetup.Tile stance = new GpuDeploySetup.Tile("stance", "Stance", List.of("Standing", "Prone"), 0, 0,
+                  GpuDeploySetup.Kind.PICK, 0, "How the unit starts out");
+            GpuDeploySetup.Tile sinks = new GpuDeploySetup.Tile("sinks", "Heat sinks",
+                  List.of("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"), 8, 10, GpuDeploySetup.Kind.STEP, 0,
+                  "Heat sinks switched on");
+            GpuDeploySetup.Tile capacitor = new GpuDeploySetup.Tile("equip-3", "PPC capacitor",
+                  List.of("Off", "Charge"), 1, 0, GpuDeploySetup.Kind.TOGGLE, 0, "Charged before the game");
+            GpuDeploySetup.Tile ecm = new GpuDeploySetup.Tile("equip-7", "Guardian ECM", List.of("ECM", "ECCM", "Off"),
+                  0, 0, GpuDeploySetup.Kind.PICK, 2, "The suite's mode");
+            GpuDeploySetup.Tile power = new GpuDeploySetup.Tile("power", "Power", List.of("On", "Shut down"), 0, 0,
+                  GpuDeploySetup.Kind.TOGGLE, 1, "Start the battle shut down");
+            GpuDeploySetup.Tile searchlight = new GpuDeploySetup.Tile("light", "Searchlight", List.of("Off", "On"), 0,
+                  0, GpuDeploySetup.Kind.TOGGLE, 0, "Lit from the start");
+            GpuDeploySetup.Choice setup = new GpuDeploySetup.Choice(ATLAS,
+                  List.of(stance, sinks, capacitor, ecm, power, searchlight), 2,
+                  List.of("PPC capacitor +5 heat each turn"), "2 CHANGES");
+            when(source.setupChoice()).thenReturn(setup);
+            try {
+                Shot deploy = deployment();
+                Dock dock = dock(hud, deploy);
+                show(hud, dock, deploy);
+                show(hud, dock, deploy);
+                hud.capture("g6-deploy-setup").dispose();
+                assertEquals(List.of("dock-setup-stance", "dock-setup-sinks", "dock-setup-equip-3",
+                      "dock-setup-equip-7", "dock-setup-power"), names(dock.root(), "dock-setup-"));
+                assertTrue(names(dock.root(), "dock-command-").isEmpty(), "the tiles take the command row");
+                click(hud, dock.find("dock-setup-equip-3"));
+                verify(source).setSetup(ATLAS, "equip-3", 0);
+                click(hud, dock.find("dock-setup-power"));
+                verify(source).setSetup(ATLAS, "power", 1);
+                GpuCommandDock.More more = dock.dock().more();
+                assertNotNull(more, "the searchlight and the deploy commands are in More");
+                assertEquals(List.of(searchlight), more.setup(), "More shows the overflow as setup tiles");
+                click(hud, dock.find("dock-setup-equip-7"));
+                show(hud, dock, deploy);
+                hud.capture("g6-deploy-setup-pick").dispose();
+
+                // More: the searchlight as a setup tile atop the panel, a click leaving the panel open.
+                click(hud, button(dock, "dock-more"));
+                show(hud, dock, deploy);
+                UiButton light = dock.drawer().findActor("dock-more-setup-light");
+                assertNotNull(light, "the overflow setup choice is a tile in More");
+                assertTrue(light.getWidth() >= 190, "More widens for setup tiles: " + light.getWidth());
+                hud.capture("g6-deploy-setup-more").dispose();
+                click(hud, light);
+                verify(source).setSetup(ATLAS, "light", 1);
+                assertTrue(dock.dock().drawer().isOpen(), "a setup tile leaves More open");
+                click(hud, dock.drawer().findActor("dock-more-close"));
+                show(hud, dock, deploy);
+
+                // The heat sinks: a slider above the tile, each whole count set as it is reached.
+                click(hud, dock.find("dock-setup-sinks"));
+                show(hud, dock, deploy);
+                Slider slider = hud.stage.getRoot().findActor("setup-sinks-slider");
+                assertNotNull(slider, "the heat sinks open a slider");
+                assertEquals(8, slider.getValue(), 0.001f);
+                assertEquals("8 / 10", ((Label) hud.stage.getRoot().findActor("setup-sinks-value")).getText()
+                      .toString());
+                hud.capture("g6-deploy-setup-sinks").dispose();
+                slider.setValue(5);
+                verify(source).setSetup(ATLAS, "sinks", 5);
+                assertEquals("5 / 10", ((Label) hud.stage.getRoot().findActor("setup-sinks-value")).getText()
+                      .toString());
+            } finally {
+                when(source.setupChoice()).thenReturn(null);
+            }
+        });
+    }
+
+    @Test
+    void aSetupTagNamesTheChangesInShortAndOpensUpwardUnderThePointer() {
+        GpuHudTestStage.run(hud -> {
+            hud.size(1920, 1080);
+            GpuDeploySetup.Tile masc = new GpuDeploySetup.Tile("equip-4", "MASC", List.of("Armed", "Off"), 1, 0,
+                  GpuDeploySetup.Kind.TOGGLE, 1, "");
+            GpuDeploySetup.Tile ecm = new GpuDeploySetup.Tile("equip-7", "ECM Suite (Guardian)", List.of("ECM", "Off"),
+                  1, 0, GpuDeploySetup.Kind.TOGGLE, 1, "");
+            GpuDeploySetup.Tile sinks = new GpuDeploySetup.Tile("sinks", "Heat sinks",
+                  List.of("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"), 8, 10, GpuDeploySetup.Kind.STEP, 0,
+                  "");
+            assertEquals("MASC Off", GpuDeploySetup.brief(List.of(masc)));
+            assertEquals("MASC Off \u00B7 8/10 sinks", GpuDeploySetup.brief(List.of(masc, sinks)));
+            assertEquals("MASC Off \u00B7 +2", GpuDeploySetup.brief(List.of(masc, ecm, sinks)),
+                  "what does not fit is counted");
+            List<GpuDeploySetup.Tile> tiles = List.of(masc, ecm, sinks);
+            GpuDeploySetup.Choice setup = new GpuDeploySetup.Choice(ATLAS, tiles, 3,
+                  List.of("2 heat sinks switched off"), GpuDeploySetup.brief(tiles));
+            GpuSetupTag tag = new GpuSetupTag(hud.kit.ui, "test-setup-tag", null);
+            hud.window.clearChildren();
+            hud.window.addActor(tag);
+            tag.show(setup);
+            tag.setVisible(true);
+            tag.setPosition(900, 500);
+            hud.stage.act(0);
+            assertFalse(tag.isOpen());
+            assertEquals("MASC OFF \u00B7 +2", ((Label) tag.findActor("test-setup-tag")).getText().toString());
+            hud.draw();
+            hud.capture("g6-setup-tag").dispose();
+            float collapsed = tag.getHeight();
+            float middle = tag.getX() + tag.getWidth() / 2;
+            Vector2 point = hud.stage.stageToScreenCoordinates(
+                  tag.localToStageCoordinates(new Vector2(tag.getWidth() / 2, 4)));
+            hud.stage.mouseMoved((int) point.x, (int) point.y);
+            hud.stage.act(0);
+            assertTrue(tag.isOpen(), "the pointer over the tag opens it");
+            assertEquals(collapsed, tag.collapsedHeight(), 0.5f);
+            assertTrue(tag.getHeight() > collapsed, "opened, it lists the changes");
+            assertEquals(500, tag.getY(), 0.5f, "it opens upward: its bottom keeps its place");
+            assertEquals(middle, tag.getX() + tag.getWidth() / 2, 1f, "and keeps its middle");
+            assertEquals("OFF", ((Label) tag.findActor("test-setup-tag-equip-4")).getText().toString());
+            assertEquals("8 / 10", ((Label) tag.findActor("test-setup-tag-sinks")).getText().toString());
+            hud.draw();
+            hud.capture("g6-setup-tag-open").dispose();
+            hud.stage.mouseMoved(1, 1);
+            hud.stage.act(0);
+            assertFalse(tag.isOpen(), "off the tag it closes");
+            assertEquals(collapsed, tag.getHeight(), 0.5f);
+        });
+    }
+
+    @Test
+    void aWalkOnUnitSetsUpItsEntryThenEntersAndCanGoBackToIt() {
+        GpuHudTestStage.run(hud -> {
+            hud.size(1920, 1080);
+            GpuDeploySetup.Tile sinks = new GpuDeploySetup.Tile("sinks", "Heat sinks",
+                  List.of("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"), 10, 10, GpuDeploySetup.Kind.STEP, 0,
+                  "Heat sinks switched on");
+            GpuDeploySetup.Tile power = new GpuDeploySetup.Tile("power", "Power", List.of("On", "Shut down"), 0, 0,
+                  GpuDeploySetup.Kind.TOGGLE, 1, "Start the battle shut down");
+            when(source.setupChoice()).thenReturn(new GpuDeploySetup.Choice(ATLAS, List.of(sinks, power), 0,
+                  List.of(), ""));
+            when(source.walkOnEntry()).thenReturn(
+                  new GpuBoardSource.WalkOnEntry(ATLAS, GpuBoardSource.EntryStage.SETTING_UP, true));
+            try {
+                Shot entry = movement(atlasRoute(), ATLAS);
+                Dock dock = dock(hud, entry);
+                show(hud, dock, entry);
+                show(hud, dock, entry);
+                hud.capture("g6-walk-on-entry").dispose();
+                assertEquals(Messages.getString("GpuBoard.hud.move.entry.enter").toUpperCase(),
+                      button(dock, "dock-main").getText().toString().toUpperCase());
+                assertEquals(List.of("dock-setup-sinks", "dock-setup-power"), names(dock.root(), "dock-setup-"));
+                assertNull(dock.find("dock-mode-back"), "nothing moves before the unit enters");
+                hud.assertLayout(dock.dock().actor(), neighbours(hud, dock));
+                click(hud, dock.find("dock-setup-power"));
+                verify(source).setSetup(ATLAS, "power", 1);
+                clickAndShow(hud, dock, entry, "dock-secondary");
+                verify(moves).clearOrWithdraw();
+                clickAndShow(hud, dock, entry, "dock-main");
+                verify(source).setEntered(ATLAS, true);
+
+                when(source.setupChoice()).thenReturn(null);
+                when(source.walkOnEntry()).thenReturn(
+                      new GpuBoardSource.WalkOnEntry(ATLAS, GpuBoardSource.EntryStage.ENTERED, true));
+                show(hud, dock, entry);
+                show(hud, dock, entry);
+                hud.capture("g6-walk-on-entered").dispose();
+                assertTrue(names(dock.root(), "dock-setup-").isEmpty(), "the plan replaces the setup");
+                assertNotNull(dock.find("dock-mode-back"));
+                click(hud, button(dock, "dock-entry-setup"));
+                verify(source).setEntered(ATLAS, false);
+            } finally {
+                when(source.setupChoice()).thenReturn(null);
+                when(source.walkOnEntry()).thenReturn(null);
+            }
         });
     }
 
@@ -586,7 +772,8 @@ class GpuCommandDockSmokeTest {
     @Test
     void moreOpensInTheDrawerWithOnlyUsableCommands() {
         GpuHudTestStage.run(hud -> {
-            Shot plan = movement(atlasRoute(), ATLAS);
+            // Go Prone, the first stance, is the dock's context slot; Hull Down, the second, waits in More.
+            Shot plan = enabling(movement(atlasRoute(), ATLAS), "moveHullDown");
             Dock dock = dock(hud, plan);
             show(hud, dock, plan);
             UiButton more = button(dock, "dock-more");
@@ -594,14 +781,16 @@ class GpuCommandDockSmokeTest {
             show(hud, dock, plan);
             Group drawer = dock.drawer();
             assertTrue(drawer.isVisible());
-            // The panel's movement controls and unit record no longer appear in More.
-            assertEquals(List.of("MORE MOVEMENT", "GO PRONE"), texts(drawer));
+            // The panel's movement controls, its context command and the unit record no longer appear in More.
+            assertEquals(List.of("MORE MOVEMENT", "TURN LEFT", "TURN RIGHT", "HULL DOWN"), texts(drawer));
             hud.capture("g6-more-drawer-movement").dispose();
-            click(hud, drawer.findActor("dock-more-moveGoProne"));
-            assertEquals(List.of("moveGoProne"), ran);
+            click(hud, drawer.findActor("dock-more-moveHullDown"));
+            assertEquals(List.of("moveHullDown"), ran);
             assertFalse(dock.dock().drawer().isOpen(), "choosing an item closes the drawer");
-            assertEquals(List.of("Hull Down"), dock.dock().more().commands().stream()
-                  .map(BoardScene.Command::label).toList());
+            // With every stance in the slot or More, the fixture's own Hull Down off leaves More only the turns.
+            Shot slotOnly = movement(atlasRoute(), ATLAS);
+            show(hud, dock, slotOnly);
+            assertEquals(TURNS, usable(dock));
             ran.clear();
 
             // Without an adjacent enemy, More closes the action row and lists the physical phase's own commands.
@@ -624,17 +813,17 @@ class GpuCommandDockSmokeTest {
             Dock dock = dock(hud, plan);
             show(hud, dock, plan);
             assertEquals("", label(dock, "dock-span"));
-            UiKit.Checkbox backwards = dock.find("dock-backwards");
-            assertFalse(backwards.isTicked());
+            UiButton backwards = button(dock, "dock-mode-back");
+            assertFalse(backwards.isChecked());
             click(hud, backwards);
             verify(moves).setMode(GpuMovePlan.Mode.BACK);
             Shot back = movement(explicit(GpuMovePlan.Mode.BACK, "Walk backwards"), ATLAS);
             show(hud, dock, back);
-            assertTrue(backwards.isTicked());
+            assertTrue(backwards.isChecked());
             click(hud, backwards);
             verify(moves, times(2)).setMode(GpuMovePlan.Mode.BACK);
             show(hud, dock, plan);
-            assertFalse(backwards.isTicked());
+            assertFalse(backwards.isChecked());
             verify(moves, times(2)).setMode(GpuMovePlan.Mode.BACK);
 
             Rectangle hold = GpuHudTestStage.bounds(button(dock, "dock-hold-all"));
@@ -650,7 +839,7 @@ class GpuCommandDockSmokeTest {
             Shot noBack = new Shot(plan.status(), plan.panels(), plan.commands().stream()
                   .filter(command -> !command.id().equals("moveBackUp")).toList());
             show(hud, dock, noBack);
-            assertNull(dock.find("dock-backwards"));
+            assertNull(dock.find("dock-mode-back"));
             assertEquals("", label(dock, "dock-span"));
 
             clickAndShow(hud, dock, plan, "dock-hold-all");
@@ -677,6 +866,171 @@ class GpuCommandDockSmokeTest {
             clickAndShow(hud, dock, plan, "dock-hold-all", "dock-confirm-yes");
             verify(moves).holdAll();
             assertNull(dock.find("dock-confirm"));
+        });
+    }
+
+    @Test
+    void vehiclesCruiseAndFlankAndVtolsStepTheirElevation() {
+        GpuHudTestStage.run(hud -> {
+            hud.size(1920, 1080);
+            // A tank: Cruise and Flank, no Jump (MegaMek still lists it, without jump MP), no elevation stepper.
+            List<BoardScene.Command> tankCommands = List.of(command("moveNext", "Next Unit", true),
+                  command("moveWalk", "Walk", true), command("moveJump", "Jump", false),
+                  command("moveBackUp", "Back Up", true), command("moveTurn", "Turn", true),
+                  command("moveRaiseElevation", "Go Up", false), command("moveLowerElevation", "Go Down", false),
+                  command("moveHullDown", "Hull Down", false), command(DONE, "Done", true),
+                  command(GpuBoardActions.CLEAR_ID, "Clear", true));
+            GpuMovePlan.Traits tankTraits = new GpuMovePlan.Traits(true, false, false, 0, false);
+            Shot tank = withPlan(movement(atlasRoute(), ATLAS), traits(atlasRoute(), tankTraits), tankCommands);
+            Dock dock = dock(hud, tank);
+            show(hud, dock, tank);
+            assertEquals("CRUISE", button(dock, "dock-mode-walk").getText().toString());
+            assertEquals("FLANK", button(dock, "dock-mode-run").getText().toString());
+            assertEquals("BACK UP", button(dock, "dock-mode-back").getText().toString());
+            assertNull(dock.find("dock-mode-jump"), "a tank without jump MP has no Jump gait");
+            assertNull(dock.find("dock-elevation"));
+            hud.assertLayout(dock.dock().actor(), neighbours(hud, dock));
+            hud.capture("g6-movement-tank").dispose();
+
+            // The tank walking on, before MegaMek's click on its entry hex: the plan's layout, its gaits and turns
+            // disabled until it enters, and the prompt in the span.
+            GpuMovePlan.Snapshot waiting = new GpuMovePlan.Snapshot(true, false, false, ATLAS,
+                  GpuMovePlan.Mode.OTHER, false, "", List.of(), List.of(), List.of(), null, 0, 0, 3,
+                  EntityMovementType.MOVE_NONE, "", false, 0, 0, true, List.of(), false, false, true, Map.of(),
+                  Set.of(), 0, false, false, new GpuMovePlan.Traits(true, false, false, 0, true));
+            Shot entering = withPlan(movement(atlasRoute(), ATLAS), waiting, tankCommands);
+            show(hud, dock, entering);
+            assertNotNull(dock.find("dock-mode-walk"), "the plan's layout before the unit enters");
+            assertTrue(button(dock, "dock-mode-walk").isDisabled());
+            assertFalse(turnUsable(dock), "no turn before the unit enters");
+            assertEquals(Messages.getString("GpuBoard.hud.dock.walkOnPick"), label(dock, "dock-span"));
+            hud.capture("g6-movement-walk-on").dispose();
+
+            // A VTOL: no Jump, the elevation stepper with its read-out, no context slot (Unjam isn't its situation),
+            // and Go up and Go down no longer in More.
+            List<BoardScene.Command> vtolCommands = List.of(command("moveNext", "Next Unit", true),
+                  command("moveWalk", "Walk", true), command("moveBackUp", "Back Up", true),
+                  command("moveTurn", "Turn", true), command("moveRaiseElevation", "Go Up", true),
+                  command("moveLowerElevation", "Go Down", false), command("moveUnjam", "Unjam", false),
+                  command("moveFlee", "Flee", true), command(DONE, "Done", true),
+                  command(GpuBoardActions.CLEAR_ID, "Clear", true));
+            GpuMovePlan.Traits vtolTraits = new GpuMovePlan.Traits(true, false, true, 3, false);
+            Shot vtol = withPlan(movement(atlasRoute(), ATLAS), traits(atlasRoute(), vtolTraits), vtolCommands);
+            dock = dock(hud, vtol);
+            show(hud, dock, vtol);
+            assertNull(dock.find("dock-mode-jump"));
+            assertNull(dock.find("dock-context"));
+            assertEquals("3", label(dock, "dock-elevation-value"));
+            assertFalse(button(dock, "dock-go-up").isDisabled());
+            assertTrue(button(dock, "dock-go-down").isDisabled());
+            hud.assertLayout(dock.dock().actor(), neighbours(hud, dock));
+            hud.capture("g6-movement-vtol").dispose();
+            click(hud, button(dock, "dock-go-up"));
+            assertEquals(List.of("moveRaiseElevation"), ran);
+            ran.clear();
+            click(hud, button(dock, "dock-more"));
+            show(hud, dock, vtol);
+            assertEquals(List.of("MORE MOVEMENT", "TURN LEFT", "TURN RIGHT", "FLEE"), texts(dock.drawer()));
+        });
+    }
+
+    @Test
+    void aerospaceFliesByVelocityThrustTurnsAndAltitude() {
+        GpuHudTestStage.run(hud -> {
+            hud.size(1920, 1080);
+            // An airborne fighter (TW aerospace movement): MegaMek plots its path, the dock sets its velocity, turns
+            // and altitude; Accelerate, Decelerate, Turn and the altitude steps are not in More.
+            List<BoardScene.Command> aeroCommands = List.of(command("moveNext", "Next Unit", true),
+                  command("moveTurn", "Turn", true), command("MoveAccelerate", "Accelerate", true),
+                  command("MoveDecelerate", "Decelerate", false), command("MoveAccNext", "Accelerate next", true),
+                  command("moveRaiseElevation", "Go Up", true), command("moveLowerElevation", "Go Down", true),
+                  command("MoveEvadeAero", "Evade", true), command(DONE, "Move", true),
+                  command(GpuBoardActions.CLEAR_ID, "Clear", true));
+            GpuMovePlan.Traits flying = new GpuMovePlan.Traits(false, false, true, 5, false,
+                  new GpuMovePlan.Flight(3, 4, 4, 1, 5, 8, 40));
+            GpuMovePlan.Snapshot flight = new GpuMovePlan.Snapshot(true, false, false, ATLAS,
+                  GpuMovePlan.Mode.OTHER, false, "", List.of(), List.of(), List.of(), null, 2, 1, 5,
+                  EntityMovementType.MOVE_NONE, "", false, 0, 0, true, List.of(), true, false, true, Map.of(),
+                  Set.of(), 0, true, false, flying);
+            Shot aero = withPlan(movement(atlasRoute(), ATLAS), flight, aeroCommands);
+            Dock dock = dock(hud, aero);
+            show(hud, dock, aero);
+            assertNull(dock.find("dock-mode-walk"), "a flight has no gaits");
+            assertEquals("3\u21924", label(dock, "dock-velocity-value"));
+            assertFalse(button(dock, "dock-accelerate").isDisabled());
+            assertTrue(button(dock, "dock-decelerate").isDisabled());
+            assertTrue(turnUsable(dock), "MegaMek's Turn, in More");
+            assertEquals("5", label(dock, "dock-elevation-value"));
+            assertFalse(button(dock, "dock-undo").isDisabled());
+            assertFalse(button(dock, "dock-main").isDisabled());
+            assertEquals(Messages.getString("GpuBoard.hud.dock.flightCost", 1, 5), label(dock, "dock-foot-bold"));
+            assertEquals(Messages.getString("GpuBoard.hud.dock.flightToGo", 40), label(dock, "dock-span"));
+            hud.assertLayout(dock.dock().actor(), neighbours(hud, dock));
+            hud.capture("g6-movement-flight").dispose();
+            for (int[] size : new int[][] { { 1280, 720 }, { 1600, 900 }, { 1920, 1080 } }) {
+                hud.size(size[0], size[1]);
+                show(hud, dock, aero);
+                for (String name : List.of("dock-accelerate", "dock-decelerate")) {
+                    Label caption = button(dock, name).getLabel();
+                    assertTrue(caption.getPrefWidth() <= caption.getWidth() + .5f,
+                          name + " fits its caption at " + size[0] + "x" + size[1] + ": " + caption.getPrefWidth()
+                                + " in " + caption.getWidth() + ", dock " + dock.root().getWidth());
+                }
+            }
+            hud.size(1920, 1080);
+            show(hud, dock, aero);
+            click(hud, button(dock, "dock-accelerate"));
+            assertEquals(List.of("MoveAccelerate"), ran);
+            ran.clear();
+            click(hud, button(dock, "dock-main"));
+            assertEquals(List.of(DONE), ran);
+            ran.clear();
+            click(hud, button(dock, "dock-more"));
+            show(hud, dock, aero);
+            assertEquals(List.of("MORE MOVEMENT", "TURN LEFT", "TURN RIGHT", "ACCELERATE NEXT", "EVADE"),
+                  texts(dock.drawer()));
+        });
+    }
+
+    /** The plan with {@code traits}: the unit's kind, gaits and elevation. */
+    private static GpuMovePlan.Snapshot traits(GpuMovePlan.Snapshot p, GpuMovePlan.Traits traits) {
+        return new GpuMovePlan.Snapshot(p.active(), p.planner(), p.external(), p.entityId(), p.mode(), p.explicit(),
+              p.gearLabel(), p.route(), p.hover(), p.pins(), p.destination(), p.facing(), p.cost(), p.budget(),
+              p.type(), p.typeLabel(), p.auto(), p.heat(), p.tmm(), p.legal(), p.warnings(), p.canUndo(), p.canPin(),
+              p.facingMatters(), p.envelope(), p.mounts(), p.holdingRemaining(), p.cancellable(), p.walkedOn(),
+              traits);
+    }
+
+    /** The shot with another plan and commands. */
+    private Shot withPlan(Shot shot, GpuMovePlan.Snapshot move, List<BoardScene.Command> commands) {
+        return new Shot(shot.status(), panels(info(), move, GpuFireOrders.Snapshot.EMPTY,
+              GpuPhysicalOptions.Snapshot.EMPTY), commands);
+    }
+
+    @Test
+    void heldCommandsSayWhyInTheWaitingBoxInsteadOfAnEmptyDock() {
+        GpuHudTestStage.run(hud -> {
+            hud.size(1920, 1080);
+            Shot plan = movement(atlasRoute(), ATLAS);
+            Dock dock = dock(hud, plan);
+            show(hud, dock, plan);
+            float height = GpuHudTestStage.bounds(dock.root()).height;
+            dock.state().clearSelection();
+            show(hud, dock, plan);
+            assertNotNull(dock.find("dock-waiting"), "a cleared selection keeps the waiting box");
+            assertNull(dock.find("dock-main"));
+            assertEquals(List.of("YOUR TURN", "SELECT A UNIT TO GIVE ORDERS"),
+                  List.of(label(dock, "dock-title"), label(dock, "dock-waiting-text")));
+            assertTrue(GpuHudTestStage.bounds(dock.root()).height > height / 2, "the dock keeps its frame filled");
+            hud.capture("g6-status-cleared").dispose();
+
+            dock.state().restoreSelection();
+            dock.state().overview = true;
+            show(hud, dock, plan);
+            assertEquals("CLOSE THE OVERVIEW TO GIVE ORDERS", label(dock, "dock-waiting-text"));
+            dock.state().overview = false;
+            show(hud, dock, plan);
+            assertNotNull(dock.find("dock-main"), "the plan returns with the board");
         });
     }
 
@@ -1279,6 +1633,15 @@ class GpuCommandDockSmokeTest {
               command(GpuBoardActions.CLEAR_ID, "Clear", true));
     }
 
+    /** The shot with the given commands of its own enabled. */
+    private static Shot enabling(Shot shot, String... ids) {
+        List<String> on = List.of(ids);
+        return new Shot(shot.status(), shot.panels(), shot.commands().stream().map(command -> on.contains(command.id())
+              ? new BoardScene.Command(command.id(), command.label(), command.detail(), true, command.commit(),
+              command.boardTool(), command.children(), command.action(), command.shortcut(), command.selected(),
+              command.unitAction()) : command).toList());
+    }
+
     /**
      * The shot with MegaMek's Get Up, available while the unit, or its plan's end, is down; the Atlas's board label
      * then says it is prone.
@@ -1504,7 +1867,7 @@ class GpuCommandDockSmokeTest {
     }
 
     /** The names under {@code actor} that start with {@code prefix}, in their order. */
-    private static List<String> names(Actor actor, String prefix) {
+   private static List<String> names(Actor actor, String prefix) {
         List<String> names = new ArrayList<>();
         if (actor.getName() != null && actor.getName().startsWith(prefix)) {
             names.add(actor.getName());
@@ -1519,6 +1882,22 @@ class GpuCommandDockSmokeTest {
      * The texts of the visible, non-empty labels under {@code actor}, button captions and details included, top to
      * bottom: a table's in its cells' order (an open popover re-adds a header it hid at the end of its children).
      */
+    private static final List<String> TURNS = List.of("dock.turnLeft", "dock.turnRight");
+
+    /** The ids of More's usable entries. */
+    private static List<String> usable(Dock dock) {
+        GpuCommandDock.More more = dock.dock().more();
+        return more == null ? List.of() : Stream.concat(more.items().stream(), more.commands().stream())
+              .filter(BoardScene.Command::enabled).map(BoardScene.Command::id).toList();
+    }
+
+    /** Whether More's Turn left is there and usable. */
+    private static boolean turnUsable(Dock dock) {
+        GpuCommandDock.More more = dock.dock().more();
+        return more != null && more.items().stream().anyMatch(item -> item.id().equals("dock.turnLeft")
+              && item.enabled());
+    }
+
     private static List<String> texts(Actor actor) {
         if (actor == null || !actor.isVisible()) {
             return List.of();

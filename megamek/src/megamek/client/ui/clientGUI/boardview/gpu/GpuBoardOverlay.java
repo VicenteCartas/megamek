@@ -796,7 +796,7 @@ final class GpuBoardOverlay implements Disposable {
         Map<Integer, BoardScene.Unit> shown = new HashMap<>();
         scene.units().forEach(unit -> shown.putIfAbsent(unit.id(), unit));
         BoardScene.Unit moving = shown.get(move.entityId());
-        if (move.active() && move.planner() && moving != null) {
+        if (GpuMovePlan.drawsRoute(move) && moving != null) {
             sink.material(material(true));
             route(sink, markers, moving);
             sink.material(material(tactical));

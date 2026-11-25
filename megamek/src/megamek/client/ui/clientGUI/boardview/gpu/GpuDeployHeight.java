@@ -6,10 +6,14 @@ import static megamek.client.ui.gdx.UiKit.text;
 import java.util.List;
 
 import com.badlogic.gdx.math.MathUtils;
+import megamek.common.units.Entity;
+import megamek.common.units.EntityMovementMode;
 
 /**
- * The height a placed unit deploys at (an aerospace unit's altitude, a VTOL's elevation), shared by the dock's stepper
- * and the shortcut over the unit, so both show the height asked for last until MegaMek's placed unit takes it.
+ * The height a placed unit deploys at (an aerospace unit's altitude, a VTOL's elevation), or a walk-on unit enters at
+ * while it sets up its entry, shared by the dock's stepper and the one over the unit, so all show the height asked for
+ * last until MegaMek's placed unit takes it. Deployment and walk-on entry offer the same heights
+ * ({@code DeploymentHelper.placementHeights}) and name them alike.
  */
 final class GpuDeployHeight {
     /** How long a height asked for shows before MegaMek's placed unit takes it. */
@@ -41,13 +45,55 @@ final class GpuDeployHeight {
         return waiting ? asked : choice.height();
     }
 
-    /** "Alt 3", "Landed" or "Elev 2", as the stepper names the shown height. */
+    /** "Alt 3", "Landed", "Elev 2" or "Depth 1", as the stepper names the shown height. */
     String label(GpuBoardSource.HeightChoice choice) {
-        int shown = shown(choice);
-        return choice.altitude() ? (shown == 0 ? text("GpuBoard.hud.deploy.landed")
-              : text("GpuBoard.hud.deploy.altitude", shown)) : text("GpuBoard.hud.deploy.elevation", shown);
+        return label(choice.kind(), shown(choice));
     }
 
+    /** What a unit's height measures, which names it. */
+    enum Kind {
+        /** A ground unit's elevation. */
+        ELEVATION,
+        /** A VTOL's or WiGE's elevation, 0 when landed. */
+        LIFT,
+        /** An aerospace unit's altitude, 0 when landed. */
+        ALTITUDE,
+        /** A submarine's or UMU unit's elevation, named as its depth under the surface. */
+        DEPTH;
+
+        /** The kind of {@code entity}'s height: an altitude, a diving unit's depth, a flier's lift, else an elevation. */
+        static Kind of(Entity entity) {
+            EntityMovementMode mode = entity.getMovementMode();
+            return entity.isAero() ? ALTITUDE : mode.isSubmarine() || mode.isUMUInfantry() ? DEPTH
+                  : mode.isVTOLOrWiGE() ? LIFT : ELEVATION;
+        }
+
+        /** The kind of a planned unit's height, as the movement plan sees it. */
+        static Kind of(GpuMovePlan.Traits traits) {
+            return traits.altitude() ? ALTITUDE : traits.dives() ? DEPTH : traits.elevates() ? LIFT : ELEVATION;
+        }
+    }
+
+    /** Whether a unit of {@code kind} at {@code height} is landed: an aerospace unit's or a flier's height 0. */
+    static boolean landed(Kind kind, int height) {
+        return height == 0 && (kind == Kind.ALTITUDE || kind == Kind.LIFT);
+    }
+
+    /**
+     * How a stepper names a height, in deployment and in movement alike: "Landed" ({@link #landed}), an altitude
+     * ("Alt 3"), a depth ("Depth 1" for elevation -1) or an elevation ("Elev 2"). {@code height} is the unit's raw
+     * elevation or altitude.
+     */
+    static String label(Kind kind, int height) {
+        if (landed(kind, height)) {
+            return text("GpuBoard.hud.deploy.landed");
+        }
+        return switch (kind) {
+            case ALTITUDE -> text("GpuBoard.hud.deploy.altitude", height);
+            case DEPTH -> text("GpuBoard.hud.move.depth", Math.max(0, -height));
+            case ELEVATION, LIFT -> text("GpuBoard.hud.deploy.elevation", height);
+        };
+    }
     /**
      * Steps {@code unitId}'s height {@code step} up (1) or down (-1); {@code wrap} goes from the highest back to the
      * lowest, as a click on the height itself does.

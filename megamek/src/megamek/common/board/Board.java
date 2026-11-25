@@ -57,8 +57,10 @@ import megamek.common.Player;
 import megamek.common.SpecialHexDisplay;
 import megamek.common.enums.BasementType;
 import megamek.common.equipment.FuelTank;
+import megamek.common.equipment.GunEmplacement;
 import megamek.common.event.board.BoardEvent;
 import megamek.common.event.board.BoardListener;
+import megamek.common.game.Game;
 import megamek.common.hexArea.HexArea;
 import megamek.common.loaders.MapSettings;
 import megamek.common.units.AbstractBuildingEntity;
@@ -100,6 +102,9 @@ public class Board implements Serializable {
     public static final int START_CENTER = 10;
     public static final int NUM_ZONES = 11;
     public static final int NUM_ZONES_X2 = 22;
+
+    /** Core Rules p.141: how far an emplacement Asset must be placed from an enemy deployment zone or home edge */
+    private static final int EMPLACEMENT_ASSET_DISTANCE = 7;
 
     // Board Dimensions
     // Used for things like artillery rules that reference the standard map sheet dimensions
@@ -1062,6 +1067,9 @@ public class Board implements Serializable {
         if (e == null) {
             return false;
         }
+        if ((e instanceof GunEmplacement) && Game.rulesManager.getRulesGame().deploysEmplacementsAsAssets()) {
+            return isLegalEmplacementAssetDeployment(c, e);
+        }
         int startingWidth = e.getStartingWidth();
         // For Walk On Deployment, we need to restrict the deployment width if it not the deployment phase.
         if (!(e.getGame().getPhase().isDeployment())) {
@@ -1096,6 +1104,34 @@ public class Board implements Serializable {
                                  e.getStartingAnyNWy(),
                                  e.getStartingAnySEx(),
                                  e.getStartingAnySEy());
+    }
+
+    /**
+     * Core Rules p.141: an emplacement Asset may be placed anywhere 7 or more hexes outside every enemy's deployment
+     * zone, whatever its own zone. An enemy that walks on has no deployment zone, so the distance counts from its home
+     * edge instead.
+     */
+    private boolean isLegalEmplacementAssetDeployment(Coords c, Entity e) {
+        if ((c == null) || !contains(c)) {
+            return false;
+        }
+        for (Player enemy : e.getGame().getPlayersList()) {
+            if (enemy.isObserver() || !enemy.isEnemyOf(e.getOwner())) {
+                continue;
+            }
+            int zone = enemy.getStartingPos();
+            boolean walksOn = Game.rulesManager.getRulesGame().restrictDeploymentWidth(enemy, zone);
+            for (Coords near : c.allLessThanDistance(EMPLACEMENT_ASSET_DISTANCE)) {
+                boolean inEnemyArea = walksOn
+                      ? isLegalDeployment(near, zone, enemy.getStartOffset() + 1, 0, Entity.STARTING_ANY_NONE,
+                            Entity.STARTING_ANY_NONE, Entity.STARTING_ANY_NONE, Entity.STARTING_ANY_NONE)
+                      : isLegalDeployment(near, enemy);
+                if (inEnemyArea) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     /**

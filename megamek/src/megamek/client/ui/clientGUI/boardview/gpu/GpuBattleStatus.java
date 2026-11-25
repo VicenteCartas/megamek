@@ -33,6 +33,7 @@ import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeECM;
 import megamek.common.enums.GamePhase;
+import megamek.common.equipment.GunEmplacement;
 import megamek.common.equipment.IArmorState;
 import megamek.common.force.Force;
 import megamek.common.game.Game;
@@ -58,11 +59,13 @@ final class GpuBattleStatus {
      * round (GpuReportLog.displayRound), and {@code turns} is the game's turn list in order. {@code initiative}
      * lists the sides of this round's initiative roll; {@code turnOrderHidden} is true under double blind, where the
      * server does not report the turn order either. {@code incoming} groups the other players' units still to walk
-     * on, by edge and side; empty under double blind.
+     * on, by edge and side; empty under double blind. {@code emplacementsOnly} is true in a deployment phase whose
+     * every unit to place is an emplacement, all the others walking on: under walk-on deployment the step before play
+     * where only emplacements are placed (Core p. 224).
      */
     record Snapshot(int round, GamePhase phase, boolean myTurn, int localPlayerId, int actorId, List<Slot> turns,
           int turnIndex, List<UnitStatus> units, List<InitiativeSide> initiative, boolean turnOrderHidden,
-          List<Link> links, Arc arc, List<Incoming> incoming) {
+          List<Link> links, Arc arc, List<Incoming> incoming, boolean emplacementsOnly) {
         static final Snapshot EMPTY = new Snapshot(0, GamePhase.UNKNOWN, false, Player.PLAYER_NONE, Entity.NONE,
               List.of(), -1, List.of(), List.of(), false);
 
@@ -79,6 +82,14 @@ final class GpuBattleStatus {
               int turnIndex, List<UnitStatus> units, List<InitiativeSide> initiative, boolean turnOrderHidden) {
             this(round, phase, myTurn, localPlayerId, actorId, turns, turnIndex, units, initiative, turnOrderHidden,
                   List.of(), Arc.NONE, List.of());
+        }
+
+        /** A status whose deployment places more than emplacements, as HUD tests build it. */
+        Snapshot(int round, GamePhase phase, boolean myTurn, int localPlayerId, int actorId, List<Slot> turns,
+              int turnIndex, List<UnitStatus> units, List<InitiativeSide> initiative, boolean turnOrderHidden,
+              List<Link> links, Arc arc, List<Incoming> incoming) {
+            this(round, phase, myTurn, localPlayerId, actorId, turns, turnIndex, units, initiative, turnOrderHidden,
+                  links, arc, incoming, false);
         }
     }
 
@@ -137,12 +148,13 @@ final class GpuBattleStatus {
     enum Side { OWN, ALLY, ENEMY }
 
     /**
-     * Why an own unit still to deploy this round cannot deploy in the local player's next turn: aerospace units have
-     * turns of their own after every ground turn ({@code AFTER_GROUND}), infantry and ProtoMeks moving later wait for
-     * the player's other units ({@code AFTER_OTHERS}), any other unit for another turn ({@code LATER}). {@code NONE}:
-     * it can, or the question does not arise.
+     * Why an own unit still to deploy or move this phase cannot act in the local player's next turn: aerospace units
+     * have turns of their own after every ground turn ({@code AFTER_GROUND}), infantry and ProtoMeks moving later wait
+     * for the player's other units ({@code AFTER_OTHERS}), any other unit for another turn ({@code LATER}). A unit
+     * aboard a carrier ({@code CARRIED}) deploys, walks on and moves with it, never on its own.
+     * {@code NONE}: it can, or the question does not arise.
      */
-    enum Wait { NONE, AFTER_GROUND, AFTER_OTHERS, LATER }
+    enum Wait { NONE, AFTER_GROUND, AFTER_OTHERS, LATER, CARRIED }
 
     /**
      * One listed unit as the Swing client shows it. {@code name} is the client's unique short name, {@code chassis}
@@ -168,8 +180,9 @@ final class GpuBattleStatus {
      * has no status words or tiles and its marks are {@link Marks#NONE}. {@code walkOnZone} is the zone of the edge the
      * unit walks on from under walk-on deployment ({@code Board.START_NONE} for a unit that deploys or stands on the
      * board) and {@code walkOnRound} the round in whose movement phase it enters. {@code deployWait} is why an own unit to
-     * deploy waits for a later turn of the deployment phase ({@link Wait}).
-     */
+          * deploy or move waits for a later turn of the deployment or movement phase ({@link Wait}). {@code turns} is
+          * whether its facing means anything ({@code GpuMovePlan.facingMatters}); deployment offers no turning otherwise.
+          */
     record UnitStatus(int id, Side side, boolean sensorContact, String name, String chassis, String model,
           double tons, String weightClass, String formation, String pilot, int gunnery, int piloting, double armor,
           double structure, int heat, int heatRgb, String heatCapacity, int walk, String run, int jump, String moved,
@@ -177,11 +190,28 @@ final class GpuBattleStatus {
           boolean destroyed, int damageLevel, List<String> destroyedLocations, String heatEffects, Coords position,
           int boardId, BoardScene.Pixels icon, List<UnitStatusWords.StatusWord> statusWords, int weightClassIndex,
           int declaredAttacks, int ownerId, List<UnitStatusWords.StatusWord> statusTiles, String label, Marks marks,
-          int twist, int moveRgb, boolean tmmShown, int walkOnZone, int walkOnRound, Wait deployWait) {
+          int twist, int moveRgb, boolean tmmShown, int walkOnZone, int walkOnRound, Wait deployWait, boolean turns) {
         UnitStatus {
             destroyedLocations = List.copyOf(destroyedLocations);
             statusWords = List.copyOf(statusWords);
             statusTiles = List.copyOf(statusTiles);
+        }
+
+        /** A unit whose facing means something, as the HUD tests build it. */
+        UnitStatus(int id, Side side, boolean sensorContact, String name, String chassis, String model,
+              double tons, String weightClass, String formation, String pilot, int gunnery, int piloting, double armor,
+              double structure, int heat, int heatRgb, String heatCapacity, int walk, String run, int jump,
+              String moved, int mpUsed, int hexesMoved, int facing, int tmm, boolean canActNow, boolean pending,
+              boolean done, boolean destroyed, int damageLevel, List<String> destroyedLocations, String heatEffects,
+              Coords position, int boardId, BoardScene.Pixels icon, List<UnitStatusWords.StatusWord> statusWords,
+              int weightClassIndex, int declaredAttacks, int ownerId, List<UnitStatusWords.StatusWord> statusTiles,
+              String label, Marks marks, int twist, int moveRgb, boolean tmmShown, int walkOnZone, int walkOnRound,
+              Wait deployWait) {
+            this(id, side, sensorContact, name, chassis, model, tons, weightClass, formation, pilot, gunnery,
+                  piloting, armor, structure, heat, heatRgb, heatCapacity, walk, run, jump, moved, mpUsed, hexesMoved,
+                  facing, tmm, canActNow, pending, done, destroyed, damageLevel, destroyedLocations, heatEffects,
+                  position, boardId, icon, statusWords, weightClassIndex, declaredAttacks, ownerId, statusTiles,
+                  label, marks, twist, moveRgb, tmmShown, walkOnZone, walkOnRound, deployWait, true);
         }
 
         /** A unit that does not walk on, as the HUD tests that do not deploy build it. */
@@ -299,8 +329,10 @@ final class GpuBattleStatus {
               : Entity.NONE;
         boolean turnTakesWalkOn = firstDeployable != Entity.NONE
               && game.walksOnInsteadOfDeploying(game.getEntity(firstDeployable));
-        // The local player's current or next deployment turn: a unit it does not take waits, whoever's turn it is now.
-        GameTurn nextLocal = !game.getPhase().isDeployment() ? null
+        // The local player's current or next deployment or movement turn: a unit it does not take waits, whoever's turn
+        // it is now (aerospace units also move only after every ground unit).
+        boolean deploying = game.getPhase().isDeployment();
+        GameTurn nextLocal = !deploying && !game.getPhase().isMovement() ? null
               : remaining.stream().filter(turn -> turn.isValid(localId, game)).findFirst().orElse(null);
         List<UnitStatus> units = new ArrayList<>();
         for (Entity entity : listed) {
@@ -317,13 +349,16 @@ final class GpuBattleStatus {
             boolean pending = remaining.stream().anyMatch(turn -> turn.isValidEntity(entity, game)
                   || turn.isValidEntity(entity, game, false));
             boolean canActNow = activeTurn != null && activeTurn.isValidEntity(entity, game);
-            boolean walksOn = game.walksOnInsteadOfDeploying(entity);
+            boolean carried = entity.getTransportId() != Entity.NONE;
+            boolean walksOn = !carried && game.walksOnInsteadOfDeploying(entity);
             if (walksOn) {
                 canActNow &= turnTakesWalkOn;
                 pending = canActNow;
             }
-            Wait wait = side != Side.OWN || walksOn || !pending || entity.getPosition() != null || nextLocal == null
-                  || nextLocal.isValidEntity(entity, game) ? Wait.NONE : waitOf(entity);
+            Wait wait = side == Side.OWN && carried ? Wait.CARRIED
+                  : side != Side.OWN || walksOn || !pending || (deploying && entity.getPosition() != null)
+                  || nextLocal == null || nextLocal.isValidEntity(entity, game) ? Wait.NONE
+                  : waitOf(entity, nextLocal);
             // The local player's view adds the scan and recon camera words (upstream), as the board labels show them.
             List<UnitStatusWords.StatusWord> words = UnitStatusWords.statusWords(entity,
                   ComputeECM.isAffectedByECM(entity, entity.getPosition(), entity.getPosition(), ecm),
@@ -337,7 +372,7 @@ final class GpuBattleStatus {
         Snapshot next = new Snapshot(GpuReportLog.displayRound(game.getRoundCount(), game.getReports(0)),
               game.getPhase(), activeTurn != null, localId, actorId, slots, turnIndex, units, initiative(game, local),
               doubleBlind, links(game, units), snapshot.arc(),
-              doubleBlind ? List.of() : incoming(game, localId, local));
+              doubleBlind ? List.of() : incoming(game, localId, local), deploying && emplacementsOnly(game));
         if (!next.equals(snapshot)) {
             snapshot = next;
         }
@@ -360,9 +395,28 @@ final class GpuBattleStatus {
         if (!arc.equals(snapshot.arc())) {
             snapshot = new Snapshot(snapshot.round(), snapshot.phase(), snapshot.myTurn(), snapshot.localPlayerId(),
                   snapshot.actorId(), snapshot.turns(), snapshot.turnIndex(), snapshot.units(), snapshot.initiative(),
-                  snapshot.turnOrderHidden(), snapshot.links(), arc, snapshot.incoming());
+                  snapshot.turnOrderHidden(), snapshot.links(), arc, snapshot.incoming(), snapshot.emplacementsOnly());
         }
         return snapshot;
+    }
+
+    /**
+     * Whether every unit this deployment phase places is an emplacement: at least one is, and each other unit due
+     * this round walks on or rides aboard a carrier.
+     */
+    private static boolean emplacementsOnly(Game game) {
+        boolean any = false;
+        for (Entity entity : game.getEntitiesVector()) {
+            if (entity.isDeployed() || entity.getDeployRound() > game.getRoundCount()
+                  || entity.getTransportId() != Entity.NONE || game.walksOnInsteadOfDeploying(entity)) {
+                continue;
+            }
+            if (!(entity instanceof GunEmplacement)) {
+                return false;
+            }
+            any = true;
+        }
+        return any;
     }
 
     /** The side of {@code target} each hex within {@link Arc#REACH} of it attacks, on its board. */
@@ -605,7 +659,7 @@ final class GpuBattleStatus {
               entity.getInternalRemainingPercent(), entity.heat,
               tracksHeat ? GUIPreferences.getInstance().getColorForHeat(entity.heat).getRGB() : 0,
               tracksHeat ? UnitToolTip.getHeatCapacityForDisplay(entity).heatCapacityStr : "", entity.getWalkMP(),
-              entity.getRunMPasString(), entity.getJumpMPWithTerrain(),
+              entity.getRunMPasString(false), entity.getJumpMPWithTerrain(),
               entity.moved == EntityMovementType.MOVE_NONE ? "" : entity.getMovementString(entity.moved),
               entity.mpUsed, entity.delta_distance, entity.getFacing(),
               Compute.getTargetMovementModifier(game, entity.getId()).getValue(), canActNow, pending,
@@ -616,17 +670,23 @@ final class GpuBattleStatus {
               UnitAnnotations.twistFacing(entity),
               GUIPreferences.getInstance().getColorForMovement(entity.moved).getRGB(),
               UnitAnnotations.tmmShown(entity, game.getPhase()),
-              walkOnZone(entity), Math.max(Math.max(1, entity.getDeployRound()), game.getRoundCount()), wait);
+              walkOnZone(entity), Math.max(Math.max(1, entity.getDeployRound()), game.getRoundCount()), wait,
+              GpuMovePlan.facingMatters(entity));
     }
 
-    /** Why a unit waits for a later deployment turn, by the turn classes TWGameManager deals out. */
-    private static Wait waitOf(Entity entity) {
+    /**
+     * Why a unit waits for a later deployment or movement turn than {@code next}, by the turn classes TWGameManager
+     * deals out: an aerospace unit waits for the ground units only while {@code next} is a ground turn (on a space map
+     * a fighter can wait for a DropShip's turn instead).
+     */
+    private static Wait waitOf(Entity entity, GameTurn next) {
         int classCode = EntityClassTurn.getClassCode(entity);
         int aerospace = EntityClassTurn.CLASS_AERO | EntityClassTurn.CLASS_SMALL_CRAFT
               | EntityClassTurn.CLASS_DROPSHIP | EntityClassTurn.CLASS_JUMPSHIP | EntityClassTurn.CLASS_WARSHIP
               | EntityClassTurn.CLASS_SPACE_STATION;
         if ((classCode & aerospace) != 0) {
-            return Wait.AFTER_GROUND;
+            return next instanceof EntityClassTurn classTurn && classTurn.isValidClass(aerospace) ? Wait.LATER
+                  : Wait.AFTER_GROUND;
         }
         return (classCode & (EntityClassTurn.CLASS_INFANTRY | EntityClassTurn.CLASS_PROTOMEK)) != 0
               ? Wait.AFTER_OTHERS : Wait.LATER;
@@ -661,7 +721,9 @@ final class GpuBattleStatus {
     private static int walkOnZone(Entity entity) {
         RulesGame rules = Game.rulesManager.getRulesGame();
         int zone = entity.getStartingPos();
+        // A carried unit enters aboard its carrier, not from an edge of its own.
         return !entity.isDeployed() && entity.getDeployRound() >= 0 && rules.isWalkOnDeployment()
+              && entity.getTransportId() == Entity.NONE
               && rules.restrictDeploymentWidth(entity.getOwner(), zone) ? zone : Board.START_NONE;
     }
 }

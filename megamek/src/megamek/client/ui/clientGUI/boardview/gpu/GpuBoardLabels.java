@@ -47,9 +47,9 @@ import megamek.common.units.Entity;
 final class GpuBoardLabels implements GpuHud.Component {
     /** overlay.js mid(): a unit's middle at .55 of its height; the tip at .9 of the unit's height over its hex. */
     private static final float MIDDLE = .55f;
-    private static final float TIP_HEIGHT = .9f;
+    static final float TIP_HEIGHT = .9f;
     /** The Tactical View anchors a unit's labels at its base ring's north point, half up its screen square. */
-    private static final float RING_NORTH = .5f;
+    static final float RING_NORTH = .5f;
     /** In the Tactical View lines between units end on a circle just outside their base rings (r .88 apothems). */
     private static final float RING_GAP = .88f / GpuUnitBases.RING;
     /**
@@ -58,9 +58,12 @@ final class GpuBoardLabels implements GpuHud.Component {
      */
     private static final float BADGE_RISE = 4;
     private static final float BADGE_GAP = 6;
-    /** .tip3d: (+56, -34) CSS from the destination's anchor, flipped left over the HUD, 8 inside the window. */
+    /**
+     * .tip3d: 56 CSS right of the destination's anchor, flipped left over the HUD, 8 inside the window. Its bottom
+     * stands over the board's Move chip (GpuMoveConfirm), which sits on the same anchor.
+     */
     private static final float TIP_DX = 56;
-    private static final float TIP_DY = 34;
+    private static final float TIP_RISE = GpuMoveConfirm.HEADROOM;
     private static final float EDGE = 8;
     /** overlay.js refreshHudRects: the HUD rectangles labels keep clear of are 6 units larger on every side. */
     private static final float HUD_MARGIN = 6;
@@ -239,7 +242,7 @@ final class GpuBoardLabels implements GpuHud.Component {
         Set<Integer> badged = new LinkedHashSet<>();
         strokes.round = view.tactical();
         rear(scene, inputs.frame().status(), view);
-        plan(scene, panels.move(), view, inputs.panelBounds());
+        plan(scene, inputs.frame().status(), panels.move(), view, inputs.panelBounds());
         preview(scene, panels.preview(), panels.move(), view, badged);
         fire(panels.fire(), view, badged);
         if (inputs.preferences().overlays().unitLinks()) {
@@ -336,12 +339,23 @@ final class GpuBoardLabels implements GpuHud.Component {
 
     // The movement plan: the destination tip and the waypoint numbers (A.7 G5, G8).
 
-    private void plan(BoardScene scene, GpuMovePlan.Snapshot move, GpuHud.HudView view, List<Rectangle> panels) {
+    private void plan(BoardScene scene, GpuBattleStatus.Snapshot status, GpuMovePlan.Snapshot move,
+          GpuHud.HudView view, List<Rectangle> panels) {
         // Only a plotted route of a unit the HUD plans (the hover route has no tip), on the board shown.
         boolean planned = scene != null && move.active() && move.planner() && move.destination() != null
               && !move.route().isEmpty() && move.route().getLast().boardId() == scene.boardId();
         Vector2 anchor = planned ? lifted(plannedPoint(scene, move.route().getLast(), view),
               move.entityId(), TIP_HEIGHT, view) : null;
+        GpuBattleStatus.UnitStatus unit = planned ? GpuHudState.unit(status, move.entityId()) : null;
+        if (anchor != null && unit != null && move.route().getLast().coords().equals(unit.position())
+              && unit.boardId() == scene.boardId()) {
+            // A route that ends on the unit's own hex (a turn in place): the Move chip stands on the unit's tag.
+            anchor.y = Math.max(anchor.y, nameplates.top(move.entityId(), anchor.y));
+        }
+        if (anchor != null && GpuMoveConfirm.steps(scene, move)) {
+            // The Move chip stands on the elevation stepper's row.
+            anchor.y += GpuMoveConfirm.STEPPER_ROOM;
+        }
         tip.setVisible(anchor != null);
         if (anchor != null) {
             showTip(move);
@@ -399,14 +413,14 @@ final class GpuBoardLabels implements GpuHud.Component {
     }
 
     /**
-     * overlay.js placeLabels for the tip: right of the anchor and above it; flipped to its left when it would cover a
-     * HUD panel; kept 8 units inside the window.
+     * overlay.js placeLabels for the tip: right of the anchor and above the board's Move chip; flipped to its left
+     * when it would cover a HUD panel; kept 8 units inside the window.
      */
     private void placeTip(Vector2 anchor, List<Rectangle> panels) {
         float width = tip.getWidth();
         float height = tip.getHeight();
         float x = anchor.x + TIP_DX;
-        float top = anchor.y + TIP_DY;
+        float top = anchor.y + TIP_RISE + height;
         Rectangle area = new Rectangle(x, top - height, width, height);
         for (Rectangle panel : panels) {
             Rectangle keepOut = new Rectangle(panel.x - HUD_MARGIN, panel.y - HUD_MARGIN,

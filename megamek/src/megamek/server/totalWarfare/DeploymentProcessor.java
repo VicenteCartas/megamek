@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Vector;
 
+import jakarta.annotation.Nullable;
 import megamek.common.Hex;
 import megamek.common.OffBoardDirection;
 import megamek.common.board.Coords;
@@ -46,8 +47,10 @@ import megamek.common.net.packets.InvalidPacketDataException;
 import megamek.common.net.packets.Packet;
 import megamek.common.options.OptionsConstants;
 import megamek.common.turns.SpecificEntityTurn;
+import megamek.common.units.DeploymentSetup;
 import megamek.common.units.Entity;
 import megamek.common.units.IAero;
+import megamek.common.units.StartingModes;
 import megamek.logging.MMLogger;
 
 /**
@@ -101,6 +104,21 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
             turn = getGame().getTurnForPlayer(connId);
         }
 
+        // A LAM or QuadVee may change the mode it starts in until it first deploys, and the mode decides where it may deploy
+        Integer startingMode = null;
+        DeploymentSetup setup = null;
+        for (int index = 7 + loadedCount; index < packet.data().length; index++) {
+            if (packet.data()[index] instanceof Integer mode) {
+                startingMode = mode;
+            } else if (packet.data()[index] instanceof DeploymentSetup chosen) {
+                setup = chosen;
+            }
+        }
+        Runnable restore = null;
+        if ((startingMode != null) && (turn != null) && turn.isValid(connId, entity, getGame())) {
+            restore = applyStartingMode(entity, startingMode);
+        }
+
         DeploymentServerHelper deploymentServerHelper = new DeploymentServerHelper(gameManager);
         boolean isLegalLocation = deploymentServerHelper.isLegalDeployment(coords, boardId, entity, nFacing, elevation);
         Hex destinationHex = getGame().hasBoardLocation(coords, boardId)
@@ -114,6 +132,9 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
               || (assaultDrop && getGame().getOptions().booleanOption(OptionsConstants.ADVANCED_ASSAULT_DROP)
               && entity.canAssaultDrop()))) {
 
+            if (restore != null) {
+                restore.run();
+            }
             String msg = "server got invalid deployment packet from connection " + connId;
             msg += ", Entity: " + entity.getShortName();
             LOGGER.error(msg);
@@ -129,8 +150,15 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
         Entity blocker = deploymentServerHelper.findDeploymentStackingViolation(entity, coords, boardId, elevation,
               assaultDrop);
         if (blocker != null) {
+            if (restore != null) {
+                restore.run();
+            }
             deploymentServerHelper.refuseStackedDeployment(connId, entity, blocker, coords, turn.playerId());
             return;
+        }
+
+        if (setup != null) {
+            applySetup(entity, setup, destinationHex);
         }
 
         // looks like mostly everything's okay
@@ -157,6 +185,39 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
         }
         TWGameManager.datasetLogger.append(getGame(), true);
         gameManager.endCurrentTurn(entity);
+    }
+
+    /**
+     * Puts the never deployed {@code entity} into the starting {@code mode} its deployment chose (StartingModes), if it
+     * may start in it.
+     *
+     * @return what restores the unit's earlier mode and height, or null when nothing changed
+     */
+    private @Nullable Runnable applyStartingMode(Entity entity, int mode) {
+        if (entity.wasNeverDeployed() && (mode != entity.getConversionMode())
+              && !StartingModes.of(entity).contains(mode)) {
+            LOGGER.error("{} can not start in conversion mode {}", entity.getShortName(), mode);
+        }
+        return StartingModes.choose(entity, mode);
+    }
+
+    /**
+     * Puts the never deployed {@code entity} into the {@code setup} its deployment chose in {@code hex}: stance, shutdown,
+     * active heat sinks and activated equipment (Core Rulebook p. 224). A setup the unit may not choose, or one whose
+     * equipment can't run together, is refused and the unit deploys as the lobby left it.
+     */
+    static void applySetup(Entity entity, DeploymentSetup setup, @Nullable Hex hex) {
+        Game game = entity.getGame();
+        if (!entity.wasNeverDeployed() || !setup.isAllowed(game, entity, hex)) {
+            LOGGER.error("{} can not start with setup {}", entity.getShortName(), setup);
+            return;
+        }
+        boolean conflicted = DeploymentSetup.conflict(entity) != null;
+        Runnable restore = setup.apply(game, entity, hex);
+        if (!conflicted && (DeploymentSetup.conflict(entity) != null)) {
+            LOGGER.error("{} can not start with equipment that conflicts: {}", entity.getShortName(), setup);
+            restore.run();
+        }
     }
 
     /**

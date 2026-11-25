@@ -4609,6 +4609,21 @@ public abstract class Mek extends Entity implements Fortifiable, RubbleClearer, 
         }
     }
 
+    @Override
+    public int getSwitchableSinks() {
+        return getNumberOfSinks();
+    }
+
+    @Override
+    public void setActiveSinks(int sinks) {
+        setActiveSinksNextRound(sinks);
+        for (MiscMounted mounted : getMisc()) {
+            if (isCountedHeatSink(mounted) && !mounted.pendingMode().equals(Mounted.MODE_NONE)) {
+                mounted.setModeImmediately(mounted.pendingMode().getName());
+            }
+        }
+    }
+
     /**
      * @return the number of operable heat sinks that are currently switched on (prototype double heat sinks and
      *       Freezers excluded, matching {@link #getNumberOfSinks()})

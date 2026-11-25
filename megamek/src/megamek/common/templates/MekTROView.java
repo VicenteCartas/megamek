@@ -42,6 +42,7 @@ import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.MiscType;
 import megamek.common.equipment.Mounted;
 import megamek.common.units.Entity;
+import megamek.common.units.EntityMovementMode;
 import megamek.common.units.LandAirMek;
 import megamek.common.units.Mek;
 import megamek.common.units.QuadVee;
@@ -72,6 +73,20 @@ public class MekTROView extends TROView {
 
     @Override
     protected void initModel(EntityVerifier verifier) {
+        // The model reads the unit in its base mode; a live unit gets its own mode back, a landed LAM fighter wheeled
+        final int conversionMode = mek.getConversionMode();
+        final EntityMovementMode movementMode = mek.getMovementMode();
+        try {
+            initBaseModeModel(verifier);
+        } finally {
+            mek.setConversionMode(conversionMode);
+            if (mek.getMovementMode() != movementMode) {
+                mek.setMovementMode(movementMode);
+            }
+        }
+    }
+
+    private void initBaseModeModel(EntityVerifier verifier) {
         setModelData("formatArmorRow", new FormatTableRowMethod(new int[] { 20, 10, 10 },
               new Justification[] { Justification.LEFT, Justification.CENTER, Justification.CENTER }));
         addBasicData(mek);

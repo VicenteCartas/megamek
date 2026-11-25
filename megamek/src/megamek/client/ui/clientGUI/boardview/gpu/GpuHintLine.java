@@ -212,11 +212,15 @@ final class GpuHintLine implements GpuHud.Component {
         int pending = inputs.frame().panels().los().pending();
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         if (pending == 0 && status.myTurn() && status.phase().isDeployment()) {
-            // Deployment: place, face by dragging from the unit; the queue's chips show the overlays.
+            // Deployment: place, face by dragging from the unit when its facing means anything; the queue's chips
+            // show the overlays.
+            GpuBattleStatus.UnitStatus actor = GpuHudState.unit(status, status.actorId());
             List<String> deploying = new ArrayList<>(List.of(text("GpuBoard.hud.mouse.leftClick"),
-                  text("GpuBoard.hud.hint.place"), text("GpuBoard.hud.mouse.leftDrag"),
-                  text("GpuBoard.hud.hint.face"), key(preferences, KeyCommandBind.DONE),
-                  text("GpuBoard.hud.deploy.confirm")));
+                  text("GpuBoard.hud.hint.place")));
+            if (actor == null || actor.turns()) {
+                deploying.addAll(List.of(text("GpuBoard.hud.mouse.leftDrag"), text("GpuBoard.hud.hint.face")));
+            }
+            deploying.addAll(List.of(key(preferences, KeyCommandBind.DONE), text("GpuBoard.hud.deploy.confirm")));
             deploying.addAll(List.of(text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.pan"),
                   text("GpuBoard.hud.mouse.wheel"), text("GpuBoard.hud.hint.zoom")));
             return deploying;

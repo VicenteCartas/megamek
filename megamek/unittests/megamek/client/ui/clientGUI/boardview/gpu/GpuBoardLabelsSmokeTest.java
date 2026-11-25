@@ -381,10 +381,10 @@ class GpuBoardLabelsSmokeTest {
                 GpuHud.HudView view = new GpuHud.HudView(false, false, Map.of(ATLAS, new Rectangle(0, 0, 60, 100)),
                       Map.of(), Map.of(), null, Entity.NONE, 118);
 
-                // Mid-window: right of the anchor and above it, as .tip3d's (+56, -34).
+                // Mid-window: right of the anchor, its bottom over the board's Move chip on the same anchor.
                 Rectangle free = tip(hud, board, labels, frame, view, destination, 960, 540);
                 assertEquals(960 + 56, free.x, 1);
-                assertEquals(540 + 90 + 34, free.y + free.height, 1);
+                assertEquals(540 + 90 + GpuMoveConfirm.HEADROOM, free.y, 1);
                 // A panel that the tip would cover, with the HUD rectangles' 6-unit margin: it flips to the left.
                 float right = free.x + free.width;
                 Rectangle flipped = tip(hud, board, labels, frame, view, destination, 960, 540,

@@ -148,6 +148,13 @@ class GpuPhaseHeaderSmokeTest {
                       List.of(), "g1-deployment").dispose();
                 assertEquals(List.of("DEPLOYMENT", UiTheme.upper(Messages.getString("GpuBoard.hud.phase.playerTurn",
                       turns.get(1).playerName()))), GpuBoardTestUi.texts(header.actor()));
+                // Under walk-on deployment the step before play places only emplacements, and says so.
+                render(hud, state, header, conditions, card, new GpuBattleStatus.Snapshot(0, GamePhase.DEPLOYMENT,
+                      true, moving.localPlayerId(), Entity.NONE, turns, 0, moving.units(), List.of(), false,
+                      List.of(), GpuBattleStatus.Arc.NONE, List.of(), true), List.of(), "g1-deployment-emplacements")
+                      .dispose();
+                assertEquals(List.of(upper("GpuBoard.hud.phase.deploymentEmplacements"),
+                      upper("GpuBoard.hud.phase.yourTurn")), GpuBoardTestUi.texts(header.actor()));
                 // Shot 15 at 1280 x 720: declaring attacks with five own units pending, narrow metrics.
                 hud.size(1280, 720);
                 render(hud, state, header, conditions, card, status(GamePhase.FIRING, true,

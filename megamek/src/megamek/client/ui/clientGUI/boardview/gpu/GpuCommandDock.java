@@ -5,9 +5,12 @@ import static megamek.client.ui.gdx.UiKit.onChange;
 import static megamek.client.ui.gdx.UiKit.text;
 
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -15,6 +18,7 @@ import java.util.stream.Stream;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
@@ -22,6 +26,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
+import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.utils.Align;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.gdx.UiButton;
@@ -36,6 +41,7 @@ import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
 import megamek.common.enums.GamePhase;
+import megamek.common.interfaces.IStartingPositions;
 import megamek.common.units.Entity;
 
 /**
@@ -45,8 +51,15 @@ import megamek.common.units.Entity;
  * rule.
  */
 final class GpuCommandDock implements GpuHud.Component {
-    /** The dock's variants (plan C.2); GENERIC is every phase and turn the prototype does not design. */
-    private enum Variant { INITIATIVE, PLAN, WAITING, FIRE, PHYSICAL, NO_PHYSICAL, PLAYBACK, GENERIC, CHAT }
+    /**
+     * The dock's variants (plan C.2); GENERIC is every phase and turn the prototype does not design. ENTRY is a walk-on
+     * unit setting up its entry (walk-on step 1): its entry hex, facing, height, mode and setup, before it enters and
+     * plans its move. STATUS holds the unit commands while the board plays a move, the local selection is cleared or
+     * the forces overview is open, and says why in the waiting box.
+     */
+    private enum Variant {
+        INITIATIVE, ENTRY, PLAN, FLIGHT, WAITING, FIRE, PHYSICAL, NO_PHYSICAL, PLAYBACK, GENERIC, STATUS
+    }
 
     /** The action awaiting an explicit choice beside its triggering button. */
     private enum Confirm {
@@ -59,12 +72,15 @@ final class GpuCommandDock implements GpuHud.Component {
 
     /**
      * What decides the dock's cells; they are rebuilt only when it changes. {@code buttons} are the ids of the option
-     * row's physical options or phase commands; {@code turns} shows the plan's turn buttons; {@code standUp} puts
-     * Stand up in Jump's place.
+     * row's physical options or phase commands; {@code back} adds the Back gait and {@code context} the context slot
+     * (GpuMoveContext); {@code jump} the Jump gait of a unit that has jump MP and
+     * {@code elevation} the elevation stepper of a unit that flies or dives; {@code run} the Run gait of a unit faster
+     * running than walking (not infantry, which move at one speed); {@code setup} the ids of the deploying unit's setup
+     * tiles (GpuDeploySetup).
      */
     private record Shape(Variant variant, List<String> buttons, boolean more, boolean primary, boolean secondary,
-          boolean stop, boolean legend, boolean steps, boolean backwards, boolean turns, boolean standUp,
-          boolean heights) { }
+          boolean stop, boolean legend, boolean steps, boolean back, boolean context,
+          boolean heights, boolean jump, boolean elevation, boolean run, List<String> forms, List<String> setup) { }
 
     /**
      * The More popover's content (plan A.7 G14, A.8 H38, C.2), which G12 shows above the More button: a title and
@@ -72,10 +88,16 @@ final class GpuCommandDock implements GpuHud.Component {
      * in its detail). Movement instead groups all available actions before all unavailable actions and omits the
      * subtitle.
      */
-    record More(String title, String subtitle, List<BoardScene.Command> items, List<BoardScene.Command> commands) {
+    record More(String title, String subtitle, List<BoardScene.Command> items, List<BoardScene.Command> commands,
+          List<GpuDeploySetup.Tile> setup) {
         More {
             items = List.copyOf(items);
             commands = List.copyOf(commands);
+            setup = List.copyOf(setup);
+        }
+
+        More(String title, String subtitle, List<BoardScene.Command> items, List<BoardScene.Command> commands) {
+            this(title, subtitle, items, commands, List.of());
         }
     }
 
@@ -87,6 +109,12 @@ final class GpuCommandDock implements GpuHud.Component {
     /** The option row's height: mode buttons with their sub-labels, and plain buttons (.b). */
     private static final float TALL = 46;
     private static final float PLAIN = 36;
+    /**
+     * The gap between the gaits of the segmented control, and the context slot's fixed width: a tool like the twists,
+     * a little wider for "Drop cargo", and narrower than a gait.
+     */
+    private static final float SEGMENT = 2;
+    private static final float CONTEXT = 60;
     /** The torso read-out's width (#dock .r1 .torso). */
     private static final float TORSO = 76;
     /** The physical options the option row shows (the prototype's four limbs), and the generic phase commands. */
@@ -97,24 +125,45 @@ final class GpuCommandDock implements GpuHud.Component {
      * button, among them).
      */
     private static final int DEPLOY_COMMANDS = 2;
+    /**
+     * The deploying unit's setup tiles the option row shows (two fewer beside the height stepper), the rest in More,
+     * and a tile's height: a caption over its value.
+     */
+    private static final int SETUP_TILES = 5;
+    private static final float SETUP_TILE = GpuSetupTile.HEIGHT;
     private static final String DEPLOY_CLEAR = DeployCommand.DEPLOY_CLEAR_DEPLOY.getCmd();
     private static final Set<String> DEPLOY_MORE_ONLY = Set.of(DeployCommand.DEPLOY_NEXT.getCmd(),
           DeployCommand.DEPLOY_TURN.getCmd(), DeployCommand.DEPLOY_REMOVE.getCmd(), DEPLOY_CLEAR);
+    /**
+     * Deployment commands More leaves out: MegaMek's Turn (a click-to-face mode the board's arrows, drag and More's
+     * Turn left and right stand for) and Clear, the dock's secondary button.
+     */
+    private static final Set<String> DEPLOY_SHOWN = Set.of(DeployCommand.DEPLOY_TURN.getCmd(), DEPLOY_CLEAR);
     private static final String SEPARATOR = " \u00B7 ";
     private static final Color WAITING = Color.valueOf("8A9593");
+    /** The gait segments; Back only for a unit with MegaMek's back-up command. Back has no key of its own. */
     private static final List<GpuMovePlan.Mode> MODES = List.of(GpuMovePlan.Mode.WALK, GpuMovePlan.Mode.RUN,
-          GpuMovePlan.Mode.JUMP);
+          GpuMovePlan.Mode.JUMP, GpuMovePlan.Mode.BACK);
     private static final List<KeyCommandBind> MODE_KEYS = List.of(KeyCommandBind.MOVE_MODE_WALK,
           KeyCommandBind.MOVE_MODE_RUN, KeyCommandBind.MOVE_MODE_JUMP);
+    private static final String BACK_UP = MoveCommand.MOVE_BACK_UP.getCmd();
+    private static final String JUMP = MoveCommand.MOVE_JUMP.getCmd();
+    private static final String GO_UP = MoveCommand.MOVE_RAISE_ELEVATION.getCmd();
+    private static final String GO_DOWN = MoveCommand.MOVE_LOWER_ELEVATION.getCmd();
+    private static final String ACCELERATE = MoveCommand.MOVE_ACC.getCmd();
+    private static final String DECELERATE = MoveCommand.MOVE_DEC.getCmd();
+    private static final String TURN = MoveCommand.MOVE_TURN.getCmd();
+    /** The velocity read-out's least width, wide enough for "3→4". */
+    private static final float VELOCITY = 44;
+    /** The elevation read-out's least width, for its short caption, and the spinner's width beside it. */
+    private static final float ELEVATION = 34;
+    private static final float SPINNER = 30;
     /**
      * MegaMek commands that a control of the dock, the forces panel's "Next pending" or the weapons panel stands for;
-     * More lists every other phase command.
+     * More lists every other phase command but the context slot's.
      */
     private static final Set<String> MOVE_SHOWN = Stream.of(MoveCommand.MOVE_WALK, MoveCommand.MOVE_JUMP,
           MoveCommand.MOVE_BACK_UP, MoveCommand.MOVE_TURN, MoveCommand.MOVE_NEXT).map(MoveCommand::getCmd)
-          .collect(Collectors.toUnmodifiableSet());
-    private static final String GET_UP = MoveCommand.MOVE_GET_UP.getCmd();
-    private static final Set<String> MOVE_SHOWN_DOWN = Stream.concat(MOVE_SHOWN.stream(), Stream.of(GET_UP))
           .collect(Collectors.toUnmodifiableSet());
     private static final Set<String> FIRE_SHOWN = Stream.of(FiringCommand.FIRE_TWIST, FiringCommand.FIRE_FIRE,
           FiringCommand.FIRE_SKIP, FiringCommand.FIRE_NEXT, FiringCommand.FIRE_NEXT_TARG, FiringCommand.FIRE_MODE,
@@ -142,6 +191,9 @@ final class GpuCommandDock implements GpuHud.Component {
     private final Label title;
     private final Label span;
     private final UiButton stop;
+    /** Walk-on step 2's way back to step 1: the head's Setup mini, in its cell after the span. */
+    private final UiButton entrySetup;
+    private Cell<UiButton> entrySetupCell;
     private final Table row1 = new Table();
     private final Table row2 = new Table();
     private final Table foot = new Table();
@@ -155,15 +207,38 @@ final class GpuCommandDock implements GpuHud.Component {
     private final GpuMoreDrawer drawer;
     // Movement plan.
     private final List<UiButton> modes = new ArrayList<>();
-    /** MegaMek's Get Up, in Jump's place while the planned unit is down: it cannot jump until it stands. */
-    private final UiButton standUp;
+    /**
+     * The context slot (GpuMoveContext): one MegaMek command for the unit's situation or stance, Stand up while it is
+     * down, as a glyph over a short caption like the twists. Its width is fixed, so a change of command moves nothing.
+     */
+    private final UiButton context;
+    private final TextTooltip contextTip;
     private final TextButton.TextButtonStyle plainStyle;
     private final TextButton.TextButtonStyle autoStyle;
-    private final UiButton turnLeft;
-    private final UiButton turnRight;
+    /**
+     * The elevation stepper of a unit that flies or dives: MegaMek's Go down and Go up beside the plan's elevation, as
+     * the torso read-out sits between the twists.
+     */
+    private final UiButton goDown;
+    private final UiButton goUp;
+    private final TextTooltip goDownTip;
+    private final TextTooltip goUpTip;
+    private final Table elevation = new Table();
+    private final Label elevationCaption;
+    private final TextTooltip elevationTip;
+    private final Label elevationValue;
+    /**
+     * Flight (FLIGHT): MegaMek's Decelerate and Accelerate beside the velocity, as the elevation stepper sits beside
+     * its read-out; the altitude stepper is the plan's, and its turns are in More.
+     */
+    private final UiButton decelerate;
+    private final UiButton accelerate;
+    private final TextTooltip decelerateTip;
+    private final TextTooltip accelerateTip;
+    private final Table velocity = new Table();
+    private final Label velocityValue;
     private final UiButton undo;
     private final UiButton waypoint;
-    private final UiKit.Checkbox backwards;
     private final UiButton clearRoute;
     private final TextTooltip clearRouteTip;
     private final UiButton holdAll;
@@ -176,13 +251,24 @@ final class GpuCommandDock implements GpuHud.Component {
     private final UiButton clear;
     private final UiButton resolve;
     private final UiConfirmation confirmation;
-    // Deployment: the placed unit's height stepper.
+    // Deployment and walk-on step 1: the placed unit's height stepper.
     private final GpuDeployHeight deployHeight;
     private final UiButton heightDown;
     private final UiButton height;
     private final UiButton heightUp;
+    private final TextTooltip heightDownTip;
+    private final TextTooltip heightTip;
+    private final TextTooltip heightUpTip;
+    /**
+     * Deployment: the setup tiles of the shape (GpuDeploySetup), a changed one framed in amber, and the main button's
+     * sub-line, where the unit stands and how many setup choices changed.
+     */
+    private final Map<String, GpuSetupTile> setupTiles = new LinkedHashMap<>();
+    private final Label mainLine;
+    private final Cell<Label> mainLineCell;
     // Another player's turn.
     private final Container<Label> waiting;
+    private final Label waitingLabel;
     // Playback and review.
     private final UiButton previous;
     private final UiButton play;
@@ -195,6 +281,12 @@ final class GpuCommandDock implements GpuHud.Component {
     private final Label footBold;
     private final Label footText;
     private final Table legend = new Table();
+    private final Label legendWalk;
+    private final Label legendRun;
+    /** Run's legend sample and word, closed for a unit without a run (infantry). */
+    private final Actor legendRunStroke;
+    private final Cell<Actor> legendRunStrokeCell;
+    private final Cell<Actor> legendRunCell;
     private final Label legendText;
     private final Table footRight = new Table();
     private final UiButton steps;
@@ -203,6 +295,10 @@ final class GpuCommandDock implements GpuHud.Component {
     private final TextTooltip stepsTip;
     /** The option row's physical options (PHYSICAL) or phase commands (GENERIC), rebuilt with the shape. */
     private final List<UiButton> choices = new ArrayList<>();
+    /** The head's mode switch of a unit that converts, in the order of the plan's forms. */
+    private final List<UiButton> forms = new ArrayList<>();
+    /** The mode switch's tooltips: why a mode is disabled, or what choosing it costs. */
+    private final List<TextTooltip> formTips = new ArrayList<>();
     /** The chosen physical options, for the actor and target they were chosen against. */
     private final Set<String> chosen = new LinkedHashSet<>();
     private int chosenActor = Entity.NONE;
@@ -243,9 +339,21 @@ final class GpuCommandDock implements GpuHud.Component {
         span.setName("dock-span");
         stop = button("hud-mini", null, text("GpuBoard.hud.dock.stop"), null, "dock-stop");
         onChange(stop, this::stop);
+        entrySetup = button("hud-mini", null, text("GpuBoard.hud.move.entry.setup"), null, "dock-entry-setup");
+        onChange(entrySetup, () -> {
+            if (inputs != null) {
+                source.setEntered(inputs.frame().panels().move().entityId(), false);
+            }
+        });
+        ui.tip(entrySetup).getActor().setText(text("GpuBoard.hud.move.entry.setupTip"));
         head.pad(0, 2, 0, 2);
 
-        main = button("hud-main", null, "", null, "dock-main");
+        main = button("hud-main", null, "", "", "dock-main");
+        mainLine = main.details.getFirst();
+        mainLine.setName("dock-main-line");
+        mainLineCell = main.getCell(mainLine);
+        mainLineCell.height(0).padTop(0);
+
         onChange(main, this::main);
         secondary = button("hud", null, "", null, "dock-secondary");
         secondary.pad(0, 14, 0, 14);
@@ -253,7 +361,7 @@ final class GpuCommandDock implements GpuHud.Component {
         more = button("hud", "more", null, null, "dock-more");
         more.pad(0, 8, 0, 8);
         onChange(more, this::openMore);
-        drawer = new GpuMoreDrawer(ui);
+        drawer = new GpuMoreDrawer(ui, this::chooseSetup);
 
         // Movement: .b.mode buttons at 14 units with their MP, the tall squares and the undo square.
         plainStyle = ui.skin.get("hud", TextButton.TextButtonStyle.class);
@@ -262,30 +370,59 @@ final class GpuCommandDock implements GpuHud.Component {
         autoStyle.up = ui.skin.getDrawable("button-auto");
         autoStyle.fontColor = Color.WHITE;
         for (GpuMovePlan.Mode mode : MODES) {
-            UiButton button = button("hud", null, modeName(mode), "",
+            UiButton button = button("hud", null, modeName(mode, false), "",
                   "dock-mode-" + mode.name().toLowerCase(Locale.ROOT));
             UiKit.size(button.getLabel(), "hud-button", 14);
             onChange(button, () -> source.moves().setMode(mode));
             modes.add(button);
             modeTips.add(ui.tip(button));
         }
-        standUp = button("hud", null, text("GpuBoard.hud.dock.standUp"), "", "dock-stand-up");
-        // Outlined in white like the route's mode, so the one thing a fallen unit needs stands out.
-        standUp.setStyle(autoStyle);
-        UiKit.size(standUp.getLabel(), "hud-button", 14);
-        onChange(standUp, () -> run(GET_UP));
-        ui.tip(standUp).getActor().setText(text("GpuBoard.hud.dock.standUpTip"));
-        turnLeft = turn("twist-left", text("Left"), -1);
-        turnRight = turn("twist-right", text("Right"), 1);
+        context = button("hud", GpuMoveContext.icon(GpuMoveContext.GET_UP), null, "", "dock-context");
+        context.pad(0, 4, 0, 4);
+        UiKit.size(context.details.getFirst(), "hud-sub", 9);
+        onChange(context, () -> run(contextCommand()));
+        contextTip = ui.tip(context);
+        goDown = button("hud", "chevron-down", null, null, "dock-go-down");
+        goDown.pad(0);
+        goDownTip = ui.tip(goDown);
+        onChange(goDown, () -> run(GO_DOWN));
+        goUp = button("hud", "chevron-up", null, null, "dock-go-up");
+        goUp.pad(0);
+        goUpTip = ui.tip(goUp);
+        onChange(goUp, () -> run(GO_UP));
+        elevationCaption = ui.label(UiTheme.upper(text("GpuBoard.hud.dock.elevationShort")), "hud-caption",
+              9.5f, UiTheme.MUTED);
+        elevationValue = ui.label("", "hud-title", 13, UiTheme.MINT);
+        elevationValue.setName("dock-elevation-value");
+        elevation.setName("dock-elevation");
+        elevation.setTouchable(Touchable.enabled);
+        elevation.add(elevationCaption).row();
+        elevation.add(elevationValue);
+        elevationTip = ui.tip(elevation);
+        elevationTip.getActor().setText(text("GpuBoard.hud.dock.elevationTip"));
+        decelerate = button("hud", null, text("GpuBoard.hud.dock.decelerate"), null, "dock-decelerate");
+        decelerate.pad(0, 6, 0, 6);
+        decelerateTip = ui.tip(decelerate);
+        onChange(decelerate, () -> run(DECELERATE));
+        accelerate = button("hud", null, text("GpuBoard.hud.dock.accelerate"), null, "dock-accelerate");
+        accelerate.pad(0, 6, 0, 6);
+        accelerateTip = ui.tip(accelerate);
+        onChange(accelerate, () -> run(ACCELERATE));
+        Label velocityCaption = ui.label(UiTheme.upper(text("GpuBoard.hud.dock.velocityShort")), "hud-caption",
+              9.5f, UiTheme.MUTED);
+        velocityValue = ui.label("", "hud-title", 13, UiTheme.MINT);
+        velocityValue.setName("dock-velocity-value");
+        velocity.setName("dock-velocity");
+        velocity.setTouchable(Touchable.enabled);
+        velocity.add(velocityCaption).row();
+        velocity.add(velocityValue);
+        ui.tip(velocity).getActor().setText(text("GpuBoard.hud.dock.velocityTip"));
         undo = button("hud", "undo", null, null, "dock-undo");
         undo.pad(0, 8, 0, 8);
         onChange(undo, () -> source.moves().undo());
         waypoint = button("hud-mini", null, text("GpuBoard.hud.dock.waypoint"), null, "dock-waypoint");
         onChange(waypoint, () -> source.moves().pinDestination());
         ui.tip(waypoint).getActor().setText(text("GpuBoard.hud.dock.waypointTip"));
-        backwards = ui.checkbox(text("GpuBoard.hud.dock.walkBackwards"), false);
-        backwards.setName("dock-backwards");
-        onChange(backwards, () -> source.moves().setMode(GpuMovePlan.Mode.BACK));
         clearRoute = button("hud-mini", null, "X", null, "dock-clear-route");
         onChange(clearRoute, () -> source.moves().clearOrWithdraw());
         clearRouteTip = ui.tip(clearRoute);
@@ -319,22 +456,24 @@ final class GpuCommandDock implements GpuHud.Component {
         // A floating card on the popover layer, separate from the dock's layout.
         confirmation = new UiConfirmation(ui, "dock-confirm", () -> open = null);
 
-        // Deployment: the placed unit's height, lower and higher beside it; a click on it steps up and wraps.
+        // Deployment, and walk-on step 1: the placed unit's height, lower and higher beside it; a click on it steps up
+        // and wraps.
         heightDown = button("hud", "chevron-down", null, null, "dock-height-down");
         heightDown.pad(0, 8, 0, 8);
-        ui.tip(heightDown).getActor().setText(text("GpuBoard.hud.deploy.heightDown"));
-        onChange(heightDown, () -> deployHeight.step(deployingActor(), -1, false));
+        heightDownTip = ui.tip(heightDown);
+        onChange(heightDown, () -> deployHeight.step(placingActor(), -1, false));
         height = button("hud", null, "", null, "dock-height");
-        ui.tip(height).getActor().setText(text("GpuBoard.hud.deploy.heightTip"));
-        onChange(height, () -> deployHeight.step(deployingActor(), 1, true));
+        heightTip = ui.tip(height);
+        onChange(height, () -> deployHeight.step(placingActor(), 1, true));
         heightUp = button("hud", "chevron-up", null, null, "dock-height-up");
         heightUp.pad(0, 8, 0, 8);
-        ui.tip(heightUp).getActor().setText(text("GpuBoard.hud.deploy.heightUp"));
-        onChange(heightUp, () -> deployHeight.step(deployingActor(), 1, false));
+        heightUpTip = ui.tip(heightUp);
+        onChange(heightUp, () -> deployHeight.step(placingActor(), 1, false));
 
-        Label waitingLabel = ui.label(UiTheme.upper(text("GpuBoard.hud.dock.waitingForOpponent")), "hud-main",
+        waitingLabel = ui.label(UiTheme.upper(text("GpuBoard.hud.dock.waitingForOpponent")), "hud-main",
               17, WAITING);
         waitingLabel.setEllipsis(true);
+        waitingLabel.setName("dock-waiting-text");
         waitingLabel.setAlignment(Align.center);
         waiting = new Container<>(waitingLabel).fillX().minWidth(0);
         waiting.setName("dock-waiting");
@@ -370,8 +509,11 @@ final class GpuCommandDock implements GpuHud.Component {
         legendText = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
         legendText.setEllipsis(true);
         legendText.setName("dock-legend");
-        legend(text("GpuBoard.hud.dock.walk"), UiTheme.MINT);
-        legend(text("GpuBoard.hud.dock.run"), UiTheme.AMBER);
+        legendWalk = legend(text("GpuBoard.hud.dock.walk"), UiTheme.MINT);
+        legendRun = legend(text("GpuBoard.hud.dock.run"), UiTheme.AMBER);
+        legendRunCell = legend.getCell((Actor) legendRun);
+        legendRunStrokeCell = legend.getCells().get(legend.getCells().indexOf(legendRunCell, true) - 1);
+        legendRunStroke = legendRunStrokeCell.getActor();
         legend.add(legendText).growX().minWidth(0);
         steps = button("hud-mini", null, text("GpuBoard.hud.dock.steps"), null, "dock-steps");
         trailingIcon(steps, "chevron-down", 13, 5);
@@ -404,16 +546,6 @@ final class GpuCommandDock implements GpuHud.Component {
         return button;
     }
 
-    /** A tall square (.b.sq.tall): the turn icon over a 9-unit "Left" or "Right". */
-    private UiButton turn(String icon, String text, int direction) {
-        UiButton button = button("hud", icon, null, text, direction < 0 ? "dock-turn-left"
-              : "dock-turn-right");
-        button.pad(0, 8, 0, 8);
-        UiKit.size(button.details.getFirst(), "hud-sub", 9);
-        onChange(button, () -> source.moves().turn(direction));
-        return button;
-    }
-
     /** An icon after the caption, in the caption's color. */
     private void trailingIcon(UiButton button, String icon, float size, float gap) {
         UiKit.Icon image = ui.icon(icon, size, Color.WHITE);
@@ -421,13 +553,15 @@ final class GpuCommandDock implements GpuHud.Component {
         button.add(image).padLeft(gap);
     }
 
-    /** One legend sample (.leg): a 14-unit dashed stroke and its word, in the band's color. */
-    private void legend(String text, Color color) {
+    /** One legend sample (.leg): a 14-unit dashed stroke and its word, in the band's color. Returns the word. */
+    private Label legend(String text, Color color) {
         Table stroke = new Table();
         stroke.add(new Image(ui.skin.newDrawable("white", color))).size(5, 2);
         stroke.add(new Image(ui.skin.newDrawable("white", color))).size(5, 2).padLeft(4);
         legend.add(stroke).padRight(5);
-        legend.add(ui.label(text, "hud-small", 11.5f, color)).padRight(10);
+        Label word = ui.label(text, "hud-small", 11.5f, color);
+        legend.add(word).padRight(10);
+        return word;
     }
 
     @Override
@@ -449,7 +583,9 @@ final class GpuCommandDock implements GpuHud.Component {
         };
         boolean secondaryShown = switch (variant) {
             case INITIATIVE -> enabled(command(REROLL));
-            case PLAN, PHYSICAL -> true;
+            case ENTRY, PLAN, PHYSICAL -> true;
+            // A flying unit rarely may hold: MegaMek's Skip only while it allows one.
+            case FLIGHT -> enabled(skip()) && !skipIsDone();
             // Without MegaMek's Skip, its Done both moves and holds: the main button is that command already.
             // Deployment has no Skip: Clear takes its place.
             case GENERIC -> deployClear() != null || skip() != null && !skipIsDone();
@@ -457,30 +593,45 @@ final class GpuCommandDock implements GpuHud.Component {
         };
         boolean stopShown = phase.isMovement() && panels.move().holdingRemaining() > 0
               || (phase.isFiring() || phase.isTargeting()) && panels.fire().autoDeclareRemaining() > 0;
-        Shape shape = new Shape(variant, buttons, variant != Variant.CHAT && more() != null,
-              variant != Variant.CHAT && variant != Variant.WAITING
+        // The movement plan and walk-on step 1 keep their More in place, disabled while nothing in it can be used, so
+        // their row never moves.
+        More content = variant == Variant.STATUS ? null : more();
+        boolean planned = variant == Variant.PLAN || variant == Variant.FLIGHT;
+        boolean entry = variant == Variant.ENTRY;
+        GpuDeploySetup.Choice setup = variant == Variant.GENERIC || entry ? setupChoice() : null;
+        Shape shape = new Shape(variant, buttons, planned || entry && hasMore() || content != null,
+              variant != Variant.STATUS && variant != Variant.WAITING
               && (variant != Variant.GENERIC || done() != null), secondaryShown, stopShown,
               variant == Variant.PLAN && panels.move().route().isEmpty(), stepsShown(),
-              variant == Variant.PLAN && enabled(command(MoveCommand.MOVE_BACK_UP.getCmd())),
-              variant == Variant.PLAN && panels.move().facingMatters(), standUpShown(),
-              variant == Variant.GENERIC && deployHeight.choice(deployingActor()) != null);
+              variant == Variant.PLAN && command(BACK_UP) != null,
+              variant == Variant.PLAN && contextCommand() != null,
+              (variant == Variant.GENERIC || entry) && deployHeight.choice(placingActor()) != null,
+              variant == Variant.PLAN && jumpShown(), planned && elevationShown(),
+              variant == Variant.PLAN && panels.move().traits().runs(),
+              planned ? panels.move().traits().forms().stream().map(GpuMovePlan.Form::label).toList()
+                    : (variant == Variant.GENERIC || entry) && startForms() != null ? startForms().labels()
+                    : List.of(),
+              setup == null ? List.of() : setup.tiles().stream().map(GpuDeploySetup.Tile::id).toList());
         if (!shape.equals(shown)) {
             shown = shape;
             layout(shape);
         }
+        more.setDisabled(content == null);
+        if (variant != Variant.GENERIC && !entry) {
+            mainLine("");
+        }
         switch (variant) {
             case INITIATIVE -> showInitiative();
+            case ENTRY -> showEntry();
             case PLAN -> showPlan();
+            case FLIGHT -> showFlight();
             case WAITING -> showWaiting();
             case FIRE -> showFire();
             case PHYSICAL -> showPhysical();
             case NO_PHYSICAL -> showNoPhysical();
             case PLAYBACK -> showPlayback();
             case GENERIC -> showGeneric();
-            case CHAT -> {
-                footBold.setText("");
-                footText.setText("");
-            }
+            case STATUS -> showStatus();
         }
         // The hold and auto-declare modes (A.7 G15, A.8 H6) replace the span with their count, beside Stop.
         if (phase.isMovement() && panels.move().holdingRemaining() > 0) {
@@ -496,7 +647,7 @@ final class GpuCommandDock implements GpuHud.Component {
         if (root.getWidth() > 0) {
             root.validate();
         }
-        if (variant == Variant.CHAT) { drawer.close(); }
+        if (variant == Variant.STATUS) { drawer.close(); }
         drawer.update(drawer.isOpen() ? more() : null);
     }
 
@@ -505,7 +656,7 @@ final class GpuCommandDock implements GpuHud.Component {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         GpuHudData panels = inputs.frame().panels();
         GamePhase phase = playbackPhase();
-        if (state.overview || state.turnLocked(status) && !phase.isReport()) { return Variant.CHAT; }
+        if (state.overview || state.turnLocked(status) && !phase.isReport()) { return Variant.STATUS; }
         boolean turns = phase.isMovement() || phase.isFiring() || phase.isTargeting() || phase.isPhysical();
         if (phase.isInitiativeReport()) {
             return Variant.INITIATIVE;
@@ -513,14 +664,36 @@ final class GpuCommandDock implements GpuHud.Component {
             return Variant.PLAYBACK;
         } else if (turns && !status.myTurn()) {
             return current() == null ? Variant.GENERIC : Variant.WAITING;
-        } else if (phase.isMovement() && panels.move().active() && panels.move().planner()) {
+        } else if (phase.isMovement() && panels.move().active() && panels.move().traits().flight() == null
+              && settingUpEntry(panels.move().entityId())) {
+            // A walk-on unit sets up its entry first: its entry hex, facing, height, mode and setup are free. An
+            // aerospace unit too, though MegaMek's clicks, not the planner, plot its flight once it entered.
+            return Variant.ENTRY;
+        } else if (phase.isMovement() && panels.move().active()
+              && (panels.move().planner() || panels.move().traits().entering()
+                    && panels.move().traits().flight() == null)) {
+            // A walk-on unit before its entry hex has the plan's layout, so nothing moves once it enters.
             return Variant.PLAN;
+        } else if (phase.isMovement() && panels.move().active() && panels.move().traits().flight() != null) {
+            return Variant.FLIGHT;
         } else if ((phase.isFiring() || phase.isTargeting()) && panels.fire().active() && panels.fire().editable()) {
             return Variant.FIRE;
         } else if (phase.isPhysical() && panels.physical().active()) {
             return panels.physical().adjacentTargets().isEmpty() ? Variant.NO_PHYSICAL : Variant.PHYSICAL;
         }
         return Variant.GENERIC;
+    }
+
+    /** Whether the walk-on unit {@code unitId} is setting up its entry (walk-on step 1). */
+    private boolean settingUpEntry(int unitId) {
+        GpuBoardSource.WalkOnEntry entry = walkOnEntry();
+        return entry.stage() == GpuBoardSource.EntryStage.SETTING_UP && entry.unitId() == unitId;
+    }
+
+    /** Where the walk-on unit moving now stands in its entry, NONE without a source that knows. */
+    private GpuBoardSource.WalkOnEntry walkOnEntry() {
+        GpuBoardSource.WalkOnEntry entry = source == null ? null : source.walkOnEntry();
+        return entry == null ? GpuBoardSource.WalkOnEntry.NONE : entry;
     }
 
     /**
@@ -577,14 +750,24 @@ final class GpuCommandDock implements GpuHud.Component {
 
     /** Rebuilds the cells from the shape: the head's parts, the variant's rows, their dynamic buttons and the foot. */
     private void layout(Shape shape) {
-        headCell.setActor(shape.variant() == Variant.CHAT ? null : head)
-              .padBottom(shape.variant() == Variant.CHAT ? 0 : 7);
+        headCell.setActor(head).padBottom(7);
         head.clearChildren();
         head.add(title).left().minWidth(0);
         head.add().expandX();
-        head.add(span).right().padLeft(10).minWidth(0);
-        if (shape.backwards()) {
-            head.add(backwards).padLeft(10);
+        head.add(span).right().minWidth(0);
+        // Walk-on step 2: Setup takes the unit back to setting up its entry; showPlan fills the cell.
+        entrySetupCell = head.add((UiButton) null).padLeft(0);
+        // A unit that converts (a LAM, a QuadVee, a Mek with tracks) chooses its mode in the head, before it moves,
+        // at the head's right edge, in line with More below.
+        forms.clear();
+        formTips.clear();
+        for (int i = 0; i < shape.forms().size(); i++) {
+            UiButton button = button("hud-mini", null, UiTheme.upper(shape.forms().get(i)), null, "dock-form-" + i);
+            int index = i;
+            onChange(button, () -> convert(index));
+            forms.add(button);
+            formTips.add(ui.tip(button));
+            head.add(button).padLeft(i == 0 ? 10 : SEGMENT);
         }
         if (shape.stop()) {
             head.add(stop).padLeft(8);
@@ -596,18 +779,43 @@ final class GpuCommandDock implements GpuHud.Component {
         row2.defaults().padLeft(GAP).height(ACTION);
         switch (shape.variant()) {
             case PLAN -> {
-                // A unit down (prone or hull down) stands first: Stand up leads, and takes Jump's place.
-                if (shape.standUp()) {
-                    row1.add(standUp).growX().uniformX().minWidth(0).height(TALL);
-                }
+                // The gaits as one segmented control, the elevation stepper, then the context slot at a fixed width.
+                // The unit turns on the board (its arrows, a drag) or from More.
+                boolean first = true;
                 for (int i = 0; i < MODES.size(); i++) {
-                    if (!shape.standUp() || MODES.get(i) != GpuMovePlan.Mode.JUMP) {
-                        row1.add(modes.get(i)).growX().uniformX().minWidth(0).height(TALL);
+                    GpuMovePlan.Mode mode = MODES.get(i);
+                    if ((mode != GpuMovePlan.Mode.BACK || shape.back())
+                          && (mode != GpuMovePlan.Mode.RUN || shape.run())
+                          && (mode != GpuMovePlan.Mode.JUMP || shape.jump())) {
+                        row1.add(modes.get(i)).growX().uniformX().minWidth(0).height(TALL)
+                              .padLeft(first ? GAP : SEGMENT);
+                        first = false;
                     }
                 }
-                if (shape.turns()) {
-                    row1.add(turnLeft).width(SQUARE).height(TALL);
-                    row1.add(turnRight).width(SQUARE).height(TALL);
+                if (shape.elevation()) {
+                    // A compact spinner: the elevation, then Go up over Go down.
+                    row1.add(elevation).minWidth(ELEVATION).height(TALL);
+                    Table spinner = new Table();
+                    spinner.add(goUp).width(SPINNER).height((TALL - SEGMENT) / 2).row();
+                    spinner.add(goDown).width(SPINNER).height((TALL - SEGMENT) / 2).padTop(SEGMENT);
+                    row1.add(spinner).width(SPINNER).height(TALL).padLeft(SEGMENT);
+                }
+                if (shape.context()) {
+                    row1.add(context).width(CONTEXT).height(TALL);
+                }
+                row2.add(undo).width(SQUARE);
+            }
+            case FLIGHT -> {
+                // Decelerate and Accelerate around the velocity, then the altitude stepper; Turn is in More.
+                row1.add(decelerate).growX().uniformX().minWidth(0).height(TALL);
+                row1.add(velocity).minWidth(VELOCITY).height(TALL);
+                row1.add(accelerate).growX().uniformX().minWidth(0).height(TALL);
+                if (shape.elevation()) {
+                    row1.add(elevation).minWidth(ELEVATION).height(TALL);
+                    Table spinner = new Table();
+                    spinner.add(goUp).width(SPINNER).height((TALL - SEGMENT) / 2).row();
+                    spinner.add(goDown).width(SPINNER).height((TALL - SEGMENT) / 2).padTop(SEGMENT);
+                    row1.add(spinner).width(SPINNER).height(TALL).padLeft(SEGMENT);
                 }
                 row2.add(undo).width(SQUARE);
             }
@@ -641,15 +849,21 @@ final class GpuCommandDock implements GpuHud.Component {
                 row1.add(counter).minWidth(0).height(PLAIN).padLeft(GAP + 6).padRight(6);
                 row2.add(replay).minWidth(0);
             }
-            case WAITING -> row2.add(waiting).growX().minWidth(0);
-            case GENERIC -> {
-                // Deployment's height stepper leads the row: lower, the height, higher (battle HUD layout, zone 2).
+            case WAITING, STATUS -> row2.add(waiting).growX().minWidth(0);
+            case ENTRY, GENERIC -> {
+                // The placement row, deployment's and walk-on step 1's alike (battle HUD layout, zone 2): the height
+                // stepper (lower, the height, higher) among the heights the unit could deploy at there, then its
+                // starting setup, a tile per choice, the rest in More. Beside setup tiles it is as high as they are.
+                // Another phase's generic row holds its first commands.
+                float rowHeight = shape.setup().isEmpty() ? PLAIN : SETUP_TILE;
                 if (shape.heights()) {
-                    row1.add(heightDown).width(SQUARE).height(PLAIN);
-                    row1.add(height).growX().minWidth(0).height(PLAIN);
-                    row1.add(heightUp).width(SQUARE).height(PLAIN);
+                    row1.add(heightDown).width(SQUARE).height(rowHeight);
+                    row1.add(height).growX().minWidth(0).height(rowHeight);
+                    row1.add(heightUp).width(SQUARE).height(rowHeight);
                 }
-                for (BoardScene.Command command : rowCommands()) {
+                addSetupTiles(shape.setup(), setupRoom(shape.heights()));
+                for (BoardScene.Command command : shape.variant() == Variant.GENERIC ? rowCommands()
+                      : List.<BoardScene.Command>of()) {
                     UiButton button = button("hud", null, command.label(), null,
                           "dock-command-" + command.id());
                     onChange(button, () -> run(command.id()));
@@ -660,9 +874,11 @@ final class GpuCommandDock implements GpuHud.Component {
             }
             default -> { }
         }
-        // Without an option row (no adjacent enemy), or a generic row with nothing in it, More closes the action row.
+        // Without an option row (no adjacent enemy), or a placement or generic row with nothing in it, More closes the
+        // action row.
         boolean moreInRow2 = shape.variant() == Variant.NO_PHYSICAL
-              || shape.variant() == Variant.GENERIC && shape.buttons().isEmpty() && !shape.heights();
+              || (shape.variant() == Variant.GENERIC || shape.variant() == Variant.ENTRY) && shape.buttons().isEmpty()
+              && !shape.heights() && shape.setup().isEmpty();
         if (shape.more() && !moreInRow2) {
             row1.add(more).width(SQUARE).fillY();
         }
@@ -693,6 +909,8 @@ final class GpuCommandDock implements GpuHud.Component {
         if (shape.variant() == Variant.PLAN) {
             footRight.add(holdAll).padLeft(8);
             footRight.add(waypoint).padLeft(8);
+            footRight.add(clearRoute).padLeft(8);
+        } else if (shape.variant() == Variant.FLIGHT) {
             footRight.add(clearRoute).padLeft(8);
         } else if (shape.variant() == Variant.PLAYBACK) {
             footRight.add(follow).padLeft(8);
@@ -740,30 +958,47 @@ final class GpuCommandDock implements GpuHud.Component {
         return text(prefix + "Result", winner.name(), first.name());
     }
 
-    /** The local movement plan (A.7 G2, G9-G16): modes, facing, undo, confirm, hold and the route's foot line. */
+    /** The local movement plan (A.7 G2, G9-G16): modes, undo, confirm, hold and the route's foot line. */
     private void showPlan() {
         GpuMovePlan.Snapshot move = inputs.frame().panels().move();
         GpuBattleStatus.UnitStatus unit = state.presented(move.entityId());
         boolean route = !move.route().isEmpty();
         head(text("GpuBoard.hud.dock.movementPlan", name(unit)), false);
-        span("", UiTheme.MUTED);
-        backwards.ticked(move.mode() == GpuMovePlan.Mode.BACK);
+        // A walk-on unit enters first: MegaMek's click on an entry hex places it, then the gaits plan.
+        boolean entering = move.traits().entering();
+        // A walk-on unit that entered names its entry hex, and goes back to setting it up with Setup.
+        boolean entered = walkOnEntry().stage() == GpuBoardSource.EntryStage.ENTERED
+              && walkOnEntry().unitId() == move.entityId();
+        span(entering ? walkOnPrompt(unit) : entered ? entryHex(unit) : "",
+              entering ? UiTheme.AMBER : UiTheme.MUTED);
+        if ((entrySetupCell.getActor() != null) != entered) {
+            entrySetupCell.setActor(entered ? entrySetup : null).padLeft(entered ? 8 : 0);
+        }
         GpuMovePlan.Band band = route ? move.route().getLast().band() : null;
+        BoardScene.Command jump = command(JUMP);
+        boolean vehicle = move.traits().vehicle();
         for (int i = 0; i < MODES.size(); i++) {
             GpuMovePlan.Mode mode = MODES.get(i);
             UiButton button = modes.get(i);
+            button.setText(UiTheme.upper(modeName(mode, vehicle)));
             String mp = unit == null ? "" : switch (mode) {
-                case WALK -> String.valueOf(unit.walk());
+                case WALK, BACK -> String.valueOf(move.traits().walk() >= 0 ? move.traits().walk() : unit.walk());
                 case RUN -> unit.run();
                 default -> String.valueOf(unit.jump());
             };
             button.details.getFirst().setText(text("GpuBoard.hud.dock.mp", mp));
             boolean explicit = move.explicit() && move.mode() == mode;
             button.pressed(explicit);
-            button.setDisabled(mode == GpuMovePlan.Mode.JUMP && (unit == null || unit.jump() <= 0));
+            // A gait MegaMek refuses now (a unit down cannot jump) is disabled in its place, unless it is chosen.
+            button.setDisabled(entering || !explicit && switch (mode) {
+                case JUMP -> unit == null || unit.jump() <= 0 || jump != null && !jump.enabled();
+                case BACK -> !enabled(command(BACK_UP));
+                default -> false;
+            });
             // The route's last band is outlined (plan G2); Run covers boosted running and sprinting.
             boolean auto = !move.explicit() && band != null && switch (mode) {
-                case WALK -> band == GpuMovePlan.Band.WALK || band == GpuMovePlan.Band.BACK;
+                case WALK -> band == GpuMovePlan.Band.WALK;
+                case BACK -> band == GpuMovePlan.Band.BACK;
                 case RUN -> band == GpuMovePlan.Band.RUN || band == GpuMovePlan.Band.BOOST
                       || band == GpuMovePlan.Band.SPRINT;
                 default -> band == GpuMovePlan.Band.JUMP;
@@ -775,25 +1010,29 @@ final class GpuCommandDock implements GpuHud.Component {
             // Only the chosen mode has a tooltip: a second click returns to the automatic mode.
             TextTooltip tip = modeTips.get(i);
             if (explicit) {
-                tip.getActor().setText(text("GpuBoard.hud.dock.modeAutoTip",
-                      GpuHintLine.key(inputs.preferences(), MODE_KEYS.get(i))));
+                tip.getActor().setText(i < MODE_KEYS.size() ? text("GpuBoard.hud.dock.modeAutoTip",
+                      GpuHintLine.key(inputs.preferences(), MODE_KEYS.get(i)))
+                      : text("GpuBoard.hud.dock.modeAutoTipNoKey"));
                 button.addListener(tip);
             } else if (button.removeListener(tip)) {
                 tip.hide();
             }
         }
         undo.setDisabled(!move.canUndo());
-        if (shown.standUp()) {
-            standUp.details.getFirst().setText(unit == null ? "" : GpuHudKit.UnitRow.prone(unit)
-                  ? text("GpuBoard.hud.state.prone") : GpuHudKit.UnitRow.hullDown(unit)
-                  ? text("GpuBoard.hud.dock.hullDown") : "");
+        showForms(move, entering);
+        if (shown.elevation()) {
+            showElevation(move);
         }
-        main(text("GpuBoard.hud.dock.confirmMove"), route && enabled(done()));
-        secondary(text("GpuBoard.hud.dock.holdPosition"), enabled(skip()));
+        if (shown.context()) {
+            showContext();
+        }
+        main(text("GpuBoard.hud.dock.confirmMove"), (route || move.traits().converting()) && enabled(done()));
+        secondary(text("GpuBoard.hud.dock.holdPosition"), enabled(command(holdId())));
         waypoint.setDisabled(!move.canPin());
         clearRoute.setDisabled(!route && !move.walkedOn());
-        clearRouteTip.getActor().setText(text(!route && move.walkedOn() ? "GpuBoard.hud.dock.withdrawWalkOn"
-              : "GpuBoard.hud.dock.clearRoute"));
+        clearRouteTip.getActor().setText(text(route ? "GpuBoard.hud.dock.clearRoute"
+              : entered ? "GpuBoard.hud.move.entry.setupTip"
+              : move.walkedOn() ? "GpuBoard.hud.dock.withdrawWalkOn" : "GpuBoard.hud.dock.clearRoute"));
         holdAll.setDisabled(!enabled(skip()) || move.holdingRemaining() > 0);
         if (open == Confirm.HOLD_ALL) {
             confirmation.text(text("GpuBoard.hud.dock.holdAllTitle"), text("GpuBoard.hud.dock.holdAllConfirm"),
@@ -801,15 +1040,154 @@ final class GpuCommandDock implements GpuHud.Component {
         }
         // The plan's facing: the route's last, or the unit's own without a route (E2b).
         String facing = GpuHudKit.facing(move.facing());
+        legendWalk.setText(modeName(GpuMovePlan.Mode.WALK, vehicle));
+        legendRun.setText(modeName(GpuMovePlan.Mode.RUN, vehicle));
+        boolean runs = move.traits().runs();
+        legendRunStrokeCell.setActor(runs ? legendRunStroke : null).padRight(runs ? 5 : 0);
+        legendRunCell.setActor(runs ? legendRun : null).padRight(runs ? 10 : 0);
         if (route) {
             String type = move.auto() ? text("GpuBoard.hud.dock.modeAuto", move.typeLabel()) : move.typeLabel();
-            foot(text("GpuBoard.hud.dock.moveCost", move.cost(), move.budget()),
-                  SEPARATOR + text("GpuBoard.hud.dock.moveFoot", type, facing, GpuHudKit.signed(move.heat())));
+            // A unit without heat (a vehicle) has no heat to show.
+            String rest = unit != null && unit.heatCapacity().isEmpty()
+                  ? text("GpuBoard.hud.dock.moveFootNoHeat", type, facing)
+                  : text("GpuBoard.hud.dock.moveFoot", type, facing, GpuHudKit.signed(move.heat()));
+            foot(text("GpuBoard.hud.dock.moveCost", move.cost(), move.budget()), SEPARATOR + rest);
         } else {
             // The explicit mode's own word (E2b gearLabel): "walk", "run", "jump" or "Walk backwards".
             legendText.setText(move.explicit() ? text("GpuBoard.hud.dock.legendOnly", move.gearLabel(), facing)
                   : text("GpuBoard.hud.dock.legendAuto", facing));
         }
+    }
+
+    /**
+     * Walk-on step 1 (Core Rulebook p. 224): the unit picks its entry hex, then turns, changes its height, mode and
+     * setup, all free; Enter settles them and the plan takes over. Clear takes it back off its entry hex.
+     */
+    private void showEntry() {
+        GpuMovePlan.Snapshot move = inputs.frame().panels().move();
+        GpuBattleStatus.UnitStatus unit = state.presented(move.entityId());
+        boolean placed = walkOnEntry().placed();
+        String edge = unit == null || !unit.walksOn() ? ""
+              : text("GpuBoard.hud.move.entry.from", IStartingPositions.getDisplayName(unit.walkOnZone()));
+        // Enter follows Done: a setup that makes the entry step illegal can't enter.
+        showPlacement(new Placement(unit, false, placed, placed ? edge : walkOnPrompt(unit),
+              text("GpuBoard.hud.move.entry.enter"),
+              placed && enabled(command(holdId())), text("GpuBoard.hud.move.entry.clear"), placed,
+              text("GpuBoard.hud.move.entry.then"), placed ? text("GpuBoard.hud.move.entry.footReady",
+              GpuHintLine.key(inputs.preferences(), KeyCommandBind.DONE)) : text("GpuBoard.hud.move.entry.footPick")));
+    }
+
+    /**
+     * What a placement says, deployment's or walk-on step 1's: the unit, whether it deploys (else enters), whether it
+     * stands on the board yet, the head's span (a prompt in amber until placed), the main button and whether it is ready, Clear and whether it clears, what follows the
+     * main button once placed (empty for nothing) and the foot.
+     */
+    private record Placement(GpuBattleStatus.UnitStatus unit, boolean deploying, boolean placed, String span,
+          String main, boolean ready, String clear, boolean clears, String then, String foot) { }
+
+    /**
+     * The placement's dock, deployment's and walk-on step 1's alike: the head ("ATLAS · Deploy", "ATLAS · Enter") and
+     * its span, the height stepper, the start forms and the setup tiles; the main button and Clear; the placed hex, its facing and the setup's changes under the main button, then
+     * what follows; the setup's consequences in amber in the foot, else how to go on.
+     */
+    private void showPlacement(Placement placement) {
+        headCell.setActor(head).padBottom(7);
+        head(text(placement.deploying() ? "GpuBoard.hud.deploy.head" : "GpuBoard.hud.move.entry.head",
+              name(placement.unit())), false);
+        span(placement.span(), placement.placed() ? UiTheme.MUTED : UiTheme.AMBER);
+        showHeight(placement.deploying());
+        showStartForms(startForms());
+        GpuDeploySetup.Choice setup = shown.setup().isEmpty() ? null : setupChoice();
+        showSetup(setup);
+        main(placement.main(), placement.ready());
+        secondary(placement.clear(), placement.clears());
+        String line = deployLine(placement.unit(), setup);
+        String then = placement.placed() ? placement.then() : "";
+        mainLine(then.isEmpty() ? line : line.isEmpty() ? then : line + SEPARATOR + then);
+        if (setup != null && !setup.consequences().isEmpty()) {
+            // What the setup costs the unit, such as heat each turn, in amber.
+            foot("", "\u25B2 " + String.join(SEPARATOR, setup.consequences()));
+            footText.getStyle().fontColor = UiTheme.AMBER;
+        } else {
+            foot("", placement.foot());
+        }
+    }
+
+    /**
+     * An airborne aerospace unit's flight (TW aerospace movement): MegaMek plots the path from board clicks, and the
+     * dock sets its velocity, altitude and confirmation (its turns in More). A walk-on unit enters first, as in the plan.
+     */
+    private void showFlight() {
+        GpuMovePlan.Snapshot move = inputs.frame().panels().move();
+        GpuMovePlan.Flight flight = move.traits().flight();
+        GpuBattleStatus.UnitStatus unit = state.presented(move.entityId());
+        boolean entering = move.traits().entering();
+        head(text("GpuBoard.hud.dock.flightPlan", name(unit)), false);
+        span(entering ? walkOnPrompt(unit) : flightHint(flight),
+              entering ? UiTheme.AMBER : UiTheme.MUTED);
+        flightStep(decelerate, decelerateTip, command(DECELERATE), entering, move.canUndo());
+        flightStep(accelerate, accelerateTip, command(ACCELERATE), entering, move.canUndo());
+        velocityValue.setText(flight.start() == flight.velocity() ? String.valueOf(flight.velocity())
+              : flight.start() + "\u2192" + flight.velocity());
+        undo.setDisabled(!move.canUndo());
+        showForms(move, entering);
+        if (shown.elevation()) {
+            showElevation(move);
+        }
+        main(text("GpuBoard.hud.dock.confirmMove"), !entering && enabled(done()));
+        secondary(text("GpuBoard.hud.dock.holdPosition"), enabled(skip()));
+        clearRoute.setDisabled(!move.canUndo() && !move.walkedOn());
+        clearRouteTip.getActor().setText(text(!move.canUndo() && move.walkedOn()
+              ? "GpuBoard.hud.dock.withdrawWalkOn" : "GpuBoard.hud.dock.clearRoute"));
+        foot(text("GpuBoard.hud.dock.flightCost", flight.thrust(), flight.safe()),
+              SEPARATOR + text("GpuBoard.hud.dock.flightFoot", flight.max(), GpuHudKit.facing(move.facing())));
+    }
+
+    /**
+     * What the flight needs next: velocity to fly at all, then the hexes it still has to fly (TW: a fighter flies its
+     * whole velocity), then only the confirmation.
+     */
+    private static String flightHint(GpuMovePlan.Flight flight) {
+        if (flight.velocity() == 0) {
+            return text("GpuBoard.hud.dock.flightAccelerate");
+        }
+        return flight.togo() > 0 ? text("GpuBoard.hud.dock.flightToGo", flight.togo())
+              : text("GpuBoard.hud.dock.flightFlown");
+    }
+
+    /**
+     * A flight button: MegaMek's command, its label in the tooltip; disabled while the unit has not entered. Velocity
+     * changes come before any other step (TW), so once the path has one, the tooltip says why it is disabled.
+     */
+    private static void flightStep(UiButton button, TextTooltip tip, BoardScene.Command command, boolean entering,
+          boolean moved) {
+        step(button, tip, command);
+        button.setDisabled(entering || button.isDisabled());
+        if (command != null && !entering && moved && button.isDisabled()) {
+            tip.getActor().setText(text("GpuBoard.hud.dock.velocityFirst", command.label()));
+        }
+    }
+
+    /**
+     * The context slot: the command's glyph over its short caption, MegaMek's full label in the tooltip. A command for
+     * the unit's situation is outlined as the route's gait is, so what the unit needs stands out.
+     */
+    private void showContext() {
+        BoardScene.Command command = contextCommand();
+        if (command == null) {
+            return;
+        }
+        boolean getUp = command.id().equals(GpuMoveContext.GET_UP);
+        ((Image) context.icons.getFirst()).setDrawable(ui.skin.getDrawable("icon-"
+              + GpuMoveContext.icon(command.id())));
+        context.details.getFirst().setText(GpuMoveContext.caption(command));
+        context.setDisabled(!command.enabled());
+        TextButton.TextButtonStyle style = GpuMoveContext.pressing(command) ? autoStyle : plainStyle;
+        if (context.getStyle() != style) {
+            context.setStyle(style);
+        }
+        contextTip.getActor().setText(getUp ? text("GpuBoard.hud.dock.standUpTip")
+              : command.enabled() ? command.label() : text("GpuBoard.hud.dock.unavailable"));
     }
 
     /**
@@ -823,9 +1201,48 @@ final class GpuCommandDock implements GpuHud.Component {
               ? text("GpuBoard.hud.dock.opponentMoving", slot.playerName())
               : text("GpuBoard.hud.phase.opponentTurn", slot.playerName()), slot.side() == GpuBattleStatus.Side.ENEMY);
         span(name(unit), UiTheme.MINT);
+        waitingLabel.setText(UiTheme.upper(text("GpuBoard.hud.dock.waitingForOpponent")));
         GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
         foot(fire.active() && !fire.editable() ? text("GpuBoard.hud.dock.weaponAttacks",
               name(state.presented(fire.actorId())), fire.attacks().size()) : "", "");
+    }
+
+    /**
+     * Unit commands held (STATUS): the waiting box says why. While a move plays, the head names its player and the
+     * span its unit; with the selection cleared in the local turn, the box asks for a unit; under the forces overview
+     * or other playback, the head is the turn's, as the waiting box shows it.
+     */
+    private void showStatus() {
+        GpuBattleStatus.Snapshot status = inputs.frame().status();
+        GpuBattleStatus.UnitStatus mover = state.playbackBusy() ? state.presented(state.history.moverId()) : null;
+        GpuBattleStatus.Slot slot = current();
+        String box;
+        if (mover != null) {
+            head(mover.side() == GpuBattleStatus.Side.OWN ? text("GpuBoard.hud.dock.youMoving")
+                  : text("GpuBoard.hud.dock.opponentMoving", playerName(status, mover.ownerId())),
+                  mover.side() == GpuBattleStatus.Side.ENEMY);
+            span(name(mover), UiTheme.MINT);
+            box = "GpuBoard.hud.dock.resolvingMove";
+        } else if (!status.myTurn() && slot != null) {
+            head(status.phase().isMovement() ? text("GpuBoard.hud.dock.opponentMoving", slot.playerName())
+                  : text("GpuBoard.hud.phase.opponentTurn", slot.playerName()),
+                  slot.side() == GpuBattleStatus.Side.ENEMY);
+            span(name(state.presented(slot.entityId())), UiTheme.MINT);
+            box = state.playbackBusy() ? "GpuBoard.hud.dock.resolving" : "GpuBoard.hud.dock.waitingForOpponent";
+        } else {
+            head(text(status.myTurn() ? "GpuBoard.hud.phase.yourTurn" : "GpuBoard.hud.dock.resolving"), false);
+            span("", UiTheme.MINT);
+            box = state.playbackBusy() || !status.myTurn() ? "GpuBoard.hud.dock.resolving"
+                  : state.overview ? "GpuBoard.hud.dock.closeOverview" : "GpuBoard.hud.dock.selectUnit";
+        }
+        waitingLabel.setText(UiTheme.upper(text(box)));
+        foot("", "");
+    }
+
+    /** The name of the player with {@code playerId} as the turn order lists it, or "Opponent". */
+    private static String playerName(GpuBattleStatus.Snapshot status, int playerId) {
+        return status.turns().stream().filter(slot -> slot.playerId() == playerId).map(GpuBattleStatus.Slot::playerName)
+              .filter(name -> !name.isBlank()).findFirst().orElse(text("GpuBoard.hud.dock.opponent"));
     }
 
     /**
@@ -965,13 +1382,23 @@ final class GpuCommandDock implements GpuHud.Component {
               : phase.isMovement() ? text("GpuBoard.hud.dock.movement", name(actor)) : name(actor);
         String line = lines[0].strip();
         boolean deploying = phase.isDeployment() && status.myTurn();
+        BoardScene.Command done = done();
+        BoardScene.Command clear = deployClear();
         if (deploying) {
-            // The phase strip names the turn; the compact dock only says what lets Deploy go.
-            line = "";
+            // Placing is local until Deploy (Done) sends the unit, so the foot names the confirmation once it can.
+            boolean turns = actor == null || actor.turns();
+            boolean ready = done != null && done.enabled();
+            showPlacement(new Placement(actor, true, actor != null && actor.position() != null, "",
+                  done == null ? "" : done.label(), ready, clear == null ? "" : clear.label(),
+                  clear != null && clear.enabled(), "", ready
+                  ? text(turns ? "GpuBoard.hud.deploy.footReady" : "GpuBoard.hud.deploy.footReadyFixed",
+                        UiTheme.upper(done.label()), GpuHintLine.key(inputs.preferences(), KeyCommandBind.DONE))
+                  : text(turns ? "GpuBoard.hud.deploy.footPlace" : "GpuBoard.hud.deploy.footPlaceFixed")));
+            return;
         }
         head(headline, false);
         span(line, UiTheme.MINT);
-        boolean headed = !headline.isEmpty() || !line.isEmpty();
+        boolean headed = !headline.isEmpty() || !line.isEmpty() || !forms.isEmpty();
         if ((headCell.getActor() == head) != headed) {
             headCell.setActor(headed ? head : null).padBottom(headed ? 7 : 0);
         }
@@ -979,30 +1406,18 @@ final class GpuCommandDock implements GpuHud.Component {
         for (int i = 0; i < choices.size() && i < row.size(); i++) {
             choices.get(i).setText(UiTheme.upper(row.get(i).label()));
         }
-        BoardScene.Command done = done();
         if (done != null) {
             main(phase.isReport() ? text("GpuBoard.hud.dock.continue") : done.label(), done.enabled());
         }
         BoardScene.Command skip = skip();
-        BoardScene.Command clear = deployClear();
         if (clear != null) {
             secondary(clear.label(), clear.enabled());
         } else if (skip != null) {
             secondary(skip.label(), skip.enabled());
         }
-        GpuBoardSource.HeightChoice choice = shown.heights() ? deployHeight.choice(deployingActor()) : null;
-        if (choice != null) {
-            height.setText(UiTheme.upper(deployHeight.label(choice)));
-        }
-        if (deploying) {
-            // Placing is local until Deploy (Done) sends the unit, so the foot names the confirmation once it can.
-            foot("", done != null && done.enabled()
-                  ? text("GpuBoard.hud.deploy.footReady", UiTheme.upper(done.label()),
-                        GpuHintLine.key(inputs.preferences(), KeyCommandBind.DONE))
-                  : text("GpuBoard.hud.deploy.footPlace"));
-        } else {
-            foot("", lines.length > 1 ? lines[1].strip() : "");
-        }
+        showStartForms(startForms());
+        mainLine("");
+        foot("", lines.length > 1 ? lines[1].strip() : "");
     }
 
     // ------------------------------------------------------------------ actions
@@ -1016,7 +1431,7 @@ final class GpuCommandDock implements GpuHud.Component {
             return;
         }
         GpuHudData panels = inputs.frame().panels();
-        if (variant == Variant.PLAN && panels.move().route().isEmpty()) {
+        if (variant == Variant.PLAN && panels.move().route().isEmpty() && !panels.move().traits().converting()) {
             source.toasts().post(ToastLevel.INFO, text("GpuBoard.hud.move.plotFirst"));
             return;
         }
@@ -1024,7 +1439,8 @@ final class GpuCommandDock implements GpuHud.Component {
             return;
         }
         switch (variant) {
-            case INITIATIVE, PLAN, GENERIC -> run(panels.phase().doneId());
+            case INITIATIVE, PLAN, FLIGHT, GENERIC -> run(panels.phase().doneId());
+            case ENTRY -> source.setEntered(panels.move().entityId(), true);
             case NO_PHYSICAL -> run(noAction());
             case PLAYBACK -> {
                 if (!playbackPhase().isEndReport() && state.history.running()) {
@@ -1043,8 +1459,10 @@ final class GpuCommandDock implements GpuHud.Component {
     private void secondary() {
         switch (variant) {
             case INITIATIVE -> run(REROLL);
+            case ENTRY -> source.moves().clearOrWithdraw();
             case GENERIC -> run(deployClear() != null ? DEPLOY_CLEAR : inputs.frame().panels().phase().skipId());
-            case PLAN -> run(inputs.frame().panels().phase().skipId());
+            case PLAN -> run(holdId());
+            case FLIGHT -> run(inputs.frame().panels().phase().skipId());
             case PHYSICAL -> run(noAction());
             default -> { }
         }
@@ -1214,7 +1632,8 @@ final class GpuCommandDock implements GpuHud.Component {
     /**
      * The More popover of the shown variant, or null without one: the remaining movement commands grouped by
      * availability, the weapon declaration's MegaMek extras (H38), the physical options beyond the option row and the
-     * physical phase's other commands, or the phase commands beyond the generic row (C.2). Firing and physical turns
+     * physical phase's other commands, or the phase commands beyond the generic row (C.2); a plan, flight or entry leads with
+     * Turn left and Turn right. Firing and physical turns
      * also offer the unit's record (unit panel design 2.2).
      */
     More more() {
@@ -1223,9 +1642,9 @@ final class GpuCommandDock implements GpuHud.Component {
         }
         List<BoardScene.Command> items = new ArrayList<>();
         More more = switch (variant) {
-            case PLAN -> {
-                items.addAll(others(standUpShown() ? MOVE_SHOWN_DOWN : MOVE_SHOWN).map(GpuCommandDock::entry)
-                      .toList());
+            case PLAN, FLIGHT -> {
+                items.addAll(turnItems());
+                items.addAll(others(moveShown()).map(GpuCommandDock::entry).toList());
                 yield new More(text("GpuBoard.hud.dock.moreMovement"), null,
                       items.stream().filter(BoardScene.Command::enabled).toList(),
                       items.stream().filter(command -> !command.enabled()).toList());
@@ -1246,15 +1665,21 @@ final class GpuCommandDock implements GpuHud.Component {
                 yield new More(text("GpuBoard.hud.common.more"), name(state.presented(physical.actorId())), items,
                       others(PHYSICAL_SHOWN).map(GpuCommandDock::entry).toList());
             }
+            // The turns, and the setup tiles the option row has no room for, as the same tiles.
+            case ENTRY -> new More(text("GpuBoard.hud.common.more"),
+                  name(state.presented(inputs.frame().panels().move().entityId())), turnItems(), List.of(),
+                  setupOverflow());
             default -> {
                 List<BoardScene.Command> row = rowCommands();
+                items.addAll(turnItems());
                 yield new More(text("GpuBoard.hud.common.more"), inputs.frame().status().phase().localizedName(),
-                      items, others(Set.of()).filter(command -> !row.contains(command)).map(GpuCommandDock::entry)
-                      .toList());
+                      items, others(deployingActor() < 0 ? Set.of() : DEPLOY_SHOWN)
+                      .filter(command -> !row.contains(command)).map(GpuCommandDock::entry).toList(),
+                      setupOverflow());
             }
         };
-        // Without a command to use now, the dock shows no More button.
-        return GpuMoreDrawer.usable(more).isEmpty() ? null : more;
+        // Without a command or a setup choice to use now, the dock shows no More button.
+        return GpuMoreDrawer.usable(more).isEmpty() && more.setup().isEmpty() ? null : more;
     }
 
     /**
@@ -1263,13 +1688,60 @@ final class GpuCommandDock implements GpuHud.Component {
      */
     private boolean hasMore() {
         return switch (variant) {
-            case PLAN, FIRE -> true;
+            case PLAN, FLIGHT, FIRE -> true;
             case PHYSICAL -> inputs.frame().panels().physical().options().size() > rowOptions().size()
                   || others(PHYSICAL_SHOWN).findAny().isPresent();
             case NO_PHYSICAL -> others(PHYSICAL_SHOWN).anyMatch(BoardScene.Command::enabled);
-            case GENERIC -> others(Set.of()).count() > rowCommands().size();
+            case GENERIC -> others(Set.of()).count() > rowCommands().size() || !setupOverflow().isEmpty()
+                  || !turnItems().isEmpty();
+            case ENTRY -> inputs.frame().panels().move().facingMatters() || !setupOverflow().isEmpty();
             default -> false;
         };
+    }
+
+    /**
+     * Turn left and Turn right, one hexside each, as the unit's arrows on the board and a drag turn it: the plan's and
+     * walk-on step 1's while facing matters (once the unit stands on its entry hex), a flight's with MegaMek's Turn,
+     * and a deploying unit's that turns once it is placed.
+     */
+    private List<BoardScene.Command> turnItems() {
+        int deploying = deployingActor();
+        if (deploying >= 0) {
+            GpuBattleStatus.UnitStatus actor = state.presented(deploying);
+            if (actor == null || !actor.turns()) {
+                return List.of();
+            }
+            boolean placed = actor.position() != null;
+            return List.of(turnItem(-1, placed, () -> source.turnPlaced(deploying, -1)),
+                  turnItem(1, placed, () -> source.turnPlaced(deploying, 1)));
+        }
+        if (variant == Variant.GENERIC) {
+            return List.of();
+        }
+        GpuMovePlan.Snapshot move = inputs.frame().panels().move();
+        boolean shown;
+        boolean usable;
+        if (variant == Variant.FLIGHT) {
+            BoardScene.Command turn = command(TURN);
+            shown = turn != null;
+            usable = !move.traits().entering() && enabled(turn);
+        } else {
+            shown = move.facingMatters();
+            usable = variant == Variant.ENTRY ? walkOnEntry().placed() : !move.traits().entering();
+        }
+        if (!shown) {
+            return List.of();
+        }
+        return List.of(turnItem(-1, usable, () -> source.moves().turn(-1)),
+              turnItem(1, usable, () -> source.moves().turn(1)));
+    }
+
+    private BoardScene.Command turnItem(int direction, boolean usable, Runnable turn) {
+        boolean left = direction < 0;
+        return item(left ? "dock.turnLeft" : "dock.turnRight", text(left ? "GpuBoard.hud.dock.turnLeft"
+              : "GpuBoard.hud.dock.turnRight"), usable ? GpuHintLine.key(inputs.preferences(), left
+              ? KeyCommandBind.TURN_LEFT : KeyCommandBind.TURN_RIGHT) : text("GpuBoard.hud.dock.unavailable"),
+              usable, turn);
     }
 
     private static BoardScene.Command item(String id, String label, String detail, boolean enabled, Runnable action) {
@@ -1319,10 +1791,13 @@ final class GpuCommandDock implements GpuHud.Component {
     /**
      * The generic option row: the first five phase commands in MegaMek's order that are available now. Deployment's
      * compact dock keeps two: its next unit is a card of the force, turning a drag, and Remove (which takes the unit
-     * out of the game) stays in More.
+     * out of the game) stays in More. A unit with a starting setup shows its setup tiles instead, its commands in More.
      */
     private List<BoardScene.Command> rowCommands() {
         boolean deployment = inputs.frame().status().phase().isDeployment();
+        if (deployment && setupChoice() != null) {
+            return List.of();
+        }
         return others(Set.of()).filter(BoardScene.Command::enabled)
               .filter(command -> !deployment || !DEPLOY_MORE_ONLY.contains(command.id()))
               .limit(deployment ? DEPLOY_COMMANDS : COMMANDS).toList();
@@ -1347,6 +1822,12 @@ final class GpuCommandDock implements GpuHud.Component {
         return command(inputs.frame().panels().phase().skipId());
     }
 
+    /** Hold position's command: the skip, or Done for a walked-on unit without a route (PhaseInfo.holdId). */
+    private String holdId() {
+        GpuHudData panels = inputs.frame().panels();
+        return panels.phase().holdId(panels.move());
+    }
+
     /** Deployment's Clear (MegaMek's "clear deployment"), the secondary button in the player's own turn, or null. */
     private BoardScene.Command deployClear() {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
@@ -1357,6 +1838,108 @@ final class GpuCommandDock implements GpuHud.Component {
     private int deployingActor() {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         return status.phase().isDeployment() && status.myTurn() ? status.actorId() : -1;
+    }
+
+    /** The unit whose height the stepper places: the deploying one, or the walk-on unit setting up its entry. */
+    private int placingActor() {
+        return inputs == null ? -1 : variant == Variant.ENTRY ? inputs.frame().panels().move().entityId()
+              : deployingActor();
+    }
+
+    /** The height stepper's read-out and tips, a deployment's or a walk-on entry's, while the shape has it. */
+    private void showHeight(boolean deploying) {
+        GpuBoardSource.HeightChoice choice = shown.heights() ? deployHeight.choice(placingActor()) : null;
+        if (choice == null) {
+            return;
+        }
+        height.setText(UiTheme.upper(deployHeight.label(choice)));
+        String prefix = deploying ? "GpuBoard.hud.deploy." : "GpuBoard.hud.move.entry.";
+        heightDownTip.getActor().setText(text(prefix + "heightDown"));
+        heightTip.getActor().setText(text(prefix + "heightTip"));
+        heightUpTip.getActor().setText(text(prefix + "heightUp"));
+    }
+
+    // ------------------------------------------------------------------ deployment setup
+
+    /**
+     * The acting unit's starting setup (Core Rulebook p. 224) while it has choices, or null: the deploying unit's, or
+     * the walk-on unit's while it sets up its entry.
+     */
+    private GpuDeploySetup.Choice setupChoice() {
+        GpuDeploySetup.Choice choice = source == null || inputs == null ? null : source.setupChoice();
+        int actor = placingActor();
+        return choice != null && actor >= 0 && choice.unitId() == actor && !choice.tiles().isEmpty() ? choice : null;
+    }
+
+    /** How many setup tiles the option row has room for, beside the height stepper or not. */
+    private static int setupRoom(boolean heights) {
+        return heights ? SETUP_TILES - 2 : SETUP_TILES;
+    }
+
+    /** Adds the option row's setup tiles, at most {@code room}; More lists the rest. */
+    private void addSetupTiles(List<String> ids, int room) {
+        setupTiles.clear();
+        for (int i = 0; i < ids.size() && i < room; i++) {
+            String id = ids.get(i);
+            GpuSetupTile tile = new GpuSetupTile(ui, "dock-setup-" + id, face -> chooseSetup(id, face));
+            setupTiles.put(id, tile);
+            row1.add(tile.button()).growX().uniformX().minWidth(0).height(GpuSetupTile.HEIGHT);
+        }
+    }
+
+    /** The setup tiles beyond the option row's room, which More lists. */
+    private List<GpuDeploySetup.Tile> setupOverflow() {
+        GpuDeploySetup.Choice choice = variant == Variant.GENERIC || variant == Variant.ENTRY ? setupChoice() : null;
+        if (choice == null) {
+            return List.of();
+        }
+        int room = setupRoom(deployHeight.choice(placingActor()) != null);
+        return choice.tiles().size() > room ? choice.tiles().subList(room, choice.tiles().size()) : List.of();
+    }
+
+    /** The tiles' captions, states and marks; a changed tile is framed in amber with an amber value. */
+    private void showSetup(GpuDeploySetup.Choice choice) {
+        setupTiles.forEach((id, shown) -> {
+            GpuDeploySetup.Tile tile = choice == null ? null : choice.tile(id);
+            if (tile != null) {
+                shown.show(tile);
+            }
+        });
+    }
+
+    /** A tile's click, in the option row or in More: a switch flips, a list or a count's slider opens above it. */
+    private void chooseSetup(String id, Actor face) {
+        GpuDeploySetup.Choice choice = setupChoice();
+        GpuDeploySetup.Tile tile = choice == null ? null : choice.tile(id);
+        if (tile == null || tile.isLocked()) {
+            return;
+        }
+        int unit = choice.unitId();
+        String detail = tile.tip().isEmpty() ? null : tile.tip();
+        switch (tile.kind()) {
+            case TOGGLE -> source.setSetup(unit, id, tile.on() ? tile.off() : 1 - tile.off());
+            case PICK -> menu.choices(face, tile.caption(), detail, tile.values(), tile.selected(),
+                  index -> source.setSetup(unit, id, index));
+            case STEP -> menu.slider(face, tile.caption(), detail, tile.selected(), tile.values().size() - 1,
+                  count -> source.setSetup(unit, id, count));
+        }
+    }
+
+
+    /** Deploy's sub-line: the hex and, when it means anything, facing the unit is placed at, and the setup changes. */
+    private static String deployLine(GpuBattleStatus.UnitStatus actor, GpuDeploySetup.Choice setup) {
+        List<String> parts = new ArrayList<>();
+        if (actor != null && actor.position() != null) {
+            parts.add(actor.position().getBoardNum());
+            String facing = actor.turns() ? GpuHudKit.facing(actor.facing()) : "";
+            if (!facing.isEmpty()) {
+                parts.add(facing);
+            }
+        }
+        if (setup != null && setup.changes() > 0) {
+            parts.add(GpuDeploySetup.text("changeCount", setup.changes()));
+        }
+        return String.join(SEPARATOR, parts);
     }
 
     /**
@@ -1378,12 +1961,131 @@ final class GpuCommandDock implements GpuHud.Component {
         return command != null && command.enabled();
     }
 
+    /** The context slot's command in the movement plan (GpuMoveContext), or null. */
+    private BoardScene.Command contextCommand() {
+        return variant == Variant.PLAN ? GpuMoveContext.pick(commands()) : null;
+    }
+
     /**
-     * Stand up shows in the movement plan while MegaMek offers Get Up: the unit, or the plan's end, is prone or hull
-     * down.
+     * The head's mode switch: the planned mode pressed, a mode the unit can't take now (it has moved, or a damaged LAM)
+     * disabled.
      */
-    private boolean standUpShown() {
-        return variant == Variant.PLAN && enabled(command(GET_UP));
+    private void showForms(GpuMovePlan.Snapshot move, boolean entering) {
+        GpuBoardSource.FormChoice starting = startForms();
+        if (starting != null) {
+            showStartForms(starting);
+            return;
+        }
+        List<GpuMovePlan.Form> planned = move.traits().forms();
+        for (int i = 0; i < forms.size() && i < planned.size(); i++) {
+            GpuMovePlan.Form form = planned.get(i);
+            UiButton button = forms.get(i);
+            button.pressed(form.planned());
+            boolean disabled = entering || !form.enabled() && !form.planned();
+            button.setDisabled(disabled);
+            String tip = disabled ? (form.why() != null ? form.why()
+                  : text(entering ? "GpuBoard.hud.dock.form.entering" : "GpuBoard.hud.dock.form.moved"))
+                  : form.planned() ? null
+                  : form.cost() > 0 ? text("GpuBoard.hud.dock.form.convertCost", form.label(), form.cost())
+                  : text("GpuBoard.hud.dock.form.convert", form.label());
+            TextTooltip formTip = i < formTips.size() ? formTips.get(i) : null;
+            if (formTip == null) {
+                continue;
+            }
+            if (tip != null) {
+                formTip.getActor().setText(tip);
+                if (!button.getListeners().contains(formTip, true)) {
+                    button.addListener(formTip);
+                }
+            } else if (button.removeListener(formTip)) {
+                formTip.hide();
+            }
+        }
+    }
+
+    /**
+     * The acting unit's starting mode choice (a LAM's, a QuadVee's): while it deploys, or walks on until its first
+     * step; null while it has none.
+     */
+    private GpuBoardSource.FormChoice startForms() {
+        GpuBoardSource.FormChoice choice = source == null ? null : source.formChoice();
+        GpuBattleStatus.Snapshot status = inputs == null ? null : inputs.frame().status();
+        boolean choosing = status != null && status.myTurn()
+              && (status.phase().isDeployment() || status.phase().isMovement());
+        return choice != null && choosing && choice.unitId() == status.actorId() && choice.modes().size() > 1
+              ? choice : null;
+    }
+
+    /**
+     * The head's mode switch while the unit chooses the mode it starts in: that mode pressed, each other one a click
+     * away, free.
+     */
+    private void showStartForms(GpuBoardSource.FormChoice choice) {
+        boolean entering = inputs.frame().status().phase().isMovement();
+        for (int i = 0; i < forms.size(); i++) {
+            UiButton button = forms.get(i);
+            boolean current = choice != null && i < choice.modes().size() && choice.modes().get(i) == choice.mode();
+            button.pressed(current);
+            button.setDisabled(choice == null);
+            TextTooltip formTip = i < formTips.size() ? formTips.get(i) : null;
+            if (formTip == null) {
+                continue;
+            }
+            if (!current && choice != null && i < choice.labels().size()) {
+                formTip.getActor().setText(text(entering ? "GpuBoard.hud.move.entry.form" : "GpuBoard.hud.deploy.form",
+                      choice.labels().get(i)));
+                if (!button.getListeners().contains(formTip, true)) {
+                    button.addListener(formTip);
+                }
+            } else if (button.removeListener(formTip)) {
+                formTip.hide();
+            }
+        }
+    }
+
+    /**
+     * A mode of the head's switch: MegaMek converts to it, or back to the starting mode; while the unit chooses its
+     * starting mode (deploying, or walking on before its first step), it starts in it instead.
+     */
+    private void convert(int index) {
+        GpuBoardSource.FormChoice starting = startForms();
+        if (starting != null) {
+            if (index < starting.modes().size() && starting.modes().get(index) != starting.mode()) {
+                source.setStartingMode(starting.unitId(), starting.modes().get(index));
+            }
+            return;
+        }
+        List<GpuMovePlan.Form> planned = inputs == null ? List.of() : inputs.frame().panels().move().traits().forms();
+        if (index < planned.size() && !planned.get(index).planned()) {
+            source.moves().convert(planned.get(index).command());
+        }
+    }
+
+    /** The movement commands the dock shows: its own controls' and the context slot's. */
+    private Set<String> moveShown() {
+        Set<String> shown = new HashSet<>(MOVE_SHOWN);
+        BoardScene.Command shownContext = contextCommand();
+        if (shownContext != null) {
+            shown.add(shownContext.id());
+        }
+        if ((variant == Variant.PLAN || variant == Variant.FLIGHT)
+              && !inputs.frame().panels().move().traits().forms().isEmpty()) {
+            shown.add(MoveCommand.MOVE_MODE_CONVERT.getCmd());
+        }
+        if ((variant == Variant.PLAN || variant == Variant.FLIGHT) && elevationShown()) {
+            shown.add(GO_UP);
+            shown.add(GO_DOWN);
+        }
+        // A walk-on unit setting up its entry chooses its height with the stepper, among those it could deploy at.
+        if (variant == Variant.ENTRY) {
+            shown.add(GO_UP);
+            shown.add(GO_DOWN);
+        }
+        if (variant == Variant.FLIGHT) {
+            shown.add(ACCELERATE);
+            shown.add(DECELERATE);
+        }
+        return shown;
     }
 
     /** The "Steps" mini: the turn-details preference is on and the local turn has steps (plan C.2, P6). */
@@ -1433,12 +2135,72 @@ final class GpuCommandDock implements GpuHud.Component {
         return String.join(SEPARATOR, parts);
     }
 
-    private static String modeName(GpuMovePlan.Mode mode) {
+    /** The walk-on prompt: the edge the unit enters from, when the battle status knows it. */
+    private static String walkOnPrompt(GpuBattleStatus.UnitStatus unit) {
+        return unit == null || !unit.walksOn() ? text("GpuBoard.hud.dock.walkOnPick")
+              : text("GpuBoard.hud.dock.walkOnPickEdge", IStartingPositions.getDisplayName(unit.walkOnZone()));
+    }
+
+    /** Walk-on step 2's span: the hex and facing the unit entered at. */
+    private static String entryHex(GpuBattleStatus.UnitStatus unit) {
+        if (unit == null || unit.position() == null) {
+            return "";
+        }
+        String facing = GpuHudKit.facing(unit.facing());
+        return text("GpuBoard.hud.move.entry.entered", unit.position().getBoardNum()
+              + (facing.isEmpty() ? "" : SEPARATOR + facing));
+    }
+
+    /** A gait's name: a vehicle cruises and flanks (TW) where a Mek walks and runs. */
+    private static String modeName(GpuMovePlan.Mode mode, boolean vehicle) {
         return text(switch (mode) {
-            case RUN -> "GpuBoard.hud.dock.run";
+            case RUN -> vehicle ? "GpuBoard.hud.dock.flank" : "GpuBoard.hud.dock.run";
             case JUMP -> "GpuBoard.hud.dock.jump";
-            default -> "GpuBoard.hud.dock.walk";
+            case BACK -> vehicle ? "GpuBoard.hud.dock.backUp" : "GpuBoard.hud.dock.back";
+            default -> vehicle ? "GpuBoard.hud.dock.cruise" : "GpuBoard.hud.dock.walk";
         });
+    }
+
+    /** The jump gait in the plan: the unit has the command and jump MP, or a booster, to use it. */
+    private boolean jumpShown() {
+        GpuMovePlan.Snapshot move = inputs.frame().panels().move();
+        return command(JUMP) != null && move != null && move.traits().jumps();
+    }
+
+    /**
+     * The elevation stepper in the plan: a unit that flies, glides or dives (VTOL, WiGE, submarine) and has the
+     * commands. A Mek keeps Go up and Go down in the drawer, where they are rare.
+     */
+    private boolean elevationShown() {
+        GpuMovePlan.Snapshot move = inputs.frame().panels().move();
+        return move != null && move.traits().elevates() && (command(GO_UP) != null || command(GO_DOWN) != null);
+    }
+
+    private void showElevation(GpuMovePlan.Snapshot move) {
+        boolean flight = move.traits().flight() != null;
+        String kind = move.traits().altitude() ? "altitude" : move.traits().dives() ? "depth" : "elevation";
+        elevationCaption.setText(UiTheme.upper(text("GpuBoard.hud.dock." + kind + "Short")));
+        elevationTip.getActor().setText(text("GpuBoard.hud.dock." + kind + "Tip"));
+        // A height-0 aerospace unit or flier is landed, named as deployment's stepper names it.
+        GpuDeployHeight.Kind heightKind = GpuDeployHeight.Kind.of(move.traits());
+        int level = move.traits().shownLevel();
+        elevationValue.setText(GpuDeployHeight.landed(heightKind, level)
+              ? UiTheme.upper(GpuDeployHeight.label(heightKind, level)) : String.valueOf(level));
+        // A walk-on unit enters at its deployment elevation, so the stepper waits for its entry hex.
+        boolean entering = move.traits().entering() && !flight;
+        step(goUp, goUpTip, command(GO_UP), entering);
+        step(goDown, goDownTip, command(GO_DOWN), entering);
+    }
+
+    private static void step(UiButton button, TextTooltip tip, BoardScene.Command command) {
+        step(button, tip, command, false);
+    }
+
+    private static void step(UiButton button, TextTooltip tip, BoardScene.Command command, boolean held) {
+        button.setDisabled(held || !enabled(command));
+        if (command != null) {
+            tip.getActor().setText(command.label());
+        }
     }
 
     private void head(String text, boolean foe) {
@@ -1464,5 +2226,16 @@ final class GpuCommandDock implements GpuHud.Component {
     private void foot(String bold, String text) {
         footBold.setText(bold);
         footText.setText(text);
+        footText.getStyle().fontColor = UiTheme.MUTED;
+    }
+
+    /** The main button's sub-line; none closes it, so the caption stays centred. */
+    private void mainLine(String text) {
+        boolean wasShown = mainLine.getText().length() > 0;
+        mainLine.setText(text);
+        if (wasShown != !text.isEmpty()) {
+            mainLineCell.height(text.isEmpty() ? Value.zero : Value.prefHeight).padTop(text.isEmpty() ? 0 : 1);
+            main.invalidateHierarchy();
+        }
     }
 }

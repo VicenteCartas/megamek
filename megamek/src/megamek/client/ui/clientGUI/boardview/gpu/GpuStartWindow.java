@@ -124,9 +124,16 @@ public final class GpuStartWindow {
      * @param roles      who plays each of the game's players, in the game's player order
      * @param playerName the host's name: the player they take, or the observer's name when they take none
      * @param password   the game's password, or blank for an open game
+     * @param recordGif  the host's answer to recording the game's summary GIF, asked at Start as the lobby asks at
+     *                   Ready; null when the preference does not ask
      */
     public record ScenarioRequest(Scenario scenario, IGame game, List<Role> roles, String playerName, String password,
-          int port) {
+          int port, @Nullable Boolean recordGif) {
+        public ScenarioRequest(Scenario scenario, IGame game, List<Role> roles, String playerName, String password,
+              int port) {
+            this(scenario, game, roles, playerName, password, port, null);
+        }
+
         public ScenarioRequest {
             Objects.requireNonNull(scenario);
             Objects.requireNonNull(game);

@@ -122,6 +122,9 @@ public class MovePath implements Cloneable,
      */
     private BoardLocation flightPathHex = BoardLocation.NO_LOCATION;
 
+    /** How a walk-on unit starts the game, chosen before it entered; null when as the lobby left it */
+    private @Nullable DeploymentSetup deploymentSetup;
+
     /**
      * Generates a new, empty, movement path object.
      */
@@ -1816,6 +1819,7 @@ public class MovePath implements Cloneable,
         copy.containedStepTypes = new HashSet<>(containedStepTypes);
         // copy.fliesOverEnemy = fliesOverEnemy;
         copy.cachedEntityState = cachedEntityState; // intentional pointer copy
+        copy.deploymentSetup = deploymentSetup;
     }
 
     /**
@@ -2235,5 +2239,19 @@ public class MovePath implements Cloneable,
 
     public BoardLocation getFlightPathHex() {
         return flightPathHex;
+    }
+
+    /**
+     * Sets how a walk-on unit starts the game (stance, power, heat sinks, activated equipment), chosen before it
+     * entered; the server applies it as the path's DEPLOY step places the unit. Null when it starts as the lobby left
+     * it.
+     */
+    public void setDeploymentSetup(@Nullable DeploymentSetup deploymentSetup) {
+        this.deploymentSetup = deploymentSetup;
+    }
+
+    /** @return how the walk-on unit starts the game, or null when it starts as the lobby left it */
+    public @Nullable DeploymentSetup getDeploymentSetup() {
+        return deploymentSetup;
     }
 }

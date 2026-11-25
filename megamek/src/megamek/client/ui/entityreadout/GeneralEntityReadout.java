@@ -66,6 +66,7 @@ import megamek.common.game.Game;
 import megamek.common.options.OptionsConstants;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
+import megamek.common.units.EntityMovementMode;
 import megamek.common.units.IBomber;
 import megamek.common.units.Mek;
 import megamek.common.verifier.TestEntity;
@@ -437,14 +438,20 @@ class GeneralEntityReadout implements EntityReadout {
         List<ViewElement> result = new ArrayList<>();
         // Temporarily change the conversion mode to get a consistent result
         int originalMode = entity.getConversionMode();
-        entity.setConversionMode(0);
-
-        result.add(new PlainLine());
-        result.add(new LabeledLine(Messages.getString("MekView.Movement"), createMovementString()));
-        result.addAll(createMiscMovementElements());
-        result.addAll(createConversionModeMovementElements());
-
-        entity.setConversionMode(originalMode);
+        // The conversion mode alone does not restore a landed fighter LAM (wheeled, not aerodyne)
+        EntityMovementMode originalMovement = entity.getMovementMode();
+        try {
+            entity.setConversionMode(0);
+            result.add(new PlainLine());
+            result.add(new LabeledLine(Messages.getString("MekView.Movement"), createMovementString()));
+            result.addAll(createMiscMovementElements());
+            result.addAll(createConversionModeMovementElements());
+        } finally {
+            entity.setConversionMode(originalMode);
+            if (entity.getMovementMode() != originalMovement) {
+                entity.setMovementMode(originalMovement);
+            }
+        }
         return result;
     }
 

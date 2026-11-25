@@ -34,6 +34,24 @@ class GpuDeploymentHudTest {
         assertEquals(new Coords(0, 8), edges.get(1).hex());
     }
 
+    /** The rail names a unit by its model only when that is a designation, else by its chassis' first word. */
+    @Test
+    void theRailNamesAUnitByADesignationElseByItsChassis() {
+        assertEquals(List.of("STU-K10", "PXH-1", "SAVANNA", "BASILIS", "BASILIS", "TIMBER", "MANTICO"), List.of(
+              GpuForcesPanel.code(named("Stuka", "STU-K10")), GpuForcesPanel.code(named("Phoenix Hawk", "PXH-1")),
+              GpuForcesPanel.code(named("Savannah Master Hovercraft", "(SL)")),
+              GpuForcesPanel.code(named("Basilisk ProtoMek", "B")), GpuForcesPanel.code(named("Basilisk", "3")),
+              GpuForcesPanel.code(named("Timber Wolf (Mad Cat)", "Prime")),
+              GpuForcesPanel.code(named("Manticore Heavy Tank", ""))));
+    }
+
+    private static GpuBattleStatus.UnitStatus named(String chassis, String model) {
+        return new GpuBattleStatus.UnitStatus(1, GpuBattleStatus.Side.OWN, false, chassis, chassis, model, 0, "Medium",
+              "", "", 0, 0, 1, 1, 0, 0, "", 0, "", 0, "", 0, 0, 0, 0, false, false, false, false, Entity.DMG_NONE,
+              List.of(), "", null, 0, null, List.of(), 2, 0, Player.PLAYER_NONE, List.of(), "",
+              GpuBattleStatus.Marks.NONE, -1, 0, false, Board.START_NONE, 1, GpuBattleStatus.Wait.NONE);
+    }
+
     private static GpuBattleStatus.UnitStatus walkOn(int id, GpuBattleStatus.Side side, int zone, int round,
           Coords position) {
         return new GpuBattleStatus.UnitStatus(id, side, false, "Unit " + id, "", "", 0, "Medium", "", "", 0, 0, 1, 1,

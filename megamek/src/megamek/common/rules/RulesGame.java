@@ -39,6 +39,7 @@ import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.AmmoType;
+import megamek.common.equipment.GunEmplacement;
 import megamek.common.equipment.MiscType;
 import megamek.common.equipment.Mounted;
 import megamek.common.equipment.WeaponType;
@@ -150,13 +151,14 @@ public abstract class RulesGame {
 
     /**
      * Walk-on deployment. Skip deployment for eligible units Note: Bot does not get Walk-on deployment for now.
-     * TODO bot walk-on deployment when enabled will remove the isBot check.
+     * TODO bot walk-on deployment when enabled will remove the isBot check. A gun emplacement can't move, so it can't
+     * walk on: it deploys in the deployment phase as usual.
      *
      * @param entity The mek under consideration
      * @return true if they can walk on, false if they cannot
      */
     public boolean canWalkOnThisRound(Entity entity) {
-        if (!isWalkOnDeployment() || entity.getGame() == null) {
+        if (!isWalkOnDeployment() || entity.getGame() == null || entity instanceof GunEmplacement) {
             return false;
         }
 
@@ -167,6 +169,16 @@ public abstract class RulesGame {
         return (!entity.isDeployed() && deploymentRound >= 0
                 && deploymentRound <= currentRound
                 && restrictDeploymentWidth(entity.getOwner(), startingPos));
+    }
+
+    /**
+     * Whether gun emplacements are Assets rather than buildings: they need no building hex and are placed by their
+     * distance from the enemy instead of in their own deployment zone (Core Rules p.137, p.141).
+     *
+     * @return false by default: emplacements deploy on buildings inside their deployment zone
+     */
+    public boolean deploysEmplacementsAsAssets() {
+        return false;
     }
 
     /**

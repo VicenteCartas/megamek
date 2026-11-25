@@ -15,7 +15,10 @@ import java.util.stream.IntStream;
 
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.utils.Align;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
@@ -23,6 +26,8 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPopover;
+import megamek.client.ui.gdx.UiSliderInput;
+import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay.FiringCommand;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
@@ -492,6 +497,61 @@ final class GpuContextMenu implements GpuHud.Component {
         popover.header(null, null).content(list).openedFrom(face);
         Vector2 corner = face.localToStageCoordinates(new Vector2());
         popover.showAt(corner.x, corner.y);
+    }
+
+    /**
+     * A dock tile's choices above it (the deployment setup): a header naming the choice, the states with a check mark
+     * at {@code selected}; choosing one calls {@code choose} with its index.
+     */
+    void choices(Actor face, String title, String detail, List<String> choices, int selected, IntConsumer choose) {
+        cancel();
+        UiMenuList list = new UiMenuList(ui);
+        for (int index = 0; index < choices.size(); index++) {
+            int choice = index;
+            item(list, choices.get(index), null, index == selected, true, () -> choose.accept(choice));
+        }
+        popover.header(title, detail).content(list).openedFrom(face);
+        popover.showAbove(face, 0);
+    }
+
+    /**
+     * A count on a slider above a setup tile (the deployment setup's active heat sinks): the slider from 0 to
+     * {@code max}, its ends, and "{value} / {max}". Each whole count the slider reaches calls {@code choose}; the
+     * popover stays open, and the arrow keys step the count.
+     */
+    void slider(Actor face, String title, String detail, int value, int max, IntConsumer choose) {
+        cancel();
+        int[] count = {Math.max(0, Math.min(value, max))};
+        Slider slider = new Slider(0, Math.max(1, max), 1, false, ui.tokenSliderStyle());
+        slider.setName("setup-sinks-slider");
+        slider.setValue(count[0]);
+        slider.setDisabled(max <= 0);
+        new UiSliderInput(slider);
+        Label shown = ui.label("", "hud-title", 15, UiTheme.MINT);
+        shown.setName("setup-sinks-value");
+        shown.setAlignment(Align.right);
+        Runnable refresh = () -> shown.setText(text("GpuBoard.hud.deploy.setup.sinksOf", count[0], max));
+        UiKit.onChange(slider, () -> {
+            int reached = Math.round(slider.getValue());
+            if (reached != count[0]) {
+                count[0] = reached;
+                choose.accept(reached);
+                refresh.run();
+            }
+        });
+        refresh.run();
+        Table content = new Table();
+        content.pad(6, 12, 8, 12);
+        content.add(slider).width(220).colspan(2);
+        content.add(shown).minWidth(72).padLeft(12).right().row();
+        content.add(ui.label("0", "hud-caption", 10, UiTheme.MUTED)).left().padTop(2);
+        content.add(ui.label(String.valueOf(max), "hud-caption", 10, UiTheme.MUTED)).right().padTop(2);
+        content.add();
+        popover.header(title, detail).content(content).openedFrom(face);
+        popover.showAbove(face, 0);
+        if (slider.getStage() != null && max > 0) {
+            slider.getStage().setKeyboardFocus(slider);
+        }
     }
 
     /**

@@ -188,12 +188,17 @@ final class GpuNameplates implements GpuHud.Component {
             scene.electronicWarfare().sources().forEach(source -> sources.putIfAbsent(source.entityId(), source));
         }
         Set<Integer> shown = new HashSet<>();
+        // A unit riding on another's hull shares its carrier's head: only its pointer brings out its plate.
+        Set<Integer> riders = new HashSet<>();
+        if (scene != null) {
+            scene.units().stream().filter(unit -> unit.attachment() != null).forEach(unit -> riders.add(unit.id()));
+        }
         for (UnitStatus unit : units) {
             Vector2 head = view.unitHeads().get(unit.id());
-            if (head == null || carded.contains(TargetKey.unit(unit.id()))) {
+            boolean hovered = view.hoveredUnit() == unit.id();
+            if (head == null || carded.contains(TargetKey.unit(unit.id())) || (riders.contains(unit.id()) && !hovered)) {
                 continue;
             }
-            boolean hovered = view.hoveredUnit() == unit.id();
             boolean enemy = unit.side() == GpuBattleStatus.Side.ENEMY;
             boolean tagged = unit.id() == state.focus() || hovered || all || unit.id() == state.inspected
                   || unit.id() == physicalTarget;

@@ -319,8 +319,8 @@ class GpuHudInteractionSmokeTest {
                     assertEquals(List.of(pin), play.move().pins().stream().map(GpuMovePlan.Step::coords).toList());
                     play.press(KeyCommandBind.UNDO_LAST_STEP);
                     assertEquals(facing, play.move().facing());
-                    // The turn button uses the same facing command; Shift+D is a boosted camera gesture.
-                    play.click("dock-turn-right");
+                    // The turn arrow uses the same facing command; Shift+D is a boosted camera gesture.
+                    play.click("move-confirm-turn-right");
                     assertEquals((facing + 1) % 6, play.move().facing());
                     // 54: the fire preview evaluates from the destination, outgoing and incoming.
                     GpuHudParitySmokeTest.awaitPreview(live, live.real, ATLAS, play::asCaptured);

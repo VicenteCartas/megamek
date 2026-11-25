@@ -5,6 +5,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -51,6 +52,7 @@ import megamek.common.enums.BasementType;
 import megamek.common.enums.GamePhase;
 import megamek.common.enums.MoveStepType;
 import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.GunEmplacement;
 import megamek.common.equipment.MiscType;
 import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
@@ -161,6 +163,66 @@ class GpuMovePlanTest {
             assertEquals(Band.ILLEGAL, shown(moving).route().getLast().band(),
                   "An illegal step must keep its illegal band even after a boosted section");
         }
+    }
+
+    @Test
+    void aTurretedEmplacementsFacingMeansNothingButANoTurretOnesDoes() {
+        GunEmplacement turreted = new GunEmplacement();
+        GunEmplacement fixed = new GunEmplacement();
+        fixed.setHasNoTurret(true);
+        assertFalse(GpuMovePlan.facingMatters(turreted), "A turret fires all around and turns freely");
+        assertTrue(GpuMovePlan.facingMatters(fixed), "A No Turret emplacement keeps the facing it deploys with");
+    }
+
+    @Test
+    void aWalkOnUnitPlacedOnItsEntryHexSetsUpItsEntry() {
+        GpuMovePlan.Traits mek = GpuMovePlan.Traits.MEK;
+        assertTrue(entry(true, mek).setsUpEntry(), "Placed, it turns freely, by the buttons or a drag");
+        assertFalse(entry(false, mek).setsUpEntry(), "Off the map, it has no hex to turn on");
+    }
+
+    @Test
+    void movementNamesAHeightAsDeploymentDoes() {
+        GpuMovePlan.Traits diver = new GpuMovePlan.Traits(false, false, true, -2, false, null, true, true, -1);
+        assertEquals(GpuDeployHeight.Kind.DEPTH, GpuDeployHeight.Kind.of(diver));
+        assertEquals(GpuDeployHeight.Kind.ELEVATION, GpuDeployHeight.Kind.of(GpuMovePlan.Traits.MEK));
+        GpuMovePlan.Traits vtol = new GpuMovePlan.Traits(true, false, true, 0, false, null, true, false, 5);
+        assertEquals(GpuDeployHeight.Kind.LIFT, GpuDeployHeight.Kind.of(vtol));
+        assertTrue(GpuDeployHeight.landed(GpuDeployHeight.Kind.LIFT, 0), "A VTOL at elevation 0 is landed");
+        assertFalse(GpuDeployHeight.landed(GpuDeployHeight.Kind.LIFT, 1));
+        assertFalse(GpuDeployHeight.landed(GpuDeployHeight.Kind.ELEVATION, 0), "A Mek at elevation 0 stands");
+    }
+
+    @Test
+    void aFlightInSpaceHasNoAltitudeToStep() {
+        Board board = new Board(4, 4);
+        for (int x = 0; x < 4; x++) {
+            for (int y = 0; y < 4; y++) {
+                board.setHex(x, y, new Hex());
+            }
+        }
+        Game game = new Game(board);
+        megamek.common.units.AeroSpaceFighter fighter = new megamek.common.units.AeroSpaceFighter();
+        fighter.setGame(game);
+        game.addEntity(fighter);
+        fighter.setBoardId(board.getBoardId());
+        fighter.setPosition(new Coords(1, 1));
+        fighter.setAltitude(0);
+        GpuMovePlan.Flight flight = new GpuMovePlan.Flight(0, 0, 3, 0, 3, 5, 0);
+
+        GpuMovePlan.Traits aloft = GpuMovePlan.Traits.of(fighter, new MovePath(game, fighter), false, flight);
+        assertTrue(aloft.elevates() && aloft.altitude(), "Over a ground map it flies at an altitude");
+
+        board.setBoardType(megamek.common.board.BoardType.FAR_SPACE);
+        GpuMovePlan.Traits space = GpuMovePlan.Traits.of(fighter, new MovePath(game, fighter), false, flight);
+        assertFalse(space.elevates(), "A space map has no altitude, so no stepper");
+        assertFalse(space.altitude(), "Nor an altitude to name Landed");
+    }
+
+    private static Snapshot entry(boolean walkedOn, GpuMovePlan.Traits traits) {
+        return new Snapshot(true, false, false, 1, Mode.OTHER, false, "", List.of(), List.of(), List.of(),
+              walkedOn ? GpuMovementFixture.START : null, 0, 0, 0, EntityMovementType.MOVE_NONE, "", false, 0, 0,
+              true, List.of(), false, false, true, Map.of(), Set.of(), 0, walkedOn, walkedOn, traits);
     }
 
     @Test
@@ -586,7 +648,10 @@ class GpuMovePlanTest {
             GpuMovePlan plan = plan(moving);
             Snapshot aero = shown(moving);
             assertTrue(aero.active());
-            assertFalse(aero.planner() || aero.canPin() || aero.canUndo());
+            assertFalse(aero.planner() || aero.canPin());
+            assertTrue(aero.canUndo(), "A flight undoes its last step");
+            assertNotNull(aero.traits().flight());
+            assertTrue(GpuMovePlan.drawsRoute(aero), "The board draws the flight's route as the planner's");
             assertEquals(Mode.OTHER, aero.mode());
             List<Coords> path = onSwing(() -> moving.display.getPlannedMovement().getStepVector().stream()
                   .map(MoveStep::getPosition).toList());
@@ -597,6 +662,39 @@ class GpuMovePlanTest {
             plan.planTo(new Coords(4, 8), 0, false);
             plan.setMode(Mode.WALK);
             assertEquals(path, shown(moving).route().stream().map(Step::coords).toList());
+        }
+    }
+
+    /**
+     * Drag turning is generic: a flight, which the planner leaves to MegaMek, turns its path's end toward the dragged
+     * hex as MegaMek's Turn does. Its turns at the end are replaced, so a drag that swings back spends nothing.
+     */
+    @Test
+    void aFlightTurnsTowardTheDraggedHexAndASwingBackSpendsNothing() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            selectAirborneFighter(moving);
+            onSwing(() -> {
+                for (int type : new int[] { BoardViewEvent.BOARD_HEX_DRAGGED, BoardViewEvent.BOARD_HEX_CLICKED }) {
+                    moving.display.hexMoused(new BoardViewEvent(moving.board.view, new Coords(4, 9), type, 0,
+                          MouseEvent.BUTTON1));
+                }
+                return null;
+            });
+            GpuMovePlan plan = plan(moving);
+            Coords end = new Coords(4, 9);
+            int facing = shown(moving).facing();
+            int length = onSwing(() -> moving.display.getPlannedMovement().length());
+
+            plan.faceToward(end.translated((facing + 1) % 6), 0);
+            assertEquals((facing + 1) % 6, shown(moving).facing());
+            plan.faceToward(end.translated((facing + 5) % 6), 0);
+            assertEquals((facing + 5) % 6, shown(moving).facing());
+            assertEquals(length + 1, onSwing(() -> moving.display.getPlannedMovement().length()),
+                  "The right turn is replaced by one left turn");
+            plan.faceToward(end.translated(facing), 0);
+            assertEquals(facing, shown(moving).facing());
+            assertEquals(length, onSwing(() -> moving.display.getPlannedMovement().length()),
+                  "Swinging back leaves no turn");
         }
     }
 
@@ -622,6 +720,7 @@ class GpuMovePlanTest {
 
             // A command of an older frame is dropped: nothing is plotted and the pick still waits.
             plan.planTo(BEHIND_TANK, 0, false);
+            plan.faceToward(BEHIND_TANK, 0);
             assertEquals(List.of(), shown(moving).route());
             assertTrue(onSwing(moving.display::isSelectingHex));
 

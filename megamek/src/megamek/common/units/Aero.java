@@ -1690,6 +1690,17 @@ public abstract class Aero extends Entity implements IAero, IBomber, ActiveHeatS
     }
 
     @Override
+    public int getSwitchableSinks() {
+        return getHeatSinks();
+    }
+
+    @Override
+    public void setActiveSinks(int sinks) {
+        setActiveSinksNextRound(sinks);
+        inactiveSinks = inactiveSinksNextRound;
+    }
+
+    @Override
     public int getHeatCapacityWithWater() {
         // If the aero is in the water, it is dead so no worries
         return getHeatCapacity(false);
