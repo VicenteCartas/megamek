@@ -84,12 +84,13 @@ class MekTilesetModelsTest {
         building.getInternalBuilding().addHex(CubeCoords.ZERO, 40, 0, BasementType.NONE, false);
         building.refreshLocations();
         building.refreshAdditionalLocations();
-        assertEquals("units/hhw.json", tileset.modelFor(building, -1));
+        // A structure's generic model is the gun emplacement's (MekTileset#genericFor), not the handheld weapon's.
+        assertEquals("units/emplacement.json", tileset.modelFor(building, -1));
         WeaponMounted wall = new WeaponMounted(building, new ISLaserMedium());
         building.addEquipment(wall, 0, false);
         wall.setFacing(0);
         assertEquals("buildings/turret.json", tileset.modelFor(building, -1));
-        assertEquals("units/hhw.json", tileset.genericModelFor(building, -1));
+        assertEquals("units/emplacement.json", tileset.genericModelFor(building, -1));
     }
 
     @Test

@@ -1233,16 +1233,12 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             String name = toolName(tool);
             Label title = ui.label(tool == BoardEditorSession.Tool.SCULPT ? name : name + " · " + brush.label(), "hud-title", 12, UiTheme.TEXT);
             title.setName("editor-brush-title"); title.setEllipsis(true); brushRow(title);
-            // A stamp brush keeps only its id: it has no options, and each click places its layout as one new group. A
-            // multi-hex blueprint (the DropShip) has none either: each click builds it on the hex and its neighbours; its
-            // Erase is its component's, over the radius.
+            // A stamp brush keeps only its id: it has no options, and each click places its layout as one new group.
             boolean stamp = brush.object() == null && brush.component().isEmpty();
-            var entry = blueprint.entry(brush.key());
-            boolean hexes = entry != null && entry.preset() != null && !entry.preset().hexes().isEmpty();
             if (tool == BoardEditorSession.Tool.SCULPT) { showSculpt(brush); }
-            else if (stamp || hexes && tool == BoardEditorSession.Tool.PAINT) {
+            else if (stamp) {
                 familyRow(brush);
-                brushRow(hint(UiKit.text(stamp ? "BoardEditor.hint.stamp" : "BoardEditor.hint.hexBlueprint")));
+                brushRow(hint(UiKit.text("BoardEditor.hint.stamp")));
             }
             else if (brush.themeCard() && tool == BoardEditorSession.Tool.ERASE) { brushRow(hint(UiKit.text("BoardEditor.themeNoErase"))); }
             else if (tool == BoardEditorSession.Tool.ERASE && brush.way()) {

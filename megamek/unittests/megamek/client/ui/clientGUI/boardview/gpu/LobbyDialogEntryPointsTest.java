@@ -36,8 +36,11 @@ class LobbyDialogEntryPointsTest {
     private static final List<String> PROMPT_OWNERS = List.of("frame()", "clientGUI", "clientGUI.getFrame()");
     /** A file chooser's first argument is its folder; it takes its owner as it shows. */
     private static final Pattern FOLDER_CHOOSER = Pattern.compile("new JFileChooser\\(");
-    /** The lobby's own libGDX dialogs and their one entry point, which take no Swing owner. */
-    private static final List<String> NATIVE = List.of("new UiDialog(", "new LobbyNativeDialogs(");
+    /**
+     * The lobby's own libGDX dialogs and their one entry point, which take no Swing owner: the dialog card, the file
+     * picker drawn in the lobby's stage (the saved searches' Open file) and the native dialogs' entry point.
+     */
+    private static final List<String> NATIVE = List.of("new UiDialog(", "new UiFileDialog(", "new LobbyNativeDialogs(");
 
     @Test
     void theLobbysOwnDialogsUseTheOnePath() throws IOException {

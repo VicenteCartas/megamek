@@ -170,28 +170,6 @@ class BoardEditorPaletteCommandsTest {
         assertEquals(pond, objects(session, at).getFirst(), "One undo step brings the pond back");
     }
 
-    @Test
-    void theDropShipBuildsSevenHexesOverTheirPavementInOneUndoStep() {
-        var session = new BoardEditorSession();
-        Coords centre = new Coords(5, 5);
-        List<Coords> around = List.of(centre, centre.translated(0), centre.translated(1), centre.translated(2),
-              centre.translated(3), centre.translated(4), centre.translated(5));
-        around.forEach(at -> session.board().setHex(at, new Hex(0, "pavement:1", "")));
-        send(session, Action.CHOOSE_BRUSH, "building", "dropship");
-        click(session, centre);
-        // The centre is piece 72; by direction N, NE, SE, S, SW, NW the shipped boards' 70, 69, 71, 73, 74, 75.
-        assertEquals(List.of(72, 70, 69, 71, 73, 74, 75), around.stream()
-              .map(at -> session.board().getHex(at).getTerrain(Terrains.BUILDING).getExits()).toList());
-        assertTrue(around.stream().allMatch(at -> session.board().getHex(at).containsTerrain(Terrains.PAVEMENT)), "Pavement stays");
-        send(session, Action.UNDO, "", "");
-        assertTrue(around.stream().noneMatch(at -> session.board().getHex(at).containsTerrain(Terrains.BUILDING)), "One undo step");
-        assertFalse(session.snapshot().canUndo());
-        Coords edge = new Coords(0, 0);
-        click(session, edge);
-        assertEquals(Messages.getString("BoardEditor.blueprintOffBoard"), session.snapshot().message());
-        assertFalse(session.board().getHex(edge).containsTerrain(Terrains.BUILDING), "At the edge nothing is built");
-    }
-
     private static List<BoardDecoration> objects(BoardEditorSession session, Coords coords) {
         return session.board().getHex(coords).getDecorations();
     }

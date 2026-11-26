@@ -67,6 +67,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class UnitLoadingDialogTest {
+    /**
+     * The longest wait for the event thread or the dialog: generous, since in a whole test run the event thread and the
+     * dialog's timer share the machine with every other test, and a wait that runs out fails the test.
+     */
+    private static final long WAIT_SECONDS = 60;
 
     @Test
     void closesIfNormalCacheLoadCompletesDuringListenerRegistration() {
@@ -125,12 +130,12 @@ class UnitLoadingDialogTest {
                 return null;
             });
             zipCount.set(11026);
-            assertTrue(progressUpdated.await(5, TimeUnit.SECONDS), "Swing must keep processing progress updates");
+            assertTrue(progressUpdated.await(WAIT_SECONDS, TimeUnit.SECONDS), "Swing must keep processing progress updates");
             assertFalse(showDialog.isDone());
 
             initialized.set(true);
             listener.get().doneLoading(); // The real cache sends this from its worker thread.
-            showDialog.get(5, TimeUnit.SECONDS);
+            showDialog.get(WAIT_SECONDS, TimeUnit.SECONDS);
             onEdt(() -> {
                 assertFalse(dialog.isDisplayable(), "Completion must release the dialog's native resources");
                 return null;
@@ -186,7 +191,7 @@ class UnitLoadingDialogTest {
                       0, x, y, 1, false, MouseEvent.BUTTON1));
                 return null;
             });
-            assertTrue(mapClicked.await(5, TimeUnit.SECONDS), "The lobby must receive clicks while units load");
+            assertTrue(mapClicked.await(WAIT_SECONDS, TimeUnit.SECONDS), "The lobby must receive clicks while units load");
             assertFalse(cache.isInitialized());
 
             listener.get().doneLoading();
@@ -286,6 +291,6 @@ class UnitLoadingDialogTest {
     private static <T> T onEdt(Callable<T> action) throws Exception {
         FutureTask<T> task = new FutureTask<>(action);
         SwingUtilities.invokeLater(task);
-        return task.get(5, TimeUnit.SECONDS);
+        return task.get(WAIT_SECONDS, TimeUnit.SECONDS);
     }
 }

@@ -54,8 +54,8 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.MegaMekGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.util.MegaMekController;
 import megamek.common.Hex;
 import megamek.common.Player;
@@ -132,13 +132,13 @@ class MovementDisplayTurnChangeTest {
 
         ClientGUI mockClientGUI = mock(ClientGUI.class);
         mockClientGUI.controller = mockController;
-        BoardView boardView = mock(BoardView.class);
+        BoardClientState boardState = mock(BoardClientState.class);
         when(mockClientGUI.getClient()).thenReturn(mockClient);
         when(mockClientGUI.boardViews()).thenReturn(List.of());
         when(mockClientGUI.getMenuBar()).thenReturn(mock(CommonMenuBar.class));
-        when(mockClientGUI.getUnitDisplay()).thenReturn(mock(UnitDisplayPanel.class));
-        when(mockClientGUI.getBoardView((Targetable) any())).thenReturn(boardView);
-        when(mockClientGUI.getBoardView(anyInt())).thenReturn(boardView);
+        when(mockClientGUI.getUnitDisplayState()).thenReturn(new UnitDisplayState(null));
+        when(mockClientGUI.getBoardState((Targetable) any())).thenReturn(boardState);
+        when(mockClientGUI.getBoardState(anyInt())).thenReturn(boardState);
 
         movementDisplay = new MovementDisplay(mockClientGUI);
     }

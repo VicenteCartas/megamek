@@ -37,15 +37,12 @@ import org.junit.jupiter.api.Test;
 class BoardViewsContainerTest {
     @Test
     void aGameShowsTheGpuBoard() throws Exception {
+        Game game = new Game();
+        game.setPhase(GamePhase.STARTING_SCENARIO);
+        ClientGUI gui = clientGUI(game);
+        doCallRealMethod().when(gui).showDefaultBoard(ClientGUI.CG_STARTING_SCENARIO);
         SwingUtilities.invokeAndWait(() -> {
             try (var gpu = mockStatic(GpuBoardWindow.class)) {
-                ClientGUI gui = mock(ClientGUI.class);
-                Client client = mock(Client.class);
-                Game game = new Game();
-                game.setPhase(GamePhase.STARTING_SCENARIO);
-                when(gui.getClient()).thenReturn(client);
-                when(client.getGame()).thenReturn(game);
-                doCallRealMethod().when(gui).showDefaultBoard(ClientGUI.CG_STARTING_SCENARIO);
                 gui.showDefaultBoard(ClientGUI.CG_STARTING_SCENARIO);
                 gpu.verify(() -> GpuBoardWindow.open(eq(gui), any()));
                 verify(gui, never()).setLegacy2DViewEnabled(true);

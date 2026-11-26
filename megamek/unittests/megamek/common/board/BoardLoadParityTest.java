@@ -15,6 +15,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.common.Configuration;
@@ -41,11 +45,34 @@ class BoardLoadParityTest {
     /** Every legacy case of the conversion: car parks, emblems, bridges, seaport art, maglev and terrain-owned art. */
     private static final File FIXTURE = new File("testresources/megamek/common/board/load-parity.board");
     private static final String BIG_BOARD = "unofficial/VictorMorson/48x48";
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private static String text(Board board) throws IOException {
         var out = new ByteArrayOutputStream();
         BoardFile.write(board, out);
         return out.toString(StandardCharsets.UTF_8);
+    }
+
+    /*
+     * The editor opens a board with its roads' automatic connections stored as they stand (no editor road connects
+     * automatically, BoardEditorSession#replace); the game's roads keep connecting. storedRoads and storedRoad give a
+     * game's board's text and a game's hex as the editor holds them.
+     */
+    private static JsonNode storedRoads(JsonNode board) {
+        JsonNode copy = board.deepCopy();
+        for (JsonNode hex : copy.path("hexes")) {
+            if (hex.path("components").path("road") instanceof ObjectNode road) { road.remove("autoConnections"); }
+        }
+        return copy;
+    }
+
+    private static Hex storedRoad(Hex hex) {
+        Hex stored = hex.duplicate();
+        Terrain road = stored.getTerrain(Terrains.ROAD);
+        if (road != null && !road.hasExitsSpecified()) {
+            stored.addTerrain(new Terrain(Terrains.ROAD, road.getLevel(), true, road.getExits()));
+        }
+        return stored;
     }
 
     private static Board finishedCopy(Board sheet) {
@@ -62,7 +89,8 @@ class BoardLoadParityTest {
         session.open(file.toPath());
         String expected = text(game);
         assertEquals(text(finishedCopy(game)), text(preview), "The file preview shows the finished game board: " + file);
-        assertEquals(expected, text(session.board()), "The editor opens the game's board: " + file);
+        assertEquals(storedRoads(JSON.readTree(expected)), JSON.readTree(text(session.board())),
+              "The editor opens the game's board: " + file);
 
         Board loaded = BoardFile.read(file.toPath());
         assertTrue(game.isNativeFormat(), "The native flag means converted");
@@ -82,8 +110,8 @@ class BoardLoadParityTest {
                 // The editor's document is what its saved .board2 holds: the game's hex without its taken tokens.
                 Hex edited = session.board().getHex(at);
                 assertSame(edited, BoardSceneryLayouts.withoutTakenTokens(edited), at + ": the editor holds no taken token");
-                assertEquals(BoardFile.hexNode(BoardSceneryLayouts.withoutTakenTokens(after)), BoardFile.hexNode(edited),
-                      at + " is the game's hex without its taken tokens");
+                assertEquals(BoardFile.hexNode(storedRoad(BoardSceneryLayouts.withoutTakenTokens(after))),
+                      BoardFile.hexNode(edited), at + " is the game's hex without its taken tokens");
                 if (after.containsTerrain(Terrains.BRIDGE)) {
                     assertNotNull(HexAppearance.bridgeBuilt(after.getAppearance()), at + " has a bridge type");
                 }
@@ -217,6 +245,6 @@ class BoardLoadParityTest {
         session.open(new File(Configuration.boardsDir(), BIG_BOARD + ".board").toPath());
         Board turned = session.board();
         BoardUtilities.flip(turned, true, true);
-        assertEquals(text(finishedCopy(turned)), text(game));
+        assertEquals(JSON.readTree(text(finishedCopy(turned))), storedRoads(JSON.readTree(text(game))));
     }
 }

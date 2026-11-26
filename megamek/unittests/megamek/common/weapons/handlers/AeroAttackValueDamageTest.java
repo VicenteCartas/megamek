@@ -138,6 +138,8 @@ class AeroAttackValueDamageTest extends GameBoardTestCase {
     void beforeEach() {
         gameManager = Mockito.spy(new TWGameManager());
         Mockito.doNothing().when(gameManager).send(any(Packet.class));
+        // Attack animations go to each connection
+        Mockito.doNothing().when(gameManager).send(anyInt(), any(Packet.class));
         Mockito.doNothing().when(gameManager).entityUpdate(anyInt());
         game = gameManager.getGame();
         game.setBoard(getBoard("AERO_ATTACK_VALUE_BOARD"));
@@ -606,7 +608,7 @@ class AeroAttackValueDamageTest extends GameBoardTestCase {
         toHit.setCoverLocPrimary(cover);
         fireBayOnTwo(dropShip, bay, mek, toHit);
 
-        assertEquals(30, building.getCurrentCF(cover));
+        assertEquals(30, building.getCurrentCF(cover, 0), "the building's only floor takes the leg hit");
         assertEquals(0, mek.heatFromExternal);
         assertEquals(STARTING_ARMOR, mek.getTotalArmor());
     }

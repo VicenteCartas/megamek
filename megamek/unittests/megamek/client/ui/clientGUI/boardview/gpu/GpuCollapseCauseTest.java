@@ -398,6 +398,8 @@ class GpuCollapseCauseTest {
               .defaultAnswer(Answers.CALLS_REAL_METHODS));
         doNothing().when(manager).autoSave();
         Game game = manager.getGame();
+        // The manager loads the saved mmconf/gameoptions.xml; these plays use the default options.
+        game.setOptions(new megamek.common.options.GameOptions());
         game.getOptions().getOption(OptionsConstants.BASE_MAX_NUMBER_ROUND_SAVES).setValue(0);
         Board board = new Board();
         var file = java.nio.file.Files.createTempFile("weight-collapse", ".board");

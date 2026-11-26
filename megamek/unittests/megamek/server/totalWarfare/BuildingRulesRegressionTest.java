@@ -617,6 +617,28 @@ class BuildingRulesRegressionTest {
         assertEquals(unit.getCurrentCF(ORIGIN, 0), unit.getCurrentCF(ORIGIN, 2));
     }
 
+    /** A fuel tank's building height is 0; expanded CF still gives it a floor, so a hit to CF 0 bursts it either way. */
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void aFuelTankShotToZeroCFExplodesWithOrWithoutExpandedCF(boolean expandedCF) {
+        TWGameManager manager = spy(new ReviewGameManager());
+        manager.getGame().getOptions().initialize();
+        doNothing().when(manager).sendChangedHex(any(Coords.class), any(int.class));
+        // A board file's hexes fill the board in order: the tank is the first, at 0101.
+        manager.getGame().setBoard(BoardLoader.initializeBoard(
+              "size 3 3\nhex 0101 0 \"fuel_tank:1:0;fuel_tank_cf:10;fuel_tank_elev:2;fuel_tank_magn:30\" \"\"\nend\n"));
+        manager.getGame().getOptions().getOption(OptionsConstants.ADVANCED_BUILDING_EXPANDED_CF).setValue(expandedCF);
+        Coords at = new Coords(0, 0);
+        IBuilding tank = manager.getGame().getBoard().getBuildingAt(at);
+        assertInstanceOf(megamek.common.equipment.FuelTank.class, tank);
+
+        Vector<megamek.common.Report> reports = manager.damageBuilding(tank, 20, at, 1);
+
+        assertEquals(expandedCF, tank.usesExpandedCF());
+        assertTrue(reports.stream().anyMatch(report -> report.messageId == 3441), "The tank explodes");
+        assertTrue(reports.stream().anyMatch(report -> report.messageId == 3560), "Its explosion hits everything nearby");
+    }
+
     @Test
     void serverFloorDamageReachesClientBuilding() throws Exception {
         var clientUnit = structure(false, 3, List.of(CubeCoords.ZERO));

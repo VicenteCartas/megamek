@@ -127,7 +127,9 @@ public class Building implements Serializable {
         if (floorStates == null) {
             floorStates = new HashMap<>();
             for (CubeCoords coords : getCoordsList()) {
-                floorStates.put(coords, new BuildingFloorState(getHeight(coords), getCurrentCF(coords), getArmor(coords)));
+                // A standing hex has at least its ground floor; a fuel tank's height is 0, so its CF stays one pool.
+                floorStates.put(coords, new BuildingFloorState(Math.max(1, getHeight(coords)), getCurrentCF(coords),
+                      getArmor(coords)));
             }
         }
     }
@@ -169,7 +171,8 @@ public class Building implements Serializable {
         if (floors != null && isIn(coords)) {
             currentCF.put(coords, floors.maximumCF());
             phaseCF.put(coords, floors.maximumCF());
-            height.put(coords, floors.height());
+            // Lost floors lower the hex; the ground floor of a height-0 structure never raises it.
+            height.put(coords, Math.min(getHeight(coords), floors.height()));
         }
     }
 

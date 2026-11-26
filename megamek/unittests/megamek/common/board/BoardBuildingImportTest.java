@@ -27,6 +27,21 @@ class BoardBuildingImportTest {
         return board;
     }
 
+    /**
+     * The kit the hex's building draws ({@link TilesetScenery#structureModels}) without its drawn variant, such as a
+     * hangar's vaulted roof.
+     */
+    private static String kit(Hex hex) {
+        String drawn = TilesetScenery.structureModels(hex).get(Terrains.BUILDING);
+        int variant = drawn == null ? -1 : drawn.indexOf('@');
+        return variant < 0 ? drawn : drawn.substring(0, variant);
+    }
+
+    /** A kit in the Square footprint, which a legacy board's unconnected building loads in (BoardSceneryLayouts). */
+    private static String square(String kit) {
+        return TilesetScenery.footprint(kit, HexAppearance.Footprint.SQUARE);
+    }
+
     private static Board roundTrip(Board board) throws Exception {
         var output = new ByteArrayOutputStream();
         BoardFile.write(board, output);
@@ -46,8 +61,9 @@ class BoardBuildingImportTest {
                     Board imported = convert(terrain, "");
                     Hex after = roundTrip(imported).getHex(AT);
                     String expected = TilesetScenery.genericBuilding(after);
-                    assertEquals(expected, TilesetScenery.structureModels(imported.getHex(AT)).get(Terrains.BUILDING), terrain);
-                    assertEquals(expected, TilesetScenery.structureModels(after).get(Terrains.BUILDING), terrain);
+                    assertEquals(HexAppearance.Footprint.SQUARE, HexAppearance.footprint(after.getAppearance()), terrain);
+                    assertEquals(square(expected), kit(imported.getHex(AT)), terrain);
+                    assertEquals(square(expected), kit(after), terrain);
                     assertTrue(TilesetScenery.customBuildingFile(expected).isFile(), expected);
                     assertEquals(weight, after.terrainLevel(Terrains.BUILDING));
                     assertEquals(buildingClass, after.terrainLevel(Terrains.BLDG_CLASS));
@@ -65,7 +81,7 @@ class BoardBuildingImportTest {
         for (String art : List.of("fluff:11:7", "fluff:1", "fluff:3")) {
             Hex hex = roundTrip(convert("building:1:0;bldg_cf:15;bldg_elev:2;" + art, "")).getHex(AT);
             assertFalse(hex.containsTerrain(Terrains.FLUFF), art);
-            assertEquals(TilesetScenery.genericBuilding(hex), TilesetScenery.structureModels(hex).get(Terrains.BUILDING));
+            assertEquals(square(TilesetScenery.genericBuilding(hex)), kit(hex));
         }
         for (int roof = 64; roof <= 68; roof++) {
             Board imported = convert("building:1:" + roof + ";bldg_cf:15;bldg_elev:2", "");
@@ -84,7 +100,7 @@ class BoardBuildingImportTest {
             if (!theme.equals("lunar")) { assertEquals(BuildingInteriors.NO, BuildingInteriors.resolve(hex)); }
             for (int buildingClass = 1; buildingClass <= 3; buildingClass++) {
                 Hex special = roundTrip(convert("building:2:0;bldg_class:" + buildingClass + ";bldg_cf:40;bldg_elev:2", theme)).getHex(AT);
-                assertEquals(TilesetScenery.genericBuilding(special), TilesetScenery.structureModels(special).get(Terrains.BUILDING));
+                assertEquals(square(TilesetScenery.genericBuilding(special)), kit(special));
             }
         }
     }

@@ -135,6 +135,7 @@ public class WeaponAttackActionToHitTest {
         when(mockBoard.isSpace()).thenReturn(false);
         when(mockBoard.contains(any(Coords.class))).thenReturn(true);
         when(mockBoard.getHex(any(Coords.class))).thenReturn(new Hex());
+        when(mockBoard.getBuildingsVector()).thenReturn(new Vector<>());
 
         // Mock Options
         mockOptions = mock(GameOptions.class);

@@ -118,6 +118,8 @@ public class BuildingCollapseHandlerTest extends GameBoardTestCase {
 
         // Mock methods that require Server to avoid NullPointerException
         Mockito.doNothing().when(gameManager).send(any(Packet.class));
+        // A destroyed unit's death animation goes to each player
+        Mockito.doNothing().when(gameManager).send(anyInt(), any(Packet.class));
         Mockito.doNothing().when(gameManager).sendChangedHex(any(Coords.class), any(int.class));
         Mockito.doNothing().when(gameManager).entityUpdate(any(int.class));
         Mockito.doNothing().when(gameManager).sendChangedBuildings(any());
@@ -154,6 +156,8 @@ public class BuildingCollapseHandlerTest extends GameBoardTestCase {
     private void resetGameManagerSpy() {
         Mockito.reset(gameManager);
         Mockito.doNothing().when(gameManager).send(any(Packet.class));
+        // A destroyed unit's death animation goes to each player
+        Mockito.doNothing().when(gameManager).send(anyInt(), any(Packet.class));
         Mockito.doNothing().when(gameManager).sendChangedHex(any(Coords.class), any(int.class));
         Mockito.doNothing().when(gameManager).entityUpdate(any(int.class));
         Mockito.doNothing().when(gameManager).sendChangedBuildings(any());

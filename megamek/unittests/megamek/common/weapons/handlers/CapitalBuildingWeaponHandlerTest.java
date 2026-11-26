@@ -61,6 +61,7 @@ import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.equipment.WeaponType;
 import megamek.common.game.Game;
+import megamek.common.net.packets.Packet;
 import megamek.common.options.OptionsConstants;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.units.BipedMek;
@@ -87,6 +88,8 @@ class CapitalBuildingWeaponHandlerTest {
     private IBuilding building;
     private BipedMek attacker;
     private BipedMek target;
+    /** The mount whose shot the handlers report for the board; the rules read the handler's own weapon type. */
+    private WeaponMounted shot;
 
     @BeforeAll
     static void initializeEquipment() {
@@ -94,8 +97,10 @@ class CapitalBuildingWeaponHandlerTest {
     }
 
     @BeforeEach
-    void setup() {
+    void setup() throws Exception {
         manager = spy(new TWGameManager());
+        // Attack animations go to every player; there is no server to send them through.
+        doNothing().when(manager).send(anyInt(), any(Packet.class));
         manager.getGame().getOptions().initialize();
         doReturn(new Vector<Report>()).when(manager).damageEntity(any(Entity.class), any(HitData.class), anyInt(),
               anyBoolean(), any(DamageType.class), anyBoolean(), anyBoolean(), anyBoolean());
@@ -118,6 +123,7 @@ class CapitalBuildingWeaponHandlerTest {
         building = game.getBoard().getBuildingAt(HEX);
         attacker = mek(1, new Coords(1, 0));
         target = mek(2, HEX);
+        shot = (WeaponMounted) attacker.addEquipment(new ISERPPC(), Mek.LOC_RIGHT_ARM);
     }
 
     private BipedMek mek(int id, Coords coords) {
@@ -149,6 +155,9 @@ class CapitalBuildingWeaponHandlerTest {
             attackingEntity = attacker;
             subjectId = attacker.getId();
             toHit = new ToHitData();
+            weapon = shot;
+            weaponAttackAction = new WeaponAttackAction(attacker.getId(),
+                  CapitalBuildingWeaponHandlerTest.this.target.getId(), attacker.getEquipmentNum(shot));
             weaponType = mock(WeaponType.class);
             when(weaponType.isCapital()).thenReturn(capital);
             nDamPerHit = damage;

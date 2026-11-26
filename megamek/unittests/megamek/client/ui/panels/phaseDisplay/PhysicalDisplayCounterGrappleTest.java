@@ -40,7 +40,6 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.withSettings;
 
 import java.util.List;
 
@@ -48,9 +47,9 @@ import megamek.client.Client;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.MegaMekGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.dialogs.ConfirmDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.util.MegaMekController;
 import megamek.common.Hex;
 import megamek.common.Player;
@@ -69,7 +68,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.Answers;
 import org.mockito.MockedStatic;
 
 /**
@@ -124,14 +122,13 @@ class PhysicalDisplayCounterGrappleTest {
 
         mockClientGUI = mock(ClientGUI.class);
         mockClientGUI.controller = mockController;
-        BoardView boardView = mock(BoardView.class);
+        BoardClientState boardState = mock(BoardClientState.class);
         when(mockClientGUI.getClient()).thenReturn(mockClient);
         when(mockClientGUI.boardViews()).thenReturn(List.of());
         when(mockClientGUI.getMenuBar()).thenReturn(mock(CommonMenuBar.class));
-        when(mockClientGUI.getBoardView((Targetable) any())).thenReturn(boardView);
-        when(mockClientGUI.getBoardView(anyInt())).thenReturn(boardView);
-        when(mockClientGUI.getUnitDisplay()).thenReturn(mock(UnitDisplayPanel.class,
-              withSettings().defaultAnswer(Answers.RETURNS_DEEP_STUBS)));
+        when(mockClientGUI.getBoardState((Targetable) any())).thenReturn(boardState);
+        when(mockClientGUI.getBoardState(anyInt())).thenReturn(boardState);
+        when(mockClientGUI.getUnitDisplayState()).thenReturn(new UnitDisplayState(null));
         // The player declines the counter grapple, then confirms ending the turn with no attack.
         when(mockClientGUI.doYesNoDialog(anyString(), anyString())).thenReturn(false);
         ConfirmDialog noAttackConfirm = mock(ConfirmDialog.class);

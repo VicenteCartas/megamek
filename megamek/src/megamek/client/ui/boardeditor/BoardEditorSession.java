@@ -2132,22 +2132,6 @@ public final class BoardEditorSession {
                         selection.addAll(members);
                     }
                 }
-            } else if (tool == Tool.PAINT && !brushHexes().isEmpty()) {
-                // A multi-hex blueprint (the DropShip), once per press: the clicked hex and its six neighbours each get the
-                // component's fields of their terrain, without its design; they keep their level, theme, ground and objects.
-                if (!placed) {
-                    placed = true; selected = at; selectedObject = ""; component = brushComponent;
-                    var definition = blueprint.component(brushComponent);
-                    Map<Coords, Hex> targets = new LinkedHashMap<>();
-                    targets.put(at, paintTemplate);
-                    brushHexes().forEach((direction, terrain) -> targets.put(at.translated(direction), new Hex(0, terrain, "")));
-                    require(targets.keySet().stream().allMatch(board()::contains), Messages.getString("BoardEditor.blueprintOffBoard"));
-                    targets.forEach((spot, template) -> change(spot, hex -> {
-                        paintFields(hex, template, definition);
-                        var styles = new LinkedHashMap<>(hex.getAppearance()); styles.remove(brushComponent); hex.setAppearance(styles);
-                    }));
-                    selection.clear(); selection.add(new Selection(at, ""));
-                }
             } else {
                 // A Theme card paints no ground field: the hex keeps its sand, mud, swamp and the rest.
                 boolean theme = brushKey.startsWith(THEME_BRUSH);
@@ -3852,12 +3836,6 @@ public final class BoardEditorSession {
         for (int type : template.getTerrainTypes()) {
             if (!fields.contains(type) && !hex.containsTerrain(type)) { hex.addTerrain(new Terrain(template.getTerrain(type))); }
         }
-    }
-
-    /** The armed preset's other hexes by direction, when it is a multi-hex blueprint (the DropShip); none otherwise. */
-    private Map<Integer, String> brushHexes() {
-        var entry = sampledHex == null ? blueprint.entry(brushKey) : null;
-        return entry == null || entry.preset() == null ? Map.of() : entry.preset().hexes();
     }
 
     /**

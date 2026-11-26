@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.TreeMap;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,11 +38,9 @@ public final class BoardEditorBlueprint {
     }
     /**
      * A complete paintable terrain choice; optional fields no longer require painting an empty component first.
-     * {@code settings} are optional fields the Brush offers although the preset leaves them out; {@code hexes} make it a
-     * multi-hex blueprint: by direction (0-5 = N, NE, SE, S, SW, NW) the terrain of that neighbour of the painted hex.
+     * {@code settings} are optional fields the Brush offers although the preset leaves them out.
      */
-    public record Preset(String id, String label, String terrain, List<String> sections, List<String> settings,
-          Map<Integer, String> hexes) { }
+    public record Preset(String id, String label, String terrain, List<String> sections, List<String> settings) { }
     /**
      * {@code pieces}: a model per structure weight ({@link #model}) for a look that names no single asset;
      * {@code skin}: the scenery a vegetation look draws in place of its trees, or null.
@@ -133,8 +130,8 @@ public final class BoardEditorBlueprint {
         /** The family label, or null. */
         public String family() { return variant != null ? variant.family() : asset != null ? asset.family() : null; }
 
-        /** A composition: a stamp layout or a multi-hex preset (the BLUEPRINT chip). */
-        public boolean blueprint() { return asset != null && asset.layout() != null || preset != null && !preset.hexes().isEmpty(); }
+        /** A composition: a stamp layout (the BLUEPRINT chip). */
+        public boolean blueprint() { return asset != null && asset.layout() != null; }
     }
     /** A card: one entry, a picker family (assets) or a gallery (variants), labelled with the family. */
     public record Card(String label, List<Entry> members) {
@@ -176,7 +173,6 @@ public final class BoardEditorBlueprint {
     }
 
     private static final String HEX = "MegaMek Hex2\n";
-    private static final List<String> DIRECTIONS = List.of("N", "NE", "SE", "S", "SW", "NW");
     /** Building levels 1-4 name their pieces' weight. */
     private static final List<String> WEIGHTS = List.of("light", "medium", "heavy", "hard");
 
@@ -271,12 +267,6 @@ public final class BoardEditorBlueprint {
             if (components.stream().anyMatch(c -> c.id().equals(id))) { throw new IOException("Duplicate component"); }
             List<Preset> presets = new ArrayList<>();
             for (JsonNode node : entry.withArray("presets")) {
-                Map<Integer, String> hexes = new TreeMap<>();
-                for (var neighbour : node.path("hexes").properties()) {
-                    int direction = DIRECTIONS.indexOf(neighbour.getKey());
-                    if (direction < 0) { throw new IOException("Unknown direction " + neighbour.getKey() + " of " + node.path("id")); }
-                    hexes.put(direction, terrain(node, neighbour.getValue().asText()));
-                }
                 List<String> settings = strings(node.path("settings"));
                 for (String setting : settings) {
                     if (fields.stream().noneMatch(field -> field.terrain().equals(setting))) {
@@ -284,7 +274,7 @@ public final class BoardEditorBlueprint {
                     }
                 }
                 Preset preset = new Preset(required(node, "id"), required(node, "label"), terrain(node, node.path("terrain").asText()),
-                      sections(node, sections), settings, Collections.unmodifiableMap(hexes));
+                      sections(node, sections), settings);
                 presets.add(preset);
                 add(entries, new Entry(id + "/" + preset.id(), id, preset.label(), preset, null, null));
             }

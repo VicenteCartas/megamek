@@ -273,7 +273,9 @@ class BoardComponentsTest {
                 ObjectNode node = JSON.createObjectNode(); BoardComponents.write(source, node);
                 Hex loaded = new Hex(); BoardComponents.read(node.get("components"), loaded, true);
                 assertEquals(mask, loaded.getTerrain(type).getExits());
-                assertTrue(loaded.getTerrain(type).hasExitsSpecified());
+                // A road whose sides were never set keeps connecting automatically (its autoConnections); every
+                // other calculated side is frozen.
+                assertEquals(type != Terrains.ROAD, loaded.getTerrain(type).hasExitsSpecified(), Terrains.getName(type));
                 assertFalse(terrain.hasExitsSpecified());
             }
         }

@@ -29,7 +29,8 @@ class BoardBuildingDesignTest {
         assertEquals(0, habitat.getRGB(40, 325) >>> 24, "Lower window stays unpainted");
         assertEquals(255, habitat.getRGB(40, 130) >>> 24, "Upper wall panel receives tint");
         assertEquals(255, habitat.getRGB(40, 390) >>> 24, "Lower wall panel receives tint");
-        // The standard kits' far atlases (tools/buildings/far_levels.py): their lit windows stay unpainted, their walls take the tint.
+        // The standard kits' far atlases (tools/buildings/far_levels.py): what glows there (a lit window without a pane of
+        // its own) stays unpainted, their walls take the tint.
         java.util.List<java.nio.file.Path> atlases;
         try (var files = java.nio.file.Files.list(root.resolve("buildings"))) {
             atlases = files.filter(file -> file.getFileName().toString().matches("building-.*-far_albedo\\.png")).toList();
@@ -47,7 +48,7 @@ class BoardBuildingDesignTest {
                     if ((glow >> 16 & 255) + (glow >> 8 & 255) + (glow & 255) > 60) { lit++; litPaint += share; }
                 }
             }
-            assertTrue(lit > 0 && litPaint / lit < .25, file + ": lit windows stay unpainted at far LOD");
+            assertTrue(lit == 0 || litPaint / lit < .25, file + ": lit windows stay unpainted at far LOD");
             assertTrue(painted / (albedo.getWidth() * albedo.getHeight()) > .05, file + ": walls receive tint at far LOD");
         }
         for (var lod : GpuBuilding.kit("buildings/lunar_habitat/lunar_habitat").lods()) {

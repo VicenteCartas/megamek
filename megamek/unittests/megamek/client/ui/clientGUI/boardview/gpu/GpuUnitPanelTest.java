@@ -158,7 +158,7 @@ class GpuUnitPanelTest {
     @Test
     void theSheetFillsTheLeftColumnAboveTheMiniCardAndKeepsClearOfTheDock() throws Exception {
         // Window, display scale, sheet height and dock clearance at 1778 x 1000, 1536 x 864 and 1280 x 720 stages.
-        // The shared HUD margin is 10, the sheet's distance from the dock beside it.
+        // The shared HUD margin is 10, the least distance between the sheet and the dock beside it.
         float[][] stages = { { 1920, 1080, 1.08f, 868, 10 }, { 1920, 1080, 1.25f, 732, 10 },
               { 1280, 720, 1, 588, 10 } };
         for (float[] stage : stages) {
@@ -177,7 +177,10 @@ class GpuUnitPanelTest {
             assertEquals(12, sheet.y - card.y - card.height, .5f, "12 above the mini card");
             assertEquals(12, strip.y - sheet.y - sheet.height, .5f, "12 below the strip");
             Rectangle dock = bounds("command-dock");
-            assertEquals(stage[4], dock.x - sheet.x - sheet.width, .5f, "the sheet keeps clear of the dock");
+            // The dock is centred in the window, pushed right only as far as the margin from the sheet asks
+            float clear = sheet.x + sheet.width + stage[4];
+            assertEquals(Math.max(clear, (hud.stage.getWidth() - dock.width) / 2), dock.x, .5f,
+                  "the dock centred and clear of the sheet at " + size);
 
             // Closed, the card has its full height, the same for a heavily damaged and an undamaged unit.
             show(ATLAS, SheetTab.SYSTEMS, false, GamePhase.FIRING);

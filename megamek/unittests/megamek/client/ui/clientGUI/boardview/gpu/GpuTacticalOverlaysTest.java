@@ -8,11 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
@@ -37,7 +37,6 @@ import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.gpu.BoardSource.UiPreferences.Overlays;
 import megamek.client.ui.util.KeyCommandBind;
@@ -48,7 +47,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 /**
  * The Tactical View's Overlays panel in the real HUD, without a GL context: the panel shows only in the Tactical View,
@@ -88,7 +86,7 @@ class GpuTacticalOverlaysTest {
         Gdx.app = mock(Application.class);
         Gdx.files = mock(Files.class);
         when(Gdx.files.classpath(anyString())).thenAnswer(call -> new Lwjgl3Files().classpath(call.getArgument(0)));
-        Gdx.graphics = mock(Graphics.class);
+        Gdx.graphics = mock(Graphics.class, withSettings().stubOnly());
         Gdx.gl = mock(GL20.class);
         AtomicInteger textures = new AtomicInteger();
         when(Gdx.gl.glGenTexture()).thenAnswer(call -> textures.incrementAndGet());
@@ -115,54 +113,38 @@ class GpuTacticalOverlaysTest {
         }
     }
 
+    /**
+     * The Overlays popover (11-16) in either view: H and the utility bar's Overlays button open and close it, Esc closes
+     * it first; a Tactical-only setting greys out in the 3D view, a View row does not. Its open state is the HUD's own,
+     * so nothing reaches the client's settings; the hint line names H Overlays.
+     */
     @Test
-    void thePanelShowsOnlyInTheTacticalViewAndHAndItsHeaderSwitchItsOpenState() {
-        show(1920, 1080, false, GamePhase.MOVEMENT, Overlays.DEFAULTS, true);
-        assertFalse(shown(panel()), "the 3D view has no Overlays panel");
-        assertFalse(hud.keyDown(Input.Keys.H, KeyEvent.VK_H, 0), "outside the Tactical View H goes on to MegaMek");
-        verify(source, never()).command(any());
-
-        show(1920, 1080, true, GamePhase.MOVEMENT, Overlays.DEFAULTS, true);
-        assertTrue(shown(panel()));
-        assertTrue(expanded("overlay-envelope"), "expanded as saved");
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        boolean open = preferences.getTacticalOverlaysOpen();
-        try {
-            assertTrue(hud.keyDown(Input.Keys.H, KeyEvent.VK_H, 0), "H is the HUD's in the Tactical View");
+    void theOverlaysPopoverOpensFromItsButtonAndHInEitherView() {
+        for (boolean tactical : new boolean[] { false, true }) {
+            String view = tactical ? "the Tactical View" : "the 3D view";
+            show(1920, 1080, tactical, GamePhase.MOVEMENT, Overlays.DEFAULTS, true);
+            assertFalse(shown(panel()), view + ": closed until asked for");
+            assertTrue(hud.keyDown(Input.Keys.H, KeyEvent.VK_H, 0), view + ": H is the HUD's");
             hud.keyUp(Input.Keys.H, KeyEvent.VK_H);
-            ArgumentCaptor<Runnable> command = ArgumentCaptor.forClass(Runnable.class);
-            verify(source).command(command.capture());
-            command.getValue().run();
-            assertEquals(!open, preferences.getTacticalOverlaysOpen(), "H flips the remembered open state");
-            clearInvocations(source);
-            Actor header = hud.stage.getRoot().findActor("overlays-header");
-            for (EventListener listener : header.getListeners()) {
-                if (listener instanceof ClickListener click) { click.clicked(new InputEvent(), 0, 0); }
-            }
-            verify(source).command(command.capture());
-            command.getValue().run();
-            assertEquals(open, preferences.getTacticalOverlaysOpen(), "so does a click on the header");
-        } finally {
-            if (preferences.getTacticalOverlaysOpen() != open) { preferences.toggleTacticalOverlaysOpen(); }
+            show(1920, 1080, tactical, GamePhase.MOVEMENT, Overlays.DEFAULTS, true);
+            assertTrue(shown(panel()), view + ": H opens the popover");
+            assertTrue(expanded("overlay-envelope"), view + ": with its rows");
+            assertEquals(tactical ? 1 : .45f, find("overlay-statusBadges").getColor().a, .01f,
+                  view + ": status badges, a Tactical-only setting");
+            assertEquals(1, find("overlay-envelope").getColor().a, .01f, view + ": the envelope, a View row");
+            assertTrue(hud.keyDown(Input.Keys.H, KeyEvent.VK_H, 0));
+            hud.keyUp(Input.Keys.H, KeyEvent.VK_H);
+            show(1920, 1080, tactical, GamePhase.MOVEMENT, Overlays.DEFAULTS, true);
+            assertFalse(shown(panel()), view + ": H closes it");
+            click(find("utility-overlays"));
+            show(1920, 1080, tactical, GamePhase.MOVEMENT, Overlays.DEFAULTS, true);
+            assertTrue(shown(panel()), view + ": so does its button");
+            assertTrue(hud.keyDown(Input.Keys.ESCAPE, KeyEvent.VK_ESCAPE, 0), view + ": Esc is the HUD's");
+            hud.keyUp(Input.Keys.ESCAPE, KeyEvent.VK_ESCAPE);
+            show(1920, 1080, tactical, GamePhase.MOVEMENT, Overlays.DEFAULTS, true);
+            assertFalse(shown(panel()), view + ": Esc closes it first");
         }
-        // Collapsed: the header only, in the same place and width; the right column keeps its places.
-        Rectangle expanded = bounds(panel());
-        float contactsTop = top(find("contacts-panel"));
-        show(1920, 1080, true, GamePhase.MOVEMENT,
-              new Overlays(false, true, true, true, true, false, true, false, true), true);
-        assertTrue(shown(panel()));
-        assertFalse(expanded("overlay-envelope"), "collapsed, the header only");
-        Rectangle collapsed = bounds(panel());
-        assertTrue(collapsed.height < 60, "the header only: " + collapsed);
-        assertEquals(expanded.y + expanded.height, top(panel()), .5f, "the same top");
-        assertEquals(expanded.x, collapsed.x, .5f, "the same place");
-        assertEquals(expanded.width, collapsed.width, .5f, "the same width");
-        assertEquals(contactsTop, top(find("contacts-panel")), .5f, "the contacts stay");
-
-        hud.state.overview = true;
-        show(1920, 1080, true, GamePhase.MOVEMENT, Overlays.DEFAULTS, true);
-        assertFalse(shown(panel()), "the forces overview covers the right column");
-        hud.state.overview = false;
+        verify(source, never()).command(any());
 
         List<String> hint = GpuHintLine.items(new GpuHud.Inputs(frame(GamePhase.MOVEMENT, viewMenu()),
               new GpuHud.HudView(true, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0), null,
@@ -172,85 +154,84 @@ class GpuTacticalOverlaysTest {
     }
 
     /**
-     * The user's placement at 1920 x 1080 and 1280 x 800: one column at the top right, left of the minimap at its top;
-     * with the minimap closed, left of the contacts, which move up into its place; with no panel on the right, at the
-     * window's right edge. The right column keeps its places, the panel covers no other panel and stays in the board's
-     * right half, also beside the weapons panel of the firing phase. Also at 960 x 640, the smallest stage
-     * (DisplayScale), where the expanded column shares the middle band with the dock.
+     * At 1920 x 1080, 1280 x 800 and 960 x 640 (the smallest stage, DisplayScale), with the minimap and the contacts on
+     * or off and beside the firing phase's weapons panel: the open popover hangs one gap below its button, its right
+     * edge at the button's or further left, inside the window, with all twelve rows; it lies over the panels, so the
+     * right column keeps its places.
      */
     @Test
-    void thePanelStandsLeftOfTheRightColumnsTopOrAtTheRightEdge() {
+    void theOverlaysPopoverHangsBelowItsButtonAndTheRightColumnKeepsItsPlaces() {
+        List<String> rows = List.of("statusBadges", "links", "envelope", "rearArcs", "losShading", "sensorRanges",
+              "fields", "jamming", "coordinates", "types", "levelShading", "distanceRings");
         for (int[] size : new int[][] { { 1920, 1080 }, { 1280, 800 }, { 960, 640 } }) {
-            float gap = GpuHud.Metrics.of(size[0], size[1]).gap();
-            String at = size[0] + "x" + size[1];
-            show(size[0], size[1], true, GamePhase.MOVEMENT, Overlays.DEFAULTS, false, true);
-            Rectangle utilities = bounds(find("utility-bar"));
-            float rightStart = utilities.y - gap;
-            float contactsAlone = top(find("contacts-panel"));
-            assertEquals(rightStart, contactsAlone, .5f, "the contacts in the minimap's place at " + at);
-
-            show(size[0], size[1], true, GamePhase.MOVEMENT, Overlays.DEFAULTS, true, true);
-            Rectangle minimap = bounds(find("minimap"));
-            Rectangle panel = bounds(panel());
-            assertTrue(expanded("overlay-distanceRings"), "expanded at " + at);
-            assertEquals(top(find("minimap")), top(panel()), .5f, "level with the minimap's top at " + at);
-            assertEquals(minimap.x - gap, panel.x + panel.width, .5f, "left of the minimap at " + at);
-            assertTrue(panel.height > 350 && panel.height < 405, "one column of twelve rows at " + at + ": " + panel);
-            assertTrue(panel.width > 110 && panel.width < 260, "a narrow column at " + at + ": " + panel);
-            assertTrue(top(find("contacts-panel")) < top(find("minimap")), "the contacts stay under the minimap");
-            assertAlone(size[0], at);
-
-            show(size[0], size[1], true, GamePhase.MOVEMENT, Overlays.DEFAULTS, false, true);
-            Rectangle contacts = bounds(find("contacts-panel"));
-            assertEquals(contactsAlone, top(find("contacts-panel")), .5f, "the contacts move up at " + at);
-            assertEquals(top(find("contacts-panel")), top(panel()), .5f, "level with the contacts' top at " + at);
-            assertEquals(contacts.x - gap, bounds(panel()).x + bounds(panel()).width, .5f, "beside them at " + at);
-            assertAlone(size[0], at);
-
-            show(size[0], size[1], true, GamePhase.MOVEMENT, Overlays.DEFAULTS, false, false);
-            assertEquals(size[0] - gap, bounds(panel()).x + bounds(panel()).width, .5f, "at the right edge at " + at);
-            assertEquals(rightStart, top(panel()), .5f, "under the utilities at " + at);
-            assertEquals(panel.width, bounds(panel()).width, .5f, "the same width at " + at);
-            assertAlone(size[0], at);
-
-            // The firing phase: the weapons panel in the contacts' place, the panel beside the minimap, expanded.
-            show(size[0], size[1], true, GamePhase.FIRING, Overlays.DEFAULTS, true, true);
-            assertTrue(shown(find("weapons-panel")));
-            assertTrue(expanded("overlay-distanceRings"), "expanded beside the weapons at " + at);
-            assertEquals(top(find("minimap")), top(panel()), .5f, at);
-            assertAlone(size[0], at);
+            for (Object[] layout : new Object[][] { { GamePhase.MOVEMENT, true, true }, { GamePhase.MOVEMENT, false, true },
+                  { GamePhase.MOVEMENT, false, false }, { GamePhase.FIRING, true, true } }) {
+                GamePhase phase = (GamePhase) layout[0];
+                boolean minimap = (Boolean) layout[1];
+                boolean contacts = (Boolean) layout[2];
+                String at = size[0] + "x" + size[1] + " " + phase + (minimap ? " minimap" : "")
+                      + (contacts ? " contacts" : "");
+                show(size[0], size[1], true, phase, Overlays.DEFAULTS, minimap, contacts);
+                String column = phase.isFiring() ? "weapons-panel" : contacts ? "contacts-panel" : null;
+                Rectangle before = column == null ? null : bounds(find(column));
+                assertTrue(hud.keyDown(Input.Keys.H, KeyEvent.VK_H, 0));
+                hud.keyUp(Input.Keys.H, KeyEvent.VK_H);
+                show(size[0], size[1], true, phase, Overlays.DEFAULTS, minimap, contacts);
+                assertTrue(shown(panel()), "open at " + at);
+                Rectangle button = bounds(find("utility-overlays"));
+                Rectangle panel = bounds(panel());
+                assertEquals(button.y - GpuUtilityBar.GAP, panel.y + panel.height, .5f, "one gap below its button at " + at);
+                assertEquals(Math.min(button.x + button.width, size[0] - GpuUtilityBar.GAP), panel.x + panel.width, .5f,
+                      "its right edge at the button's, inside the window, at " + at);
+                assertTrue(panel.x >= GpuUtilityBar.GAP - .5f && panel.y >= 0, "inside the window at " + at + ": " + panel);
+                for (String row : rows) {
+                    assertTrue(expanded("overlay-" + row), row + " at " + at);
+                }
+                if (before != null) {
+                    assertEquals(before, bounds(find(column)), column + " keeps its place at " + at);
+                }
+                assertTrue(hud.keyDown(Input.Keys.H, KeyEvent.VK_H, 0));
+                hud.keyUp(Input.Keys.H, KeyEvent.VK_H);
+            }
         }
     }
 
     /**
-     * A card beside the right column needs the panel's room: the initiative card, centred between the columns of the
-     * 1280-wide window, shows the panel as its header for the frame and stacks below it; the saved state stays. At
-     * 1920 the card leaves the panel room.
+     * The initiative card and the popover need no shared room: at 1280 x 800 and 1920 x 1080 the popover opens with its
+     * rows while the card shows, over it (its layer draws after the panels'), and the card keeps its place.
      */
     @Test
-    void theInitiativeCardCollapsesThePanelForTheFrameWhereItNeedsTheRoom() {
-        show(1280, 800, true, GamePhase.INITIATIVE_REPORT, Overlays.DEFAULTS, true, true);
-        Actor initiative = find("initiative-card");
-        assertTrue(shown(initiative));
-        assertFalse(expanded("overlay-envelope"), "the header only while the initiative card shows");
-        assertTrue(bounds(panel()).height < 60, "the header: " + bounds(panel()));
-        assertTrue(top(initiative) <= bounds(panel()).y - 12 + .5f, "the card below the header");
-        assertTrue(GUIPreferences.getInstance().getDefaultBoolean(GUIPreferences.TACTICAL_OVERLAYS_OPEN));
-        assertAlone(1280, "1280x800 initiative");
-
-        show(1920, 1080, true, GamePhase.INITIATIVE_REPORT, Overlays.DEFAULTS, true, true);
-        assertTrue(shown(find("initiative-card")));
-        assertTrue(expanded("overlay-envelope"), "room for both at 1920");
-        assertAlone(1920, "1920x1080 initiative");
+    void theOverlaysPopoverOpensOverTheInitiativeCardWhichKeepsItsPlace() {
+        for (int[] size : new int[][] { { 1280, 800 }, { 1920, 1080 } }) {
+            String at = size[0] + "x" + size[1];
+            show(size[0], size[1], true, GamePhase.INITIATIVE_REPORT, Overlays.DEFAULTS, true, true);
+            Actor initiative = find("initiative-card");
+            assertTrue(shown(initiative), "the initiative card at " + at);
+            Rectangle card = bounds(initiative);
+            assertTrue(hud.keyDown(Input.Keys.H, KeyEvent.VK_H, 0));
+            hud.keyUp(Input.Keys.H, KeyEvent.VK_H);
+            show(size[0], size[1], true, GamePhase.INITIATIVE_REPORT, Overlays.DEFAULTS, true, true);
+            assertTrue(shown(panel()) && expanded("overlay-envelope"), "the popover with its rows at " + at);
+            assertEquals(card, bounds(find("initiative-card")), "the card keeps its place at " + at);
+            assertTrue(layer(panel()) > layer(initiative), "the popover over the card at " + at);
+            assertTrue(hud.keyDown(Input.Keys.H, KeyEvent.VK_H, 0));
+            hud.keyUp(Input.Keys.H, KeyEvent.VK_H);
+        }
     }
 
-    /** The panel overlaps no other shown panel and stays in the right half of the window. */
-    private void assertAlone(int width, String at) {
-        Rectangle panel = bounds(panel());
-        assertTrue(panel.x > width / 2f, "in the right half at " + at + ": " + panel);
-        for (Rectangle other : hud.panelBounds()) {
-            boolean self = other.x == panel.x && other.y == panel.y && other.width == panel.width;
-            assertTrue(self || !other.overlaps(panel), "the panel " + panel + " covers " + other + " at " + at);
+    /** The draw order of the stage's layer that holds {@code actor}: its top-level group's index. */
+    private int layer(Actor actor) {
+        Actor top = actor;
+        while (top.getParent() != hud.stage.getRoot()) {
+            top = top.getParent();
+        }
+        return hud.stage.getRoot().getChildren().indexOf(top, true);
+    }
+
+    /** Runs the button's click as a pointer's click would, through its ClickListener. */
+    private static void click(Actor actor) {
+        for (EventListener listener : actor.getListeners()) {
+            if (listener instanceof ClickListener click) { click.clicked(new InputEvent(), 0, 0); }
         }
     }
 

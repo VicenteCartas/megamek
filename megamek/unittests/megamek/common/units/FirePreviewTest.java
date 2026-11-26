@@ -449,9 +449,10 @@ class FirePreviewTest {
         assertEquals(ILocationExposureStatus.WET, mover.getLocationStatus(Mek.LOC_LEFT_LEG));
         assertEquals("Weapon underwater, but not target.",
               shot(result.exchanges().getFirst().outgoing(), mover, legLaser).toHit().getDesc());
+        // Fire at it has the +1 of a target in partial water cover (ComputeTerrainMods#getTerrainModifiers).
         assertEquals("attacker 0 target 0"
               + " | 2 out [0:[8, 8, 6, 6, x, x, x], 5:[x, 8, x, x, x, x, x], 1:[8, 8, 6, 6, x, x, x]]"
-              + " in [3:[8, 8, 6, 8, 8, x, x], 2:[x, 8, x, x, x, x, x], 4:[8, 8, 6, 8, 8, x, x]]", numbers(result),
+              + " in [3:[9, 9, 7, 9, 9, x, x], 2:[x, 9, x, x, x, x, x], 4:[9, 9, 7, 9, 9, x, x]]", numbers(result),
               "the arms and torsos fire from above the surface, the leg laser does not");
     }
 
@@ -590,7 +591,8 @@ class FirePreviewTest {
         place(mover, new Coords(3, 12), 0);
         FirePreview.Result deep = FirePreview.compute(plan(mover, MoveStepType.FORWARDS), List.of(atlas, bulldog));
 
-        assertEquals("[2 in [3:[8, 8, 6, 8, 8, x, x], 2:[x, 8, x, x, x, x, x], 4:[8, 8, 6, 8, 8, x, x]],"
+        // Wading, the mover has partial water cover: +1 to direct fire at it.
+        assertEquals("[2 in [3:[9, 9, 7, 9, 9, x, x], 2:[x, 9, x, x, x, x, x], 4:[9, 9, 7, 9, 9, x, x]],"
               + " 3 in [4:[f, 9, 9, 7], 3:[f, 9, 9, 7], 5:[f, x, x, x], 2:[f, x, x, x], 0:[f, x, x, x],"
               + " 1:[f, x, x, x]]]", incomingNumbers(wading));
         assertEquals("[2 in [3:[x, x, x, x, x, x, x], 2:[x, x, x, x, x, x, x], 4:[x, x, x, x, x, x, x]],"

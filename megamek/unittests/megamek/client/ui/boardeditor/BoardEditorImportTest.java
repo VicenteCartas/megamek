@@ -60,7 +60,7 @@ class BoardEditorImportTest {
     }
 
     @Test
-    void openingAPreviewCopiesItsCurrentContentsAndKeepsTheSaveDestination(@TempDir Path folder) {
+    void openingAPreviewCopiesAGeneratedMapAndReopensAFilesSheet(@TempDir Path folder) throws Exception {
         Board preview = Board.createEmptyBoard(2, 2);
         Coords at = new Coords(1, 1);
         preview.setHex(at, new Hex(3, "fluff:93:8", ""));
@@ -68,28 +68,34 @@ class BoardEditorImportTest {
         preview.setDescription("Preview map");
         preview.setAnnotations(at, List.of("Keep this note"));
         var session = new BoardEditorSession();
-        Path nativeFile = folder.resolve("Preview.board2");
-        session.open(preview, nativeFile);
-        assertEquals(nativeFile, session.path(), "Use the current preview without reloading its file");
-        assertFalse(session.dirty());
+        session.open(preview, null);
+        assertNull(session.path(), "Generated maps have no source file");
+        assertTrue(session.dirty(), "Closing a generated map must offer to save it");
+        assertFalse(session.snapshot().canUndo(), "Opening a preview is not an edit to undo");
         assertNotSame(preview, session.board());
         assertNotSame(preview.getHex(at), session.board().getHex(at));
+        assertFalse(session.board().getHex(at).containsTerrain(Terrains.FLUFF));
+        assertTrue(preview.getHex(at).containsTerrain(Terrains.FLUFF), "Import must not convert the lobby's board");
+        Path nativeFile = folder.resolve("Preview.board2");
+        session.save(nativeFile);
+
+        // A file's preview is finished (its outer building exits closed): the editor reopens the file's sheet instead.
+        session.open(preview, nativeFile);
+        assertEquals(nativeFile, session.path(), "The sheet is the save destination");
+        assertFalse(session.dirty());
         assertEquals(3, session.board().getHex(at).getLevel());
         assertEquals(preview.getTags(), session.board().getTags());
         assertEquals(preview.getDescription(), session.board().getDescription());
         assertEquals(preview.getAnnotations(), session.board().getAnnotations());
         assertFalse(session.board().getHex(at).containsTerrain(Terrains.FLUFF));
-        assertTrue(preview.getHex(at).containsTerrain(Terrains.FLUFF), "Import must not convert the lobby's board");
         session.board().getHex(at).setLevel(5);
         assertEquals(3, preview.getHex(at).getLevel(), "Editing must not change the preview's original");
 
-        session.open(preview, folder.resolve("Preview.board"));
+        Path legacyFile = folder.resolve("Preview.board");
+        try (OutputStream output = Files.newOutputStream(legacyFile)) { preview.save(output, false); }
+        session.open(preview, legacyFile);
         assertNull(session.path(), "A legacy file is never the editor's save destination");
         assertEquals("Preview.board2 (imported, unsaved)", session.title());
-        session.open(preview, null);
-        assertNull(session.path(), "Generated maps have no source file");
-        assertTrue(session.dirty(), "Closing a generated map must offer to save it");
-        assertFalse(session.snapshot().canUndo(), "Opening a preview is not an edit to undo");
     }
 
     @Test

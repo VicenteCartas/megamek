@@ -98,6 +98,15 @@ public class BuildingCollapseHandler extends AbstractTWRuleHandler {
     }
 
     /**
+     * The level the collapse checks count a structure's floors from. A map structure counts in the hex's levels, as its
+     * hex's bridge and building levels do; from a bridge's deck ({@link BuildingElevation#base}), a unit on the deck
+     * would stand under the bridge, never load it and never fall with it.
+     */
+    private static int levelBase(IBuilding bldg, Coords coords) {
+        return bldg instanceof BuildingTerrain ? 0 : BuildingElevation.base(bldg, coords);
+    }
+
+    /**
      * Determine if the given building should collapse. If so, inflict the appropriate amount of damage on each entity
      * in the building and update the clients. If the building does not collapse, determine if any entities crash
      * through its floor into its basement. Again, apply appropriate damage.
@@ -187,7 +196,7 @@ public class BuildingCollapseHandler extends AbstractTWRuleHandler {
                         continue;
                     }
                     // WiGEs can collapse a building hex by flying over it.
-                    final int entityElev = BuildingElevation.floor(bldg, entity.getPosition(), entity.getElevation());
+                    final int entityElev = entity.getElevation() - levelBase(bldg, entity.getPosition());
                     final boolean wigeFlyover = isWiGEFlyingOver(entity, entityElev, numFloors);
 
                     if (entityElev != bridgeEl && !wigeFlyover) {
@@ -403,7 +412,7 @@ public class BuildingCollapseHandler extends AbstractTWRuleHandler {
         Set<Integer> releasedVessels = bldg instanceof MobileStructure mobile
               ? new MobileStructureNavalHandler(gameManager).releaseVesselsInHex(mobile, coords) : Set.of();
         var collapseSnapshot = expandedCollapse.capture(bldg, coords);
-        int physicalBase = BuildingElevation.base(bldg, coords);
+        int physicalBase = levelBase(bldg, coords);
         int authoredHeight = bldg.getHeight(coords);
         if (bldg instanceof AbstractBuildingEntity authored) {
             new BuildingEnvironmentHandler(gameManager).collapsed(authored, coords, authoredHeight, vPhaseReport);

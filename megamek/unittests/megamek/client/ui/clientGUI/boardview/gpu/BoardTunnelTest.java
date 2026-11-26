@@ -51,7 +51,8 @@ class BoardTunnelTest {
         assertEquals(8, floorTriangles, "Only four flat quads are needed for the interior light fade");
         assertEquals(2.75f, start, .001f, "A quarter-unit underlap seals the lattice's slightly oblique hex edges");
         assertEquals(BoardTunnel.DEPTH, end, .001f);
-        assertTrue(total < 300, "A single inexpensive LOD0 is sufficient");
+        assertTrue(total < 320,
+              "A single inexpensive LOD0 is sufficient (309 since the headwall and cap of 2026-11-16: the portal 88 to 108)");
         boolean wings = false;
         for (var material : model.materials) { wings |= material.id.equals("tunnel-wings"); }
         assertEquals(asset.equals(BoardTunnel.ASSET), wings);

@@ -45,7 +45,6 @@ import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay.PhysicalCommand;
 import megamek.client.ui.util.MegaMekController;
-import megamek.common.CriticalSlot;
 import megamek.common.Player;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.KickAttackAction;
@@ -125,9 +124,9 @@ class GpuPhysicalOptionsTest {
             assertEquals(List.of(KickAttackAction.LEFT), scene.press(PhysicalCommand.PHYSICAL_KICK),
                   "Equal rolls kick with the left leg");
 
-            scene.hitFootActuator(Mek.LOC_LEFT_LEG);
+            scene.fireFromLeftLeg();
             assertEquals(List.of(KickAttackAction.RIGHT), scene.press(PhysicalCommand.PHYSICAL_KICK),
-                  "A destroyed left foot actuator adds 1 to the left leg's roll");
+                  "A weapon fired from the left leg rules out a kick with that leg");
         }
     }
 
@@ -569,15 +568,11 @@ class GpuPhysicalOptionsTest {
             });
         }
 
-        void hitFootActuator(int location) throws Exception {
+        void fireFromLeftLeg() throws Exception {
             onSwing(() -> {
-                for (int slot = 0; slot < attacker.getNumberOfCriticalSlots(location); slot++) {
-                    CriticalSlot critical = attacker.getCritical(location, slot);
-                    if ((critical != null) && (critical.getType() == CriticalSlot.TYPE_SYSTEM)
-                          && (critical.getIndex() == Mek.ACTUATOR_FOOT)) {
-                        critical.setHit(true);
-                    }
-                }
+                var weapon = attacker.getWeaponList().getFirst();
+                weapon.setLocation(Mek.LOC_LEFT_LEG);
+                weapon.setUsedThisRound(true);
                 return null;
             });
         }

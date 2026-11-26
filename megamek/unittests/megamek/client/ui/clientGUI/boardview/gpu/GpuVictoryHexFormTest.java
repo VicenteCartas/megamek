@@ -167,7 +167,8 @@ class GpuVictoryHexFormTest {
 
                 fixture.source.answer(retained.id(), new DialogAnswer(OKAY, List.of(), null, false,
                       List.of(label("scheme", SchemePreset.DEFEND), "7", "3", "true",
-                            text("VictoryHex.startingControl.teamed", "Princess", 2), "2", "5")));
+                            text("VictoryHex.startingControl.teamed", "Princess", 2), "2", "5", "false", "false",
+                            "false")));
                 assertEquals(Result.SAVED, edit.get(20, SECONDS));
 
                 ObjectiveMarker swing = point();
