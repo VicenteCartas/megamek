@@ -155,6 +155,7 @@ record TWPhaseEndManager(TWGameManager gameManager) {
                 gameManager.applyBuildingDamage();
                 new MobileStructureNavalHandler(gameManager).endMovement();
                 gameManager.checkForPSRFromDamage();
+                gameManager.resolveForcedObjectiveDrops();
                 gameManager.addReport(gameManager.resolvePilotingRolls()); // Skids cause damage in
                 // movement phase
                 gameManager.checkForFlamingDamage();
@@ -205,6 +206,7 @@ record TWPhaseEndManager(TWGameManager gameManager) {
                 gameManager.resolveScheduledOrbitalBombardments();
                 gameManager.applyBuildingDamage();
                 gameManager.checkForPSRFromDamage();
+                gameManager.resolveForcedObjectiveDrops();
                 gameManager.resolveUnJams();
                 gameManager.cleanupDestroyedNarcPods();
                 gameManager.addReport(gameManager.resolvePilotingRolls());
@@ -238,6 +240,7 @@ record TWPhaseEndManager(TWGameManager gameManager) {
                 gameManager.resolveBoobyTraps(); // booby trap says it resolves "immediately"... could be problematic
                 gameManager.applyBuildingDamage();
                 gameManager.checkForPSRFromDamage();
+                gameManager.resolveForcedObjectiveDrops();
                 gameManager.addReport(gameManager.resolvePilotingRolls());
                 gameManager.addReport(gameManager.resolveCrewConsciousness());
                 gameManager.resolveSinkVees();
@@ -303,6 +306,7 @@ record TWPhaseEndManager(TWGameManager gameManager) {
                       .forEach(player -> gameManager.send(player.getId(), gameManager.createArtilleryPacket(player)));
                 gameManager.applyBuildingDamage();
                 gameManager.checkForPSRFromDamage();
+                gameManager.resolveForcedObjectiveDrops();
                 gameManager.addReport(gameManager.resolvePilotingRolls());
                 gameManager.addReport(gameManager.resolveCrewConsciousness());
 

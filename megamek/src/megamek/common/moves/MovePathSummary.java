@@ -78,7 +78,7 @@ public final class MovePathSummary {
               || (moved == EntityMovementType.MOVE_SKID)) {
             sources.add(new HeatSource("HeatBreakdown.movementRunning", entity.getRunHeat()));
         } else if ((moved == EntityMovementType.MOVE_JUMP) && !mechanicalJumpBoosters) {
-            sources.add(new HeatSource("HeatBreakdown.movementJumping", entity.getJumpHeat(distance)));
+            sources.add(new HeatSource("HeatBreakdown.movementJumping", entity.getJumpHeatForDistance(distance)));
         } else if ((moved == EntityMovementType.MOVE_SPRINT)
               || (moved == EntityMovementType.MOVE_VTOL_SPRINT)) {
             sources.add(new HeatSource("HeatBreakdown.movementSprinting", entity.getSprintHeat()));

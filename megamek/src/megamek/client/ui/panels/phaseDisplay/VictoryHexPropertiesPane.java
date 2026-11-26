@@ -32,7 +32,9 @@
  */
 package megamek.client.ui.panels.phaseDisplay;
 
+import java.awt.BorderLayout;
 import java.awt.Component;
+import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -43,20 +45,22 @@ import java.util.List;
 import java.util.Locale;
 import java.util.stream.IntStream;
 import javax.swing.Box;
-import javax.swing.BoxLayout;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
-import javax.swing.JTextField;
+import javax.swing.JTextArea;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
+import javax.swing.text.JTextComponent;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
@@ -69,8 +73,10 @@ import megamek.common.Player;
 import megamek.common.equipment.ObjectiveMarker;
 import megamek.common.equipment.ObjectiveScoringScheme;
 import megamek.common.equipment.ObjectiveScoringScheme.HoldCounting;
+import megamek.common.equipment.ObjectiveScoringScheme.RaidPayout;
 import megamek.common.equipment.ObjectiveScoringScheme.ScanPayout;
 import megamek.common.equipment.ObjectiveScoringScheme.SchemePreset;
+import megamek.logging.MMLogger;
 
 /**
  * The properties editor of a control point: control radius, victory point value and the scoring scheme with its
@@ -79,6 +85,9 @@ import megamek.common.equipment.ObjectiveScoringScheme.SchemePreset;
  * applies any removal, so the editor itself never touches the game.
  */
 public final class VictoryHexPropertiesPane {
+
+    /** Feature logger for the victory hex designation diagnostics; enabled via the log4j2.xml VictoryHex block. */
+    private static final MMLogger VICTORY_HEX_LOGGER = MMLogger.create("megamek.feature.VictoryHex");
 
     /** What the user chose in the properties pane. */
     public enum Result {
@@ -102,7 +111,7 @@ public final class VictoryHexPropertiesPane {
      *
      * @return what the user chose; on {@link Result#REMOVED} the caller removes the marker itself
      */
-    public static Result edit(JFrame frame, ObjectiveMarker marker, List<Player> players, boolean gameMaster) {
+    public static Result edit(JFrame frame, ObjectiveMarker marker, List<Player> players) {
         ObjectiveScoringScheme scheme = marker.getScoringScheme();
         JSpinner radiusSpinner = new JSpinner(
               new SpinnerNumberModel(marker.getControlRadius(), 0, ObjectiveMarker.MAX_CONTROL_RADIUS, 1));
@@ -152,6 +161,11 @@ public final class VictoryHexPropertiesPane {
         payoutCombo.setSelectedItem(scheme.getScanPayout());
         payoutCombo.setRenderer(new MessageKeyRenderer("VictoryHex.payout.", true));
         JLabel payoutLabel = new JLabel(Messages.getString("VictoryHex.scanPayout"));
+        // a Raid point's one setting: every End Phase, as printed, or once at game end
+        JComboBox<RaidPayout> raidPayoutCombo = new JComboBox<>(RaidPayout.values());
+        raidPayoutCombo.setSelectedItem(scheme.getRaidPayout());
+        raidPayoutCombo.setRenderer(new MessageKeyRenderer("VictoryHex.raidPayout.", true));
+        JLabel raidPayoutLabel = new JLabel(Messages.getString("VictoryHex.raidPayout"));
         // whose the point is. A scanning mission reads either something nobody owns or something belonging to
         // a particular side, and without this every scan point came out as an unowned white flag
         JComboBox<SideChoice> belongsToCombo = new JComboBox<>();
@@ -162,10 +176,16 @@ public final class VictoryHexPropertiesPane {
         selectOwningSide(belongsToCombo, marker);
         belongsToCombo.setToolTipText(Messages.getString("VictoryHex.belongsTo.tooltip"));
         JLabel belongsToLabel = new JLabel(Messages.getString("VictoryHex.belongsTo"));
-        // a game master can write what the scan reveals; the note is sent to the scanning side on a success
-        JTextField revealsField = new JTextField(marker.getScanRevealsNote(), REVEALS_COLUMNS);
-        revealsField.setToolTipText(Messages.getString("VictoryHex.scanReveals.tooltip"));
+        // which side scores it by scanning: the placer's by default, or the other side's for something hidden for
+        // them to find
+        JComboBox<SideChoice> scannedByCombo = createScannedByCombo(players, marker);
+        JLabel scannedByLabel = new JLabel(Messages.getString("VictoryHex.scannedBy"));
+        // what the scan reveals, written by whoever opened the point: its placer or a game master. The note is sent
+        // to the scanning side on a success, and before that only the placer's side and a game master are sent it
+        JTextArea revealsArea = createRevealsArea(marker);
         JLabel revealsLabel = new JLabel(Messages.getString("VictoryHex.scanReveals"));
+        JPanel revealsPanel = createRevealsPanel(revealsLabel, revealsArea);
+        VariantChecks variantChecks = VariantChecks.forMarker(marker, schemeCombo);
 
         JLabel thresholdLabel = new JLabel();
         JLabel rateLabel = new JLabel();
@@ -175,20 +195,20 @@ public final class VictoryHexPropertiesPane {
         JLabel startingControlLabel = new JLabel(Messages.getString("VictoryHex.startingControl"));
         JLabel radiusLabel = new JLabel(Messages.getString("VictoryHex.radius"));
         // a scan point is read, not held: nothing about control applies to it, so these rows go away with it
-        List<JComponent> scanRows = gameMaster
-              ? List.of(payoutLabel, payoutCombo, belongsToLabel, belongsToCombo, revealsLabel, revealsField)
-              : List.of(payoutLabel, payoutCombo, belongsToLabel, belongsToCombo);
+        List<JComponent> scanRows = List.of(payoutLabel, payoutCombo, belongsToLabel, belongsToCombo, scannedByLabel,
+              scannedByCombo, revealsPanel);
         List<JComponent> controlRows = List.of(retainControlLabel, retainControlCheckbox, startingControlLabel,
               startingControlCombo, radiusLabel, radiusSpinner);
         SchemeControls controls = new SchemeControls(schemeCombo, countingCombo, thresholdSpinner, rateSpinner,
-              retainControlCheckbox, payoutCombo, scanRows, controlRows, thresholdLabel, rateLabel,
-              countingLabel, schemeDescription);
+              retainControlCheckbox, payoutCombo, raidPayoutCombo, raidPayoutLabel, scanRows, controlRows,
+              thresholdLabel, rateLabel, countingLabel, schemeDescription);
         schemeCombo.addActionListener(event -> refreshSchemeRows(controls));
         countingCombo.addActionListener(event -> refreshSchemeRows(controls));
         thresholdSpinner.addChangeListener(event -> refreshSchemeRows(controls));
         rateSpinner.addChangeListener(event -> refreshSchemeRows(controls));
         retainControlCheckbox.addActionListener(event -> refreshSchemeRows(controls));
         payoutCombo.addActionListener(event -> refreshSchemeRows(controls));
+        raidPayoutCombo.addActionListener(event -> refreshSchemeRows(controls));
         refreshSchemeRows(controls);
 
         // the order a player decides these in: what kind of point is this, how is it won, who holds it
@@ -202,32 +222,37 @@ public final class VictoryHexPropertiesPane {
         addRow(propertiesPanel, 1, thresholdLabel, thresholdSpinner);
         addRow(propertiesPanel, 2, countingLabel, countingCombo);
         addRow(propertiesPanel, 3, rateLabel, rateSpinner);
-        addRow(propertiesPanel, 4, payoutLabel, payoutCombo);
-        addRow(propertiesPanel, 5, belongsToLabel, belongsToCombo);
-        if (gameMaster) {
-            addRow(propertiesPanel, 6, revealsLabel, revealsField);
-        }
-        addRow(propertiesPanel, 7, retainControlLabel, retainControlCheckbox);
-        addRow(propertiesPanel, 8, startingControlLabel, startingControlCombo);
-        addRow(propertiesPanel, 9, radiusLabel, radiusSpinner);
-        addRow(propertiesPanel, 10, new JLabel(Messages.getString("VictoryHex.victoryPoints")), victoryPointSpinner);
-        pinRowsToTheTop(propertiesPanel, 11);
+        addRow(propertiesPanel, 4, raidPayoutLabel, raidPayoutCombo);
+        addRow(propertiesPanel, 5, payoutLabel, payoutCombo);
+        addRow(propertiesPanel, 6, belongsToLabel, belongsToCombo);
+        addRow(propertiesPanel, 7, scannedByLabel, scannedByCombo);
+        addRow(propertiesPanel, 8, retainControlLabel, retainControlCheckbox);
+        addRow(propertiesPanel, 9, startingControlLabel, startingControlCombo);
+        addRow(propertiesPanel, 10, radiusLabel, radiusSpinner);
+        addRow(propertiesPanel, 11, new JLabel(Messages.getString("VictoryHex.victoryPoints")), victoryPointSpinner);
+        addRow(propertiesPanel, 12, new JLabel(Messages.getString("VictoryHex.variants")), variantChecks.panel());
+        pinRowsToTheTop(propertiesPanel, 13);
 
-        JPanel editorPanel = new JPanel();
-        editorPanel.setLayout(new BoxLayout(editorPanel, BoxLayout.PAGE_AXIS));
-        editorPanel.add(propertiesPanel);
-        editorPanel.add(schemeDescription);
+        // the scan note sits in the middle so that it alone takes up any room gained by enlarging the dialog
+        int gap = UIUtil.scaleForGUI(4);
+        JPanel editorPanel = new JPanel(new BorderLayout(0, gap));
+        editorPanel.add(propertiesPanel, BorderLayout.NORTH);
+        editorPanel.add(revealsPanel, BorderLayout.CENTER);
+        editorPanel.add(schemeDescription, BorderLayout.SOUTH);
 
         String okLabel = Messages.getString("Okay");
         String removeLabel = Messages.getString("VictoryHex.remove");
         String cancelLabel = Messages.getString("Cancel");
         Object[] dialogOptions = { okLabel, removeLabel, cancelLabel };
-        int result = option(frame, propertiesPanel, schemeDescription, editorPanel,
-              Messages.getString("VictoryHex.title", marker.generalName()), dialogOptions);
+        int result = option(frame, propertiesPanel, new Row(revealsLabel, revealsArea), revealsPanel,
+              schemeDescription, editorPanel, Messages.getString("VictoryHex.title", marker.generalName()),
+              dialogOptions);
         if (result == 1) {
             return Result.REMOVED;
         }
         if (result != 0) {
+            VICTORY_HEX_LOGGER.info("[VictoryHex] {} editor closed without saving - nothing changed",
+                  marker.generalName());
             return Result.CANCELLED;
         }
         // a scan point has no control to keep or to start with, whatever the hidden rows still say
@@ -235,6 +260,7 @@ public final class VictoryHexPropertiesPane {
         boolean retainsControl = !isScanPoint && retainControlCheckbox.isSelected();
         scheme.setRetainsControlWhenEmpty(retainsControl);
         scheme.setScanPayout((ScanPayout) payoutCombo.getSelectedItem());
+        scheme.setRaidPayout((RaidPayout) raidPayoutCombo.getSelectedItem());
         // a greyed dropdown keeps whatever it last showed, so its choice only counts while retention is on;
         // without retention the first End Phase would clear a starting holder anyway
         ControlChoice startingControl = retainsControl
@@ -249,17 +275,123 @@ public final class VictoryHexPropertiesPane {
         if (isScanPoint) {
             SideChoice owningSide = (SideChoice) belongsToCombo.getSelectedItem();
             marker.setBelongsToPlayerId((owningSide == null) ? Player.PLAYER_NONE : owningSide.playerId());
+            SideChoice scanningSide = (SideChoice) scannedByCombo.getSelectedItem();
+            if (scanningSide != null) {
+                marker.setScannedByPlayerId(scanningSide.playerId());
+            }
         }
         marker.setControlRadius((Integer) radiusSpinner.getValue());
         marker.setVictoryPointValue((Integer) victoryPointSpinner.getValue());
-        if (gameMaster) {
-            marker.setScanRevealsNote(revealsField.getText());
-        }
+        marker.setScanRevealsNote(revealsArea.getText());
         scheme.setPreset((SchemePreset) schemeCombo.getSelectedItem());
         scheme.setThreshold((Integer) thresholdSpinner.getValue());
         scheme.setRatePerTurn((Integer) rateSpinner.getValue());
         scheme.setHoldCounting((HoldCounting) countingCombo.getSelectedItem());
+        variantChecks.applyTo(marker);
+        VICTORY_HEX_LOGGER.info("[VictoryHex] {} saved: potential {}, false {}, fragile {}, mobile {}",
+              marker.generalName(), marker.isPotential(), marker.isFalseObjective(), marker.isFragile(),
+              marker.isMobile());
         return Result.SAVED;
+    }
+
+    /**
+     * The four objective variant tick boxes, kept to the rules {@link ObjectiveMarker} sets: Potential and False cannot
+     * be combined, a Scan point cannot be Potential, and only a Raid point can be Mobile. A box the rules rule out is
+     * greyed, and its tooltip says why.
+     *
+     * @param potential      a candidate that must be confirmed by a scan before it can score
+     * @param falseObjective a decoy
+     * @param fragile        at risk of destruction when its hex takes damage
+     * @param mobile         can be picked up and carried
+     * @param schemeCombo    the pane's scoring scheme selector, which decides whether Potential and Mobile are allowed
+     */
+    private record VariantChecks(JCheckBox potential, JCheckBox falseObjective, JCheckBox fragile,
+          JCheckBox mobile, JComboBox<SchemePreset> schemeCombo) {
+
+        /**
+         * @param marker      the point being edited
+         * @param schemeCombo the pane's scoring scheme selector
+         *
+         * @return the tick boxes, set from the marker and wired to follow the variant rules as the boxes and the
+         *       scheme change
+         */
+        static VariantChecks forMarker(ObjectiveMarker marker, JComboBox<SchemePreset> schemeCombo) {
+            VariantChecks checks = new VariantChecks(variantCheckbox("potential", marker.isPotential()),
+                  variantCheckbox("false", marker.isFalseObjective()),
+                  variantCheckbox("fragile", marker.isFragile()),
+                  variantCheckbox("mobile", marker.isMobile()),
+                  schemeCombo);
+            checks.potential().addActionListener(event -> checks.refreshRules());
+            checks.falseObjective().addActionListener(event -> checks.refreshRules());
+            schemeCombo.addActionListener(event -> checks.refreshRules());
+            checks.refreshRules();
+            return checks;
+        }
+
+        private static JCheckBox variantCheckbox(String variant, boolean isSelected) {
+            JCheckBox checkbox = new JCheckBox(Messages.getString("VictoryHex.variant." + variant), isSelected);
+            checkbox.setToolTipText(Messages.getString("VictoryHex.variant." + variant + ".tooltip"));
+            return checkbox;
+        }
+
+        /**
+         * Applies the variant rules to the boxes. A box the selected scheme rules out is unticked and greyed, since a
+         * greyed tick would still read as set. Between Potential and False, whichever is unticked greys while the
+         * other is ticked; a ticked box is never greyed by that rule, so a marker that somehow arrives with both can
+         * still be corrected here.
+         */
+        void refreshRules() {
+            SchemePreset preset = (SchemePreset) schemeCombo.getSelectedItem();
+            boolean isPotentialAllowed = (preset != null) && ObjectiveMarker.canBePotential(preset);
+            boolean isMobileAllowed = (preset != null) && ObjectiveMarker.canBeMobile(preset);
+            if (!isPotentialAllowed) {
+                potential.setSelected(false);
+            }
+            if (!isMobileAllowed) {
+                mobile.setSelected(false);
+            }
+            boolean isPotentialBlockedByFalse = !potential.isSelected() && falseObjective.isSelected();
+            boolean isFalseBlockedByPotential = !falseObjective.isSelected() && potential.isSelected();
+
+            potential.setEnabled(isPotentialAllowed && !isPotentialBlockedByFalse);
+            String potentialTooltipKey = "VictoryHex.variant.potential.tooltip";
+            if (!isPotentialAllowed) {
+                potentialTooltipKey = "VictoryHex.variant.potential.notOnScan";
+            } else if (isPotentialBlockedByFalse) {
+                potentialTooltipKey = "VictoryHex.variant.potential.blocked";
+            }
+            potential.setToolTipText(Messages.getString(potentialTooltipKey));
+
+            falseObjective.setEnabled(!isFalseBlockedByPotential);
+            falseObjective.setToolTipText(Messages.getString(isFalseBlockedByPotential
+                  ? "VictoryHex.variant.false.blocked" : "VictoryHex.variant.false.tooltip"));
+
+            mobile.setEnabled(isMobileAllowed);
+            mobile.setToolTipText(Messages.getString(isMobileAllowed
+                  ? "VictoryHex.variant.mobile.tooltip" : "VictoryHex.variant.mobile.raidOnly"));
+        }
+
+        /** @return the four boxes side by side, for the properties grid */
+        JPanel panel() {
+            JPanel result = new JPanel(new FlowLayout(FlowLayout.LEADING, UIUtil.scaleForGUI(4), 0));
+            result.add(potential);
+            result.add(falseObjective);
+            result.add(fragile);
+            result.add(mobile);
+            return result;
+        }
+
+        /**
+         * Writes the ticks to the marker, through the same setters the scenario reader uses.
+         *
+         * @param marker the point being edited
+         */
+        void applyTo(ObjectiveMarker marker) {
+            marker.setPotential(potential.isSelected());
+            marker.setFalseObjective(falseObjective.isSelected());
+            marker.setFragile(fragile.isSelected());
+            marker.setMobile(mobile.isSelected());
+        }
     }
 
 
@@ -273,8 +405,10 @@ public final class VictoryHexPropertiesPane {
      * @param rateSpinner       the per-turn rate (grip drain or capture progress)
      * @param retainControl     whether the point keeps its holder once the zone empties
      * @param scanPayout        when a Scan point pays its points
-     * @param scanRows          the rows shown only for a Scan point: the payout choice and, for a game master, the
-     *                          note the scan reveals
+     * @param raidPayout        when a Raid point pays its points, shown only for a Raid point
+     * @param raidPayoutLabel   the label of the Raid payout selector
+     * @param scanRows          the rows shown only for a Scan point: the payout choice, whose point it is, which
+     *                          side scans it and the note the scan reveals
      * @param controlRows       the retention, starting holder and radius rows, hidden for a Scan point
      * @param thresholdLabel    the label naming the threshold for the selected preset
      * @param rateLabel         the label naming the rate for the selected preset
@@ -283,11 +417,61 @@ public final class VictoryHexPropertiesPane {
      */
     private record SchemeControls(JComboBox<SchemePreset> schemeCombo, JComboBox<HoldCounting> countingCombo,
           JSpinner thresholdSpinner, JSpinner rateSpinner, JCheckBox retainControl, JComboBox<ScanPayout> scanPayout,
-          List<JComponent> scanRows, List<JComponent> controlRows, JLabel thresholdLabel,
+          JComboBox<RaidPayout> raidPayout, JLabel raidPayoutLabel, List<JComponent> scanRows, List<JComponent> controlRows, JLabel thresholdLabel,
           JLabel rateLabel, JLabel countingLabel, JLabel schemeDescription) {}
 
-    /** Width of the game master's note field, in text columns. */
+    /** Width of the scan note box when the dialog opens, in text columns. */
     private static final int REVEALS_COLUMNS = 24;
+
+    /** Height of the scan note box when the dialog opens, in lines; enlarging the dialog makes it taller. */
+    private static final int REVEALS_ROWS = 4;
+
+    /**
+     * @param marker the point being edited
+     *
+     * @return the box for what a scan of the point reveals, holding the point's current note, wrapping at words
+     */
+    private static JTextArea createRevealsArea(ObjectiveMarker marker) {
+        JTextArea revealsArea = new JTextArea(marker.getScanRevealsNote(), REVEALS_ROWS, REVEALS_COLUMNS);
+        revealsArea.setLineWrap(true);
+        revealsArea.setWrapStyleWord(true);
+        revealsArea.setToolTipText(Messages.getString("VictoryHex.scanReveals.tooltip"));
+        return revealsArea;
+    }
+
+    /**
+     * @param revealsLabel the scan note's label
+     * @param revealsArea  the box for what a scan of the point reveals
+     *
+     * @return the scan note row: its label above the box, which scrolls once the note outgrows it
+     */
+    private static JPanel createRevealsPanel(JLabel revealsLabel, JTextArea revealsArea) {
+        JPanel revealsPanel = new JPanel(new BorderLayout(0, UIUtil.scaleForGUI(2)));
+        revealsPanel.add(revealsLabel, BorderLayout.NORTH);
+        revealsPanel.add(new JScrollPane(revealsArea), BorderLayout.CENTER);
+        return revealsPanel;
+    }
+
+    /**
+     * Shows the editor as a modal Okay / Remove Flag / Cancel dialog the user can enlarge, which gives a long scan
+     * note room.
+     *
+     * @param frame       the parent frame
+     * @param editorPanel the editor's content
+     * @param title       the dialog title
+     * @param options     Okay, Remove Flag and Cancel
+     *
+     * @return the chosen option's index, or {@link JOptionPane#CLOSED_OPTION} when the dialog was closed
+     */
+    private static int showResizableDialog(JFrame frame, JPanel editorPanel, String title, Object[] options) {
+        JOptionPane optionPane = new JOptionPane(editorPanel, JOptionPane.PLAIN_MESSAGE,
+              JOptionPane.YES_NO_CANCEL_OPTION, null, options, options[0]);
+        JDialog dialog = optionPane.createDialog(frame, title);
+        dialog.setResizable(true);
+        dialog.setVisible(true);
+        dialog.dispose();
+        return Arrays.asList(options).indexOf(optionPane.getValue());
+    }
 
     /**
      * Adds one label-and-control row to the properties grid. Both cells share the row's width equally, so the
@@ -326,7 +510,8 @@ public final class VictoryHexPropertiesPane {
         Object rate = controls.rateSpinner().getValue();
         HoldCounting counting = (HoldCounting) controls.countingCombo().getSelectedItem();
         String presetDescription = describeConfiguredPreset(preset, threshold, rate, counting,
-              controls.retainControl().isSelected(), (ScanPayout) controls.scanPayout().getSelectedItem());
+              controls.retainControl().isSelected(), (ScanPayout) controls.scanPayout().getSelectedItem(),
+              (RaidPayout) controls.raidPayout().getSelectedItem());
         controls.schemeDescription().setText("<html><body style='width: 260px'>" + presetDescription
               + "</body></html>");
         controls.schemeCombo().setToolTipText(presetDescription);
@@ -351,6 +536,9 @@ public final class VictoryHexPropertiesPane {
         controls.rateSpinner().setVisible(usesRate);
         controls.countingLabel().setVisible(usesCounting);
         controls.countingCombo().setVisible(usesCounting);
+        boolean usesRaidPayout = preset == SchemePreset.RAID;
+        controls.raidPayoutLabel().setVisible(usesRaidPayout);
+        controls.raidPayout().setVisible(usesRaidPayout);
         resizeDialogToFit(controls, layoutBefore);
     }
 
@@ -366,7 +554,8 @@ public final class VictoryHexPropertiesPane {
      */
     private static String layoutSignature(SchemeControls controls) {
         return controls.thresholdSpinner().isVisible() + "/" + controls.countingCombo().isVisible() + "/"
-              + controls.rateSpinner().isVisible() + "/" + controls.schemeDescription().getText();
+              + controls.rateSpinner().isVisible() + "/" + controls.raidPayout().isVisible() + "/"
+              + controls.schemeDescription().getText();
     }
 
     /**
@@ -419,6 +608,8 @@ public final class VictoryHexPropertiesPane {
      *
      * @param frame       the parent frame
      * @param rows        the properties grid
+     * @param note        the scan note, below the grid
+     * @param notePanel   the scan note's panel, shown only for a scan point
      * @param description the scheme description below the grid
      * @param editor      the pane's whole editor, for the Swing option pane
      * @param title       the pane's title
@@ -426,10 +617,10 @@ public final class VictoryHexPropertiesPane {
      *
      * @return the chosen option's index, or {@link JOptionPane#CLOSED_OPTION}
      */
-    private static int option(JFrame frame, JPanel rows, JLabel description, JPanel editor, String title,
-          Object[] options) {
+    private static int option(JFrame frame, JPanel rows, Row note, JComponent notePanel, JLabel description,
+          JPanel editor, String title, Object[] options) {
         ClientGUI gui = ClientGUI.forFrame(frame);
-        List<Row> shown = (gui == null) ? null : shownRows(rows);
+        List<Row> shown = (gui == null) ? null : shownRows(rows, note, notePanel);
         while (shown != null) {
             DialogAnswer answer = gui.askForm(description.getText(), title,
                   shown.stream().map(VictoryHexPropertiesPane::field).toList(),
@@ -443,19 +634,20 @@ public final class VictoryHexPropertiesPane {
             if (answer.button() != DialogAnswer.CHANGED) {
                 return answer.button();
             }
-            shown = shownRows(rows);
+            shown = shownRows(rows, note, notePanel);
         }
-        return JOptionPane.showOptionDialog(frame, editor, title, JOptionPane.YES_NO_CANCEL_OPTION,
-              JOptionPane.PLAIN_MESSAGE, null, options, options[0]);
+        return showResizableDialog(frame, editor, title, options);
     }
 
     /**
-     * @param rows the properties grid
+     * @param rows      the properties grid
+     * @param note      the scan note, below the grid
+     * @param notePanel the scan note's panel, shown only for a scan point
      *
-     * @return the rows the pane shows and lets the player change, in its order; null when one of them has a control
-     *       the native form cannot show
+     * @return the rows the pane shows and lets the player change, in its order, the scan note last; null when one of
+     *       them has a control the native form cannot show
      */
-    private static @Nullable List<Row> shownRows(JPanel rows) {
+    private static @Nullable List<Row> shownRows(JPanel rows, Row note, JComponent notePanel) {
         List<Row> shown = new ArrayList<>();
         Component[] parts = rows.getComponents();
         for (int index = 0; index + 1 < parts.length; index += 2) {
@@ -463,12 +655,15 @@ public final class VictoryHexPropertiesPane {
             if ((parts[index] instanceof JLabel label) && label.isVisible() && control.isVisible()
                   && control.isEnabled()) {
                 boolean shownNatively = (control instanceof JSpinner) || (control instanceof JComboBox)
-                      || (control instanceof JCheckBox) || (control instanceof JTextField);
+                      || (control instanceof JCheckBox) || (control instanceof JTextComponent);
                 if (!shownNatively) {
                     return null;
                 }
                 shown.add(new Row(label, control));
             }
+        }
+        if (notePanel.isVisible()) {
+            shown.add(note);
         }
         return shown;
     }
@@ -486,7 +681,7 @@ public final class VictoryHexPropertiesPane {
             return new DialogField(label, FieldKind.INTEGER, List.of(), (Integer) model.getMinimum(),
                   (Integer) model.getMaximum(), String.valueOf(spinner.getValue()));
         }
-        if (row.control() instanceof JTextField text) {
+        if (row.control() instanceof JTextComponent text) {
             return new DialogField(label, FieldKind.TEXT, List.of(), 0, 0, text.getText());
         }
         if (row.control() instanceof JComboBox<?> list) {
@@ -527,7 +722,7 @@ public final class VictoryHexPropertiesPane {
                       .ifPresent(list::setSelectedIndex);
             } else if ((control instanceof JCheckBox box) && (box.isSelected() != Boolean.parseBoolean(value))) {
                 box.doClick(0);
-            } else if (control instanceof JTextField text) {
+            } else if (control instanceof JTextComponent text) {
                 text.setText(value);
             }
         }
@@ -554,16 +749,17 @@ public final class VictoryHexPropertiesPane {
      * @return the plain-words what-it-does / how-to-make-it-work description of the point as configured
      */
     private static String describeConfiguredPreset(SchemePreset preset, Object threshold, Object rate,
-          HoldCounting counting, boolean retainsControl, ScanPayout scanPayout) {
+          HoldCounting counting, boolean retainsControl, ScanPayout scanPayout, RaidPayout raidPayout) {
         String presetDescription = switch (preset) {
             case SCAN -> Messages.getString("VictoryHex.describe.scan."
                   + scanPayout.name().toLowerCase(Locale.ROOT));
+            case RAID -> Messages.getString("VictoryHex.describe.raid."
+                  + raidPayout.name().toLowerCase(Locale.ROOT));
             case HOLD -> Messages.getString("VictoryHex.describe.hold."
                   + counting.name().toLowerCase(Locale.ROOT), threshold);
             case DEFEND -> Messages.getString("VictoryHex.describe.defend", threshold, rate);
             case CAPTURE -> Messages.getString("VictoryHex.describe.capture", threshold, rate);
-            case STANDARD, RAID -> Messages.getString("VictoryHex.describe."
-                  + preset.name().toLowerCase(Locale.ROOT));
+            case STANDARD -> Messages.getString("VictoryHex.describe.standard");
         };
         if (!retainsControl) {
             return presetDescription;
@@ -645,6 +841,28 @@ public final class VictoryHexPropertiesPane {
     }
 
     /**
+     * Builds the "scanned by" selector: one entry per player, pointed at the side that scans the point now - the
+     * placer's unless another side was chosen. There is no "nobody": a point nobody may scan could never score.
+     *
+     * @param players the players in the game
+     * @param marker  the point being edited
+     *
+     * @return the selector
+     */
+    private static JComboBox<SideChoice> createScannedByCombo(List<Player> players, ObjectiveMarker marker) {
+        JComboBox<SideChoice> scannedByCombo = new JComboBox<>();
+        for (Player player : players) {
+            SideChoice choice = new SideChoice(player.getId(), player.getName());
+            scannedByCombo.addItem(choice);
+            if (player.getId() == marker.getScannedByPlayerId()) {
+                scannedByCombo.setSelectedItem(choice);
+            }
+        }
+        scannedByCombo.setToolTipText(Messages.getString("VictoryHex.scannedBy.tooltip"));
+        return scannedByCombo;
+    }
+
+    /**
      * Points the selector at the marker's current owner, falling back to nobody when the owner is not a player
      * in this game - which is the state every scan point starts in.
      *
@@ -716,6 +934,7 @@ public final class VictoryHexPropertiesPane {
      */
     public static String describeScheme(ObjectiveScoringScheme scheme) {
         return describeConfiguredPreset(scheme.getPreset(), scheme.getThreshold(), scheme.getRatePerTurn(),
-              scheme.getHoldCounting(), scheme.retainsControlWhenEmpty(), scheme.getScanPayout());
+              scheme.getHoldCounting(), scheme.retainsControlWhenEmpty(), scheme.getScanPayout(),
+              scheme.getRaidPayout());
     }
 }

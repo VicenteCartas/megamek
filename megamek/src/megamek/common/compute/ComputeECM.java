@@ -51,6 +51,8 @@ import megamek.common.ECMInfo;
 import megamek.common.Player;
 import megamek.common.TemporaryECMField;
 import megamek.common.battleArmor.BattleArmor;
+import megamek.common.battlefieldSupport.BFSSpecialType;
+import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
 import megamek.common.board.Coords;
 import megamek.common.equipment.INarcPod;
 import megamek.common.equipment.MiscMounted;
@@ -683,7 +685,15 @@ public class ComputeECM {
                 }
             }
         }
-        return applyEmiRangeBonus(bestInfo, entity);
+        bestInfo = applyEmiRangeBonus(bestInfo, entity);
+        // The Asset ECM Special provides its own six-hex field (Core p.149).
+        if ((entity instanceof BattlefieldSupportAsset asset) && asset.hasSpecial(BFSSpecialType.ECM)) {
+            ECMInfo assetInfo = new ECMInfo(6, 1, entity);
+            if ((bestInfo == null) || (ecmComparator.compare(assetInfo, bestInfo) > 0)) {
+                bestInfo = assetInfo;
+            }
+        }
+        return bestInfo;
     }
 
     /**

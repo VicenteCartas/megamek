@@ -252,8 +252,7 @@ class GpuVictoryHexFormTest {
 
     /** Opens the editor on the EDT, as the Victory Setup display does on a hex click. */
     private static FutureTask<Result> edit(JFrame frame, ObjectiveMarker marker) {
-        FutureTask<Result> edit = new FutureTask<>(() -> VictoryHexPropertiesPane.edit(frame, marker, players(),
-              false));
+        FutureTask<Result> edit = new FutureTask<>(() -> VictoryHexPropertiesPane.edit(frame, marker, players()));
         SwingUtilities.invokeLater(edit);
         return edit;
     }
@@ -304,7 +303,7 @@ class GpuVictoryHexFormTest {
                       script.accept(SwingPane.of(call.getArgument(1)));
                       return option;
                   });
-            return VictoryHexPropertiesPane.edit(frame, marker, players(), false);
+            return VictoryHexPropertiesPane.edit(frame, marker, players());
         }
     }
 }

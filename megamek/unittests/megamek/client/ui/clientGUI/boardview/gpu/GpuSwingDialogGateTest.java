@@ -272,7 +272,7 @@ class GpuSwingDialogGateTest {
             gate.drive("R5 VictoryHexPropertiesPane", DialogKind.FORM, MESSAGE_BOX, () -> {
                 ObjectiveMarker point = new ObjectiveMarker();
                 point.setName("Objective 0505");
-                return VictoryHexPropertiesPane.edit(frame, point, GpuVictoryHexFormTest.players(), false);
+                return VictoryHexPropertiesPane.edit(frame, point, GpuVictoryHexFormTest.players());
             });
             // R9: a scenario's story
             gate.drive("R9 MMNarrativeStoryDialog", DialogKind.MESSAGE, type(MMNarrativeStoryDialog.class), () -> {

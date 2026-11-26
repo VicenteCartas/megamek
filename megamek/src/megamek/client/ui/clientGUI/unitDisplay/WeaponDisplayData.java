@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.unitDisplay;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.function.IntUnaryOperator;
 
 import jakarta.annotation.Nullable;
 import megamek.client.Client;
@@ -35,7 +36,9 @@ import megamek.common.weapons.bayWeapons.BayWeapon;
 import megamek.common.weapons.capitalWeapons.CapitalMissileWeapon;
 import megamek.common.weapons.gaussRifles.HAGWeapon;
 import megamek.common.weapons.handlers.AreaEffectHelper;
+import megamek.common.weapons.handlers.BayWeaponHandler;
 import megamek.common.weapons.handlers.DamageFalloff;
+import megamek.common.weapons.handlers.WeaponHandler;
 import megamek.common.weapons.infantry.InfantryWeapon;
 import megamek.logging.MMLogger;
 
@@ -85,10 +88,7 @@ public final class WeaponDisplayData {
             // extreme temperatures.
             if ((game != null) && (game.getPlanetaryConditions().getTemperature() > 0)) {
                 int buildup = game.getPlanetaryConditions().getTemperatureDifference(50, -30);
-                if (((Mek) en).hasIntactHeatDissipatingArmor()) {
-                    buildup /= 2;
-                }
-                currentHeatBuildup += buildup;
+                currentHeatBuildup += Game.rulesManager.getRulesArmor().reduceExtremeHeat(en, buildup);
             } else if (game != null) {
                 currentHeatBuildup -= game.getPlanetaryConditions().getTemperatureDifference(50, -30);
             }
@@ -98,26 +98,12 @@ public final class WeaponDisplayData {
             Hex hex = game.getBoard(entity.getBoardId()).getHex(position);
             if (hex != null) {
                 if (hex.containsTerrain(Terrains.FIRE) && (hex.getFireTurn() > 0)) {
-                    // standing in fire
-                    if ((en instanceof Mek) && ((Mek) en).hasIntactHeatDissipatingArmor()) {
-                        currentHeatBuildup += 2;
-                    } else {
-                        currentHeatBuildup += 5;
-                    }
+                    currentHeatBuildup += Game.rulesManager.getRulesArmor().reduceNonLocationHeat(en, 5);
                 }
 
-                if (hex.terrainLevel(Terrains.MAGMA) == 1) {
-                    if ((en instanceof Mek) && ((Mek) en).hasIntactHeatDissipatingArmor()) {
-                        currentHeatBuildup += 2;
-                    } else {
-                        currentHeatBuildup += 5;
-                    }
-                } else if (hex.terrainLevel(Terrains.MAGMA) == 2) {
-                    if ((en instanceof Mek) && ((Mek) en).hasIntactHeatDissipatingArmor()) {
-                        currentHeatBuildup += 5;
-                    } else {
-                        currentHeatBuildup += 10;
-                    }
+                int magmaLevel = hex.terrainLevel(Terrains.MAGMA);
+                if (magmaLevel == 1 || magmaLevel == 2) {
+                    currentHeatBuildup += Game.rulesManager.getRulesArmor().reduceNonLocationHeat(en, 5 * magmaLevel);
                 }
             } else {
                 logger.warn("An entity is not offboard but has a position not on board.");
@@ -572,10 +558,13 @@ public final class WeaponDisplayData {
     private static AerospaceValues attackValues(Entity entity, WeaponMounted weapon, @Nullable AmmoMounted ammo) {
         WeaponType weaponType = weapon.getType();
         // update Attack Values and change range
-        int avShort = weaponType.getRoundShortAV();
-        int avMed = weaponType.getRoundMedAV();
-        int avLong = weaponType.getRoundLongAV();
-        int avExt = weaponType.getRoundExtAV();
+        // Each attack value rounds as its weapon type rounds it (TM p. 136); a charged capacitor adds 5 (TO:AUE p. 149)
+        IntUnaryOperator charged = av -> ((av > 0) && weapon.firesCapacitorCharge())
+              ? (av + Mounted.CAPACITOR_DAMAGE_BONUS) : av;
+        int avShort = charged.applyAsInt(weaponType.getRoundShortAV());
+        int avMed = charged.applyAsInt(weaponType.getRoundMedAV());
+        int avLong = charged.applyAsInt(weaponType.getRoundLongAV());
+        int avExt = charged.applyAsInt(weaponType.getRoundExtAV());
         int maxRange = weaponType.getMaxRange(weapon);
 
         // change range and attack values based upon ammo
@@ -634,10 +623,10 @@ public final class WeaponDisplayData {
                   && ((mAmmo == null) || (mAmmo.getUsableShotsLeft() > 0))) {
                 WeaponType bayWType = m.getType();
                 heat = heat + m.getCurrentHeat();
-                double mAVShort = bayWType.getShortAV();
-                double mAVMed = bayWType.getMedAV();
-                double mAVLong = bayWType.getLongAV();
-                double mAVExt = bayWType.getExtAV();
+                double mAVShort = m.getAttackValue(WeaponType.RANGE_SHORT);
+                double mAVMed = m.getAttackValue(WeaponType.RANGE_MED);
+                double mAVLong = m.getAttackValue(WeaponType.RANGE_LONG);
+                double mAVExt = m.getAttackValue(WeaponType.RANGE_EXT);
                 int mMaxR = bayWType.getMaxRange(m);
 
                 // deal with any ammo adjustments
@@ -660,28 +649,20 @@ public final class WeaponDisplayData {
                 }
             }
         }
-        // check for bracketing
-        double multiplier = 1.0;
-        if (weapon.hasModes() && weapon.curMode().equals("Bracket 80%")) {
-            multiplier = 0.8;
-        }
-        if (weapon.hasModes() && weapon.curMode().equals("Bracket 60%")) {
-            multiplier = 0.6;
-        }
-        if (weapon.hasModes() && weapon.curMode().equals("Bracket 40%")) {
-            multiplier = 0.4;
-        }
-        avShort = multiplier * avShort;
-        avMed = multiplier * avMed;
-        avLong = multiplier * avLong;
-        avExt = multiplier * avExt;
-
-        if (entity.getGame().getOptions().booleanOption(OptionsConstants.ADVANCED_AERO_RULES_AERO_SANITY)
-              && weaponType.isCapital()) {
-            avShort *= 10;
-            avMed *= 10;
-            avLong *= 10;
-            avExt *= 10;
+        double multiplier = WeaponHandler.bracketingMultiplier(weapon);
+        if (entity.getGame().getOptions().booleanOption(OptionsConstants.ADVANCED_AERO_RULES_AERO_SANITY)) {
+            // Each of the bay's weapons resolves on its own, a capital one at standard scale
+            double scale = weaponType.isCapital() ? (multiplier * 10) : multiplier;
+            avShort *= scale;
+            avMed *= scale;
+            avLong *= scale;
+            avExt *= scale;
+        } else {
+            // As the game resolves the bay: its total rounds normally, then bracketing drops the fractions
+            avShort = BayWeaponHandler.bracketBayDamage(BayWeaponHandler.roundBayDamage(avShort), multiplier);
+            avMed = BayWeaponHandler.bracketBayDamage(BayWeaponHandler.roundBayDamage(avMed), multiplier);
+            avLong = BayWeaponHandler.bracketBayDamage(BayWeaponHandler.roundBayDamage(avLong), multiplier);
+            avExt = BayWeaponHandler.bracketBayDamage(BayWeaponHandler.roundBayDamage(avExt), multiplier);
         }
         return aerospaceValues(Integer.toString(heat), isCapital, maxRange, isCapital ? "1-12" : "1-6",
               List.of(Integer.toString((int) Math.ceil(avShort)), Integer.toString((int) Math.ceil(avMed)),

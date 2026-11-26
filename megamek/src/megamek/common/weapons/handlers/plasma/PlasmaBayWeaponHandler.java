@@ -35,107 +35,88 @@
 package megamek.common.weapons.handlers.plasma;
 
 import java.io.Serial;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Vector;
 
+import jakarta.annotation.Nullable;
 import megamek.common.Report;
 import megamek.common.ToHitData;
 import megamek.common.actions.WeaponAttackAction;
 import megamek.common.board.Coords;
-import megamek.common.compute.Compute;
-import megamek.common.enums.HitDamageType;
-import megamek.common.equipment.ArmorType;
-import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponMounted;
-import megamek.common.equipment.WeaponType;
 import megamek.common.game.Game;
 import megamek.common.loaders.EntityLoadingException;
 import megamek.common.rolls.TargetRoll;
-import megamek.common.units.Aero;
 import megamek.common.units.Entity;
 import megamek.common.units.IBuilding;
-import megamek.common.units.Mek;
+import megamek.common.units.Targetable;
 import megamek.common.weapons.handlers.AmmoBayWeaponHandler;
 import megamek.common.weapons.ppc.clan.CLPlasmaCannon;
-import megamek.common.weapons.ppc.innerSphere.ISHeavyPlasmaRifle;
-import megamek.common.weapons.ppc.innerSphere.ISLightPlasmaRifle;
-import megamek.common.weapons.ppc.innerSphere.ISPlasmaRifle;
 import megamek.server.totalWarfare.TWGameManager;
 
-@Deprecated(since = "0.51.0", forRemoval = true)
+/** Plasma bays apply their firing weapons' heat at the location struck (TW p. 238). */
 public class PlasmaBayWeaponHandler extends AmmoBayWeaponHandler {
     @Serial
     private static final long serialVersionUID = -4718048077136686433L;
 
-    /**
-     *
-     */
-    public PlasmaBayWeaponHandler(ToHitData toHit, WeaponAttackAction waa, Game g, TWGameManager m)
+    /** Rebuilt when the attack spends its ammunition. A cannon can fire and contribute zero physical damage. */
+    private transient Map<WeaponMounted, Double> firedWeapons;
+    private transient @Nullable WeaponMounted groundWeapon;
+
+    public PlasmaBayWeaponHandler(ToHitData toHit, WeaponAttackAction attack, Game game, TWGameManager manager)
           throws EntityLoadingException {
-        super(toHit, waa, g, m);
-        generalDamageType = HitDamageType.DAMAGE_HEAT;
+        super(toHit, attack, game, manager);
     }
 
-    /*
-     * (non-Javadoc)
-     *
-     * @see
-     * megamek.common.weapons.handlers.WeaponHandler#handleEntityDamage(megamek.common
-     * .Entity, java.util.Vector, megamek.common.units.Building, int, int, int, int)
-     */
     @Override
-    protected void handleEntityDamage(Entity entityTarget,
-          Vector<Report> vPhaseReport, IBuilding bldg, int hits, int nCluster,
-          int bldgAbsorbs) {
-        super.handleEntityDamage(entityTarget, vPhaseReport, bldg, hits,
-              nCluster, bldgAbsorbs);
-        if (!missed
-              && ((entityTarget instanceof Mek) || (entityTarget instanceof Aero))) {
-            int extraHeat = 0;
-            for (WeaponMounted m : weapon.getBayWeapons()) {
-                if (!m.isBreached() && !m.isDestroyed() && !m.isJammed()) {
-                    WeaponType bayWType = m.getType();
-                    if (bayWType instanceof ISPlasmaRifle) {
-                        extraHeat += Compute.d6();
-                    } else if (bayWType instanceof CLPlasmaCannon) {
-                        extraHeat += Compute.d6(2);
-                    } else if (bayWType instanceof ISLightPlasmaRifle) {
-                        extraHeat += (int) Math.ceil(Compute.d6(1) / 2.0);
-                    } else if (bayWType instanceof ISHeavyPlasmaRifle) {
-                        extraHeat += Compute.d6(2);
-                    }
-                }
-            }
+    protected int calcAttackValue() {
+        firedWeapons = new LinkedHashMap<>();
+        groundWeapon = null;
+        return super.calcAttackValue();
+    }
 
-            if (extraHeat > 0) {
-                Report r = new Report(3400);
-                r.subject = subjectId;
-                r.indent(2);
-                if (entityTarget.getArmor(hit) > 0 &&
-                      (entityTarget.getArmorType(hit.getLocation()) ==
-                            EquipmentType.T_ARMOR_REFLECTIVE)) {
-                    entityTarget.heatFromExternal += Math.max(1, extraHeat / 2);
-                    r.messageId = 3406;
-                    r.add(Math.max(1, extraHeat / 2));
-                    r.choose(true);
-                    r.add(extraHeat);
-                    r.add(ArmorType.forEntity(entityTarget, hit.getLocation()).getName());
-                } else if (entityTarget.getArmor(hit) > 0 &&
-                      (entityTarget.getArmorType(hit.getLocation()) ==
-                            EquipmentType.T_ARMOR_HEAT_DISSIPATING)) {
-                    entityTarget.heatFromExternal += extraHeat / 2;
-                    r.messageId = 3406;
-                    r.add(extraHeat / 2);
-                    r.choose(true);
-                    r.add(extraHeat);
-                    r.add(ArmorType.forEntity(entityTarget, hit.getLocation()).getName());
-                } else {
-                    entityTarget.heatFromExternal += extraHeat;
-                    r.add(extraHeat);
-                    r.choose(true);
-                }
-                vPhaseReport.addElement(r);
+    @Override
+    protected double firedWeaponAttackValue(WeaponMounted member, double ammoAV) {
+        firedWeapons.put(member, ammoAV);
+        return isHeatOnlyHit(member, target) ? 0 : ammoAV;
+    }
+
+    @Override
+    protected boolean prepareGroundWeaponHit(WeaponMounted member, int range) {
+        Double damage = firedWeapons.get(member);
+        if (damage == null) {
+            return false;
+        }
+        groundWeapon = member;
+        nDamPerHit = (int) Math.ceil(damage);
+        return true;
+    }
+
+    @Override
+    protected int damagePerHitAgainst(Entity entityTarget) {
+        return groundWeapon != null && isHeatOnlyHit(groundWeapon, entityTarget) ? 0 : nDamPerHit;
+    }
+
+    private boolean isHeatOnlyHit(WeaponMounted member, Targetable struck) {
+        return member.getType() instanceof CLPlasmaCannon && struck.tracksHeat();
+    }
+
+    @Override
+    protected @Nullable Report applyHeatOnStrike(Entity entityTarget, int damageThatStrikes) {
+        if (!entityTarget.tracksHeat() || firedWeapons.isEmpty()) {
+            return null;
+        }
+        // Ground hits each have a location. In space or against an airborne target the bay strikes one location.
+        int heat = 0;
+        if (groundWeapon != null) {
+            heat = PlasmaRifleHandler.rollPlasmaHeat(groundWeapon.getType());
+        } else {
+            for (WeaponMounted member : firedWeapons.keySet()) {
+                heat += PlasmaRifleHandler.rollPlasmaHeat(member.getType());
             }
         }
+        return applyExternalHeat(entityTarget, heat);
     }
 
     @Override
@@ -158,7 +139,7 @@ public class PlasmaBayWeaponHandler extends AmmoBayWeaponHandler {
 
     @Override
     protected int woodsDamage(int nDamage) {
-        // Plasma weapons deal double damage to woods.
+        // Plasma weapons deal double damage to woods (TW p. 139).
         return nDamage * 2;
     }
 
