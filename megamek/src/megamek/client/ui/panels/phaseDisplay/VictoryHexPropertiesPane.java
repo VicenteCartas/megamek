@@ -49,7 +49,6 @@ import javax.swing.DefaultListCellRenderer;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
-import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -453,27 +452,6 @@ public final class VictoryHexPropertiesPane {
     }
 
     /**
-     * Shows the editor as a modal Okay / Remove Flag / Cancel dialog the user can enlarge, which gives a long scan
-     * note room.
-     *
-     * @param frame       the parent frame
-     * @param editorPanel the editor's content
-     * @param title       the dialog title
-     * @param options     Okay, Remove Flag and Cancel
-     *
-     * @return the chosen option's index, or {@link JOptionPane#CLOSED_OPTION} when the dialog was closed
-     */
-    private static int showResizableDialog(JFrame frame, JPanel editorPanel, String title, Object[] options) {
-        JOptionPane optionPane = new JOptionPane(editorPanel, JOptionPane.PLAIN_MESSAGE,
-              JOptionPane.YES_NO_CANCEL_OPTION, null, options, options[0]);
-        JDialog dialog = optionPane.createDialog(frame, title);
-        dialog.setResizable(true);
-        dialog.setVisible(true);
-        dialog.dispose();
-        return Arrays.asList(options).indexOf(optionPane.getValue());
-    }
-
-    /**
      * Adds one label-and-control row to the properties grid. Both cells share the row's width equally, so the
      * labels line up on the left and the controls on the right whichever rows are currently visible.
      *
@@ -636,7 +614,8 @@ public final class VictoryHexPropertiesPane {
             }
             shown = shownRows(rows, note, notePanel);
         }
-        return showResizableDialog(frame, editor, title, options);
+        return JOptionPane.showOptionDialog(frame, editor, title, JOptionPane.YES_NO_CANCEL_OPTION,
+              JOptionPane.PLAIN_MESSAGE, null, options, options[0]);
     }
 
     /**
@@ -644,8 +623,9 @@ public final class VictoryHexPropertiesPane {
      * @param note      the scan note, below the grid
      * @param notePanel the scan note's panel, shown only for a scan point
      *
-     * @return the rows the pane shows and lets the player change, in its order, the scan note last; null when one of
-     *       them has a control the native form cannot show
+     * @return the rows the pane shows and lets the player change, in its order, the scan note last; a row of tick boxes
+     *       gives one row per usable box, named by the box; null when one of them has a control the native form cannot
+     *       show
      */
     private static @Nullable List<Row> shownRows(JPanel rows, Row note, JComponent notePanel) {
         List<Row> shown = new ArrayList<>();
@@ -654,6 +634,17 @@ public final class VictoryHexPropertiesPane {
             Component control = parts[index + 1];
             if ((parts[index] instanceof JLabel label) && label.isVisible() && control.isVisible()
                   && control.isEnabled()) {
+                if (control instanceof JPanel boxes) {
+                    for (Component part : boxes.getComponents()) {
+                        if (!(part instanceof JCheckBox box)) {
+                            return null;
+                        }
+                        if (box.isVisible() && box.isEnabled()) {
+                            shown.add(new Row(new JLabel(box.getText()), box));
+                        }
+                    }
+                    continue;
+                }
                 boolean shownNatively = (control instanceof JSpinner) || (control instanceof JComboBox)
                       || (control instanceof JCheckBox) || (control instanceof JTextComponent);
                 if (!shownNatively) {

@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mockStatic;
 
 import java.awt.Container;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -113,7 +114,7 @@ class GpuVictoryHexFormTest {
                 assertEquals(List.of(text("Okay"), text("VictoryHex.remove"), text("Cancel")), standard.buttons());
                 assertEquals(0, standard.defaultButton(), "Okay is the pane's initial option");
                 assertEquals(-1, standard.cancelButton(), "Esc closes it like the pane's close box");
-                assertEquals(List.of(text("VictoryHex.scheme"), text("VictoryHex.retainControl"),
+                assertEquals(withVariants(text("VictoryHex.scheme"), text("VictoryHex.retainControl"),
                       text("VictoryHex.radius"), text("VictoryHex.victoryPoints")), labels(standard),
                       "Standard has no rows of its own, and no holder without retention");
                 DialogField scheme = standard.fields().getFirst();
@@ -121,16 +122,16 @@ class GpuVictoryHexFormTest {
                 assertEquals(Arrays.stream(SchemePreset.values()).map(preset -> label("scheme", preset)).toList(),
                       scheme.choices());
                 assertEquals(label("scheme", SchemePreset.STANDARD), scheme.initial());
-                assertEquals(List.of(true, true, false, false),
+                assertEquals(List.of(true, true, false, false, true, true, false),
                       standard.fields().stream().map(DialogField::live).toList(),
-                      "the scheme and the retention change the rows; the numbers do not");
+                      "the scheme, retention, Potential and False change the rows; numbers and Fragile do not");
                 assertEquals(List.of(0, ObjectiveMarker.MAX_CONTROL_RADIUS), bounds(standard.fields().get(2)));
                 assertEquals(List.of(1, 99), bounds(standard.fields().get(3)));
                 assertEquals(text("VictoryHex.describe.standard"), standard.message());
 
                 DialogRequest hold = change(fixture.source, standard, edit, label("scheme", SchemePreset.HOLD),
                       "false", "0", "1");
-                assertEquals(List.of(text("VictoryHex.scheme"), text("VictoryHex.turnsToSecure"),
+                assertEquals(withVariants(text("VictoryHex.scheme"), text("VictoryHex.turnsToSecure"),
                       text("VictoryHex.counting"), text("VictoryHex.retainControl"), text("VictoryHex.radius"),
                       text("VictoryHex.victoryPoints")), labels(hold));
                 assertEquals(text("VictoryHex.describe.hold.consecutive", 10), hold.message());
@@ -144,19 +145,19 @@ class GpuVictoryHexFormTest {
                 DialogRequest defend = change(fixture.source, cumulative, edit,
                       label("scheme", SchemePreset.DEFEND), "10", label("counting", HoldCounting.CUMULATIVE),
                       "false", "0", "1");
-                assertEquals(List.of(text("VictoryHex.scheme"), text("VictoryHex.startingGrip"),
+                assertEquals(withVariants(text("VictoryHex.scheme"), text("VictoryHex.startingGrip"),
                       text("VictoryHex.gripDrainPerTurn"), text("VictoryHex.retainControl"),
                       text("VictoryHex.radius"), text("VictoryHex.victoryPoints")), labels(defend));
 
                 // The numbers were typed before the retention was ticked; the next form keeps them.
                 DialogRequest retained = change(fixture.source, defend, edit, label("scheme", SchemePreset.DEFEND),
                       "7", "3", "true", "2", "5");
-                assertEquals(List.of(text("VictoryHex.scheme"), text("VictoryHex.startingGrip"),
+                assertEquals(withVariants(text("VictoryHex.scheme"), text("VictoryHex.startingGrip"),
                       text("VictoryHex.gripDrainPerTurn"), text("VictoryHex.retainControl"),
                       text("VictoryHex.startingControl"), text("VictoryHex.radius"),
                       text("VictoryHex.victoryPoints")), labels(retained));
                 assertEquals(List.of(label("scheme", SchemePreset.DEFEND), "7", "3", "true",
-                      text("VictoryHex.startingControl.nobody"), "2", "5"),
+                      text("VictoryHex.startingControl.nobody"), "2", "5", "false", "false", "false"),
                       retained.fields().stream().map(DialogField::initial).toList());
                 assertEquals(List.of(text("VictoryHex.startingControl.nobody"), "GPU review",
                       text("VictoryHex.startingControl.teamed", "Princess", 2)),
@@ -266,6 +267,17 @@ class GpuVictoryHexFormTest {
 
     private static List<String> labels(DialogRequest form) {
         return form.fields().stream().map(DialogField::label).toList();
+    }
+
+    /**
+     * The rows before the variant boxes, then the boxes a point that is neither a Raid nor a Scan point offers: Mobile
+     * is greyed outside Raid points.
+     */
+    private static List<String> withVariants(String... rows) {
+        List<String> labels = new ArrayList<>(List.of(rows));
+        labels.addAll(List.of(text("VictoryHex.variant.potential"), text("VictoryHex.variant.false"),
+              text("VictoryHex.variant.fragile")));
+        return labels;
     }
 
     private static List<Integer> bounds(DialogField field) {
