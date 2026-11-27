@@ -93,6 +93,11 @@ final class GpuHudState {
     /** A report phase opened the closed log, so the next phase that is no report closes it again. */
     private boolean logAuto;
     private int focus = Entity.NONE;
+    /** The selected allied bot lance's bot (-1 for none) and force, and the own focus when it was selected. */
+    private int lanceBot = -1;
+    private int lanceForce;
+    private int lanceFocus = Entity.NONE;
+    private GpuBots.Snapshot bots = GpuBots.Snapshot.EMPTY;
     /** Last explicit own inspection; a foreign inspection must not replace the left card during playback. */
     private int ownInspection = Entity.NONE;
     /** The player cleared the selection with the card's ✕ (clearSelection). */
@@ -186,6 +191,8 @@ final class GpuHudState {
 
     /** The left card shows an own inspection or the own selection, independently of a foreign inspection. */
     int ownCardUnit() {
+        if (selectedLance() != null) { return Entity.NONE; }
+        if (inspected != Entity.NONE && alliedBotUnit(inspected)) { return inspected; }
         GpuBattleStatus.UnitStatus unit = presented(inspected);
         if (unit != null && unit.side() == GpuBattleStatus.Side.OWN) { return inspected; }
         if (selectionCleared) { return Entity.NONE; }
@@ -200,10 +207,72 @@ final class GpuHudState {
               .mapToInt(GpuBattleStatus.UnitStatus::id).findFirst().orElse(Entity.NONE);
     }
 
-    /** Only units outside the local player's control occupy the right card, allies included. */
+    /**
+     * Only units outside the local player's control occupy the right card, allies included; an allied bot's units go
+     * to the left card with their orders.
+     */
     int otherCardUnit() {
         GpuBattleStatus.UnitStatus unit = presented(inspected);
-        return unit != null && unit.side() != GpuBattleStatus.Side.OWN ? inspected : Entity.NONE;
+        return unit != null && unit.side() != GpuBattleStatus.Side.OWN && !alliedBotUnit(inspected) ? inspected
+              : Entity.NONE;
+    }
+
+    /** Whether an allied bot owns the unit, which the left card then shows with its orders. */
+    boolean alliedBotUnit(int unitId) {
+        return bots.alliedOwnerOf(unitId) != null;
+    }
+
+    /** The latest bots snapshot, which says whose units an allied bot owns and which lances it has. */
+    GpuBots.Snapshot bots() {
+        return bots;
+    }
+
+    /** Takes the frame's bots snapshot. */
+    void bots(GpuBots.Snapshot snapshot) {
+        bots = snapshot;
+    }
+
+    /**
+     * Selects the allied CASPAR lance for the left card, ending any inspection. Princess takes orders only for single
+     * units, so its lances are never selected.
+     */
+    void selectLance(int botId, int forceId) {
+        GpuBots.BotRow bot = bots.bot(botId);
+        if (bot == null || !bot.allied() || !bot.lancesSelectable()) {
+            return;
+        }
+        inspected = Entity.NONE;
+        lanceBot = botId;
+        lanceForce = forceId;
+        lanceFocus = focus;
+    }
+
+    /** Ends the lance selection. */
+    void clearLance() {
+        lanceBot = -1;
+    }
+
+    /**
+     * The selected allied bot lance, or null: an inspection, a new own focus (another own unit, or the local turn
+     * beginning) or the lance leaving the bot ends it.
+     */
+    GpuBots.Lance selectedLance() {
+        if (lanceBot < 0) {
+            return null;
+        }
+        GpuBots.BotRow bot = bots.bot(lanceBot);
+        GpuBots.Lance lance = bot == null || !bot.allied() || !bot.lancesSelectable() ? null
+              : bot.lances().stream().filter(each -> each.forceId() == lanceForce).findFirst().orElse(null);
+        if (lance == null || inspected != Entity.NONE || focus != lanceFocus) {
+            lanceBot = -1;
+            return null;
+        }
+        return lance;
+    }
+
+    /** The bot whose lance is selected; only meaningful while {@link #selectedLance()} is not null. */
+    int selectedLanceBot() {
+        return lanceBot;
     }
 
     /**
@@ -391,6 +460,7 @@ final class GpuHudState {
             selectionFrame = frame;
             concealedDuringPlayback = false;
         }
+        bots(frame.panels().bots() == null ? GpuBots.Snapshot.EMPTY : frame.panels().bots());
         int select = update(frame.status(), frame.panels().record(), frame.panels().ownRecord(), busy);
         for (BoardScene.Animation event : frame.timeline()) {
             if (busy && event instanceof BoardScene.Concealed hidden && frame.scene() != null

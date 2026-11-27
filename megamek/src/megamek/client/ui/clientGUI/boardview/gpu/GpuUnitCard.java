@@ -120,7 +120,10 @@ final class GpuUnitCard implements GpuHud.Component {
     /** What the card shows; it is rebuilt when this changes. Snapshots keep their identity while unchanged. */
     private record Shown(GpuBattleStatus.UnitStatus unit, GpuUnitRecord.Snapshot record, GpuFireOrders.Heat heat,
           boolean low, GamePhase phase, boolean mini, boolean sheetSelected, Deltas deltas,
-          List<GpuBoardSource.Bind> binds, List<Setup> setup, boolean deploying) { }
+          List<GpuBoardSource.Bind> binds, List<Setup> setup, boolean deploying, BotScope scope) { }
+
+    /** An allied bot unit's place and orders: its bot, its lance ("" for none) and what it was told; null otherwise. */
+    private record BotScope(String bot, String lance, GpuBots.Order order) { }
 
     /** A deployment command of the placed unit as the card shows it; the card runs it by id at the click. */
     private record Setup(String id, String label, boolean enabled) { }
@@ -142,6 +145,8 @@ final class GpuUnitCard implements GpuHud.Component {
     private final Drawable friendPanel;
     private final Drawable foePanel;
     private final GpuPaperdoll doll;
+    /** The lance form, which fills the own card while an allied bot's lance is selected. */
+    private final GpuLanceCard lanceCard;
     /** The window-sized layer of the hover card, which GpuHud places on its popover layer. */
     private final Group overlay = new Group();
     private final Table hoverCard = new Table();
@@ -168,6 +173,7 @@ final class GpuUnitCard implements GpuHud.Component {
         friendPanel = ui.skin.getDrawable("panel");
         foePanel = ui.skin.getDrawable("panel-foe");
         doll = new GpuPaperdoll(ui.skin);
+        lanceCard = new GpuLanceCard(ui, state);
         doll.setName(name("-doll"));
         doll.setTouchable(Touchable.enabled);
         doll.addListener(new InputListener() {
@@ -217,6 +223,12 @@ final class GpuUnitCard implements GpuHud.Component {
 
     @Override
     public void update(GpuHud.Inputs inputs) {
+        GpuBots.Lance lance = other ? null : state.selectedLance();
+        if (lance != null) {
+            showLance(lance, inputs);
+            return;
+        }
+        lanceCard.forget();
         GpuBattleStatus.UnitStatus unit = state.presented(other ? state.otherCardUnit() : state.ownCardUnit());
         root.setVisible(unit != null);
         if (unit == null) {
@@ -250,11 +262,49 @@ final class GpuUnitCard implements GpuHud.Component {
               inputs.frame().status().phase(), !other && GpuRecordSheet.open(state),
               state.recordOpen && state.cardUnit() == unit.id(), deltas.shown(now),
               inputs.preferences().binds(), setup(inputs.frame().status(), unit),
-              deploying(inputs.frame().status(), unit));
+              deploying(inputs.frame().status(), unit), botScope(unit));
         if (!next.equals(shown)) {
             shown = next;
             show(next, inputs.preferences());
         }
+    }
+
+    /** The lance form in place of a unit: the unit form rebuilds when a unit is shown again. */
+    private void showLance(GpuBots.Lance lance, GpuHud.Inputs inputs) {
+        if (shown != null) {
+            shown = null;
+            shownId = Entity.NONE;
+            hover(null, 0, 0);
+            if (opener != null) {
+                root.removeListener(opener);
+                opener = null;
+            }
+        }
+        root.setVisible(true);
+        lanceCard.update(root, state.bots().bot(state.selectedLanceBot()), lance, inputs.frame().status().phase(),
+              inputs.metrics().lowHeight());
+    }
+
+    /** The allied bot owning the own card's unit, its lance and the unit's orders; null for any other unit. */
+    private BotScope botScope(GpuBattleStatus.UnitStatus unit) {
+        GpuBots.BotRow bot = other ? null : state.bots().alliedOwnerOf(unit.id());
+        if (bot == null) {
+            return null;
+        }
+        GpuBots.Lance lance = bot.lanceOf(unit.id());
+        return new BotScope(bot.name(), lance == null ? "" : lance.name(), bot.orders().get(unit.id()));
+    }
+
+    /** An allied bot unit's Orders band: what it was told, and whether it follows its lance's leader or is that. */
+    private Table ordersBand(BotScope scope) {
+        GpuBots.Order order = scope.order();
+        String caption = text("GpuBoard.hud.orders.title");
+        if (!scope.lance().isEmpty() && order.follows()) {
+            caption = text("GpuBoard.hud.orders.follows", scope.lance());
+        } else if (!scope.lance().isEmpty() && order.leader()) {
+            caption = text("GpuBoard.hud.orders.leads", scope.lance());
+        }
+        return GpuLanceCard.ordersBand(ui, caption, order.text(), name("-orders"));
     }
 
     private void show(Shown next, GpuBoardSource.UiPreferences preferences) {
@@ -414,6 +464,10 @@ final class GpuUnitCard implements GpuHud.Component {
         fillChips(ui, chips, chips(unit, next.record(), next.phase()), room, chip -> showSheet(chip.home()));
         root.add(chips).growX().height(22).padTop(low ? 6 : 8).row();
         root.add(buttons(unit, next, preferences, low)).growX().height(low ? 30 : 34).padTop(low ? 8 : 10);
+        if (next.scope() != null) {
+            root.row();
+            root.add(ordersBand(next.scope())).growX().padTop(low ? 10 : 12);
+        }
     }
 
     /** The mini card (R3-1), 44 units: one line of name, damage level, the pressed Unit record and Locate. */
@@ -484,11 +538,18 @@ final class GpuUnitCard implements GpuHud.Component {
             header.add(deployingTag()).right().padLeft(8);
         }
         header.add(damageLevel(unit, next.record())).right().padLeft(8);
+        if (next.scope() != null) {
+            // An allied bot unit: the card says its orders are this unit's alone, not its lance's.
+            header.add(GpuLanceCard.scopeChip(ui, "unit", text("GpuBoard.hud.orders.scopeUnit"), name("-scope")))
+                  .right().padLeft(8);
+        }
         header.add(closeButton()).size(28).padLeft(2).padRight(-6);
+        int columns = header.getCells().size;
         header.row();
-        Label subtitle = ui.label(subtitle(unit), "hud-body", low ? 11 : 12, UiTheme.MUTED);
+        Label subtitle = ui.label(subtitle(unit, next.scope()), "hud-body", low ? 11 : 12, UiTheme.MUTED);
         subtitle.setEllipsis(true);
-        header.add(subtitle).colspan(next.deploying() ? 4 : 3).left().minWidth(0).growX().height(low ? 16 : 17);
+        subtitle.setName(name("-subtitle"));
+        header.add(subtitle).colspan(columns).left().minWidth(0).growX().height(low ? 16 : 17);
         return header;
     }
 
@@ -514,8 +575,11 @@ final class GpuUnitCard implements GpuHud.Component {
         return tag;
     }
 
-    /** The sub-line (4.1): model, tons and pilot, or an ally's player, a carrier, a removed unit. */
-    private String subtitle(GpuBattleStatus.UnitStatus unit) {
+    /**
+     * The sub-line (4.1): model, tons and pilot, or an ally's player, a carrier, a removed unit; an allied bot unit's
+     * names its bot and lance before the pilot.
+     */
+    private String subtitle(GpuBattleStatus.UnitStatus unit, BotScope scope) {
         GpuUnitRecord.Snapshot record = shown == null ? GpuUnitRecord.Snapshot.EMPTY : shown.record();
         if (record.removed()) {
             return text("GpuBoard.hud.unit.removed");
@@ -524,6 +588,13 @@ final class GpuUnitCard implements GpuHud.Component {
               .map(GpuUnitRecord.InfoRow::text).findFirst().orElse("");
         if (!carrier.isEmpty()) {
             return text("GpuBoard.hud.unit.carriedBy", carrier);
+        }
+        if (scope != null) {
+            return scope.lance().isEmpty()
+                  ? text("GpuBoard.hud.orders.botSubtitle", scope.bot(), unit.pilot(), unit.gunnery(),
+                  unit.piloting())
+                  : text("GpuBoard.hud.orders.unitSubtitle", scope.bot(), scope.lance(), unit.pilot(),
+                  unit.gunnery(), unit.piloting());
         }
         // A unit without a model name starts with its weight.
         String subtitle = text("GpuBoard.hud.unit.subtitle", unit.model(), unit.tons(), unit.pilot(), unit.gunnery(),

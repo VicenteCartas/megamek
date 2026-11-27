@@ -6,7 +6,10 @@ import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -24,10 +27,15 @@ import megamek.client.bot.princess.PrincessException;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.BotSetupForm.Personality;
 import megamek.client.lobby.BotSetupForm.Presets;
+import megamek.client.ui.Messages;
 import megamek.common.Player;
 import megamek.common.equipment.GunEmplacement;
+import megamek.common.force.Force;
 import megamek.common.game.BotStatus;
 import megamek.common.game.Game;
+import megamek.common.orders.FormationOrder;
+import megamek.common.orders.LanceRoles;
+import megamek.common.orders.UnitOrders;
 import megamek.common.units.BuildingEntity;
 import megamek.common.units.Entity;
 import megamek.logging.MMLogger;
@@ -67,18 +75,55 @@ final class GpuBots {
     }
 
     /**
+     * A lance of an allied bot: its force ({@link Force#NO_FORCE} for the units in none), name, units in id order, the
+     * formation leader among them (-1 for none) and the line its orders show: the leader's, the one every unit shares,
+     * else {@link GpuOrderText#mixed()}.
+     */
+    record Lance(int forceId, String name, List<Integer> units, int leaderId, String orders) {
+        Lance {
+            units = List.copyOf(units);
+        }
+    }
+
+    /**
+     * An allied bot unit's orders: its lance's force, the line they show, whether it {@code follows} its lance's leader
+     * in formation and whether it is that {@code leader}.
+     */
+    record Order(int forceId, String text, boolean follows, boolean leader) { }
+
+    /**
      * One bot. {@code allied}: not an enemy of the local player (else a game master commands it). {@code behavior} is
      * null until the bot reports its settings. {@code units}, {@code tag}, {@code enemies} and {@code enemyPlayers} are
      * captured only while the sheet is open (0, false and empty otherwise). {@code sending} lists the controls whose
-     * command waits for the bot's report; {@code noReply} says the last one timed out.
+     * command waits for the bot's report; {@code noReply} says the last one timed out. {@code lances} and
+     * {@code orders} (by unit id) are captured for allied bots only, for the forces panel and the lower-left card.
      */
     record BotRow(int id, String name, AIType type, int rgb, boolean allied, int units, boolean tag,
           Behavior behavior, BotStatus status, List<Enemy> enemies, List<EnemyPlayer> enemyPlayers,
-          Set<Control> sending, boolean noReply) {
+          Set<Control> sending, boolean noReply, List<Lance> lances, Map<Integer, Order> orders) {
         BotRow {
             enemies = List.copyOf(enemies);
             enemyPlayers = List.copyOf(enemyPlayers);
             sending = sending.isEmpty() ? Set.of() : Set.copyOf(sending);
+            lances = List.copyOf(lances);
+            orders = Map.copyOf(orders);
+        }
+
+        BotRow(int id, String name, AIType type, int rgb, boolean allied, int units, boolean tag,
+              Behavior behavior, BotStatus status, List<Enemy> enemies, List<EnemyPlayer> enemyPlayers,
+              Set<Control> sending, boolean noReply) {
+            this(id, name, type, rgb, allied, units, tag, behavior, status, enemies, enemyPlayers, sending, noReply,
+                  List.of(), Map.of());
+        }
+
+        /** Whether the player selects this bot's lances: CASPAR takes lance orders; Princess only single units. */
+        boolean lancesSelectable() {
+            return type == AIType.CASPAR;
+        }
+
+        /** The lance holding the unit, or null. */
+        Lance lanceOf(int unitId) {
+            return lances.stream().filter(lance -> lance.units().contains(unitId)).findFirst().orElse(null);
         }
 
         /** Whether any command waits for the bot's report. */
@@ -103,6 +148,12 @@ final class GpuBots {
         /** The bot with {@code id}, or null when the local player may not command it (any more). */
         BotRow bot(int id) {
             return bots.stream().filter(row -> row.id() == id).findFirst().orElse(null);
+        }
+
+        /** The allied bot owning the unit, or null. */
+        BotRow alliedOwnerOf(int unitId) {
+            return bots.stream().filter(row -> row.allied() && row.orders().containsKey(unitId)).findFirst()
+                  .orElse(null);
         }
     }
 
@@ -281,7 +332,7 @@ final class GpuBots {
         BehaviorSettings settings = game.getBotSettings() == null ? null : game.getBotSettings().get(bot.getName());
         Behavior behavior = settings == null ? null : behavior(settings, asked, reported);
         if (asked != null && asked.hold != null) {
-            status = new BotStatus(asked.hold, status.tagTargets(), status.strategicHexes());
+            status = new BotStatus(asked.hold, status.tagTargets(), status.strategicHexes(), status.waypoints());
         }
         int units = 0;
         boolean tag = false;
@@ -309,9 +360,70 @@ final class GpuBots {
                   .toList();
         }
         AIType type = game.getBotTypes().getOrDefault(bot.getName(), AIType.PRINCESS);
-        return new BotRow(id, bot.getName(), type, bot.getColour().getColour().getRGB(), !local.isEnemyOf(bot),
+        boolean allied = !local.isEnemyOf(bot);
+        List<Lance> lances = new ArrayList<>();
+        Map<Integer, Order> orders = new HashMap<>();
+        if (allied) {
+            forces(game, id, type, status, lances, orders);
+        }
+        return new BotRow(id, bot.getName(), type, bot.getColour().getColour().getRGB(), allied,
               units, tag, behavior, status, enemies, enemyPlayers,
-              asked == null ? Set.of() : asked.controls, asked == null && unanswered.containsKey(id));
+              asked == null ? Set.of() : asked.controls, asked == null && unanswered.containsKey(id), lances, orders);
+    }
+
+    /** The allied bot's units by lance, in order of first appearance, and each unit's orders. */
+    private static void forces(Game game, int botId, AIType type, BotStatus status, List<Lance> lances,
+          Map<Integer, Order> orders) {
+        Map<Integer, List<Entity>> byForce = new LinkedHashMap<>();
+        for (Entity entity : game.getEntitiesVector()) {
+            Player owner = entity.getOwner();
+            if (owner != null && owner.getId() == botId) {
+                byForce.computeIfAbsent(game.getForces().getForceId(entity), force -> new ArrayList<>()).add(entity);
+            }
+        }
+        int round = game.getCurrentRound();
+        for (Map.Entry<Integer, List<Entity>> entry : byForce.entrySet()) {
+            int forceId = entry.getKey();
+            List<Entity> members = entry.getValue();
+            Set<Integer> ids = new HashSet<>();
+            members.forEach(member -> ids.add(member.getId()));
+            int leaderId = -1;
+            if (type == AIType.CASPAR) {
+                for (Entity member : members) {
+                    Optional<FormationOrder> formation = member.getUnitOrders().getFormation();
+                    if (formation.isPresent() && ids.contains(formation.get().getLeaderId())) {
+                        leaderId = formation.get().getLeaderId();
+                        break;
+                    }
+                }
+            }
+            int lead = leaderId;
+            Set<String> texts = new LinkedHashSet<>();
+            String leaderText = null;
+            for (Entity member : members) {
+                String text;
+                boolean follows = false;
+                if (type == AIType.CASPAR) {
+                    UnitOrders unitOrders = member.getUnitOrders();
+                    text = GpuOrderText.caspar(status, unitOrders, LanceRoles.effectiveRole(member), round);
+                    follows = member.getId() != lead && unitOrders.getFormation()
+                          .map(formation -> formation.getLeaderId() == lead).orElse(false);
+                } else {
+                    text = GpuOrderText.princess(status, member.getId());
+                }
+                if (member.getId() == leaderId) {
+                    leaderText = text;
+                }
+                texts.add(text);
+                orders.put(member.getId(), new Order(forceId, text, follows, member.getId() == leaderId));
+            }
+            String lanceText = leaderText != null ? leaderText
+                  : texts.size() == 1 ? texts.iterator().next() : GpuOrderText.mixed();
+            Force force = game.getForces().getForce(forceId);
+            String name = force == null || force.getName() == null || force.getName().isBlank()
+                  ? Messages.getString("GpuBoard.hud.forces.unassigned") : force.getName();
+            lances.add(new Lance(forceId, name, members.stream().map(Entity::getId).toList(), leaderId, lanceText));
+        }
     }
 
     private Behavior behavior(BehaviorSettings settings, Pending asked,

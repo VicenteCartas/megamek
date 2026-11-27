@@ -34,7 +34,11 @@ package megamek.common.game;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import megamek.common.board.Coords;
@@ -44,18 +48,21 @@ import megamek.common.board.Coords;
  * {@link megamek.common.net.enums.PacketCommand#PRINCESS_STATUS} after every change so that allied players can see
  * them. The settings themselves travel through {@link megamek.common.net.enums.PacketCommand#PRINCESS_SETTINGS}.
  *
- * <p>Sent over the network only; it is never part of a savegame. The sets are copied into {@link HashSet}s because the
- * network filter ({@link megamek.common.net.marshalling.SanityInputFilter}) rejects the JDK's immutable sets.</p>
+ * <p>Sent over the network only; it is never part of a savegame. The collections are copied into {@link HashSet}s,
+ * {@link HashMap}s and {@link ArrayList}s because the network filter
+ * ({@link megamek.common.net.marshalling.SanityInputFilter}) rejects the JDK's immutable collections.</p>
  *
  * @param holdingPosition {@code true} while the bot's units hold their position
  * @param tagTargets      the enemy units the bot has been asked to TAG
  * @param strategicHexes  the hexes the bot moves to and attacks
+ * @param waypoints       each unit's waypoints, by unit id, in the order the unit goes to them; units without
+ *                        waypoints are left out
  */
-public record BotStatus(boolean holdingPosition, Set<Integer> tagTargets, Set<Coords> strategicHexes)
-      implements Serializable {
+public record BotStatus(boolean holdingPosition, Set<Integer> tagTargets, Set<Coords> strategicHexes,
+      Map<Integer, List<Coords>> waypoints) implements Serializable {
 
     @Serial
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     /** The status of a bot that has not reported: no standing orders. */
     public static final BotStatus NONE = new BotStatus(false, Set.of(), Set.of());
@@ -63,5 +70,26 @@ public record BotStatus(boolean holdingPosition, Set<Integer> tagTargets, Set<Co
     public BotStatus {
         tagTargets = new HashSet<>(tagTargets);
         strategicHexes = new HashSet<>(strategicHexes);
+        Map<Integer, List<Coords>> copy = new HashMap<>();
+        waypoints.forEach((unitId, hexes) -> {
+            if (!hexes.isEmpty()) {
+                copy.put(unitId, new ArrayList<>(hexes));
+            }
+        });
+        waypoints = copy;
+    }
+
+    /** A status with no waypoints. */
+    public BotStatus(boolean holdingPosition, Set<Integer> tagTargets, Set<Coords> strategicHexes) {
+        this(holdingPosition, tagTargets, strategicHexes, Map.of());
+    }
+
+    /**
+     * @param unitId a unit of the bot
+     *
+     * @return the unit's waypoints in order, empty when it has none
+     */
+    public List<Coords> waypointsOf(int unitId) {
+        return waypoints.getOrDefault(unitId, List.of());
     }
 }

@@ -52,6 +52,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -63,6 +64,7 @@ import megamek.common.game.Game;
 import megamek.common.net.enums.PacketCommand;
 import megamek.common.net.marshalling.SanityInputFilter;
 import megamek.common.net.packets.Packet;
+import megamek.common.units.Entity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -249,9 +251,49 @@ class BotCommandMessagesTest {
             assertEquals(order, throughTheNetworkFilter(new Packet(PacketCommand.BOT_ORDER, 1, order)).getObject(1));
         }
 
-        BotStatus status = new BotStatus(true, Set.of(6), Set.of(HEX));
+        BotStatus status = new BotStatus(true, Set.of(6), Set.of(HEX), Map.of(3, List.of(HEX, new Coords(9, 9))));
         assertEquals(status, throughTheNetworkFilter(new Packet(PacketCommand.PRINCESS_STATUS, 1, status))
               .getObject(1));
+    }
+
+    @Test
+    void everyUnitsWaypointsShowInTheStatusInOrder() {
+        UnitBehavior tracker = trackerReachingEveryHex();
+        Coords second = new Coords(9, 2);
+        tracker.setEntityWaypoints(unit(7), List.of(HEX, second), princess);
+        tracker.clearWaypoints(unit(8), princess);
+
+        BotStatus status = princess.buildStatus();
+
+        assertEquals(List.of(HEX, second), status.waypointsOf(7));
+        assertEquals(Set.of(7), status.waypoints().keySet(), "a unit with no waypoints must be left out");
+        assertEquals(List.of(), status.waypointsOf(8));
+    }
+
+    @Test
+    void aWaypointChangeTheBotMadeItselfIsReported() {
+        UnitBehavior tracker = trackerReachingEveryHex();
+
+        princess.sendStatusIfChanged();
+        verify(princess, never()).sendStatus();
+
+        tracker.setEntityWaypoints(unit(7), List.of(HEX), princess);
+        princess.sendStatusIfChanged();
+        verify(princess).sendStatus();
+    }
+
+    private UnitBehavior trackerReachingEveryHex() {
+        UnitBehavior tracker = spy(new UnitBehavior());
+        doReturn(false).when(tracker).isDestinationUnreachable(any(), any(), any());
+        doReturn(tracker).when(princess).getUnitBehaviorTracker();
+        return tracker;
+    }
+
+    private static Entity unit(int id) {
+        Entity unit = mock(Entity.class);
+        when(unit.getId()).thenReturn(id);
+        when(unit.getDisplayName()).thenReturn("Unit " + id);
+        return unit;
     }
 
     private static Packet throughTheNetworkFilter(Packet packet) throws IOException, ClassNotFoundException {

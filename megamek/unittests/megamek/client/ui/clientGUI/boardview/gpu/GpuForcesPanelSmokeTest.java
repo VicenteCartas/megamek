@@ -21,6 +21,7 @@ import static org.mockito.Mockito.when;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
@@ -38,6 +39,10 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
+import megamek.client.bot.AIType;
+import megamek.client.bot.princess.CardinalEdge;
+import megamek.client.bot.princess.CombatPosture;
+import megamek.client.lobby.BotSetupForm.Personality;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
@@ -408,6 +413,85 @@ class GpuForcesPanelSmokeTest {
             search(hud, panel, allies, "kurita");
             assertEquals(List.of(11, 12), listed(panel, "forces-unit-"));
         });
+    }
+
+    @Test
+    void alliedBotsListTheirLancesUnderTheirHeader() {
+        GpuHudTestStage.run(hud -> {
+            Panel panel = new Panel(hud);
+            List<UnitStatus> units = new ArrayList<>(MOCK.units());
+            units.add(side(copy(unit(MOCK, 1), 21, "", false, false, false, "", 0), ALLY, 9));
+            units.add(side(copy(unit(MOCK, 2), 22, "", false, false, false, "", 0), ALLY, 9));
+            units.add(side(copy(unit(MOCK, 4), 23, "", false, false, false, "", 0), ALLY, 9));
+            units.add(side(copy(unit(MOCK, 5), 31, "", false, false, false, "", 0), ALLY, 10));
+            String route = "Route to 1206 \u00B7 2 waypoints";
+            GpuBots.BotRow caspar = new GpuBots.BotRow(9, "Kurita Regulars", AIType.CASPAR, 0xFF82E2CE, true, 3, false,
+                  new GpuBots.Behavior(Personality.CAUTIOUS, CombatPosture.DEFEND, Map.of(), CardinalEdge.NONE,
+                        Map.of(), Set.of()), null, List.of(), List.of(), Set.of(), false,
+                  List.of(new GpuBots.Lance(5, "Fire lance", List.of(21, 22), 21, route),
+                        new GpuBots.Lance(6, "Scout lance", List.of(23), -1, "No orders")),
+                  Map.of(21, new GpuBots.Order(5, route, false, true), 22, new GpuBots.Order(5, route, true, false),
+                        23, new GpuBots.Order(6, "No orders", false, false)));
+            GpuBots.BotRow princess = new GpuBots.BotRow(10, "Davion Guards", AIType.PRINCESS, 0xFF82E2CE, true, 1,
+                  false, null, null, List.of(), List.of(), Set.of(), false,
+                  List.of(new GpuBots.Lance(7, "Recon lance", List.of(31), -1, "No waypoints")),
+                  Map.of(31, new GpuBots.Order(7, "No waypoints", false, false)));
+            panel.state.bots(new GpuBots.Snapshot(List.of(caspar, princess), List.of(), Map.of()));
+            GpuBoardSource.Frame frame = frame(status(GamePhase.MOVEMENT, true, 1, 0, units), players());
+            show(hud, panel, frame);
+
+            // Each allied bot heads its lances after the own formations, its lances in the bot's order.
+            assertEquals(List.of("Alpha lance", "Bravo lance"), groups(panel));
+            assertEquals(List.of(1, 2, 3, 4, 5, 21, 22, 23, 31), listed(panel, "forces-unit-"));
+            List<String> header = GpuBoardTestUi.texts(panel.find("forces-bot-9"));
+            assertTrue(header.contains("Kurita Regulars"), header.toString());
+            assertTrue(header.stream().anyMatch(text -> text.startsWith("CASPAR \u00B7 ")), header.toString());
+            assertTrue(GpuBoardTestUi.texts(panel.find("forces-unit-21")).contains(
+                  UiTheme.upper(Messages.getString("GpuBoard.hud.forces.leader"))), "The lance leader says so");
+            assertFalse(GpuBoardTestUi.texts(panel.find("forces-unit-22")).contains(
+                  UiTheme.upper(Messages.getString("GpuBoard.hud.forces.leader"))));
+            assertTrue(GpuBoardTestUi.texts(panel.find("forces-lance-9-5")).contains(route),
+                  "A CASPAR lance shows its orders");
+            hud.capture("forces-allied-bots").dispose();
+
+            // A click on a CASPAR lance selects it for the card; a Princess lance only folds.
+            click(hud, panel.find("forces-lance-9-5"), Input.Buttons.LEFT);
+            show(hud, panel, frame);
+            assertEquals(5, panel.state.selectedLance().forceId());
+            assertTrue(GpuForcesPanelSmokeTest.<Boolean>headerField(panel, "forces-lance-9-5", "selected"));
+            click(hud, panel.find("forces-lance-10-7"), Input.Buttons.LEFT);
+            show(hud, panel, frame);
+            assertEquals(5, panel.state.selectedLance().forceId(), "Princess lances are not selected");
+            assertFalse(listed(panel, "forces-unit-").contains(31), "but fold");
+            click(hud, panel.find("forces-lance-10-7"), Input.Buttons.LEFT);
+            show(hud, panel, frame);
+
+            // The Bot button opens the bot's sheet without folding it; a click elsewhere on the header folds the bot.
+            click(hud, panel.find("forces-bot-open-9"), Input.Buttons.LEFT);
+            show(hud, panel, frame);
+            assertEquals(GpuHudState.Dialog.BOTS, panel.state.dialog);
+            assertEquals(9, panel.state.botSheetId);
+            assertEquals(List.of(1, 2, 3, 4, 5, 21, 22, 23, 31), listed(panel, "forces-unit-"));
+            click(hud, panel.find("forces-bot-9"), Input.Buttons.LEFT);
+            show(hud, panel, frame);
+            assertEquals(List.of(1, 2, 3, 4, 5, 31), listed(panel, "forces-unit-"));
+            assertNull(panel.find("forces-lance-9-5"), "A folded bot hides its lances");
+            click(hud, panel.find("forces-bot-9"), Input.Buttons.LEFT);
+            show(hud, panel, frame);
+
+            // The search matches a bot's units by the bot's and the lance's names.
+            search(hud, panel, frame, "scout");
+            assertEquals(List.of(23), listed(panel, "forces-unit-"));
+            search(hud, panel, frame, "kurita");
+            assertEquals(List.of(21, 22, 23), listed(panel, "forces-unit-"));
+        });
+    }
+
+    /** A field of the header named {@code name}. */
+    private static <T> T headerField(Panel panel, String name, String part) {
+        Actor header = panel.find(name);
+        assertNotNull(header, name);
+        return field(header, part);
     }
 
     @Test

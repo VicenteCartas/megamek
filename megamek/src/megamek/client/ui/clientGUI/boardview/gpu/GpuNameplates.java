@@ -188,6 +188,9 @@ final class GpuNameplates implements GpuHud.Component {
             scene.electronicWarfare().sources().forEach(source -> sources.putIfAbsent(source.entityId(), source));
         }
         Set<Integer> shown = new HashSet<>();
+        // The selected allied lance's units show their plates, as an inspected unit does.
+        GpuBots.Lance lance = state.selectedLance();
+        Set<Integer> lanceUnits = lance == null ? Set.of() : Set.copyOf(lance.units());
         // A unit riding on another's hull shares its carrier's head: only its pointer brings out its plate.
         Set<Integer> riders = new HashSet<>();
         if (scene != null) {
@@ -201,7 +204,7 @@ final class GpuNameplates implements GpuHud.Component {
             }
             boolean enemy = unit.side() == GpuBattleStatus.Side.ENEMY;
             boolean tagged = unit.id() == state.focus() || hovered || all || unit.id() == state.inspected
-                  || unit.id() == physicalTarget;
+                  || unit.id() == physicalTarget || lanceUnits.contains(unit.id());
             String sub = tagged && !unit.sensorContact() ? sub(unit, hovered && enemy ? focus : null, fire) : "";
             boolean tag = unit.sensorContact() || tagged && !(unit.label().isEmpty() && sub.isEmpty());
             if (based && !tag) {

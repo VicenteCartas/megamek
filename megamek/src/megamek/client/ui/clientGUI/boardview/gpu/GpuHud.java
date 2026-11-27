@@ -1010,6 +1010,8 @@ final class GpuHud implements GpuBoardHud {
             return false;
         } else if (state.inspected != Entity.NONE) {
             state.inspected = Entity.NONE;
+        } else if (state.selectedLance() != null) {
+            state.clearLance();
         } else if (!phase.isEndReport() && state.history.running()) {
             state.history.skip();
         } else if (state.ownCardUnit() != Entity.NONE) {
@@ -1363,6 +1365,7 @@ final class GpuHud implements GpuBoardHud {
         if (unit == null) {
             return;
         }
+        state.clearLance();
         if (inputs.view().playbackBusy()) {
             state.inspected = unitId;
             return;

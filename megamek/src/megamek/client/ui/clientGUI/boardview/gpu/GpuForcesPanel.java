@@ -4,6 +4,8 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.gdx.UiKit.onChange;
 import static megamek.client.ui.gdx.UiKit.text;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -45,6 +47,7 @@ import megamek.client.ui.panels.phaseDisplay.PrephaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.enums.GamePhase;
+import megamek.common.force.Force;
 import megamek.common.interfaces.IStartingPositions;
 import megamek.common.units.Entity;
 
@@ -67,6 +70,10 @@ final class GpuForcesPanel implements GpuHud.Component {
     /** Row, group header and panel header heights; the rail and the open list share them, so rows stay in place. */
     private static final float ROW_HEIGHT = 44;
     private static final float GROUP_HEIGHT = 22;
+    /** An allied bot's header: its name with the Bot button, and its type, personality and posture under it. */
+    private static final float BOT_HEIGHT = 40;
+    /** A bot's lances and their chevrons sit under its name. */
+    private static final float LANCE_INDENT = 22;
     /** A collapsed group: its header line, and its units' small sprites under it. */
     private static final float STRIP_HEIGHT = 20;
     private static final float HEAD_HEIGHT = 34;
@@ -104,11 +111,16 @@ final class GpuForcesPanel implements GpuHud.Component {
     /**
      * Everything the list shows. The snapshots keep their identity while unchanged, so comparing this each frame is
      * cheap, and the list is rebuilt only when it differs. {@code card} is the unit the card shows
-     * ({@link GpuHudState#cardUnit}); {@code revision} counts the collapsed groups' changes.
+     * ({@link GpuHudState#cardUnit}); {@code revision} counts the collapsed groups' changes. {@code bots} says which
+     * units allied bots own and their lances; {@code lance} is the selected bot lance's group key, else empty;
+     * {@code sheetBot} the bot the open bot sheet shows, else -1.
      */
     private record View(List<UnitStatus> units, GpuBattleStatus.Snapshot status, int focus, int card, Filter filter,
           String query, int revision, boolean folded, List<GpuBoardSource.Bind> binds,
-          GpuPlayers.Snapshot players) { }
+          GpuPlayers.Snapshot players, GpuBots.Snapshot bots, String lance, int sheetBot) { }
+
+    /** A bot lance's group: the allied bot and the lance's force. */
+    private record BotGroup(int botId, int forceId) { }
 
     private final GpuHudKit kit;
     private final UiKit ui;
@@ -148,6 +160,9 @@ final class GpuForcesPanel implements GpuHud.Component {
     /** The units' rows and the groups' headers, kept across rebuilds so that their pointer state stays with them. */
     private final Map<Integer, ForceRow> rows = new HashMap<>();
     private final Map<String, GroupHeader> headers = new HashMap<>();
+    private final Map<Integer, BotHeader> botHeaders = new HashMap<>();
+    /** The listed groups that are an allied bot's lances, by group key. */
+    private final Map<String, BotGroup> botGroups = new HashMap<>();
     private final Set<String> collapsed = new HashSet<>();
     private boolean folded;
     /** The open list's state while not pinned: unfolded by the resting pointer, folded a moment after it left. */
@@ -311,9 +326,12 @@ final class GpuForcesPanel implements GpuHud.Component {
         }
         boolean sheet = GpuRecordSheet.open(state);
         folded = !unfolded && !sheet;
+        GpuBots.Lance lance = state.selectedLance();
         View view = new View(state.presentedUnits(), inputs.frame().status(), state.focus(), state.cardUnit(), filter,
               searching ? search.field.getText().strip().toLowerCase(Locale.ROOT) : "", revision, folded,
-              inputs.preferences().binds(), inputs.frame().panels().players());
+              inputs.preferences().binds(), inputs.frame().panels().players(), state.bots(),
+              lance == null ? "" : botKey(state.selectedLanceBot(), lance.forceId()),
+              state.dialog == GpuHudState.Dialog.BOTS ? state.botSheetId : -1);
         if (!view.equals(shown)) {
             shown = view;
             rebuild();
@@ -384,7 +402,18 @@ final class GpuForcesPanel implements GpuHud.Component {
         }
         Filter active = big ? shown.filter() : Filter.ALL;
         List<UnitStatus> listed = force.stream().filter(this::matches).filter(unit -> passes(unit, active)).toList();
-        Map<String, List<UnitStatus>> groups = GpuHudKit.groups(listed, this::formation, (first, second) -> 0);
+        // The own formations and allied players first, then each allied bot's lances in the bot's order.
+        Map<String, List<UnitStatus>> groups = GpuHudKit.groups(listed, this::groupKey,
+              Comparator.comparingInt(this::rank));
+        botGroups.clear();
+        listed.forEach(unit -> {
+            GpuBots.BotRow bot = shown.bots().alliedOwnerOf(unit.id());
+            if (bot != null) {
+                GpuBots.Lance lance = bot.lanceOf(unit.id());
+                int forceId = lance == null ? Force.NO_FORCE : lance.forceId();
+                botGroups.putIfAbsent(botKey(bot.id(), forceId), new BotGroup(bot.id(), forceId));
+            }
+        });
         // While the same groups list the same units, only the rows' and headers' contents change: re-adding them would
         // cancel a press on one (Scene2D unfocuses removed actors), and status updates arrive during the enemy's turn.
         // A force not split into formations is one unassigned group: it lists its units without a header, as the
@@ -400,27 +429,78 @@ final class GpuForcesPanel implements GpuHud.Component {
                       : text("GpuBoard.hud.forces.noMatch", shown.query()));
             }
             headers.keySet().retainAll(bare ? Set.of() : groups.keySet());
-            groups.forEach((name, members) -> {
-                if (!bare) {
-                    GroupHeader header = headers.computeIfAbsent(name, GroupHeader::new);
-                    list.add(header).growX().minWidth(0)
-                          .height(collapsed.contains(name) ? GROUP_HEIGHT + STRIP_HEIGHT : GROUP_HEIGHT).row();
+            botHeaders.keySet().retainAll(botGroups.values().stream().map(BotGroup::botId).toList());
+            int[] lastBot = { -1 };
+            groups.forEach((key, members) -> {
+                BotGroup botGroup = botGroups.get(key);
+                if (botGroup != null && botGroup.botId() != lastBot[0]) {
+                    lastBot[0] = botGroup.botId();
+                    boolean botClosed = collapsed.contains(botKey(botGroup.botId()));
+                    list.add(botHeaders.computeIfAbsent(botGroup.botId(), BotHeader::new)).growX().minWidth(0)
+                          .height(botClosed ? BOT_HEIGHT + STRIP_HEIGHT : BOT_HEIGHT).row();
                 }
-                if (bare || !collapsed.contains(name)) {
+                if (botGroup != null && collapsed.contains(botKey(botGroup.botId()))) {
+                    return;
+                }
+                if (!bare) {
+                    GroupHeader header = headers.computeIfAbsent(key, GroupHeader::new);
+                    list.add(header).growX().minWidth(0)
+                          .height(collapsed.contains(key) ? GROUP_HEIGHT + STRIP_HEIGHT : GROUP_HEIGHT).row();
+                }
+                if (bare || !collapsed.contains(key)) {
                     members.forEach(unit -> list.add(rows.computeIfAbsent(unit.id(), ForceRow::new)).growX()
                           .minWidth(0).height(ROW_HEIGHT).row());
                 }
             });
             rows.keySet().retainAll(listed.stream().map(UnitStatus::id).toList());
         }
-        groups.forEach((name, members) -> {
-            if (!bare) {
-                headers.get(name).show(members, verb);
+        Map<Integer, List<UnitStatus>> botMembers = new HashMap<>();
+        groups.forEach((key, members) -> {
+            BotGroup botGroup = botGroups.get(key);
+            if (botGroup != null) {
+                botMembers.computeIfAbsent(botGroup.botId(), id -> new ArrayList<>()).addAll(members);
+                if (collapsed.contains(botKey(botGroup.botId()))) {
+                    return;
+                }
             }
-            if (bare || !collapsed.contains(name)) {
+            if (!bare) {
+                headers.get(key).show(members, verb, botGroup);
+            }
+            if (bare || !collapsed.contains(key)) {
                 members.forEach(unit -> rows.get(unit.id()).show(unit));
             }
         });
+        botMembers.forEach((botId, members) -> botHeaders.get(botId).show(members));
+    }
+
+    /** A bot lance's group key, which no formation name takes. */
+    private static String botKey(int botId, int forceId) {
+        return "\u0001bot:" + botId + ":" + forceId;
+    }
+
+    /** A bot's own collapse key. */
+    private static String botKey(int botId) {
+        return "\u0001bot:" + botId;
+    }
+
+    /** The unit's group: its allied bot's lance, else its formation as {@link GpuHudKit#formation} names it. */
+    private String groupKey(UnitStatus unit) {
+        GpuBots.BotRow bot = shown.bots().alliedOwnerOf(unit.id());
+        if (bot == null) {
+            return formation(unit);
+        }
+        GpuBots.Lance lance = bot.lanceOf(unit.id());
+        return botKey(bot.id(), lance == null ? Force.NO_FORCE : lance.forceId());
+    }
+
+    /** The group order: 0 for the own and allied players' formations, then by bot and by the bot's lance. */
+    private int rank(UnitStatus unit) {
+        GpuBots.BotRow bot = shown.bots().alliedOwnerOf(unit.id());
+        if (bot == null) {
+            return 0;
+        }
+        GpuBots.Lance lance = bot.lanceOf(unit.id());
+        return 1 + shown.bots().bots().indexOf(bot) * 1000 + (lance == null ? 999 : bot.lances().indexOf(lance));
     }
 
     /** The phase's verb for the units still to act ("to move"), or null in a phase in which none acts in turn. */
@@ -441,9 +521,15 @@ final class GpuForcesPanel implements GpuHud.Component {
         return GpuHudKit.formation(unit, shown.status(), shown.players());
     }
 
-    /** The search (C3) by the formation the list shows ({@link GpuHudKit#matches}). */
+    /**
+     * The search (C3) by the formation the list shows ({@link GpuHudKit#matches}); an allied bot's unit by its bot's
+     * and its lance's names.
+     */
     private boolean matches(UnitStatus unit) {
-        return GpuHudKit.matches(unit, formation(unit), shown.query());
+        GpuBots.BotRow bot = shown.bots().alliedOwnerOf(unit.id());
+        GpuBots.Lance lance = bot == null ? null : bot.lanceOf(unit.id());
+        String formation = bot == null ? formation(unit) : lance == null ? bot.name() : bot.name() + " " + lance.name();
+        return GpuHudKit.matches(unit, formation, shown.query());
     }
 
     private static boolean passes(UnitStatus unit, Filter filter) {
@@ -569,73 +655,222 @@ final class GpuForcesPanel implements GpuHud.Component {
         return disc;
     }
 
-    /**
-     * A formation's header: chevron, name and how many of its units are still to act; a click collapses it, and a
-     * collapsed one lists its units as small sprites on a line under it. On the rail it shows the name alone.
-     */
-    private final class GroupHeader extends Table {
-        private final String name;
-        private final Label count = ui.label("", "hud-small", 11, UiTheme.MUTED);
-        private final Table sprites = new Table();
+    /** Collapses the group or bot {@code key}, or opens it again. */
+    private void toggleCollapsed(String key) {
+        if (!collapsed.remove(key)) {
+            collapsed.add(key);
+        }
+        revision++;
+    }
+
+    /** A collapsed group's or bot's units as small sprites on a line. */
+    private final class SpriteStrip extends Table {
         private final Map<Integer, GpuHudKit.UnitSprite> miniSprites = new HashMap<>();
 
-        private GroupHeader(String name) {
-            this.name = name;
-            setName("forces-group-" + name);
-            setTouchable(Touchable.enabled);
-            sprites.left();
-            sprites.setClip(true);
-            addListener(new ClickListener() {
-                @Override
-                public void clicked(InputEvent event, float x, float y) {
-                    if (!collapsed.remove(name)) {
-                        collapsed.add(name);
-                    }
-                    revision++;
-                }
-            });
+        private SpriteStrip() {
+            left();
+            setClip(true);
         }
 
-        void show(List<UnitStatus> members, String verb) {
+        void show(List<UnitStatus> members, float indent) {
             clearChildren();
-            boolean closed = collapsed.contains(name);
-            long left = members.stream().filter(UnitStatus::pending).count();
-            boolean waiting = verb != null && left > 0;
-            Table line = new Table();
-            if (shown.folded()) {
-                // The rail names the group only: a chevron or a count would read as a control, and the pointer
-                // resting on the rail unfolds it anyway.
-                Label label = ui.label(UiTheme.upper(name), "hud-caption", 10, UiTheme.MUTED);
-                label.setEllipsis(true);
-                line.pad(0, 10, 0, 8);
-                line.add(label).growX().minWidth(0).left();
-                add(line).growX().minWidth(0).height(GROUP_HEIGHT);
-            } else {
-                line.add(ui.icon(closed ? "chevron-right" : "chevron-down", 12, UiTheme.MUTED));
-                line.pad(0, 10, 0, 10);
-                Label label = ui.label(UiTheme.upper(name), "hud-caption", 10.5f, UiTheme.MUTED);
-                label.setEllipsis(true);
-                line.add(label).minWidth(0).padLeft(6).left();
-                line.add().growX();
-                count.setText(verb == null ? text("GpuBoard.hud.forces.groupCount", members.size())
-                      : text("GpuBoard.hud.forces.pendingOf", left, members.size(), text(verb)));
-                count.setColor(waiting ? UiTheme.MINT : UiTheme.MUTED);
-                line.add(count).padLeft(6);
-                add(line).growX().minWidth(0).height(GROUP_HEIGHT);
-            }
-            if (!closed) {
-                return;
-            }
-            row();
-            sprites.clearChildren();
-            sprites.padLeft(shown.folded() ? 6 : 28);
+            padLeft(indent);
             miniSprites.keySet().retainAll(members.stream().map(UnitStatus::id).toList());
             for (UnitStatus unit : members) {
                 GpuHudKit.UnitSprite sprite = miniSprites.computeIfAbsent(unit.id(), id -> kit.sprite(18, 14));
                 sprite.set(unit.icon(), UnitRow.spriteColor(unit));
                 sprite.getColor().a = unit.destroyed() ? .4f : .8f;
-                sprites.add(sprite).padRight(3);
+                add(sprite).padRight(3);
             }
+        }
+    }
+
+    /**
+     * An allied bot's header over its lances: the bot icon, its name and the Bot button, which opens its bot sheet,
+     * and under them its AI, personality and posture. A click elsewhere collapses the bot to its units' sprites. On
+     * the rail it shows the name and the AI.
+     */
+    private final class BotHeader extends Table {
+        private final int botId;
+        private final UiButton open;
+        private final Label name = ui.label("", "hud-name", 13.5f, UiTheme.TEXT);
+        private final Label railName = ui.label("", "hud-caption", 10.5f, UiTheme.TEXT);
+        private final Label about = ui.label("", "hud-small", 11, UiTheme.MUTED);
+        private final SpriteStrip sprites = new SpriteStrip();
+
+        private BotHeader(int botId) {
+            this.botId = botId;
+            setName("forces-bot-" + botId);
+            setTouchable(Touchable.enabled);
+            name.setEllipsis(true);
+            railName.setEllipsis(true);
+            about.setEllipsis(true);
+            open = ui.button("hud-mini", "bot", text("GpuBoard.hud.bots.chip"), null);
+            open.setName("forces-bot-open-" + botId);
+            ui.tip(open).getActor().setText(text("GpuBoard.hud.forces.botTip"));
+            onChange(open, () -> state.toggleBot(botId));
+            addListener(new ClickListener() {
+                @Override
+                public void clicked(InputEvent event, float x, float y) {
+                    if (!event.getTarget().isDescendantOf(open)) {
+                        toggleCollapsed(botKey(botId));
+                    }
+                }
+            });
+        }
+
+        void show(List<UnitStatus> members) {
+            clearChildren();
+            GpuBots.BotRow bot = shown.bots().bot(botId);
+            if (bot == null) {
+                return;
+            }
+            boolean closed = collapsed.contains(botKey(botId));
+            name.setText(bot.name());
+            about.setText(about(bot));
+            Table top = new Table();
+            Table bottom = new Table();
+            if (shown.folded()) {
+                railName.setText(UiTheme.upper(bot.name()));
+                top.pad(0, 10, 0, 8);
+                top.add(ui.icon("bot", 13, UiTheme.tokenColor("accent.primary"))).padRight(5);
+                top.add(railName).growX().minWidth(0).left();
+                about.setText(text("BotConfigDialog.aiType." + bot.type().name()));
+                bottom.pad(0, 28, 0, 8);
+                bottom.add(about).growX().minWidth(0).left();
+            } else {
+                top.pad(0, 10, 0, 6);
+                top.add(ui.icon(closed ? "chevron-right" : "chevron-down", 12, UiTheme.MUTED));
+                top.add(ui.icon("bot", 16, UiTheme.tokenColor("accent.primary"))).padLeft(6);
+                top.add(name).minWidth(0).padLeft(6).left();
+                top.add().growX();
+                open.pressed(shown.sheetBot() == botId);
+                top.add(open).padLeft(6);
+                bottom.pad(0, 50, 0, 10);
+                bottom.add(about).growX().minWidth(0).left();
+            }
+            add(top).growX().minWidth(0).height(22).padTop(3).row();
+            add(bottom).growX().minWidth(0).height(15);
+            if (closed) {
+                row();
+                sprites.show(members, shown.folded() ? 6 : 28);
+                add(sprites).growX().minWidth(0).height(STRIP_HEIGHT).top();
+            }
+        }
+
+        /** The bot's AI, then its personality and posture once it reported them. */
+        private String about(GpuBots.BotRow bot) {
+            String type = text("BotConfigDialog.aiType." + bot.type().name());
+            GpuBots.Behavior behavior = bot.behavior();
+            if (behavior == null) {
+                return type;
+            }
+            String personality = behavior.personality() == null ? text("GpuBoard.hud.bots.custom")
+                  : behavior.personality().label();
+            return type + SEPARATOR + personality + SEPARATOR + behavior.posture();
+        }
+
+        @Override
+        public void draw(Batch batch, float parentAlpha) {
+            float previous = batch.getPackedColor();
+            float alpha = getColor().a * parentAlpha;
+            ui.fill(batch, GROUP_FILL, alpha, getX(), getY(), getWidth(), getHeight());
+            ui.fill(batch, SEPARATOR_LINE, alpha, getX(), getY(), getWidth(), 1);
+            batch.setPackedColor(previous);
+            super.draw(batch, parentAlpha);
+        }
+    }
+
+    /**
+     * A formation's header: chevron, name and how many of its units are still to act; a click collapses it, and a
+     * collapsed one lists its units as small sprites on a line under it. On the rail it shows the name alone. An
+     * allied bot's lance sits indented under its bot: a CASPAR lance shows its orders and a click selects it for the
+     * card (its chevron still folds it); Princess takes orders unit by unit, so its lance only folds.
+     */
+    private final class GroupHeader extends Table {
+        private final String key;
+        private final Label count = ui.label("", "hud-small", 11, UiTheme.MUTED);
+        private final SpriteStrip sprites = new SpriteStrip();
+        private final ClickListener pointer;
+        private final TextTooltip tip;
+        private BotGroup botGroup;
+        private boolean selectable;
+        private boolean selected;
+
+        private GroupHeader(String key) {
+            this.key = key;
+            BotGroup group = botGroups.get(key);
+            setName(group == null ? "forces-group-" + key : "forces-lance-" + group.botId() + "-" + group.forceId());
+            setTouchable(Touchable.enabled);
+            count.setEllipsis(true);
+            pointer = new ClickListener() {
+                @Override
+                public void clicked(InputEvent event, float x, float y) {
+                    if (selectable && (shown.folded() || x > LANCE_INDENT + 16)) {
+                        state.selectLance(botGroup.botId(), botGroup.forceId());
+                    } else {
+                        toggleCollapsed(key);
+                    }
+                }
+            };
+            addListener(pointer);
+            tip = group == null ? null : ui.tip(this);
+        }
+
+        void show(List<UnitStatus> members, String verb, BotGroup group) {
+            clearChildren();
+            botGroup = group;
+            GpuBots.BotRow bot = group == null ? null : shown.bots().bot(group.botId());
+            GpuBots.Lance lance = bot == null ? null : bot.lances().stream()
+                  .filter(each -> each.forceId() == group.forceId()).findFirst().orElse(null);
+            selectable = lance != null && bot.lancesSelectable();
+            selected = selectable && key.equals(shown.lance());
+            String name = lance != null ? lance.name() : key;
+            boolean closed = collapsed.contains(key);
+            long left = members.stream().filter(UnitStatus::pending).count();
+            boolean waiting = verb != null && left > 0;
+            Table line = new Table();
+            float indent = group == null ? 10 : LANCE_INDENT;
+            if (shown.folded()) {
+                // The rail names the group only: a chevron or a count would read as a control, and the pointer
+                // resting on the rail unfolds it anyway.
+                Label label = ui.label(UiTheme.upper(name), "hud-caption", 10, selected ? UiTheme.TEXT : UiTheme.MUTED);
+                label.setEllipsis(true);
+                line.pad(0, indent, 0, 8);
+                line.add(label).growX().minWidth(0).left();
+                add(line).growX().minWidth(0).height(GROUP_HEIGHT);
+            } else {
+                line.add(ui.icon(closed ? "chevron-right" : "chevron-down", 12, UiTheme.MUTED));
+                line.pad(0, indent, 0, 10);
+                if (group != null) {
+                    line.add(ui.icon("account-tree", 12, selected ? UiTheme.MINT : UiTheme.MUTED)).padLeft(6);
+                }
+                Label label = ui.label(UiTheme.upper(name), "hud-caption", 10.5f,
+                      selected ? UiTheme.TEXT : UiTheme.MUTED);
+                label.setEllipsis(true);
+                line.add(label).minWidth(0).padLeft(6).left();
+                if (selectable) {
+                    count.setText(lance.orders());
+                    count.setColor(selected ? UiTheme.TEXT : UiTheme.MUTED);
+                    line.add(count).growX().minWidth(0).padLeft(8).right();
+                } else {
+                    line.add().growX();
+                    count.setText(verb == null ? text("GpuBoard.hud.forces.groupCount", members.size())
+                          : text("GpuBoard.hud.forces.pendingOf", left, members.size(), text(verb)));
+                    count.setColor(waiting ? UiTheme.MINT : UiTheme.MUTED);
+                    line.add(count).padLeft(6);
+                }
+                add(line).growX().minWidth(0).height(GROUP_HEIGHT);
+            }
+            if (tip != null) {
+                tip.getActor().setText(selectable ? text("GpuBoard.hud.forces.lanceTip", lance.orders())
+                      : text("GpuBoard.hud.forces.unitOrdersTip"));
+            }
+            if (!closed) {
+                return;
+            }
+            row();
+            sprites.show(members, shown.folded() ? 6 : indent + 18);
             add(sprites).growX().minWidth(0).height(STRIP_HEIGHT).top();
         }
 
@@ -644,6 +879,13 @@ final class GpuForcesPanel implements GpuHud.Component {
             float previous = batch.getPackedColor();
             float alpha = getColor().a * parentAlpha;
             ui.fill(batch, GROUP_FILL, alpha, getX(), getY(), getWidth(), getHeight());
+            if (selected) {
+                ui.fill(batch, INSPECTED, alpha, getX(), getY(), getWidth(), getHeight());
+                ui.fill(batch, UiTheme.MINT, alpha * .6f, getX(), getY(), 2, getHeight());
+            }
+            if (selectable && pointer.isOver()) {
+                ui.fill(batch, HOVER, alpha, getX(), getY(), getWidth(), getHeight());
+            }
             ui.fill(batch, SEPARATOR_LINE, alpha, getX(), getY(), getWidth(), 1);
             batch.setPackedColor(previous);
             super.draw(batch, parentAlpha);
@@ -666,6 +908,8 @@ final class GpuForcesPanel implements GpuHud.Component {
         private final Label name = ui.label("", "hud-name", 13.5f, UiTheme.TEXT);
         private final Label marker = ui.label("", "hud-name", 13.5f, UiTheme.MINT);
         private final Label model = ui.label("", "hud-small", 11, UiTheme.MUTED);
+        /** "Leader" on the formation leader of an allied bot's lance. */
+        private final Label leader = ui.label("", "hud-caption", 10, UiTheme.MUTED);
         private final Container<Actor> tag = new Container<>();
         private final Label pilot = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
         private final Label skills = ui.label("", "hud-medium", 11.5f, UiTheme.TEXT);
@@ -707,6 +951,7 @@ final class GpuForcesPanel implements GpuHud.Component {
             line1.add(name).minWidth(0);
             line1.add(marker).padLeft(4);
             line1.add(model).growX().minWidth(0).padLeft(6).left();
+            line1.add(leader).padLeft(6);
             line1.add(tag).padLeft(6);
             Table line2 = new Table();
             line2.add(pilot).minWidth(0).left();
@@ -782,6 +1027,10 @@ final class GpuForcesPanel implements GpuHud.Component {
                 name.setText(UiTheme.upper(unit.chassis()));
                 marker.setText(marker(unit));
                 model.setText(unit.model());
+                GpuBots.BotRow bot = shown.bots().alliedOwnerOf(unit.id());
+                GpuBots.Order order = bot == null ? null : bot.orders().get(unit.id());
+                leader.setText(order != null && order.leader() ? UiTheme.upper(text("GpuBoard.hud.forces.leader"))
+                      : "");
                 tag.setActor(tag(state));
                 pilot.setText(unit.pilot());
                 skills.setText(unit.gunnery() + "/" + unit.piloting());

@@ -22,6 +22,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.swing.SwingUtilities;
 
+import megamek.client.bot.AIType;
 import megamek.client.bot.princess.BehaviorChange;
 import megamek.client.bot.princess.BehaviorChange.Trait;
 import megamek.client.bot.princess.BehaviorSettings;
@@ -34,8 +35,14 @@ import megamek.client.lobby.BotSetupForm.Presets;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBots.Control;
 import megamek.common.Player;
 import megamek.common.board.Coords;
+import megamek.common.force.Force;
 import megamek.common.game.BotStatus;
 import megamek.common.loaders.MekFileParser;
+import megamek.common.orders.ContactRule;
+import megamek.common.orders.FormationOrder;
+import megamek.common.orders.FormationPace;
+import megamek.common.orders.FormationShape;
+import megamek.common.orders.UnitOrders;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -186,6 +193,69 @@ class GpuBotsTest {
             GpuBots.BotRow sending = GpuTestSupport.onSwing(sheet.bots()::capture).bot(3);
             Tactic.ALPHA_STRIKE.indices().forEach(index -> assertEquals(index.value(),
                   sending.behavior().traits().get(index.trait())));
+        }
+    }
+
+    @Test
+    void alliedBotsListTheirLancesAndEachUnitsOrders() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Sheet sheet = GpuTestSupport.onSwing(() -> sheet(fixture));
+            GpuBots.BotRow princess = GpuTestSupport.onSwing(sheet.bots()::capture).bot(3);
+            assertFalse(princess.lancesSelectable(), "Princess takes orders for single units only");
+            assertEquals(List.of(new GpuBots.Lance(Force.NO_FORCE, "Unassigned", List.of(8), -1,
+                  "No waypoints \u00b7 the bot decides")), princess.lances());
+            assertEquals(new GpuBots.Order(Force.NO_FORCE, "No waypoints \u00b7 the bot decides", false, false),
+                  princess.orders().get(8));
+
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.game.setBotStatus(3, new BotStatus(false, Set.of(), Set.of(),
+                      Map.of(8, List.of(new Coords(11, 5)))));
+                Player owner = fixture.game.getPlayer(3);
+                int alpha = fixture.game.getForces().addTopLevelForce(Force.createToplevelForce("Alpha", owner),
+                      owner);
+                fixture.game.getForces().addEntity(fixture.game.getEntity(8), alpha);
+            });
+            GpuBots.Snapshot shown = GpuTestSupport.onSwing(sheet.bots()::capture);
+            GpuBots.Lance alpha = shown.bot(3).lances().get(0);
+            assertEquals("Alpha", alpha.name());
+            assertEquals("Waypoints \u00b7 1206", shown.bot(3).orders().get(8).text(), "the bot's report names them");
+            assertSame(shown.bot(3), shown.alliedOwnerOf(8));
+            assertNull(shown.alliedOwnerOf(9), "an enemy unit has no allied owner");
+        }
+    }
+
+    @Test
+    void aCasparLanceIsSelectableAndFollowsItsFormationLeader() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Sheet sheet = GpuTestSupport.onSwing(() -> sheet(fixture));
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.game.setBotTypes(Map.of("Princess", AIType.CASPAR));
+                try {
+                    unit(fixture, 10, sheet.princess(), new Coords(7, 6));
+                } catch (Exception failure) {
+                    throw new IllegalStateException(failure);
+                }
+                Player owner = sheet.princess();
+                int alpha = fixture.game.getForces().addTopLevelForce(Force.createToplevelForce("Alpha", owner),
+                      owner);
+                for (int id : List.of(8, 10)) {
+                    Entity member = fixture.game.getEntity(id);
+                    fixture.game.getForces().addEntity(member, alpha);
+                    member.setUnitOrders(UnitOrders.NONE.withRoute(List.of(new Coords(11, 5)))
+                          .withFormation(new FormationOrder(FormationShape.WEDGE, 8, 2, id == 8 ? 0 : 1,
+                                FormationPace.WALK, ContactRule.HOLD)));
+                }
+            });
+            GpuBots.BotRow caspar = GpuTestSupport.onSwing(sheet.bots()::capture).bot(3);
+            assertTrue(caspar.lancesSelectable());
+            GpuBots.Lance alpha = caspar.lances().get(0);
+            assertEquals(List.of(8, 10), alpha.units());
+            assertEquals(8, alpha.leaderId());
+            assertEquals("Route to 1206 \u00b7 1 waypoint \u00b7 Wedge", alpha.orders(), "the leader's orders");
+            assertTrue(caspar.orders().get(8).leader());
+            assertFalse(caspar.orders().get(8).follows());
+            assertTrue(caspar.orders().get(10).follows(), "the wingman follows the leader");
+            assertSame(alpha, caspar.lanceOf(10));
         }
     }
 

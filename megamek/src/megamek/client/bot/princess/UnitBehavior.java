@@ -384,4 +384,17 @@ public class UnitBehavior {
     public void clear() {
         entityBehaviors.clear();
     }
+
+    /**
+     * @return every unit's waypoints in order, by unit id; units without waypoints are left out
+     */
+    public Map<Integer, List<Coords>> getWaypoints() {
+        Map<Integer, List<Coords>> waypoints = new HashMap<>();
+        entityWaypoints.forEach((unitId, hexes) -> {
+            if (!hexes.isEmpty()) {
+                waypoints.put(unitId, new ArrayList<>(hexes));
+            }
+        });
+        return waypoints;
+    }
 }

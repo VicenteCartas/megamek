@@ -231,6 +231,9 @@ public class Princess extends BotClient {
     // Reports on the units' orders, by radio or plainly. Reach it through getOrdersRadio().
     private OrdersRadio ordersRadio;
 
+    // The standing orders last reported to allies, so a change made by the game itself is reported too.
+    private BotStatus lastSentStatus = BotStatus.NONE;
+
     private Integer spinUpThreshold = null;
 
     private double moveEvaluationTimeEstimate = 0;
@@ -5040,17 +5043,25 @@ public class Princess extends BotClient {
     }
 
     /**
-     * Reports the standing orders this bot follows outside its behavior settings - hold position, TAG targets and
-     * strategic hexes - so allied players can see them.
+     * Reports the standing orders this bot follows outside its behavior settings - hold position, TAG targets,
+     * strategic hexes and its units' waypoints - so allied players can see them.
      */
     public void sendStatus() {
-        send(new Packet(PacketCommand.PRINCESS_STATUS, buildStatus()));
+        lastSentStatus = buildStatus();
+        send(new Packet(PacketCommand.PRINCESS_STATUS, lastSentStatus));
     }
 
     /** @return this bot's standing orders, as {@link #sendStatus()} reports them. Package-visible for testing. */
     BotStatus buildStatus() {
         return new BotStatus(getHoldPosition(), new HashSet<>(getDesignatedTagTargets()),
-              new HashSet<>(getStrategicBuildingTargets()));
+              new HashSet<>(getStrategicBuildingTargets()), getUnitBehaviorTracker().getWaypoints());
+    }
+
+    /** Reports the standing orders again when they changed on their own, such as a unit reaching its waypoint. */
+    void sendStatusIfChanged() {
+        if (!buildStatus().equals(lastSentStatus)) {
+            sendStatus();
+        }
     }
 
     /**
@@ -5953,6 +5964,8 @@ public class Princess extends BotClient {
                 getUnitBehaviorTracker().removeHeadWaypoint(entity);
             }
         }
+        // a waypoint reached here, or dropped as unreachable while moving, changes what allies see
+        sendStatusIfChanged();
     }
 
     public ArtilleryCommandAndControl getArtilleryCommandAndControl() {

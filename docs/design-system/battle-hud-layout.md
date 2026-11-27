@@ -89,6 +89,20 @@ The dock treats it as a right-column panel and stays clear of it (rule 3).
 - **No chat:** each change goes to the bot as a typed command, never as a chat message. The sheet shows what was asked
   until the bot reports it back.
 
+Allied bots' forces and orders are shown, read-only, in zones 6 and 1:
+
+- **Units list:** each allied bot gets a header row (its name and behavior), then its lances and units. Enemy bots are
+  not listed.
+- **Selection:** a click on a CASPAR lance header selects the whole lance. The lower-left card then shows the lance
+  form, with a LANCE scope chip, a units table (armor, heat, state) and the lance's Orders band. The lance's units show
+  their nameplates on the board. Princess gives orders per unit, so its lances can't be selected; the player picks
+  single units.
+- **Allied bot unit:** an allied bot's unit opens in the left card, not the right one. Its card has a UNIT scope chip,
+  a subtitle naming the bot and the lance, and an Orders band ("Orders · follows Fire lance"). Princess reports its
+  waypoints to allies, so the band shows its route.
+- **Ending it:** a unit row in the lance form inspects that unit. The card's ✕, Esc and a new own selection end the
+  lance selection.
+
 ## Known issues from the tester screenshots
 
 Addressed in the layout rework, pending a retest:

@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -24,6 +25,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Rectangle;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -240,6 +242,137 @@ class GpuBotSheetSmokeTest {
                 batch.dispose();
             }
         });
+    }
+
+    // ---------------------------------------------------------------- the lower-left card
+
+    private static final int CASPAR_BOT = 9;
+    private static final int FIRE_LANCE = 5;
+    private static final String FIRE_ORDERS = "Route to 1206 \u00b7 2 waypoints \u00b7 Wedge \u00b7 Escort";
+
+    /**
+     * Step 2 of the bot orders: a selected allied CASPAR lance fills the lower-left card (LANCE scope, its units with
+     * armor, heat and state, the Orders band); a click on a unit row inspects that unit alone, whose card then names
+     * its bot and lance, wears the UNIT scope and shows its own Orders band; the ✕ and Esc end the lance selection.
+     */
+    @Test
+    void theLowerLeftCardShowsAnAlliedLanceThenOneOfItsUnits() {
+        GpuHudTestStage.run(harness -> {
+            SpriteBatch batch = new SpriteBatch();
+            GpuBoardSource source = mock(GpuBoardSource.class);
+            when(source.record()).thenReturn(mock(GpuUnitRecord.class));
+            when(source.players()).thenReturn(mock(GpuPlayers.class));
+            when(source.los()).thenReturn(mock(GpuLosResult.class));
+            when(source.bots()).thenReturn(mock(GpuBots.class));
+            when(source.botOrders()).thenReturn(mock(GpuBotOrders.class));
+            GpuHud hud = new GpuHud(source, harness.theme.skin, batch, new BoardCamera(),
+                  mock(GpuBoardTuning.class), new GpuPlaybackHistory(new UnitPlayback()));
+            try {
+                GpuBoardSource.Frame frame = GpuHudFixtures.frame(alliedStatus(),
+                      GpuHudFixtures.panels(GpuUnitRecord.Snapshot.EMPTY).withBots(alliedBots()));
+                GpuBoardSource.UiPreferences preferences = GpuBoardSource.UiPreferences.capture();
+                for (int[] size : List.of(new int[] { 1360, 900 }, new int[] { 1920, 1080 })) {
+                    harness.size(size[0], size[1]);
+                    float density = Gdx.graphics.getBackBufferWidth() / (float) Gdx.graphics.getWidth();
+                    hud.resize(Math.round(harness.width() / density), Math.round(harness.height() / density),
+                          1 / density);
+                    hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
+                    hud.state.selectLance(CASPAR_BOT, FIRE_LANCE);
+                    draw(hud, frame, preferences);
+                    Table card = hud.stage.getRoot().findActor("unit-card");
+                    assertTrue(card.isVisible() && card.getParent().isVisible(), "the lance takes the left card");
+                    assertEquals("FIRE LANCE", text(card, "lance-card-name"));
+                    assertEquals("Kurita Regulars \u00b7 allied bot \u00b7 3 units", text(card, "lance-card-subtitle"));
+                    assertNotNull(card.findActor("lance-card-scope"));
+                    assertEquals(FIRE_ORDERS, text(card, "lance-card-orders-line"));
+                    for (int id : List.of(21, 22, 23)) {
+                        assertNotNull(card.findActor("lance-card-unit-" + id), "a row per unit: " + id);
+                    }
+                    assertTrue(GpuHudTestStage.bounds(card).width > 0);
+                    UiTestStage.assertTexts(card);
+                    harness.capture("hud-lance-card-" + size[0]).dispose();
+
+                    // A unit row inspects that unit: the lance selection ends and the unit card names its scope.
+                    press(hud, card.findActor("lance-card-unit-22"));
+                    draw(hud, frame, preferences);
+                    assertNull(hud.state.selectedLance(), "inspecting a unit ends the lance selection");
+                    assertEquals(22, hud.state.inspected);
+                    assertEquals(22, hud.state.ownCardUnit(), "an allied bot unit stays on the left card");
+                    assertNull(card.findActor("lance-card-name"));
+                    assertNotNull(card.findActor("unit-card-scope"));
+                    assertEquals("Kurita Regulars \u00b7 Fire lance \u00b7 Lt. M. Okafor 4/5",
+                          text(card, "unit-card-subtitle"));
+                    assertEquals("ORDERS \u00b7 FOLLOWS FIRE LANCE", text(card, "unit-card-orders-caption"));
+                    assertEquals(FIRE_ORDERS, text(card, "unit-card-orders-line"));
+                    Actor other = hud.stage.getRoot().findActor("other-unit-card");
+                    assertTrue(other == null || !other.isVisible(), "the right card stays free");
+                    harness.capture("hud-allied-unit-card-" + size[0]).dispose();
+
+                    // The lance card's ✕ ends the selection; the own card comes back.
+                    hud.state.inspected = Entity.NONE;
+                    hud.state.selectLance(CASPAR_BOT, FIRE_LANCE);
+                    draw(hud, frame, preferences);
+                    click(card.findActor("lance-card-close"));
+                    draw(hud, frame, preferences);
+                    assertNull(hud.state.selectedLance());
+                    assertNull(card.findActor("lance-card-name"));
+                    assertNull(card.findActor("unit-card-scope"), "an own unit's card has no bot scope");
+                }
+            } finally {
+                hud.dispose();
+                batch.dispose();
+            }
+        });
+    }
+
+    private static void draw(GpuHud hud, GpuBoardSource.Frame frame, GpuBoardSource.UiPreferences preferences) {
+        hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
+        hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
+        ScreenUtils.clear(.42f, .5f, .3f, 1, true);
+        hud.draw();
+    }
+
+    private static void press(GpuHud hud, Actor actor) {
+        assertNotNull(actor);
+        Vector2 point = hud.stage.stageToScreenCoordinates(
+              actor.localToStageCoordinates(new Vector2(actor.getWidth() / 2, actor.getHeight() / 2)));
+        hud.stage.touchDown((int) point.x, (int) point.y, 0, Input.Buttons.LEFT);
+        hud.stage.touchUp((int) point.x, (int) point.y, 0, Input.Buttons.LEFT);
+    }
+
+    /** The own roster's five units, and three units of the allied CASPAR bot: one hot and worn, one that moved. */
+    private static GpuBattleStatus.Snapshot alliedStatus() {
+        GpuBattleStatus.Snapshot fixture = GpuHudFixtures.status();
+        List<GpuBattleStatus.UnitStatus> units = new ArrayList<>(fixture.units().stream()
+              .filter(unit -> unit.side() == GpuBattleStatus.Side.OWN).toList());
+        units.add(ally(fixture.units().get(0), 21, 0, .91, true, false));
+        units.add(ally(fixture.units().get(1), 22, 11, .45, true, false));
+        units.add(ally(fixture.units().get(3), 23, 3, .96, false, true));
+        return new GpuBattleStatus.Snapshot(fixture.round(), fixture.phase(), fixture.myTurn(),
+              fixture.localPlayerId(), fixture.actorId(), fixture.turns(), fixture.turnIndex(), units, List.of(),
+              false);
+    }
+
+    private static GpuBattleStatus.UnitStatus ally(GpuBattleStatus.UnitStatus unit, int id, int heat, double armor,
+          boolean pending, boolean done) {
+        return new GpuBattleStatus.UnitStatus(id, GpuBattleStatus.Side.ALLY, false, unit.name(), unit.chassis(),
+              unit.model(), unit.tons(), unit.weightClass(), "Fire lance", unit.pilot(), unit.gunnery(),
+              unit.piloting(), armor, unit.structure(), heat, unit.heatRgb(), unit.heatCapacity(), unit.walk(),
+              unit.run(), unit.jump(), done ? "Walked" : "", done ? 4 : 0, done ? 4 : 0, unit.facing(), unit.tmm(),
+              false, pending, done, false, unit.damageLevel(), unit.destroyedLocations(), "",
+              new Coords(unit.position().getX() - 4, unit.position().getY() + 2), 0, unit.icon(), List.of(),
+              unit.weightClassIndex(), 0, CASPAR_BOT, List.of());
+    }
+
+    /** The allied CASPAR bot "Kurita Regulars" with its Fire lance of 21 (the leader), 22 and 23 on a route. */
+    private static GpuBots.Snapshot alliedBots() {
+        GpuBots.Lance fire = new GpuBots.Lance(FIRE_LANCE, "Fire lance", List.of(21, 22, 23), 21, FIRE_ORDERS);
+        Map<Integer, GpuBots.Order> orders = Map.of(21, new GpuBots.Order(FIRE_LANCE, FIRE_ORDERS, false, true),
+              22, new GpuBots.Order(FIRE_LANCE, FIRE_ORDERS, true, false),
+              23, new GpuBots.Order(FIRE_LANCE, FIRE_ORDERS, true, false));
+        GpuBots.BotRow bot = new GpuBots.BotRow(CASPAR_BOT, "Kurita Regulars", AIType.CASPAR, 0xFF82E2CE, true, 3,
+              false, behavior(), BotStatus.NONE, List.of(), List.of(), Set.of(), false, List.of(fire), orders);
+        return new GpuBots.Snapshot(List.of(bot), List.of(), Map.of());
     }
 
     // ---------------------------------------------------------------- fixtures
