@@ -954,7 +954,8 @@ final class GpuHud implements GpuBoardHud {
     }
 
     /**
-     * The Esc chain (C.4), one step per press: what is open closes, then a pending action is dropped (a pick, the
+     * The Esc chain (C.4), one step per press: a running hex pick ends without its order (it can run beside an open
+     * sheet), what is open closes, then a pending action is dropped (the
      * armed weapon, the route, the chosen physical attack; MegaMek's own movement, aerospace and the other gears the
      * planner leaves to it, gets CANCEL while its display has a path, gear or hex pick to drop), then the inspected
      * unit goes, a running playback skips to its results as the dock's Skip does, and the selection clears as the
@@ -980,6 +981,9 @@ final class GpuHud implements GpuBoardHud {
             stage.setKeyboardFocus(null);
         } else if (contextMenu.back() || dock.drawer().close()) {
             return true;
+        } else if (picking(inputs)) {
+            // A pick runs beside an open sheet (the bot sheet's strategic hexes): Esc cancels it before the sheet.
+            source.players().endPick(false);
         } else if (state.dialog != GpuHudState.Dialog.NONE) {
             state.dialog = GpuHudState.Dialog.NONE;
             if (inDialog) {
@@ -989,8 +993,6 @@ final class GpuHud implements GpuBoardHud {
             state.overview = false;
         } else if (state.chatOpen) {
             state.chatOpen = false;
-        } else if (picking(inputs)) {
-            source.players().endPick(false);
         } else if (losPanel.cancel() || recordSheet.cancel()) {
             // The sheet's step: its popover, the expanded weapon row, then the sheet (U3).
             return true;

@@ -32,7 +32,7 @@ class GpuOrderTextTest {
               8, List.of(new Coords(0, 0), new Coords(1, 1), new Coords(2, 2), new Coords(3, 3))));
         assertEquals("Waypoints \u00b7 1206 \u2192 1010", GpuOrderText.princess(status, 7));
         assertEquals("Waypoints \u00b7 0101 \u2192 0202 \u2192 0303 \u2192 \u2026", GpuOrderText.princess(status, 8));
-        assertEquals("No waypoints \u00b7 the bot decides", GpuOrderText.princess(status, 9));
+        assertEquals("No waypoints", GpuOrderText.princess(status, 9));
     }
 
     @Test
@@ -45,7 +45,7 @@ class GpuOrderTextTest {
 
     @Test
     void aCasparUnitShowsWhatItDoesNowThenItsFormationAndRole() {
-        assertEquals("No orders \u00b7 the bot decides", GpuOrderText.caspar(FREE, UnitOrders.NONE, null, 1));
+        assertEquals("No orders", GpuOrderText.caspar(FREE, UnitOrders.NONE, null, 1));
 
         UnitOrders route = UnitOrders.NONE.withRoute(List.of(new Coords(5, 5), new Coords(11, 5)))
               .withFormation(new FormationOrder(FormationShape.WEDGE, 1, 2, 0, FormationPace.WALK,

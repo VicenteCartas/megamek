@@ -895,7 +895,8 @@ class GpuHudInputTest {
     /**
      * While a bot order picks hexes (N7c), a left board click is MegaMek's board click, which the order's picker
      * takes, on a unit and in the planner's turn too; the Done key ends the pick with the order instead of the turn,
-     * and Esc ends it without the order before any other step; the hint line shows the pick.
+     * and Esc ends it without the order before any other step, the bot sheet it runs from staying open; the hint line
+     * shows the pick.
      */
     @Test
     void aBotOrdersHexPickTakesTheBoardClicksTheDoneKeyAndEsc() {
@@ -920,6 +921,11 @@ class GpuHudInputTest {
         verify(players).endPick(true);
         assertTrue(escape());
         verify(players).endPick(false);
+        hud.state.dialog = GpuHudState.Dialog.BOTS;
+        assertTrue(escape());
+        verify(players, times(2)).endPick(false);
+        assertEquals(GpuHudState.Dialog.BOTS, hud.state.dialog, "the bot sheet the pick runs from stays open");
+        hud.state.dialog = GpuHudState.Dialog.NONE;
         verifyNoInteractions(moves);
         assertEquals(List.of(UiKit.text("GpuBoard.hud.mouse.leftClick"), pick.instructions() + " · " + pick.status(),
               "", UiKit.text("BotCommandPanel.HexPicker.done"), "", UiKit.text("BotCommandPanel.HexPicker.cancel")),

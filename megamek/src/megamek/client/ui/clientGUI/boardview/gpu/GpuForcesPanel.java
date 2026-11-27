@@ -800,7 +800,6 @@ final class GpuForcesPanel implements GpuHud.Component {
         private final Label count = ui.label("", "hud-small", 11, UiTheme.MUTED);
         private final SpriteStrip sprites = new SpriteStrip();
         private final ClickListener pointer;
-        private final TextTooltip tip;
         private BotGroup botGroup;
         private boolean selectable;
         private boolean selected;
@@ -822,7 +821,6 @@ final class GpuForcesPanel implements GpuHud.Component {
                 }
             };
             addListener(pointer);
-            tip = group == null ? null : ui.tip(this);
         }
 
         void show(List<UnitStatus> members, String verb, BotGroup group) {
@@ -869,10 +867,6 @@ final class GpuForcesPanel implements GpuHud.Component {
                     line.add(count).padLeft(6);
                 }
                 add(line).growX().minWidth(0).height(GROUP_HEIGHT);
-            }
-            if (tip != null) {
-                tip.getActor().setText(selectable ? text("GpuBoard.hud.forces.lanceTip", lance.orders())
-                      : text("GpuBoard.hud.forces.unitOrdersTip"));
             }
             if (!closed) {
                 return;

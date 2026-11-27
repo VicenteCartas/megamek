@@ -84,13 +84,13 @@ The dock treats it as a right-column panel and stays clear of it (rule 3).
 - **Entry points:** the bots utility (shown only while the player commands a bot), the *Orders and behavior* row under
   each commandable bot in the Players panel, and the bot commands key (Ctrl+Shift+G), which opens the sheet when the
   player commands exactly one bot and the Players panel otherwise.
-- **Scope:** the sheet's header says what its options change; today every option applies to the whole bot. Lances
-  and artillery are tabs for later.
+- **Scope:** the sheet's header says what its options change; today every option applies to the whole bot. Its
+  pages are Behavior and Targets; lance and artillery pages come when they have content.
 - **No chat:** each change goes to the bot as a typed command, never as a chat message. The sheet shows what was asked
   until the bot reports it back.
-- **Strategic hexes:** *Pick on board* steps the sheet aside and starts a board pick. The hint line's chip shows it
-  with Done and Cancel: board clicks pick or unpick hexes, Done adds them, and Cancel or Esc adds none. Either way the
-  sheet opens again on the page it left.
+- **Strategic hexes:** *Pick on board* starts a board pick with the sheet still open. Board clicks pick or unpick
+  hexes; the Targets page shows the picked hexes in place of the button, with Done and Cancel (the hint line's chip
+  shows them too). Done adds the hexes, Cancel adds none, and Esc cancels the pick before it closes the sheet.
 
 Allied bots' forces and orders are shown, read-only, in zones 6 and 1:
 

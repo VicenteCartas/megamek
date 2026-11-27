@@ -10,7 +10,6 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -61,7 +60,7 @@ import org.junit.jupiter.api.Test;
 /**
  * The bot sheet (bot sheet plan, step 5) in the component harness, placed at the window's right as GpuHud places it:
  * its whole-bot scope, the Behavior and Targets pages showing what the bot reported, the commands its controls send,
- * the disabled Lances and Artillery tabs, and the waiting state before the bot's first report.
+ * its pick of strategic hexes on the board, and the waiting state before the bot's first report.
  */
 @Tag("on-demand")
 class GpuBotSheetSmokeTest {
@@ -71,6 +70,7 @@ class GpuBotSheetSmokeTest {
         final GpuBoardSource source = mock(GpuBoardSource.class);
         final GpuBots bots = mock(GpuBots.class);
         final GpuBotOrders orders = mock(GpuBotOrders.class);
+        final GpuPlayers players = mock(GpuPlayers.class);
         final GpuHudState state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
         final GpuBotSheet sheet;
         final Table root;
@@ -78,13 +78,18 @@ class GpuBotSheetSmokeTest {
         Sheet(GpuHudTestStage hud) {
             when(source.bots()).thenReturn(bots);
             when(source.botOrders()).thenReturn(orders);
+            when(source.players()).thenReturn(players);
             sheet = new GpuBotSheet(hud.kit, source, state);
             root = (Table) sheet.actor();
             hud.window.addActor(root);
         }
 
         void show(GpuHudTestStage hud, GpuBots.Snapshot snapshot) {
-            sheet.update(inputs(hud, snapshot));
+            show(hud, snapshot, GpuPlayers.Snapshot.EMPTY);
+        }
+
+        void show(GpuHudTestStage hud, GpuBots.Snapshot snapshot, GpuPlayers.Snapshot players) {
+            sheet.update(inputs(hud, snapshot, players));
             float width = Math.min(DesignTokens.shipped().size().get("dialog.sm"), hud.width() - 32);
             root.setBounds(hud.width() - 16 - width, 16, width, hud.height() - 72);
             root.validate();
@@ -104,7 +109,7 @@ class GpuBotSheetSmokeTest {
             assertEquals("Princess", text(sheet.root, "bot-sheet-title"));
             assertEquals(Messages.getString("GpuBoard.hud.bots.scope", 4), text(sheet.root, "bot-sheet-scope"));
             UiTabs tabs = sheet.root.findActor("bot-sheet-tabs");
-            assertTrue(tabs.option(2).isDisabled() && tabs.option(3).isDisabled(), "lances and artillery come later");
+            assertEquals(2, tabs.count(), "Behavior and Targets only");
             assertFalse(visible(sheet.root, "bot-sheet-waiting"));
             assertFalse(visible(sheet.root, "bot-sheet-sending"));
             UiFilterChip stay = sheet.root.findActor("bot-tactic-stay_at_range");
@@ -161,25 +166,37 @@ class GpuBotSheetSmokeTest {
             click(sheet.root.findActor("bot-ignore-clear"));
             verify(sheet.orders).clearIgnored(BOT);
 
-            // Pick on board steps the sheet aside for the board's pick, and opens it again once Done or Cancel ends it.
+            // Pick on board keeps the sheet open: its pick area follows the board's pick, with Done and Cancel.
             GpuBots.Snapshot targets = snapshot(row(behavior(), held, false));
             click(sheet.root.findActor("bot-hex-pick"));
             verify(sheet.orders).pickHexes(BOT, Messages.getString("GpuBoard.hud.bots.hexes.order", "Princess"));
-            assertEquals(Dialog.NONE, sheet.state.dialog, "the board is clear to click");
+            assertEquals(Dialog.BOTS, sheet.state.dialog, "the sheet stays open while the board picks");
             GpuPlayers.Pick pick = new GpuPlayers.Pick("Click hexes on the board", "");
-            sheet.sheet.update(inputs(hud, targets, new GpuPlayers.Snapshot(List.of(), null, pick)));
-            assertEquals(Dialog.NONE, sheet.state.dialog, "it stays aside while the pick runs");
+            sheet.show(hud, targets, new GpuPlayers.Snapshot(List.of(), null, pick));
+            assertTrue(visible(sheet.root, "bot-hex-picking"));
+            assertNull(sheet.root.findActor("bot-hex-pick"), "the pick area shows the running pick");
+            assertEquals(Messages.getString("GpuBoard.hud.bots.hexes.picking"), text(sheet.root, "bot-hex-pick-status"));
+            pick = new GpuPlayers.Pick("Click hexes on the board", "1 hex(es) selected: 1709");
+            sheet.show(hud, targets, new GpuPlayers.Snapshot(List.of(), null, pick));
+            assertEquals("1 hex(es) selected: 1709", text(sheet.root, "bot-hex-pick-status"));
+            hud.draw();
+            hud.assertLayout(sheet.root);
+            UiTestStage.assertTexts(sheet.root);
+            hud.capture("bot-sheet-picking").dispose();
+            click(sheet.root.findActor("bot-hex-pick-done"));
+            verify(sheet.players).endPick(true);
+            click(sheet.root.findActor("bot-hex-pick-cancel"));
+            verify(sheet.players).endPick(false);
             sheet.show(hud, targets);
-            assertEquals(Dialog.BOTS, sheet.state.dialog, "the pick ended: the sheet is back");
-            sheet.show(hud, targets);
-            assertEquals(1, tabs.getSelectedIndex(), "on the page it left");
-            assertNotNull(sheet.root.findActor("bot-hex-pick"));
-
+            assertEquals(Dialog.BOTS, sheet.state.dialog);
+            assertEquals(1, tabs.getSelectedIndex(), "on the page it showed");
+            assertNotNull(sheet.root.findActor("bot-hex-pick"), "the pick ended: Pick on board is back");
+            assertNull(sheet.root.findActor("bot-hex-picking"));
             // The bot gone, the sheet closes and stops capturing.
             sheet.show(hud, GpuBots.Snapshot.EMPTY);
             assertEquals(Dialog.NONE, sheet.state.dialog);
             sheet.show(hud, GpuBots.Snapshot.EMPTY);
-            verify(sheet.bots, times(2)).setSheetOpen(false);
+            verify(sheet.bots).setSheetOpen(false);
         });
     }
 

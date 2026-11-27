@@ -24,7 +24,7 @@ final class GpuOrderText {
     private GpuOrderText() {
     }
 
-    /** A Princess unit: the bot-wide hold, else the unit's waypoints in order, else that the bot decides. */
+    /** A Princess unit: the bot-wide hold, else the unit's waypoints in order, else no waypoints. */
     static String princess(BotStatus status, int unitId) {
         if (status.holdingPosition()) {
             return text("GpuBoard.hud.orders.holding");

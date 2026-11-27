@@ -203,8 +203,8 @@ class GpuBotsTest {
             GpuBots.BotRow princess = GpuTestSupport.onSwing(sheet.bots()::capture).bot(3);
             assertFalse(princess.lancesSelectable(), "Princess takes orders for single units only");
             assertEquals(List.of(new GpuBots.Lance(Force.NO_FORCE, "Unassigned", List.of(8), -1,
-                  "No waypoints \u00b7 the bot decides")), princess.lances());
-            assertEquals(new GpuBots.Order(Force.NO_FORCE, "No waypoints \u00b7 the bot decides", false, false),
+                  "No waypoints")), princess.lances());
+            assertEquals(new GpuBots.Order(Force.NO_FORCE, "No waypoints", false, false),
                   princess.orders().get(8));
 
             SwingUtilities.invokeAndWait(() -> {
