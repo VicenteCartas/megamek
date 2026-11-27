@@ -21,6 +21,7 @@ import megamek.common.options.GameOptions;
 import megamek.common.options.IBasicOption;
 import megamek.common.options.IOption;
 import megamek.common.options.OptionsConstants;
+import megamek.common.rules.core.CoreRulesManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -150,7 +151,7 @@ class GameOptionsFormTest {
     void coreRulesDisableTheOptionsTheyOverride() {
         form.text(OptionsConstants.RULES_SYSTEM, OptionsConstants.RULES_TW);
         // The set has no order, and some of its options also depend on others: take one free of those.
-        String overridden = GameOptionsCatalog.CORE_RULES_DISABLED_OPTIONS.stream()
+        String overridden = CoreRulesManager.IGNORED_GAME_OPTIONS.stream()
               .filter(name -> options.getOption(name) != null && form.editable(name))
               .sorted().findFirst().orElseThrow();
         form.text(OptionsConstants.RULES_SYSTEM, OptionsConstants.RULES_CORE);

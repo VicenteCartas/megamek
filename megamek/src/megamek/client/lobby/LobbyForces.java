@@ -244,6 +244,7 @@ public record LobbyForces(List<LobbyUnit> units, List<Owner> owners, List<Format
         top.sort(Comparator.comparing((Object item) -> item instanceof Force force ? forces.getOwner(force)
                     : ((Entity) item).getOwner(), Comparator.nullsLast(ownerOrder))
               .thenComparing(item -> item instanceof Force ? 0 : 1)
+              .thenComparingInt(item -> item instanceof Force force ? force.getPosition() : 0)
               .thenComparingInt(item -> item instanceof Force force ? force.getId() : ((Entity) item).getId()));
         for (Object item : top) {
             if (item instanceof Force force) {

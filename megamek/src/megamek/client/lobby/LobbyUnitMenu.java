@@ -678,15 +678,18 @@ public final class LobbyUnitMenu {
     }
 
     private static Item forceTreeMenu(Force force, Game game, String enToken) {
-        Item result;
         String item = force.getName() + idString(game, force.getId());
+        Item addToForce = menuItem(item, LMP_F_ADD_TO + "|" + force.getId() + enToken, true);
         if (force.getSubForces().isEmpty()) {
-            result = menuItem(item, LMP_F_ADD_TO + "|" + force.getId() + enToken, true);
-        } else {
-            result = Item.menu(item);
-            for (Integer subForceId : force.getSubForces()) {
-                result.add(forceTreeMenu(game.getForces().getForce(subForceId), game, enToken));
-            }
+            return addToForce;
+        }
+        // A force with sub forces opens as a submenu. It lists itself first, so units can join it directly and not
+        // only one of its sub forces.
+        Item result = Item.menu(item);
+        result.add(addToForce);
+        result.addSeparator();
+        for (Integer subForceId : force.getSubForces()) {
+            result.add(forceTreeMenu(game.getForces().getForce(subForceId), game, enToken));
         }
         return result;
     }

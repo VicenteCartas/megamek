@@ -28,6 +28,7 @@ import megamek.common.options.IBasicOption;
 import megamek.common.options.IOption;
 import megamek.common.options.IOptionGroup;
 import megamek.common.options.OptionsConstants;
+import megamek.common.rules.core.CoreRulesManager;
 
 /**
  * The game options without a toolkit, as the Swing {@code GameOptionsDialog} edits them in the lobby: every option of
@@ -194,7 +195,7 @@ public final class GameOptionsForm extends SettingsForm {
               && controllers.stream().noneMatch(this::bool)) {
             return false;
         }
-        if (GameOptionsCatalog.CORE_RULES_DISABLED_OPTIONS.contains(name) && !totalWarfare()) {
+        if (CoreRulesManager.IGNORED_GAME_OPTIONS.contains(name) && !totalWarfare()) {
             return false;
         }
         return rule;

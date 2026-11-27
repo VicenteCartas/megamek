@@ -123,19 +123,6 @@ public final class GameOptionsCatalog {
           OptionsConstants.ADVANCED_GROUND_MOVEMENT_AUTO_ABANDON_UNIT,
           OptionsConstants.RPG_RPG_GUNNERY);
 
-    /** The options the Core rules system has no rules for: editable only under Total Warfare. */
-    public static final Set<String> CORE_RULES_DISABLED_OPTIONS = Set.of(
-          OptionsConstants.BASE_FLAMER_HEAT,
-          OptionsConstants.ADVANCED_COMBAT_TAC_OPS_AMS,
-          OptionsConstants.ADVANCED_COMBAT_TAC_OPS_CHARGE_DAMAGE,
-          OptionsConstants.ADVANCED_GROUND_MOVEMENT_TAC_OPS_WALK_BACKWARDS,
-          OptionsConstants.ADVANCED_COMBAT_TAC_OPS_RETRACTABLE_BLADES,
-          OptionsConstants.ADVANCED_COMBAT_UNJAM_UAC,
-          OptionsConstants.INIT_FRONT_LOAD_INITIATIVE,
-          OptionsConstants.ADVANCED_MINEFIELDS,
-          OptionsConstants.ADVANCED_ALTERNATE_MASC,
-          OptionsConstants.ADVANCED_ALTERNATE_MASC_ENHANCED);
-
     /** Options that only apply while one of their controlling boolean options is on, mapped to those. */
     private static final Map<String, List<String>> EDITABLE_WHEN_ANY = new LinkedHashMap<>();
 

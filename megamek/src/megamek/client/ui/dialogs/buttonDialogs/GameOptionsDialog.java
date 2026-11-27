@@ -83,6 +83,7 @@ import megamek.common.options.IBasicOption;
 import megamek.common.options.IOption;
 import megamek.common.options.IOptionGroup;
 import megamek.common.options.OptionsConstants;
+import megamek.common.rules.core.CoreRulesManager;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
 import megamek.common.units.Tank;
@@ -97,7 +98,7 @@ import org.w3c.dom.NodeList;
 public class GameOptionsDialog extends AbstractButtonDialog implements ActionListener, DialogOptionListener {
     private static final MMLogger LOGGER = MMLogger.create(GameOptionsDialog.class);
     private static final int BUTTON_GAP = 8;
-    private static final Set<String> CORE_RULES_DISABLED_OPTIONS = GameOptionsCatalog.CORE_RULES_DISABLED_OPTIONS;
+    private static final Set<String> CORE_RULES_DISABLED_OPTIONS = CoreRulesManager.IGNORED_GAME_OPTIONS;
 
     private ClientGUI clientGui;
     private JFrame frame;

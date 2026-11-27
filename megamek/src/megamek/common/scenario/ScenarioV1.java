@@ -129,6 +129,8 @@ public class ScenarioV1 extends HashMap<String, Collection<String>> implements S
     private static final String PARAM_DAMAGE = "Damage";
     private static final String PARAM_SPECIFIC_DAMAGE = "DamageSpecific";
     private static final String PARAM_CRITICAL_HIT = "CriticalHit";
+    /** The spelling used in the scenario readme and several shipped scenarios */
+    private static final String PARAM_CRITICAL_HIT_SHORT = "CritHit";
     private static final String PARAM_AMMO_AMOUNT = "SetAmmoTo";
     private static final String PARAM_AMMO_TYPE = "SetAmmoType";
     private static final String PARAM_PILOT_HITS = "PilotHits";
@@ -137,8 +139,13 @@ public class ScenarioV1 extends HashMap<String, Collection<String>> implements S
     private static final String PARAM_AUTO_EJECT = "AutoEject";
     private static final String PARAM_COMMANDER = "Commander";
     private static final String PARAM_DEPLOYMENT_ROUND = "DeploymentRound";
+    /** Faction camo key, as in {@code camo_Faction=Category,File} */
     private static final String PARAM_CAMO = "camo";
-    private static final String PARAM_ALTITUDE = "altitude";
+    /** Faction camo key with the capital letter the scenario readme uses */
+    private static final String PARAM_CAMO_CAPITALIZED = "Camo";
+    /** Unit data keys must start with a capital letter to match the unit data pattern */
+    private static final String PARAM_UNIT_CAMO = "Camo";
+    private static final String PARAM_UNIT_ALTITUDE = "Altitude";
 
     private static final String PARAM_PLANET_CONDITIONS_TEMP = "PlanetaryConditionsTemperature";
     private static final String PARAM_PLANET_CONDITIONS_GRAV = "PlanetaryConditionsGravity";
@@ -727,7 +734,7 @@ public class ScenarioV1 extends HashMap<String, Collection<String>> implements S
                         }
                         damagePlans.add(damagePlan);
                         break;
-                    case PARAM_CRITICAL_HIT:
+                    case PARAM_CRITICAL_HIT, PARAM_CRITICAL_HIT_SHORT:
                         CriticalHitPlan criticalHitPlan = new CriticalHitPlan(entity);
                         for (String value : scenarioV1.getString(key).split(SEPARATOR_COMMA, -1)) {
                             criticalHitPlan.addCriticalHits(value);
@@ -749,7 +756,7 @@ public class ScenarioV1 extends HashMap<String, Collection<String>> implements S
                         ammoPlans.add(setAmmoPlanType);
                         break;
                     case PARAM_PILOT_HITS:
-                        int hits = parseInt(scenarioV1.getString(key), 0);
+                        int hits = MathUtility.parseInt(scenarioV1.getString(key), 0);
                         entity.getCrew().setHits(Math.min(hits, 5), 0);
                         break;
                     case PARAM_EXTERNAL_ID:
@@ -765,7 +772,7 @@ public class ScenarioV1 extends HashMap<String, Collection<String>> implements S
                         parseCommander(entity, scenarioV1.getString(key));
                         break;
                     case PARAM_DEPLOYMENT_ROUND:
-                        int round = parseInt(scenarioV1.getString(key), 0);
+                        int round = MathUtility.parseInt(scenarioV1.getString(key), 0);
                         if (round > 0) {
                             LOGGER.debug("{} will be deployed before round {}", entity.getDisplayName(), round);
                             entity.setDeployRound(round);
@@ -774,14 +781,14 @@ public class ScenarioV1 extends HashMap<String, Collection<String>> implements S
                             entity.setPosition(null);
                         }
                         break;
-                    case PARAM_CAMO:
+                    case PARAM_UNIT_CAMO:
                         final Camouflage camouflage = parseCamouflage(scenarioV1.getString(key));
                         if (!camouflage.isDefault()) {
                             entity.setCamouflage(camouflage);
                         }
                         break;
-                    case PARAM_ALTITUDE:
-                        int altitude = Math.min(parseInt(scenarioV1.getString(key), 0), 10);
+                    case PARAM_UNIT_ALTITUDE:
+                        int altitude = Math.min(MathUtility.parseInt(scenarioV1.getString(key), 0), 10);
                         if (entity.isAero()) {
                             entity.setAltitude(altitude);
                             if (altitude <= 0) {
@@ -961,7 +968,11 @@ public class ScenarioV1 extends HashMap<String, Collection<String>> implements S
             int dir = Math.max(findIndex(IStartingPositions.START_LOCATION_NAMES, loc), 0);
             player.setStartingPos(dir);
 
-            final Camouflage camouflage = parseCamouflage(scenarioV1.getString(getFactionParam(faction, PARAM_CAMO)));
+            String camoValue = scenarioV1.getString(getFactionParam(faction, PARAM_CAMO));
+            if (camoValue == null) {
+                camoValue = scenarioV1.getString(getFactionParam(faction, PARAM_CAMO_CAPITALIZED));
+            }
+            final Camouflage camouflage = parseCamouflage(camoValue);
             if (!camouflage.isDefault()) {
                 player.setCamouflage(camouflage);
             }
