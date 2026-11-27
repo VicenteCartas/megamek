@@ -18,15 +18,9 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.awt.Component;
 import java.io.File;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
-import javax.swing.JMenu;
-import javax.swing.JMenuItem;
-import javax.swing.JPopupMenu;
 import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
@@ -46,83 +40,29 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
- * The bot commands on the players panel's rows (plan A.15 O3, stage E7b): for each bot the local player commands, the
- * bot commands panel's popup buttons as groups of that bot's items, which run exactly what clicking the same item of
- * the panel's popup runs; none for other players; the panel's Pause/Continue button as a plain command.
+ * The players panel's capture of the bot commands panel: no Swing popup commands on the rows (the bot sheet gives the
+ * bots' orders), and the panel's Pause/Continue button as a plain command while the players panel is open.
  */
 @ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(180)
 class GpuBotCommandsTest {
 
-    /** The order ends with a hex prompt (a board pick, or a typed prompt without a board view); not run here. */
-    private static final Set<String> PROMPTS = Set.of(Messages.getString("BotCommandPanel.ScootToHex.title"),
-          Messages.getString("BotCommandPanel.StrategicTarget.title"),
-          Messages.getString("BotCommandPanel.PriorityTargetPicker.title"),
-          Messages.getString("BotCommandPanel.ArtillerySingle.title"),
-          Messages.getString("BotCommandPanel.ArtilleryVolley.title"),
-          Messages.getString("BotCommandPanel.ArtilleryBarrage.title"));
-
     /** The game around the fixture's local player: an allied bot, an enemy player and an enemy bot. */
     private record Bots(GpuPlayers players, BotCommandsPanel panel, Client client, Player princess) { }
 
     @Test
-    void eachBotCommandRunsTheSameActionAsItsSwingPopupItem() throws Exception {
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            List<String> sent = new CopyOnWriteArrayList<>();
-            Bots game = GpuTestSupport.onSwing(() -> bots(fixture, sent));
-            GpuPlayers.Snapshot snapshot = GpuTestSupport.onSwing(game.players()::capture);
-            GpuPlayers.PlayerRow princess = row(snapshot, game.princess().getId());
-            List<String> buttons = GpuTestSupport.onSwing(() -> game.panel().popupCommands(game.princess()).stream()
-                  .map(command -> command.button().getText()).toList());
-            // Princess has no artillery, so the Artillery button's popup lists nothing for her.
-            assertEquals(buttons.stream().filter(label -> !label.equals(title("Artillery"))).toList(),
-                  princess.botCommands().stream().map(BoardScene.Command::label).toList(),
-                  "the panel's popup buttons, in its order, as groups");
-            int compared = 0;
-            for (BoardScene.Command group : princess.botCommands()) {
-                for (List<BoardScene.Command> path : leaves(group, new ArrayList<>())) {
-                    BoardScene.Command item = path.getLast();
-                    List<String> labels = path.stream().map(BoardScene.Command::label).toList();
-                    JMenuItem swing = GpuTestSupport.onSwing(() -> find(popup(game, group.label()), labels.subList(1,
-                          labels.size())));
-                    assertNotNull(swing, "the Swing popup has " + labels);
-                    assertEquals(swing.isEnabled(), item.enabled(), "availability of " + labels);
-                    if (!item.enabled() || labels.stream().anyMatch(PROMPTS::contains)) {
-                        continue;
-                    }
-                    sent.clear();
-                    SwingUtilities.invokeAndWait(() -> swing.doClick(0));
-                    List<String> expected = List.copyOf(sent);
-                    sent.clear();
-                    item.action().run();
-                    // The command runs on the Swing thread after the call returns.
-                    SwingUtilities.invokeAndWait(() -> { });
-                    assertFalse(expected.isEmpty(), labels + " sends an order");
-                    assertEquals(expected, List.copyOf(sent), labels.toString());
-                    assertTrue(expected.stream().allMatch(message -> !message.startsWith("chat: ")
-                          || message.startsWith("chat: Princess: ") || message.startsWith("chat: /unitOrder ")),
-                          "orders go to Princess, by her chat or a unit order: " + expected);
-                    compared++;
-                }
-            }
-            assertTrue(compared > 80, "every order without a hex prompt was compared: " + compared);
-        }
-    }
-
-    @Test
-    void onlyBotsUnderTheLocalPlayersCommandGetCommandsAndOnlyWhileThePanelIsOpen() throws Exception {
+    void pauseIsCapturedOnlyWhileThePlayersPanelIsOpen() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Bots game = GpuTestSupport.onSwing(() -> bots(fixture, new CopyOnWriteArrayList<>()));
             GpuPlayers.Snapshot open = GpuTestSupport.onSwing(game.players()::capture);
-            assertEquals(List.of("GPU review 0", "Princess 5", "Opponent 0", "Enemy bot 0", "Bot Two 3"),
-                  open.players().stream().map(row -> row.name() + " " + row.botCommands().size()).toList(),
-                  "an enemy bot is not under the local player's command; a bot without units on the board has no"
-                        + " movement, waypoint or artillery orders");
-            assertSame(open, GpuTestSupport.onSwing(game.players()::capture), "unchanged commands keep the snapshot's instance");
+            assertEquals(List.of("GPU review", "Princess", "Opponent", "Enemy bot", "Bot Two"),
+                  open.players().stream().map(GpuPlayers.PlayerRow::name).toList());
+            assertNotNull(open.pause());
+            assertSame(open, GpuTestSupport.onSwing(game.players()::capture),
+                  "an unchanged Pause keeps the snapshot's instance");
             game.players().setPanelOpen(false);
-            GpuPlayers.Snapshot closed = GpuTestSupport.onSwing(game.players()::capture);
-            assertTrue(closed.players().stream().allMatch(row -> row.botCommands().isEmpty()));
-            assertNull(closed.pause(), "no commands are captured while the players panel is closed");
+            assertNull(GpuTestSupport.onSwing(game.players()::capture).pause(),
+                  "no command is captured while the players panel is closed");
         }
     }
 
@@ -205,49 +145,6 @@ class GpuBotCommandsTest {
         entity.setPosition(position);
         entity.setDeployed(true);
         fixture.game.addEntity(entity, false);
-    }
-
-    /** EDT: the popup that the panel's button with this label opens for Princess. */
-    private static JPopupMenu popup(Bots game, String label) {
-        return game.panel().popupCommands(game.princess()).stream()
-              .filter(command -> command.button().getText().equals(label)).findFirst().orElseThrow().popup().get();
-    }
-
-    /** The menu item at the end of the labels' path through the popup's menus, or null. */
-    private static JMenuItem find(JPopupMenu popup, List<String> labels) {
-        Component[] components = popup.getComponents();
-        JMenuItem found = null;
-        for (String label : labels) {
-            found = null;
-            for (Component component : components) {
-                if (component instanceof JMenuItem item && label.equals(item.getText())) {
-                    found = item;
-                    break;
-                }
-            }
-            if (found == null) {
-                return null;
-            }
-            components = found instanceof JMenu menu ? menu.getMenuComponents() : new Component[0];
-        }
-        return found;
-    }
-
-    /** Every item below {@code command}, as its path from the group down. */
-    private static List<List<BoardScene.Command>> leaves(BoardScene.Command command,
-          List<BoardScene.Command> parents) {
-        List<BoardScene.Command> path = new ArrayList<>(parents);
-        path.add(command);
-        if (command.children().isEmpty()) {
-            return List.of(path);
-        }
-        List<List<BoardScene.Command>> leaves = new ArrayList<>();
-        command.children().forEach(child -> leaves.addAll(leaves(child, path)));
-        return leaves;
-    }
-
-    private static GpuPlayers.PlayerRow row(GpuPlayers.Snapshot snapshot, int id) {
-        return snapshot.players().stream().filter(row -> row.id() == id).findFirst().orElseThrow();
     }
 
     /** A bot commands panel button's label. */

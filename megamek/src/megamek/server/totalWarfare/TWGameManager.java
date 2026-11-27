@@ -49,7 +49,9 @@ import java.util.stream.Stream;
 
 import jakarta.annotation.Nullable;
 import megamek.client.bot.AIType;
+import megamek.client.bot.princess.BehaviorChange;
 import megamek.client.bot.princess.BehaviorSettings;
+import megamek.client.bot.princess.BotOrder;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.tooltip.UnitToolTip;
 import megamek.common.*;
@@ -91,6 +93,7 @@ import megamek.common.exceptions.LocationFullException;
 import megamek.common.force.Force;
 import megamek.common.force.Forces;
 import megamek.common.game.BotHonorReport;
+import megamek.common.game.BotStatus;
 import megamek.common.game.Game;
 import megamek.common.game.GameDatasetLogger;
 import megamek.common.game.GameTurn;
@@ -1202,8 +1205,38 @@ public class TWGameManager extends AbstractGameManager {
             // would kill every connecting client, which is exactly a bot taking over a loaded seat.
             send(connectionId, new Packet(PacketCommand.PRINCESS_SETTINGS, getGame().getBotSettings(),
                   new HashMap<>(getGame().getBotTypes())));
+            getGame().getBotStatuses().forEach((botId, status) ->
+                  send(connectionId, new Packet(PacketCommand.PRINCESS_STATUS, botId, status)));
             new ScanNotePrivacyHandler(this).sendGroundObjectsTo(connectionId);
         }
+    }
+
+    /**
+     * Passes a bot command packet on to the bot it names, when the sender may command that bot: a player on its side or
+     * a game master, as for the bots' chat commands. Anything else is dropped.
+     *
+     * @param sender the player who sent the packet
+     * @param packet a {@link PacketCommand#BOT_BEHAVIOR_CHANGE} or {@link PacketCommand#BOT_ORDER} packet, whose first
+     *               object is the bot's player ID
+     */
+    void forwardToCommandableBot(@Nullable Player sender, Packet packet) {
+        if (!(packet.getObject(0) instanceof Integer botId)) {
+            return;
+        }
+        Player bot = game.getPlayer(botId);
+        if (!canCommandBot(sender, bot)) {
+            LOGGER.warn("Dropping {} for player {} from {}: not a bot it may command", packet.command(), botId,
+                  (sender == null) ? "unknown connection" : sender.getName());
+            return;
+        }
+        send(botId, packet);
+    }
+
+    /**
+     * @return true when {@code sender} may command {@code bot}, as {@link Player#mayCommandBot} says
+     */
+    static boolean canCommandBot(@Nullable Player sender, @Nullable Player bot) {
+        return (sender != null) && sender.mayCommandBot(bot);
     }
 
     /**
@@ -1257,6 +1290,25 @@ public class TWGameManager extends AbstractGameManager {
                         // Relay this bot's honor report to all clients, tagged with the bot's player ID, so clients
                         // can tag its withdrawing units and warn a human before an action that would dishonor them.
                         send(new Packet(PacketCommand.PRINCESS_DISHONORED, player.getId(), packet.getObject(0)));
+                    }
+                    break;
+                case BOT_BEHAVIOR_CHANGE:
+                    if (packet.getObject(1) instanceof List<?> changes
+                          && changes.stream().allMatch(BehaviorChange.class::isInstance)) {
+                        forwardToCommandableBot(player, packet);
+                    }
+                    break;
+                case BOT_ORDER:
+                    if (packet.getObject(1) instanceof BotOrder) {
+                        forwardToCommandableBot(player, packet);
+                    }
+                    break;
+                case PRINCESS_STATUS:
+                    // Only bots report their standing orders; relay them to every client, tagged with the bot's ID,
+                    // and keep the last one for players who connect later.
+                    if ((player != null) && player.isBot() && (packet.getObject(0) instanceof BotStatus status)) {
+                        game.setBotStatus(player.getId(), status);
+                        send(new Packet(PacketCommand.PRINCESS_STATUS, player.getId(), status));
                     }
                     break;
                 case REROLL_INITIATIVE:

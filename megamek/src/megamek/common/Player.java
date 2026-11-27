@@ -626,6 +626,16 @@ public final class Player extends TurnOrdered {
         return (id != other.getId()) && ((team == TEAM_NONE) || (team == TEAM_UNASSIGNED) || (team != other.getTeam()));
     }
 
+    /**
+     * @param bot the player to command, may be null
+     *
+     * @return true when this player may give orders to {@code bot} and change its behavior: it is a bot, and this
+     *       player is on its side or is a game master
+     */
+    public boolean mayCommandBot(Player bot) {
+        return (bot != null) && bot.isBot() && (isGameMaster() || !isEnemyOf(bot));
+    }
+
     public void setAdmitsDefeat(boolean admitsDefeat) {
         this.admitsDefeat = admitsDefeat;
     }

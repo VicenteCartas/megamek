@@ -95,6 +95,7 @@ import megamek.common.equipment.enums.BombType.BombTypeEnum;
 import megamek.common.event.GameCFREvent;
 import megamek.common.event.player.GamePlayerChatEvent;
 import megamek.common.game.BotHonorReport;
+import megamek.common.game.BotStatus;
 import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.game.IGame;
@@ -5039,6 +5040,70 @@ public class Princess extends BotClient {
     }
 
     /**
+     * Reports the standing orders this bot follows outside its behavior settings - hold position, TAG targets and
+     * strategic hexes - so allied players can see them.
+     */
+    public void sendStatus() {
+        send(new Packet(PacketCommand.PRINCESS_STATUS, buildStatus()));
+    }
+
+    /** @return this bot's standing orders, as {@link #sendStatus()} reports them. Package-visible for testing. */
+    BotStatus buildStatus() {
+        return new BotStatus(getHoldPosition(), new HashSet<>(getDesignatedTagTargets()),
+              new HashSet<>(getStrategicBuildingTargets()));
+    }
+
+    /**
+     * Reports everything a command may have changed: settings, standing orders and honor. Called after a player's
+     * command, typed or sent from a UI.
+     */
+    public void reportCommandedState() {
+        sendPrincessSettings();
+        sendStatus();
+    }
+
+    @Override
+    protected void receiveBehaviorChanges(List<BehaviorChange> changes) {
+        applyBehaviorChanges(changes);
+        reportCommandedState();
+    }
+
+    @Override
+    protected void receiveBotOrder(BotOrder order) {
+        LOGGER.info("{}: received order {}", getName(), order);
+        order.apply(this);
+        if (order instanceof BotOrder.BloodFeud) {
+            sendDishonoredData();
+        }
+        sendStatus();
+    }
+
+    /** Applies the changes in order. Package-visible for testing. */
+    void applyBehaviorChanges(List<BehaviorChange> changes) {
+        for (BehaviorChange change : changes) {
+            LOGGER.info("{}: applying behavior change {}", getName(), change);
+            change.apply(this);
+        }
+    }
+
+    /**
+     * Takes a personality's behavior values, as {@link BehaviorSettings#takeStyleFrom} describes, and refreshes what
+     * depends on them, as {@link #setBehaviorSettings} does.
+     *
+     * @param preset the personality's preset
+     */
+    void takeStyle(BehaviorSettings preset) {
+        behaviorSettings.takeStyleFrom(preset);
+        if (behaviorSettings.iAmAPirate() && honorUtil instanceof HonorUtil honorUtilCast) {
+            honorUtilCast.setIAmAPirate(true);
+        }
+        spinUpThreshold = null;
+        if (initialized) {
+            initializePathRankers();
+        }
+    }
+
+    /**
      * Reports to the server which players this bot currently considers dishonored, whether it follows Forced
      * Withdrawal, and which of its units are withdrawing. Clients use it to tag withdrawing units and to warn a human
      * player before committing an action that would newly dishonor them. The dishonored set is fully resolved - it
@@ -5079,6 +5144,7 @@ public class Princess extends BotClient {
     @Override
     protected void sendBotSettingsToServer() {
         sendPrincessSettings();
+        sendStatus();
     }
 
     @Override

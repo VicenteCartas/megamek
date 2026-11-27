@@ -50,11 +50,11 @@ public abstract class UiOptionBar extends Table {
                 }
                 return switch (keycode) {
                     case Input.Keys.LEFT -> {
-                        choose(selected - 1);
+                        choose(enabled(selected, -1));
                         yield true;
                     }
                     case Input.Keys.RIGHT -> {
-                        choose(selected + 1);
+                        choose(enabled(selected, 1));
                         yield true;
                     }
                     default -> false;
@@ -106,7 +106,8 @@ public abstract class UiOptionBar extends Table {
 
     /** A user's selection: selects {@code index} and fires a ChangeEvent, unless it is selected or out of range. */
     void choose(int index) {
-        if (disabled || index < 0 || index >= options.size() || index == selected) {
+        if (disabled || index < 0 || index >= options.size() || index == selected
+              || options.get(index).isDisabled()) {
             return;
         }
         selected = index;
@@ -116,6 +117,15 @@ public abstract class UiOptionBar extends Table {
         } finally {
             Pools.free(event);
         }
+    }
+
+    /** The first enabled option from {@code index} in steps of {@code step}, or -1 past the bar's end. */
+    private int enabled(int index, int step) {
+        int next = index + step;
+        while (next >= 0 && next < options.size() && options.get(next).isDisabled()) {
+            next += step;
+        }
+        return next;
     }
 
     /** Whether the option at {@code index} shows the focus ring: frozen by a view, or selected in a focused bar. */

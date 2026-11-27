@@ -228,6 +228,8 @@ public class ChatProcessor {
                     LOGGER.info("{}: executing chat command {} with arguments {}",
                           princess.getLocalPlayer().getName(), cmd.getCommand(), Arrays.toString(arguments));
                     cmd.getChatCommand().execute(princess, args);
+                    // typed commands change settings and orders in place; report them so allied players see them
+                    princess.reportCommandedState();
                 } catch (IllegalArgumentException exception) {
                     LOGGER.warn("{}: invalid arguments for chat command {}: {} ({})",
                           princess.getLocalPlayer().getName(), cmd.getCommand(), Arrays.toString(arguments),

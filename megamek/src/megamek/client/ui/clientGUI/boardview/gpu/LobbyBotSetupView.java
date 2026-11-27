@@ -16,15 +16,12 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
-import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.utils.Align;
 import megamek.client.bot.AIType;
-import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.CardinalEdge;
-import megamek.client.bot.princess.CombatPosture;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.BotSetupForm.Flag;
 import megamek.client.lobby.BotSetupForm.HexTarget;
@@ -43,10 +40,8 @@ import megamek.client.ui.gdx.UiFormField;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiSelect;
-import megamek.client.ui.gdx.UiSliderInput;
 import megamek.client.ui.gdx.UiSummaryCard;
 import megamek.client.ui.gdx.UiTextField;
-import megamek.client.ui.gdx.UiTraitCard;
 
 /**
  * The lobby's bot setup in a {@link UiDialog}, which leads with good defaults and tucks the tuning away. On top, what
@@ -80,12 +75,7 @@ final class LobbyBotSetupView {
     private static final List<BotSetupForm.Slider> CORE = List.of(BotSetupForm.Slider.AGGRESSION,
           BotSetupForm.Slider.BRAVERY, BotSetupForm.Slider.SELF_PRESERVATION, BotSetupForm.Slider.MUTUAL_SUPPORT,
           BotSetupForm.Slider.FALL_SHAME);
-    /** The sliders the cards' meters show, in their order. */
-    private static final List<BotSetupForm.Slider> TRAITS = List.of(BotSetupForm.Slider.AGGRESSION,
-          BotSetupForm.Slider.BRAVERY, BotSetupForm.Slider.SELF_PRESERVATION, BotSetupForm.Slider.MUTUAL_SUPPORT);
-    private static final String[] TRAIT_KEYS = { "aggression", "bravery", "survival", "teamwork" };
-    private static final CombatPosture[] POSTURES = { CombatPosture.AUTO, CombatPosture.ATTACK,
-                                                      CombatPosture.DEFEND };
+    private static final List<BotSetupForm.Slider> TRAITS = GpuBotControls.TRAITS;
 
     private final UiKit kit;
     private final UiDialog dialog;
@@ -93,10 +83,9 @@ final class LobbyBotSetupView {
     private final Host host;
     private final Runnable close;
     private final boolean stacked;
-    private final Map<Personality, UiTraitCard> cards = new EnumMap<>(Personality.class);
-    private final Map<Personality, int[]> cardTraits = new EnumMap<>(Personality.class);
-    private final Map<BotSetupForm.Slider, Slider> sliders = new EnumMap<>(BotSetupForm.Slider.class);
-    private final Map<BotSetupForm.Slider, Label> sliderTitles = new EnumMap<>(BotSetupForm.Slider.class);
+    private GpuBotControls.PersonalityCards cards;
+    private final Map<BotSetupForm.Slider, GpuBotControls.SliderRow> sliders =
+          new EnumMap<>(BotSetupForm.Slider.class);
     private final Map<Flag, UiChoice> flags = new EnumMap<>(Flag.class);
     private final List<Preset> savedPresets = new ArrayList<>();
     private final Container<Table> page = new Container<>();
@@ -108,8 +97,7 @@ final class LobbyBotSetupView {
     private UiButton ok;
     private UiFormField nameField;
     private Label status;
-    private UiSegmented posture;
-    private Label postureHint;
+    private GpuBotControls.PostureControl posture;
     private UiSegmented retreat;
     private UiSelect retreatEdge;
     private Label retreatHint;
@@ -162,7 +150,7 @@ final class LobbyBotSetupView {
     }
 
     private static float space(String name) {
-        return DesignTokens.shipped().space().get(name);
+        return GpuBotControls.space(name);
     }
 
     private static float size(String name) {
@@ -170,36 +158,19 @@ final class LobbyBotSetupView {
     }
 
     private static String colonless(String key) {
-        String text = Messages.getString(key).strip();
-        return text.endsWith(":") ? text.substring(0, text.length() - 1) : text;
+        return GpuBotControls.colonless(key);
     }
 
     private void tip(Actor actor, String text) {
-        kit.tip(actor, true).getActor().setText(GpuBoardWindow.plainText(text));
+        GpuBotControls.tip(kit, actor, text);
     }
 
     private Label hint(String text) {
-        Label hint = kit.typeLabel(text, "small", "text.muted");
-        hint.setWrap(true);
-        hint.setAlignment(Align.topLeft);
-        return hint;
+        return GpuBotControls.hint(kit, text);
     }
 
-    /**
-     * {@code shown} over hidden copies of each of {@code texts}, so the slot keeps the height of the longest and what
-     * is below never moves as the text changes; {@code shown} may be one of several labels in the slot.
-     */
     private Stack steady(List<String> texts, Label... shown) {
-        Stack slot = new Stack();
-        for (String text : texts) {
-            Label sizer = hint(text);
-            sizer.setVisible(false);
-            slot.add(sizer);
-        }
-        for (Label each : shown) {
-            slot.add(each);
-        }
-        return slot;
+        return GpuBotControls.steady(kit, texts, shown);
     }
 
     /** The main page's footer (OK, Cancel and Help) or an inner page's (Back as the main button, and Help). */
@@ -304,75 +275,24 @@ final class LobbyBotSetupView {
     }
 
     private Table personalities() {
-        Table grid = new Table();
-        grid.top().left();
-        List<Personality> shown = form.personalities();
-        int columns = stacked ? 2 : 4;
-        float gap = space("md");
-        for (int index = 0; index < shown.size(); index++) {
-            Personality personality = shown.get(index);
-            UiTraitCard card = kit.traitCard(personality.label(), personality.blurb());
-            card.setName("bot-personality-" + personality.key());
-            BehaviorSettings preset = form.preset(personality);
-            if (preset != null) {
-                int[] values = new int[TRAITS.size()];
-                for (int trait = 0; trait < TRAITS.size(); trait++) {
-                    values[trait] = TRAITS.get(trait).of(preset);
-                    card.trait(Messages.getString("Lobby.bot.trait." + TRAIT_KEYS[trait]), values[trait],
-                          TRAITS.get(trait).max());
-                }
-                cardTraits.put(personality, values);
-            }
-            card.resetButton().setName("bot-reset-" + personality.key());
-            tip(card.resetButton(), Messages.getString("Lobby.bot.resetTip", personality.label()));
-            // A click on the card, or on its reset, goes back to the personality's own settings
-            UiKit.onChange(card, () -> {
-                if (!busy) {
-                    form.choose(personality);
-                    showValues();
-                    refresh();
-                }
-            });
-            cards.put(personality, card);
-            int column = index % columns;
-            grid.add(card).growX().uniform().fill().minWidth(0)
-                  .padLeft(column == 0 ? 0 : gap).padTop(index < columns ? 0 : gap);
-            if (column == columns - 1) {
-                grid.row();
-            }
-        }
-        // A short last row keeps its cards the width of the rest
-        for (int index = shown.size(); index % columns != 0; index++) {
-            grid.add().growX().uniform().padLeft(gap);
-        }
-        return grid;
+        // A click on a card, or on its reset, goes back to the personality's own settings
+        cards = new GpuBotControls.PersonalityCards(kit, form.personalities(), form::preset, stacked ? 2 : 4,
+              personality -> {
+                  if (!busy) {
+                      form.choose(personality);
+                      showValues();
+                      refresh();
+                  }
+              });
+        return cards.grid();
     }
 
     private Table postureBlock() {
-        Table block = new Table();
-        block.top().left().defaults().left().growX();
-        String[] labels = new String[POSTURES.length];
-        for (int index = 0; index < POSTURES.length; index++) {
-            labels[index] = POSTURES[index].toString();
-        }
-        posture = kit.tokenSegmented(true, labels);
-        posture.setName("bot-posture");
-        for (int index = 0; index < POSTURES.length; index++) {
-            posture.option(index).setName("bot-posture-" + POSTURES[index].name().toLowerCase(Locale.ROOT));
-        }
-        UiKit.onChange(posture, () -> {
-            form.posture(POSTURES[posture.getSelectedIndex()]);
+        posture = new GpuBotControls.PostureControl(kit, chosen -> {
+            form.posture(chosen);
             refresh();
         });
-        block.add(kit.formField(colonless("BotConfigDialog.postureLabel"), posture)).row();
-        postureHint = hint("");
-        postureHint.setName("bot-posture-hint");
-        List<String> hints = new ArrayList<>();
-        for (CombatPosture each : POSTURES) {
-            hints.add(Messages.getString("Lobby.bot.posture." + each.name().toLowerCase(Locale.ROOT) + ".hint"));
-        }
-        block.add(steady(hints, postureHint)).minWidth(0).padTop(space("xs")).row();
-        return block;
+        return posture.block();
     }
 
     private Table retreatBlock() {
@@ -499,32 +419,14 @@ final class LobbyBotSetupView {
     }
 
     private Table slider(BotSetupForm.Slider kind) {
-        Slider slider = new Slider(kind.min(), kind.max(), 1, false, kit.tokenSliderStyle());
-        slider.setName("bot-slider-" + kind.name().toLowerCase(Locale.ROOT));
-        slider.setProgrammaticChangeEvents(false);
-        slider.addListener(new UiSliderInput(slider));
-        Label title = kit.typeLabel(kind.title(form.value(kind)), "small", "text.secondary");
-        UiKit.onChange(slider, () -> {
-            form.value(kind, Math.round(slider.getValue()));
-            title.setText(kind.title(form.value(kind)));
+        GpuBotControls.SliderRow[] made = new GpuBotControls.SliderRow[1];
+        made[0] = new GpuBotControls.SliderRow(kit, kind, form.value(kind), value -> {
+            form.value(kind, value);
+            made[0].value(form.value(kind));
             refresh();
         });
-        tip(slider, kind.tip());
-        tip(title, kind.tip());
-        sliders.put(kind, slider);
-        sliderTitles.put(kind, title);
-        Table row = new Table();
-        row.top().left();
-        row.add(title).left().colspan(2).row();
-        row.add(slider).growX().colspan(2).padTop(space("xs")).row();
-        Label min = kit.typeLabel(kind.minText(), "small", "text.muted");
-        Label max = kit.typeLabel(kind.maxText(), "small", "text.muted");
-        min.setEllipsis(true);
-        max.setEllipsis(true);
-        max.setAlignment(Align.right);
-        row.add(min).left().growX().uniformX().minWidth(0);
-        row.add(max).right().growX().uniformX().minWidth(0).padLeft(space("sm"));
-        return row;
+        sliders.put(kind, made[0]);
+        return made[0].row();
     }
 
     /**
@@ -909,12 +811,9 @@ final class LobbyBotSetupView {
 
     /** Puts the form's values into the controls, as after loading a preset. */
     private void showValues() {
-        sliders.forEach((kind, slider) -> {
-            slider.setValue(form.value(kind));
-            sliderTitles.get(kind).setText(kind.title(form.value(kind)));
-        });
+        sliders.forEach((kind, row) -> row.value(form.value(kind)));
         flags.forEach((flag, check) -> check.setChecked(form.flag(flag)));
-        posture.select(Math.max(0, List.of(POSTURES).indexOf(form.posture())));
+        posture.select(form.posture());
         retreat.select(form.retreat().ordinal());
         retreatEdge.select(Math.max(0, BotSetupForm.edges().indexOf(form.retreatTo())));
         int chosen = savedPresets.indexOf(form.selected());
@@ -936,21 +835,9 @@ final class LobbyBotSetupView {
         for (int trait = 0; trait < TRAITS.size(); trait++) {
             now[trait] = form.value(TRAITS.get(trait));
         }
-        cards.forEach((personality, card) -> {
-            boolean chosen = personality == shown;
-            boolean changed = chosen && matched == null;
-            card.chosen(chosen);
-            card.modified(changed ? Messages.getString("Lobby.bot.modifiedTag") : null);
-            int[] own = cardTraits.get(personality);
-            if (own != null) {
-                card.current(changed ? now : own);
-            }
-            card.resetButton().setDisabled(busy);
-        });
+        cards.show(shown, matched == null, now, busy);
         status.setText(shown == null ? Messages.getString("Lobby.bot.custom") : "");
 
-        String postureKey = POSTURES[Math.max(0, posture.getSelectedIndex())].name().toLowerCase(Locale.ROOT);
-        postureHint.setText(Messages.getString("Lobby.bot.posture." + postureKey + ".hint"));
         Retreat chosenRetreat = form.retreat();
         retreatHint.setText(Messages.getString("Lobby.bot.retreat." + chosenRetreat.name().toLowerCase(Locale.ROOT)
               + ".hint"));

@@ -33,7 +33,6 @@ import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.client.ui.panels.phaseDisplay.StatusBarPhaseDisplay;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.common.OffBoardDirection;
-import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
@@ -310,28 +309,6 @@ final class GpuBoardActions {
             List<BoardScene.Command> children = menuCommands(commands.get(), commands, null);
             result.add(new BoardScene.Command(GAME_COMMANDS_ID, Messages.getString("GameCommands.title"),
                   Messages.getString("GameCommands.tooltip"), !children.isEmpty(), false, children, () -> { }));
-        }
-        return result;
-    }
-
-    /**
-     * EDT: one bot's commands from the bot commands panel: each popup button as a group of the items its popup lists
-     * for that bot, with MegaMek's labels and availability. A button whose popup lists nothing for the bot is left
-     * out, so a player the local player does not command gets none. Empty without the panel.
-     */
-    List<BoardScene.Command> botCommands(Player bot) {
-        BotCommandsPanel bots = botCommandsPanel();
-        if (bots == null) {
-            return List.of();
-        }
-        List<BoardScene.Command> result = new ArrayList<>();
-        for (BotCommandsPanel.PopupCommand command : bots.popupCommands(bot)) {
-            Supplier<Container> popup = () -> command.popup().get();
-            List<BoardScene.Command> items = menuCommands(popup.get(), popup, null);
-            AbstractButton button = command.button();
-            if (!items.isEmpty()) {
-                result.add(describe(button.getActionCommand(), button, false, items, () -> { }));
-            }
         }
         return result;
     }

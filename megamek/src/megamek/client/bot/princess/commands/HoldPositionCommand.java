@@ -35,6 +35,7 @@ package megamek.client.bot.princess.commands;
 import java.util.List;
 
 import megamek.client.bot.Messages;
+import megamek.client.bot.princess.BotOrder;
 import megamek.client.bot.princess.Princess;
 import megamek.server.commands.arguments.Argument;
 import megamek.server.commands.arguments.Arguments;
@@ -59,7 +60,7 @@ public class HoldPositionCommand implements ChatCommand {
     @Override
     public void execute(Princess princess, Arguments arguments) {
         BooleanArgument holdArgument = arguments.get(HOLD, BooleanArgument.class);
-        princess.setHoldPosition(holdArgument.getValue());
+        new BotOrder.Hold(holdArgument.getValue()).apply(princess);
         if (holdArgument.getValue()) {
             princess.sendChat(Messages.getString("Princess.command.holdPosition.holding"));
         } else {

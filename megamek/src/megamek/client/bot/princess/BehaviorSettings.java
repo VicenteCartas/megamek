@@ -219,6 +219,34 @@ public class BehaviorSettings implements Serializable {
     }
 
     /**
+     * Takes the behavior values of a personality preset: its description, indices and style switches. Keeps this
+     * configuration's combat posture, targets, ignored units, retreat and withdrawal, which players choose apart from
+     * the personality.
+     *
+     * @param preset the preset to take the values of
+     */
+    public void takeStyleFrom(final BehaviorSettings preset) {
+        try {
+            setDescription(preset.getDescription());
+        } catch (final PrincessException ex) {
+            logger.warn("Keeping description {}, preset has none", getDescription());
+        }
+        setFallShameIndex(preset.getFallShameIndex());
+        setBraveryIndex(preset.getBraveryIndex());
+        setMutualSupportIndex(preset.getMutualSupportIndex());
+        setHyperAggressionIndex(preset.getHyperAggressionIndex());
+        setSelfPreservationIndex(preset.getSelfPreservationIndex());
+        setAntiCrowding(preset.getAntiCrowding());
+        setFavorHigherTMM(preset.getFavorHigherTMM());
+        setNumberOfEnemiesToConsiderFacing(preset.getNumberOfEnemiesToConsiderFacing());
+        setAllowFacingTolerance(preset.getAllowFacingTolerance());
+        setExclusiveMutualSupport(preset.isExclusiveMutualSupport());
+        setIAmAPirate(preset.iAmAPirate());
+        setIgnoreDamageOutput(preset.isIgnoreDamageOutput());
+        setExperimental(preset.isExperimental());
+    }
+
+    /**
      * @return TRUE if I am running experimental features.
      */
     public boolean isExperimental() {
@@ -482,7 +510,7 @@ public class BehaviorSettings implements Serializable {
      *
      * @param id The ID of the unit to be removed.
      */
-    void removePriorityUnit(final int id) {
+    public void removePriorityUnit(final int id) {
         priorityUnitTargets.remove(id);
         targetPriorityMap().remove(id);
     }

@@ -18,8 +18,9 @@ import megamek.common.Player;
 
 /**
  * Players panel (C.1 G14, plan A.15 O3, swing-inventory W3 and W4): the players as the Swing player list shows them,
- * and under each bot the local player commands, the bot commands panel's buttons with MegaMek's labels as groups of
- * their items; its Pause/Continue button first. Opened by the Menu, the View menu's player list and BOT_COMMANDS.
+ * and under each bot the local player commands, an Orders and behavior row that opens the bot sheet on it; the bot
+ * commands panel's Pause/Continue button first. Opened by the Menu, the View menu's player list and BOT_COMMANDS with
+ * more than one bot.
  */
 final class GpuPlayersPanel implements GpuHud.Component {
     /** The player colour's square before the name. */
@@ -33,7 +34,7 @@ final class GpuPlayersPanel implements GpuHud.Component {
     private final GpuHudState state;
     private final Table root;
     private final GpuCommandTree tree;
-    /** The open state last passed to the players service, which captures the bot commands only while it holds. */
+    /** The open state last passed to the players service, which captures Pause/Continue only while it holds. */
     private boolean sentOpen;
 
     GpuPlayersPanel(GpuHudKit kit, GpuBoardSource source, GpuHudState state) {
@@ -64,6 +65,7 @@ final class GpuPlayersPanel implements GpuHud.Component {
             return;
         }
         GpuPlayers.Snapshot players = inputs.frame().panels().players();
+        GpuBots.Snapshot bots = inputs.frame().panels().bots();
         List<Object> rows = new ArrayList<>();
         if (players.pause() != null) {
             tree.rows(List.of(players.pause()), "", 0, rows);
@@ -73,13 +75,21 @@ final class GpuPlayersPanel implements GpuHud.Component {
                 rows.add(GpuCommandTree.SEPARATOR);
             }
             rows.add(shown(player));
-            tree.rows(player.botCommands(), "bot " + player.id(), 1, rows);
+            if (bots.bot(player.id()) != null) {
+                tree.rows(List.of(orders(player.id())), "bot " + player.id(), 1, rows);
+            }
         }
         tree.show(rows, row -> player((Shown) row), command -> {
-            // As a menu closes: a bot order that picks hexes on the board needs the board.
+            // As a menu closes; a bot's orders row then opens the bot sheet.
             state.dialog = Dialog.NONE;
             command.action().run();
         });
+    }
+
+    /** The row under a bot that opens the bot sheet on it. */
+    private BoardScene.Command orders(int botId) {
+        return new BoardScene.Command("orders", text("GpuBoard.hud.players.botOrders"),
+              text("GpuBoard.hud.players.botOrders.tip"), true, false, List.of(), () -> state.toggleBot(botId));
     }
 
     /**

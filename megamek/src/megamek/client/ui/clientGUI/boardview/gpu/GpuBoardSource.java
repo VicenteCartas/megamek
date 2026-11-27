@@ -143,6 +143,8 @@ final class GpuBoardSource implements BoardSource {
     private final GpuToasts toasts = new GpuToasts(this);
     private final GpuLosResult los = new GpuLosResult(this);
     private final GpuPlayers players = new GpuPlayers(this);
+    private final GpuBots bots = new GpuBots(this);
+    private final GpuBotOrders botOrders = new GpuBotOrders(this, bots, GpuBotOrders.clientOf(this));
     /** EDT: the last published panel bundle, kept while every part is equal. */
     private GpuHudData panels = GpuHudData.EMPTY;
     /** Set by the GL thread; each capture uses them only while the unit is still identified or owned. */
@@ -1886,7 +1888,7 @@ final class GpuBoardSource implements BoardSource {
               preview.capture(view.getLocalPlayer(), activeTurn, focus == Entity.NONE ? actorId : focus, path,
                     this::visible, this::sensorContact),
               chat.capture(), toasts.capture(), rulerSnapshot, players.capture(),
-              ownCard == card ? record : ownUnitRecord.capture(ownCard));
+              ownCard == card ? record : ownUnitRecord.capture(ownCard), bots.capture());
         if (!nextPanels.equals(panels)) {
             panels = nextPanels;
         }
@@ -2714,6 +2716,14 @@ final class GpuBoardSource implements BoardSource {
 
     GpuPlayers players() {
         return players;
+    }
+
+    GpuBots bots() {
+        return bots;
+    }
+
+    GpuBotOrders botOrders() {
+        return botOrders;
     }
 
     public void inspect(Coords coords) {

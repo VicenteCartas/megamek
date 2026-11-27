@@ -29,6 +29,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import megamek.client.bot.AIType;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.gdx.UiButton;
@@ -38,6 +39,7 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.game.BotStatus;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
@@ -72,6 +74,8 @@ class GpuUtilityMinimapSmokeTest {
         final GpuMinimap minimap;
         /** The client's preferences the frames carry. */
         GpuBoardSource.UiPreferences preferences = PREFERENCES;
+        /** The bots the local player commands, which the frames carry. */
+        GpuBots.Snapshot bots = GpuBots.Snapshot.EMPTY;
 
         Parts(GpuHudTestStage hud, BoardCamera camera, BoardScene scene) {
             BoardScene.Command item = new BoardScene.Command("View:View/" + ClientGUI.VIEW_MINI_MAP + ":Minimap",
@@ -99,7 +103,7 @@ class GpuUtilityMinimapSmokeTest {
             state.update(status, GpuUnitRecord.Snapshot.EMPTY, false);
             GpuBoardSource.Frame frame = new GpuBoardSource.Frame(scene, List.of(), null, global, "", null, 0,
                   "", null, reports, status, GpuHudFixtures.panels(move, GpuFireOrders.Snapshot.EMPTY,
-                        GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
+                        GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY).withBots(bots));
             GpuHud.Inputs inputs = new GpuHud.Inputs(frame, new GpuHud.HudView(tactical, false, Map.of(), Map.of(),
                   Map.of(), null, Entity.NONE, 0), null, preferences, GpuHud.Metrics.of(width, height), List.of());
             utilities.update(inputs);
@@ -257,6 +261,51 @@ class GpuUtilityMinimapSmokeTest {
         });
     }
 
+    /**
+     * The bots utility shows beside Chat only while the local player commands a bot, takes no room while hidden, opens
+     * the bot sheet on the first bot and shows pressed while it is open.
+     */
+    @Test
+    void theBotsUtilityShowsOnlyWithACommandableBotAndTogglesTheSheet() throws Exception {
+        BoardScene scene = GpuBoardSpaceHarness.scene();
+        GpuHudTestStage.run(hud -> {
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            Parts parts = new Parts(hud, board.camera, scene);
+            try {
+                UiButton bots = hud.stage.getRoot().findActor("utility-bots");
+                GpuBattleStatus.Snapshot moving = GpuHudFixtures.status();
+                board.view(false);
+                show(hud, board, parts, scene, moving, move(), false);
+                float without = parts.utilities.actor().getWidth();
+                assertFalse(bots.isVisible(), "no bot: no utility");
+
+                parts.bots = new GpuBots.Snapshot(List.of(new GpuBots.BotRow(3, "Princess", AIType.PRINCESS,
+                      0xFF82E2CE, true, 4, false, null, BotStatus.NONE, List.of(), List.of(), Set.of(), false)),
+                      List.of(), Map.of());
+                show(hud, board, parts, scene, moving, move(), false);
+                assertTrue(bots.isVisible());
+                assertTrue(parts.utilities.actor().getWidth() > without, "the shown utility widens the plate");
+                assertSame(hud.kit.ui.skin.getDrawable("icon-bot"), ((Image) bots.icons.getFirst()).getDrawable());
+                click(hud, "utility-bots");
+                assertEquals(GpuHudState.Dialog.BOTS, parts.state.dialog);
+                assertEquals(-1, parts.state.botSheetId, "the sheet opens on the first bot");
+                show(hud, board, parts, scene, moving, move(), false);
+                assertTrue(bots.isChecked(), "pressed while the sheet shows");
+                hud.capture("ux2-utilities-bots").dispose();
+                click(hud, "utility-bots");
+                assertEquals(GpuHudState.Dialog.NONE, parts.state.dialog);
+
+                parts.bots = GpuBots.Snapshot.EMPTY;
+                show(hud, board, parts, scene, moving, move(), false);
+                assertFalse(bots.isVisible(), "the utility leaves with the last bot");
+                assertEquals(without, parts.utilities.actor().getWidth(), .01f);
+            } finally {
+                parts.minimap.dispose();
+                board.dispose();
+            }
+        });
+    }
+
     /** The preferences with the contacts panel shown or hidden. */
     private static GpuBoardSource.UiPreferences contacts(GpuBoardSource.UiPreferences p, boolean enabled) {
         return GpuHudFixtures.with(p, Map.of("contactsEnabled", enabled));
@@ -287,7 +336,7 @@ class GpuUtilityMinimapSmokeTest {
             }
         });
         assertEquals(List.of("utility-speeds", "utility-overlays", "utility-view", "utility-map", "utility-contacts",
-              "utility-log", "chat-button", "utility-menu"), plate);
+              "utility-log", "chat-button", "utility-bots", "utility-menu"), plate);
         Actor popover = hud.stage.getRoot().findActor("utility-view-menu");
         assertFalse(popover.isVisible(), "View starts closed");
         click(hud, "utility-view");

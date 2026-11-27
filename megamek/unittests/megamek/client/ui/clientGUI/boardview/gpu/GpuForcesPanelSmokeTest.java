@@ -704,6 +704,6 @@ class GpuForcesPanelSmokeTest {
 
     private static GpuPlayers.PlayerRow player(int id, String name, int team, boolean local) {
         return new GpuPlayers.PlayerRow(id, name, team, 0, local, false, false, false, false, false, false, false,
-              false, List.of());
+              false);
     }
 }

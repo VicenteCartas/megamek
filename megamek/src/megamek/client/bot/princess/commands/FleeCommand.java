@@ -35,6 +35,7 @@ package megamek.client.bot.princess.commands;
 import java.util.List;
 
 import megamek.client.bot.Messages;
+import megamek.client.bot.princess.BehaviorChange;
 import megamek.client.bot.princess.CardinalEdge;
 import megamek.client.bot.princess.Princess;
 import megamek.server.commands.arguments.Argument;
@@ -61,37 +62,10 @@ public class FleeCommand implements ChatCommand {
     public void execute(Princess princess, Arguments arguments) {
         CardinalEdge edge = arguments.getEnum(EDGE, CardinalEdge.class);
         if (edge == CardinalEdge.NONE) {
-            cancelFleeOrder(princess);
+            princess.sendChat(Messages.getString("Princess.command.flee.canceled"));
         } else {
-            issueFleeOrder(princess, edge);
+            princess.sendChat(Messages.getString("Princess.command.flee.fleeing", edge.name()));
         }
-    }
-
-    private void issueFleeOrder(Princess princess, CardinalEdge edge) {
-        String reason = "Received flee order - " + edge.name();
-        princess.sendChat(Messages.getString("Princess.command.flee.fleeing", edge.name()));
-        princess.getBehaviorSettings().setDestinationEdge(edge);
-        // Auto-flee plus a destination edge is what actually makes healthy units move toward the edge
-        // (see UnitBehavior#calculateUnitBehavior), and the flee-board flag allows them to leave the map.
-        princess.getBehaviorSettings().setAutoFlee(true);
-        princess.setFallBack(true, reason);
-        princess.setFleeBoard(true, reason);
-        // for a bot that follows unit orders, the order is carried by each unit as Exit by edge, replacing its route,
-        // so it shows on the map and is saved
-        if (princess.followsUnitOrders()) {
-            princess.getUnitOrdersFollower().orderAllToExit(edge);
-        }
-    }
-
-    private void cancelFleeOrder(Princess princess) {
-        String reason = "Received cancel flee order";
-        princess.sendChat(Messages.getString("Princess.command.flee.canceled"));
-        princess.getBehaviorSettings().setDestinationEdge(CardinalEdge.NONE);
-        princess.getBehaviorSettings().setAutoFlee(false);
-        princess.setFallBack(false, reason);
-        princess.setFleeBoard(false, reason);
-        if (princess.followsUnitOrders()) {
-            princess.getUnitOrdersFollower().cancelExitOrders();
-        }
+        new BehaviorChange.Retreat(edge).apply(princess);
     }
 }
