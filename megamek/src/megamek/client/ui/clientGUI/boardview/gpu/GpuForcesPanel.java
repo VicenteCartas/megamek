@@ -31,6 +31,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.utils.TimeUtils;
+import megamek.client.bot.princess.CombatPosture;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
@@ -70,7 +71,7 @@ final class GpuForcesPanel implements GpuHud.Component {
     /** Row, group header and panel header heights; the rail and the open list share them, so rows stay in place. */
     private static final float ROW_HEIGHT = 44;
     private static final float GROUP_HEIGHT = 22;
-    /** An allied bot's header: its name with the Bot button, and its type, personality and posture under it. */
+    /** An allied bot's header: its name with the Bot button, and its personality and posture under it. */
     private static final float BOT_HEIGHT = 40;
     /** A bot's lances and their chevrons sit under its name. */
     private static final float LANCE_INDENT = 22;
@@ -687,8 +688,8 @@ final class GpuForcesPanel implements GpuHud.Component {
 
     /**
      * An allied bot's header over its lances: the bot icon, its name and the Bot button, which opens its bot sheet,
-     * and under them its AI, personality and posture. A click elsewhere collapses the bot to its units' sprites. On
-     * the rail it shows the name and the AI.
+     * and under them its personality and posture. A click elsewhere collapses the bot to its units' sprites. On the
+     * rail it shows the same under the name.
      */
     private final class BotHeader extends Table {
         private final int botId;
@@ -735,7 +736,6 @@ final class GpuForcesPanel implements GpuHud.Component {
                 top.pad(0, 10, 0, 8);
                 top.add(ui.icon("bot", 13, UiTheme.tokenColor("accent.primary"))).padRight(5);
                 top.add(railName).growX().minWidth(0).left();
-                about.setText(text("BotConfigDialog.aiType." + bot.type().name()));
                 bottom.pad(0, 28, 0, 8);
                 bottom.add(about).growX().minWidth(0).left();
             } else {
@@ -749,8 +749,13 @@ final class GpuForcesPanel implements GpuHud.Component {
                 bottom.pad(0, 50, 0, 10);
                 bottom.add(about).growX().minWidth(0).left();
             }
-            add(top).growX().minWidth(0).height(22).padTop(3).row();
-            add(bottom).growX().minWidth(0).height(15);
+            if (about.getText().isEmpty()) {
+                // Before the bot's first report there is nothing to say under its name.
+                add(top).growX().minWidth(0).height(22).padTop(3).padBottom(3);
+            } else {
+                add(top).growX().minWidth(0).height(22).padTop(3).row();
+                add(bottom).growX().minWidth(0).height(15);
+            }
             if (closed) {
                 row();
                 sprites.show(members, shown.folded() ? 6 : 28);
@@ -758,16 +763,19 @@ final class GpuForcesPanel implements GpuHud.Component {
             }
         }
 
-        /** The bot's AI, then its personality and posture once it reported them. */
+        /**
+         * The bot's personality once it reported it, and its posture when the player set one: Auto, the default,
+         * decides each round and says nothing more.
+         */
         private String about(GpuBots.BotRow bot) {
-            String type = text("BotConfigDialog.aiType." + bot.type().name());
             GpuBots.Behavior behavior = bot.behavior();
             if (behavior == null) {
-                return type;
+                return "";
             }
             String personality = behavior.personality() == null ? text("GpuBoard.hud.bots.custom")
                   : behavior.personality().label();
-            return type + SEPARATOR + personality + SEPARATOR + behavior.posture();
+            return behavior.posture() == CombatPosture.AUTO ? personality
+                  : personality + SEPARATOR + behavior.posture();
         }
 
         @Override

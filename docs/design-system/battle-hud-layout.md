@@ -88,11 +88,15 @@ The dock treats it as a right-column panel and stays clear of it (rule 3).
   and artillery are tabs for later.
 - **No chat:** each change goes to the bot as a typed command, never as a chat message. The sheet shows what was asked
   until the bot reports it back.
+- **Strategic hexes:** *Pick on board* steps the sheet aside and starts a board pick. The hint line's chip shows it
+  with Done and Cancel: board clicks pick or unpick hexes, Done adds them, and Cancel or Esc adds none. Either way the
+  sheet opens again on the page it left.
 
 Allied bots' forces and orders are shown, read-only, in zones 6 and 1:
 
-- **Units list:** each allied bot gets a header row (its name and behavior), then its lances and units. Enemy bots are
-  not listed.
+- **Units list:** each allied bot gets a header row: its name, then its personality ("Balanced"). Its posture follows
+  only when the player set one (Attack or Defend); Auto, the default, decides each round. The AI (Princess or CASPAR)
+  is not shown. Its lances and units follow. Enemy bots are not listed.
 - **Selection:** a click on a CASPAR lance header selects the whole lance. The lower-left card then shows the lance
   form, with a LANCE scope chip, a units table (armor, heat, state) and the lance's Orders band. The lance's units show
   their nameplates on the board. Princess gives orders per unit, so its lances can't be selected; the player picks

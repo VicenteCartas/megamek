@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -160,11 +161,25 @@ class GpuBotSheetSmokeTest {
             click(sheet.root.findActor("bot-ignore-clear"));
             verify(sheet.orders).clearIgnored(BOT);
 
+            // Pick on board steps the sheet aside for the board's pick, and opens it again once Done or Cancel ends it.
+            GpuBots.Snapshot targets = snapshot(row(behavior(), held, false));
+            click(sheet.root.findActor("bot-hex-pick"));
+            verify(sheet.orders).pickHexes(BOT, Messages.getString("GpuBoard.hud.bots.hexes.order", "Princess"));
+            assertEquals(Dialog.NONE, sheet.state.dialog, "the board is clear to click");
+            GpuPlayers.Pick pick = new GpuPlayers.Pick("Click hexes on the board", "");
+            sheet.sheet.update(inputs(hud, targets, new GpuPlayers.Snapshot(List.of(), null, pick)));
+            assertEquals(Dialog.NONE, sheet.state.dialog, "it stays aside while the pick runs");
+            sheet.show(hud, targets);
+            assertEquals(Dialog.BOTS, sheet.state.dialog, "the pick ended: the sheet is back");
+            sheet.show(hud, targets);
+            assertEquals(1, tabs.getSelectedIndex(), "on the page it left");
+            assertNotNull(sheet.root.findActor("bot-hex-pick"));
+
             // The bot gone, the sheet closes and stops capturing.
             sheet.show(hud, GpuBots.Snapshot.EMPTY);
             assertEquals(Dialog.NONE, sheet.state.dialog);
             sheet.show(hud, GpuBots.Snapshot.EMPTY);
-            verify(sheet.bots).setSheetOpen(false);
+            verify(sheet.bots, times(2)).setSheetOpen(false);
         });
     }
 
@@ -408,10 +423,14 @@ class GpuBotSheetSmokeTest {
     }
 
     private static GpuHud.Inputs inputs(GpuHudTestStage hud, GpuBots.Snapshot bots) {
+        return inputs(hud, bots, GpuPlayers.Snapshot.EMPTY);
+    }
+
+    private static GpuHud.Inputs inputs(GpuHudTestStage hud, GpuBots.Snapshot bots, GpuPlayers.Snapshot players) {
         GpuHudData panels = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
               GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-              RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY).withBots(bots);
+              RulerModel.Snapshot.NONE, players).withBots(bots);
         GpuBoardSource.Frame frame = new GpuBoardSource.Frame(board(), List.of(), null, List.of(), "",
               null, 0, "", null, GpuReportLog.Snapshot.EMPTY, GpuBattleStatus.Snapshot.EMPTY, panels);
         GpuHud.HudView view = new GpuHud.HudView(false, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);

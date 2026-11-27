@@ -17,7 +17,10 @@ import megamek.client.bot.princess.CombatPosture;
 import megamek.client.bot.princess.PrincessException;
 import megamek.client.bot.princess.Tactic;
 import megamek.client.lobby.BotSetupForm.Personality;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBots.Control;
+import megamek.client.ui.dialogs.BotCommands.HexTargetPicker;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.equipment.GunEmplacement;
@@ -160,6 +163,28 @@ final class GpuBotOrders {
         source.command(() -> {
             bots.sending(botId, Control.HEX, asked -> { });
             send(botId, Control.HEX, new BehaviorChange.StrategicHex(hex, add));
+        });
+    }
+
+    /**
+     * Starts a pick of strategic hexes on the board, which the hint line's chip shows as {@code description} with
+     * Done and Cancel: Done adds the clicked hexes, Cancel adds none. Without a client there is no board to pick on.
+     */
+    void pickHexes(int botId, String description) {
+        source.command(() -> {
+            BoardClientState view = source.currentView();
+            ClientGUI gui = view.getClientgui();
+            if (gui == null) {
+                return;
+            }
+            new HexTargetPicker(gui, view, description, false, 0, picked -> {
+                List<BehaviorChange> changes = new ArrayList<>();
+                for (String number : picked.split("-")) {
+                    changes.add(new BehaviorChange.StrategicHex(Coords.parseHexNumber(number), true));
+                }
+                bots.sending(botId, Control.HEX, asked -> { });
+                send(botId, Control.HEX, changes);
+            }).start();
         });
     }
 

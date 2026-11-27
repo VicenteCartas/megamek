@@ -445,7 +445,10 @@ class GpuForcesPanelSmokeTest {
             assertEquals(List.of(1, 2, 3, 4, 5, 21, 22, 23, 31), listed(panel, "forces-unit-"));
             List<String> header = GpuBoardTestUi.texts(panel.find("forces-bot-9"));
             assertTrue(header.contains("Kurita Regulars"), header.toString());
-            assertTrue(header.stream().anyMatch(text -> text.startsWith("CASPAR \u00B7 ")), header.toString());
+            // Its personality and posture, not its AI: Auto, the default, would say nothing more.
+            assertTrue(header.contains(Personality.CAUTIOUS.label() + " \u00B7 " + CombatPosture.DEFEND),
+                  header.toString());
+            assertTrue(header.stream().noneMatch(text -> text.contains("CASPAR")), header.toString());
             assertTrue(GpuBoardTestUi.texts(panel.find("forces-unit-21")).contains(
                   UiTheme.upper(Messages.getString("GpuBoard.hud.forces.leader"))), "The lance leader says so");
             assertFalse(GpuBoardTestUi.texts(panel.find("forces-unit-22")).contains(

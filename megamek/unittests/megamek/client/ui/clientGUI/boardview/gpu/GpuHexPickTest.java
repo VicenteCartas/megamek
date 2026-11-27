@@ -26,6 +26,7 @@ import java.io.File;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
@@ -35,6 +36,8 @@ import javax.swing.JPanel;
 
 import megamek.client.Client;
 import megamek.client.bot.AIType;
+import megamek.client.bot.princess.BehaviorChange;
+import megamek.client.bot.princess.BotOrder;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
@@ -162,6 +165,50 @@ class GpuHexPickTest {
     }
 
     @Test
+    void theBotSheetsPickAddsTheClickedHexesAsStrategicHexesAndCancelAddsNone() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(); Session game = onSwing(() -> session(fixture))) {
+            present(game.gui(), game.view(), game.source());
+            try {
+                List<BehaviorChange> changes = new CopyOnWriteArrayList<>();
+                GpuBotOrders orders = new GpuBotOrders(game.source(), game.source().bots(),
+                      new GpuBotOrders.Sender() {
+                          @Override
+                          public void behavior(int botId, List<BehaviorChange> sent) {
+                              assertEquals(game.princess().getId(), botId);
+                              changes.addAll(sent);
+                          }
+
+                          @Override
+                          public void order(int botId, BotOrder order) {
+                              game.sent().add("order: " + order);
+                          }
+                      });
+                String description = Messages.getString("GpuBoard.hud.bots.hexes.order", "Princess");
+                orders.pickHexes(game.princess().getId(), description);
+                assertEquals(new GpuPlayers.Pick(Messages.getString("BotCommandPanel.HexPicker.instructions",
+                      description), ""), pick(game), "the HUD's chip shows the sheet's pick");
+                game.source().click(FIRST, false, 0);
+                game.source().click(SECOND, false, 0);
+                game.source().players().endPick(true);
+                assertNull(pick(game), "Done ends the pick");
+                assertEquals(Set.of(new BehaviorChange.StrategicHex(FIRST, true),
+                      new BehaviorChange.StrategicHex(SECOND, true)), Set.copyOf(changes), "one message, both hexes");
+                assertTrue(game.sent().stream().noneMatch(line -> line.startsWith("chat: ")), "never as chat");
+
+                changes.clear();
+                orders.pickHexes(game.princess().getId(), description);
+                game.source().click(FIRST, false, 0);
+                game.source().players().endPick(false);
+                assertNull(pick(game), "Cancel ends the pick");
+                assertTrue(changes.isEmpty(), "and adds no hex");
+                assertTrue(game.sent().stream().noneMatch(line -> line.startsWith("order: ")), game.sent().toString());
+            } finally {
+                dismiss();
+            }
+        }
+    }
+
+    @Test
     void theMoveOrderEditorPicksWaypointsOnTheNativeBoardAndTheHudEndsItsPick() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "The Move Order editor is a Swing dialog");
         try (GpuBoardFixture fixture = GpuBoardFixture.create(); Session game = onSwing(() -> session(fixture))) {
@@ -277,7 +324,7 @@ class GpuHexPickTest {
 
     /**
      * The bot commands panel's Strategic Target of Princess while the battle window shows: the HUD no longer lists the
-     * panel's orders (the bot sheet types strategic hexes), but a pick the panel starts still runs on the board.
+     * panel's orders (the bot sheet picks strategic hexes itself), but a pick the panel starts still runs on the board.
      */
     private static void nativeStrategicTarget(Session game) throws Exception {
         onSwing(() -> {
