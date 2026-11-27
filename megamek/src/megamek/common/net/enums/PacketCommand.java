@@ -63,6 +63,24 @@ public enum PacketCommand {
      */
     PRINCESS_DISHONORED,
 
+    /**
+     * A player changing some of a bot's behavior settings (C -> S), checked by the Server and passed on to that bot
+     * (S -> C). Carries the bot's player ID and a list of {@link megamek.client.bot.princess.BehaviorChange}s.
+     */
+    BOT_BEHAVIOR_CHANGE,
+
+    /**
+     * A player giving a bot a standing order such as hold position (C -> S), checked by the Server and passed on to
+     * that bot (S -> C). Carries the bot's player ID and a {@link megamek.client.bot.princess.BotOrder}.
+     */
+    BOT_ORDER,
+
+    /**
+     * A Princess Client reporting the orders it is following (C -> S), or the Server relaying one bot's report to all
+     * Clients (S -> C), tagged with the bot's player ID. Carries a {@link megamek.common.game.BotStatus}.
+     */
+    PRINCESS_STATUS,
+
     /** A packet setting a Client's ready status (S -> C) or updating the Server on the Client's status (C -> S). */
     PLAYER_READY,
 

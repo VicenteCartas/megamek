@@ -63,10 +63,12 @@ import jakarta.annotation.Nullable;
 import megamek.client.AbstractClient;
 import megamek.client.bot.princess.ArtilleryCommandAndControl.ArtilleryOrder;
 import megamek.client.bot.princess.ArtilleryCommandAndControl.SpecialAmmo;
+import megamek.client.bot.princess.BehaviorChange;
 import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.bot.princess.ChatCommands;
 import megamek.client.bot.princess.CombatPosture;
+import megamek.client.bot.princess.Tactic;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -767,18 +769,9 @@ public class BotCommandsPanel extends JPanel {
         return createBotFirstPopup(bots, (botMenu, botPlayer) -> {
             botMenu.add(createPostureMenu(botPlayer));
             botMenu.addSeparator();
-            addBotAction(botMenu, botPlayer, "AlphaStrike", this::alphaStrikeManeuver);
-            addBotAction(botMenu, botPlayer, "NoPrisoners", this::noPrisonersManeuver);
-            addBotAction(botMenu, botPlayer, "StayAtRange", this::stayAtRangeManeuver);
-            addBotAction(botMenu, botPlayer, "Disperse", this::disperseManeuver);
-            addBotAction(botMenu, botPlayer, "TightFormation", this::tightFormationManeuver);
-            addBotAction(botMenu, botPlayer, "LooseFormation", this::looseFormationManeuver);
-            addBotAction(botMenu, botPlayer, "HoldTheLine", this::holdTheLineManeuver);
-            addBotAction(botMenu, botPlayer, "DoubleTimeMarch", this::doubleTimeMarchManeuver);
-            addBotAction(botMenu, botPlayer, "FinalGlory", this::finalGloryManeuver);
-            addBotAction(botMenu, botPlayer, "FallBack", this::fallBackManeuver);
-            addBotAction(botMenu, botPlayer, "EvasiveAction", this::evasiveActionManeuver);
-            addBotAction(botMenu, botPlayer, "CarefulAim", this::carefulAimManeuver);
+            for (Tactic tactic : Tactic.values()) {
+                addBotAction(botMenu, botPlayer, tactic.key(), bot -> useTactic(bot, tactic));
+            }
             botMenu.addSeparator();
             botMenu.add(createFineTuneMenu(botPlayer));
         });
@@ -974,93 +967,31 @@ public class BotCommandsPanel extends JPanel {
         return menuItem;
     }
 
-    private void carefulAimManeuver(Player botPlayer) {
-        setAvoid(botPlayer, 6);
-        setBravery(botPlayer, 8);
-        setHyperAggression(botPlayer, 3);
-        setFallShame(botPlayer, 7);
+    /**
+     * Gives a bot one of the shared quick tactics, through the same chat commands as typing them.
+     *
+     * @param botPlayer The bot to give the tactic to
+     * @param tactic    The tactic
+     */
+    private void useTactic(Player botPlayer, Tactic tactic) {
+        for (BehaviorChange.Index index : tactic.indices()) {
+            sendChatCommand(botPlayer, dialCommand(index.trait()), index.value());
+        }
+        if (tactic.dropsMercy()) {
+            clearIgnoredTargets(botPlayer);
+            bloodFeudAgainstAllEnemies(botPlayer);
+        }
     }
 
-    private void evasiveActionManeuver(Player botPlayer) {
-        setAvoid(botPlayer, 10);
-        setBravery(botPlayer, 3);
-        setHyperAggression(botPlayer, 6);
-        setFallShame(botPlayer, 2);
-    }
-
-    private void fallBackManeuver(Player botPlayer) {
-        setAvoid(botPlayer, 8);
-        setBravery(botPlayer, 3);
-        setHyperAggression(botPlayer, 3);
-        setFallShame(botPlayer, 7);
-    }
-
-    private void finalGloryManeuver(Player botPlayer) {
-        setAvoid(botPlayer, 0);
-        setBravery(botPlayer, 10);
-        setHyperAggression(botPlayer, 10);
-        setFallShame(botPlayer, 6);
-    }
-
-    private void doubleTimeMarchManeuver(Player botPlayer) {
-        setAvoid(botPlayer, 2);
-        setFallShame(botPlayer, 2);
-    }
-
-    private void holdTheLineManeuver(Player botPlayer) {
-        setAvoid(botPlayer, 2);
-        setBravery(botPlayer, 4);
-        setHyperAggression(botPlayer, 10);
-        setFallShame(botPlayer, 7);
-    }
-
-    private void looseFormationManeuver(Player botPlayer) {
-        setHerdMentality(botPlayer, 3);
-    }
-
-    private void tightFormationManeuver(Player botPlayer) {
-        setHerdMentality(botPlayer, 9);
-    }
-
-    private void stayAtRangeManeuver(Player botPlayer) {
-        setBravery(botPlayer, 8);
-        setHyperAggression(botPlayer, 3);
-        setAvoid(botPlayer, 7);
-    }
-
-    private void disperseManeuver(Player botPlayer) {
-        setHerdMentality(botPlayer, 0);
-    }
-
-    private void noPrisonersManeuver(Player botPlayer) {
-        clearIgnoredTargets(botPlayer);
-        bloodFeudAgainstAllEnemies(botPlayer);
-    }
-
-    private void alphaStrikeManeuver(Player botPlayer) {
-        setBravery(botPlayer, 10);
-        setHyperAggression(botPlayer, 10);
-        setAvoid(botPlayer, 5);
-    }
-
-    private void setHerdMentality(Player botPlayer, int value) {
-        sendChatCommand(botPlayer, ChatCommands.MUTUAL_SUPPORT, value);
-    }
-
-    private void setBravery(Player botPlayer, int value) {
-        sendChatCommand(botPlayer, ChatCommands.BRAVERY, value);
-    }
-
-    private void setHyperAggression(Player botPlayer, int value) {
-        sendChatCommand(botPlayer, ChatCommands.AGGRESSION, value);
-    }
-
-    private void setAvoid(Player botPlayer, int value) {
-        sendChatCommand(botPlayer, ChatCommands.AVOID, value);
-    }
-
-    private void setFallShame(Player botPlayer, int value) {
-        sendChatCommand(botPlayer, ChatCommands.CAUTION, value);
+    /** @return the chat command that sets {@code trait} */
+    static ChatCommands dialCommand(BehaviorChange.Trait trait) {
+        return switch (trait) {
+            case AGGRESSION -> ChatCommands.AGGRESSION;
+            case BRAVERY -> ChatCommands.BRAVERY;
+            case SELF_PRESERVATION -> ChatCommands.AVOID;
+            case FALL_SHAME -> ChatCommands.CAUTION;
+            case MUTUAL_SUPPORT -> ChatCommands.MUTUAL_SUPPORT;
+        };
     }
 
     private record PlayerBehavior(Player player, String behavior) {}

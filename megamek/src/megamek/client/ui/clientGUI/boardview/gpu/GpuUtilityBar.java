@@ -18,6 +18,7 @@ import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
@@ -36,7 +37,8 @@ import megamek.client.ui.util.KeyCommandBind;
 
 /**
  * Top-right utilities, the Tactical View chip and the Tactical View's north mark (C.1 G4). One dark plate holds the
- * playback speeds, then Overlays and View, then the minimap, contacts, the log and the chat, then the Menu, the groups
+ * playback speeds, then Overlays and View, then the minimap, contacts, the log, the chat and the bot orders (only while
+ * the local player commands a bot), then the Menu, the groups
  * split by hairlines; the developer's Tuning is a pill under it. View opens a popover with the 3D / Tactical switch,
  * the camera presets and the wireframe view; Overlays opens GpuTacticalOverlays. They show the playback's speed, the
  * camera, the wireframe view, the minimap and contacts preferences, the log's presented events and the HUD's open
@@ -90,6 +92,9 @@ final class GpuUtilityBar implements GpuHud.Component {
     private final UiButton contacts;
     private final UiButton log;
     private final UiButton chat;
+    /** Opens the bot sheet; shown only while the local player commands a bot. */
+    private final UiButton bots;
+    private final Cell<UiButton> botsCell;
     private final UiButton menu;
     private final Label menuTip;
     /** The row's tooltips, which the open popover takes off their buttons. */
@@ -130,6 +135,7 @@ final class GpuUtilityBar implements GpuHud.Component {
         map = iconButton(ui, "map", Messages.getString("GpuBoard.hud.util.map"), "utility-map");
         contacts = iconButton(ui, "enemy", Messages.getString("GpuBoard.hud.common.contacts"), "utility-contacts");
         log = iconButton(ui, "report", Messages.getString("GpuBoard.hud.util.log"), "utility-log");
+        bots = iconButton(ui, "bot", Messages.getString("GpuBoard.hud.bots.title"), "utility-bots");
         menu = iconButton(ui, "menu", Messages.getString("GpuBoard.hud.menu.title"), "utility-menu");
         menuTip = tipLabel(menu);
         // One plate: the playback speeds, then the board (Overlays, View), the panels (minimap, contacts, log, chat)
@@ -140,16 +146,22 @@ final class GpuUtilityBar implements GpuHud.Component {
         plate.setName("utility-plate");
         plate.setBackground(ui.skin.getDrawable("utility-plate"));
         plate.add(speeds).height(BUTTON_HEIGHT - 2);
-        List<List<UiButton>> groups = List.of(List.of(overlays, view), List.of(map, contacts, log, chat),
+        List<List<UiButton>> groups = List.of(List.of(overlays, view), List.of(map, contacts, log, chat, bots),
               List.of(menu));
+        Cell<UiButton> botsAt = null;
         for (List<UiButton> group : groups) {
             plate.add(new Image(ui.skin.newDrawable("white", UiTheme.QUIET))).size(1, 20).padLeft(6).padRight(4);
             for (UiButton utility : group) {
                 utility.setStyle(ui.skin.get("hud-utility-flat", TextButton.TextButtonStyle.class));
                 utility.pad(0);
-                plate.add(utility).size(BUTTON_WIDTH, BUTTON_HEIGHT).padLeft(2);
+                Cell<UiButton> cell = plate.add(utility).size(BUTTON_WIDTH, BUTTON_HEIGHT).padLeft(2);
+                if (utility == bots) {
+                    botsAt = cell;
+                }
             }
         }
+        botsCell = botsAt;
+        showBots(false);
         root.add(plate).height(HEIGHT).right();
         root.row();
         root.add(tuningButton).right().height(DEV_HEIGHT).padTop(GAP);
@@ -198,6 +210,8 @@ final class GpuUtilityBar implements GpuHud.Component {
         // The contacts panel's preference, remembered as the minimap's is; the client's settings change on Swing.
         onChange(contacts, () -> source.command(() -> GUIPreferences.getInstance().toggleGpuContactsEnabled()));
         onChange(log, state::toggleLog);
+        onChange(bots, () -> state.toggleBots(inputs == null ? GpuBots.Snapshot.EMPTY
+              : inputs.frame().panels().bots()));
         onChange(menu, () -> state.toggle(GpuHudState.Dialog.MENU));
 
         // The chip names the mode only; the View popover's switch and the T key switch back (the user's decision of
@@ -470,6 +484,11 @@ final class GpuUtilityBar implements GpuHud.Component {
         map.pressed(inputs.preferences().minimapEnabled()).setDisabled(minimap == null || !minimap.enabled());
         contacts.pressed(inputs.preferences().contactsEnabled());
         log.pressed(state.logOpen()).badge(reviewable > 0 ? String.valueOf(reviewable) : null);
+        boolean commandsBot = !inputs.frame().panels().bots().bots().isEmpty();
+        if (commandsBot != bots.isVisible()) {
+            showBots(commandsBot);
+        }
+        bots.pressed(state.dialog == GpuHudState.Dialog.BOTS);
         menu.pressed(state.dialog == GpuHudState.Dialog.MENU);
         menuTip.setText(menuTip(inputs.preferences()));
         chip.setVisible(tacticalView);
@@ -477,6 +496,13 @@ final class GpuUtilityBar implements GpuHud.Component {
         // Scene2D turns counterclockwise; the camera's azimuth turns the board's north that far clockwise on screen.
         north.setOrigin(Align.center);
         north.setRotation(-camera.azimuth());
+    }
+
+    /** Shows the bot utility in the plate, or takes it out with its gap. */
+    private void showBots(boolean shown) {
+        bots.setVisible(shown);
+        botsCell.size(shown ? BUTTON_WIDTH : 0, BUTTON_HEIGHT).padLeft(shown ? 2 : 0);
+        botsCell.getTable().invalidateHierarchy();
     }
 
     /** As the T key: the camera enters the Tactical View or returns to the 3D pose it replaced. */

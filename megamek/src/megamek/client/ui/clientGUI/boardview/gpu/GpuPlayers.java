@@ -8,8 +8,9 @@ import megamek.client.ui.clientGUI.boardview.BoardHexPick;
 import megamek.common.Player;
 
 /**
- * EDT service for the players panel: the game's players with the states the Swing player list shows, the bot
- * commands panel's commands for each bot while the panel is open, and the hex pick of a bot order while it runs.
+ * EDT service for the players panel: the game's players with the states the Swing player list shows, the bot commands
+ * panel's Pause/Continue while the panel is open, and the board's hex pick while it runs. The bots' orders are the bot
+ * sheet's (GpuBots).
  */
 final class GpuPlayers {
     /**
@@ -22,17 +23,11 @@ final class GpuPlayers {
     /**
      * One player. {@code team} is the player's team number, {@link Player#TEAM_NONE} (the Swing list's "Lone Wolf")
      * or {@link Player#TEAM_UNASSIGNED}. {@code seeAll}, {@code singleBlind} and {@code ignoresDoubleBlind} are the
-     * visibility modes the Swing list marks. {@code botCommands} are the bot commands panel's popup buttons for this
-     * bot as groups of their items (GpuBoardActions.botCommands), captured only while the players panel is open; they
-     * are empty otherwise and for every player the local player does not command.
+     * visibility modes the Swing list marks.
      */
     record PlayerRow(int id, String name, int team, int rgb, boolean local, boolean done, boolean bot,
           boolean observer, boolean ghost, boolean gameMaster, boolean seeAll, boolean singleBlind,
-          boolean ignoresDoubleBlind, List<BoardScene.Command> botCommands) {
-        PlayerRow {
-            botCommands = List.copyOf(botCommands);
-        }
-    }
+          boolean ignoresDoubleBlind) { }
 
     /**
      * The players in id order, the bot commands panel's Pause/Continue button as a plain command while the players
@@ -64,23 +59,23 @@ final class GpuPlayers {
     }
 
     /**
-     * GL thread: whether the players panel is open. Only then does the capture build the bot commands, whose popups
-     * list every enemy unit and player; the next capture follows the change.
+     * GL thread: whether the players panel is open. Only then does the capture build the Pause/Continue command; the
+     * next capture follows the change.
      */
     void setPanelOpen(boolean open) {
         panelOpen = open;
     }
 
     /**
-     * EDT: the players of the source's game in id order, as the Swing player list shows them, with each bot's commands
-     * while the panel is open; the previous instance while nothing changed. Each capture builds new command actions,
-     * so a bot's commands keep their previous instances while they show the same.
+     * EDT: the players of the source's game in id order, as the Swing player list shows them; the previous instance
+     * while nothing changed. Each capture builds a new Pause/Continue action, so the command keeps its previous
+     * instance while it shows the same.
      */
     Snapshot capture() {
         GpuBoardSource.requireSwingThread();
         var view = source.currentView();
         Player local = view.getLocalPlayer();
-        // The bot commands do not depend on the shown board; a command waits only for the source to accept input.
+        // Pause/Continue does not depend on the shown board; it waits only for the source to accept input.
         GpuBoardActions actions = panelOpen
               ? new GpuBoardActions(view, () -> null, () -> !source.acceptsInput(), source::refresh) : null;
         List<PlayerRow> rows = view.game.getPlayersList().stream()
@@ -88,10 +83,7 @@ final class GpuPlayers {
               .map(player -> new PlayerRow(player.getId(), player.getName(), player.getTeam(),
                     player.getColour().getColour().getRGB(), local != null && local.getId() == player.getId(),
                     player.isDone(), player.isBot(), player.isObserver(), player.isGhost(), player.isGameMaster(),
-                    player.getSeeAll(), player.getSingleBlind(), player.canIgnoreDoubleBlind(),
-                    actions == null || !player.isBot() ? List.of() : unchanged(actions.botCommands(player),
-                          snapshot.players().stream().filter(row -> row.id() == player.getId())
-                                .map(PlayerRow::botCommands).findFirst().orElse(List.of()))))
+                    player.getSeeAll(), player.getSingleBlind(), player.canIgnoreDoubleBlind()))
               .toList();
         BoardScene.Command pause = actions == null || rows.stream().noneMatch(PlayerRow::bot) ? null
               : actions.pauseCommand();

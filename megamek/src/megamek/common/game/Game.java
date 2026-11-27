@@ -279,6 +279,13 @@ public final class Game extends AbstractGame implements Serializable,
     private transient ForcedWithdrawalReports forcedWithdrawalReports = new ForcedWithdrawalReports();
 
     /**
+     * Each bot's last reported standing orders (keyed by player ID), relayed through
+     * {@link megamek.common.net.enums.PacketCommand#PRINCESS_STATUS}. Transient, ephemeral battle state; concurrent
+     * because it is written on the packet-handling thread and read on the UI threads.
+     */
+    private transient Map<Integer, BotStatus> botStatuses = new ConcurrentHashMap<>();
+
+    /**
      * Constructor
      */
     public Game() {
@@ -4125,6 +4132,41 @@ public final class Game extends AbstractGame implements Serializable,
 
     public void setBotSettings(Map<String, BehaviorSettings> botSettings) {
         this.botSettings = botSettings;
+    }
+
+    /**
+     * @param botPlayerId the bot's player ID
+     *
+     * @return the standing orders that bot last reported, {@link BotStatus#NONE} when it has not reported
+     */
+    public BotStatus getBotStatus(int botPlayerId) {
+        return ensureBotStatuses().getOrDefault(botPlayerId, BotStatus.NONE);
+    }
+
+    /**
+     * @return every bot's last reported standing orders, keyed by player ID, as a copy
+     */
+    public Map<Integer, BotStatus> getBotStatuses() {
+        return new HashMap<>(ensureBotStatuses());
+    }
+
+    /**
+     * Records the standing orders a bot reported through
+     * {@link megamek.common.net.enums.PacketCommand#PRINCESS_STATUS}.
+     *
+     * @param botPlayerId the reporting bot's player ID
+     * @param status      its report
+     */
+    public void setBotStatus(int botPlayerId, BotStatus status) {
+        ensureBotStatuses().put(botPlayerId, status);
+    }
+
+    private Map<Integer, BotStatus> ensureBotStatuses() {
+        if (botStatuses == null) {
+            // Transient field is null after deserialization of a savegame.
+            botStatuses = new ConcurrentHashMap<>();
+        }
+        return botStatuses;
     }
 
     /**

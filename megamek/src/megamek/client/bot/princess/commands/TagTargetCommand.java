@@ -35,6 +35,7 @@ package megamek.client.bot.princess.commands;
 import java.util.List;
 
 import megamek.client.bot.Messages;
+import megamek.client.bot.princess.BotOrder;
 import megamek.client.bot.princess.Princess;
 import megamek.server.commands.arguments.Argument;
 import megamek.server.commands.arguments.Arguments;
@@ -59,7 +60,7 @@ public class TagTargetCommand implements ChatCommand {
     @Override
     public void execute(Princess princess, Arguments arguments) {
         UnitArgument unitArgument = arguments.get(UNIT_ID, UnitArgument.class);
-        princess.addDesignatedTagTarget(unitArgument.getValue());
+        new BotOrder.TagTarget(unitArgument.getValue()).apply(princess);
         princess.sendChat(Messages.getString("Princess.command.tagTarget.success"));
     }
 }

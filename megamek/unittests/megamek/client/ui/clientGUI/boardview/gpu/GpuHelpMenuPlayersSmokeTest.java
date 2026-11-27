@@ -19,6 +19,7 @@ import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import javax.swing.SwingUtilities;
 
@@ -37,6 +38,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 import com.badlogic.gdx.utils.Pools;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.Client;
+import megamek.client.bot.AIType;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
@@ -50,6 +52,7 @@ import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.game.BotStatus;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -58,7 +61,7 @@ import org.junit.jupiter.api.Test;
  * The Help, Menu and Players dialogs (C.1 G14, C.2, plan A.15 O1-O3) in the component harness, centred as the HUD
  * places them: Help lists the binds' current keys by group with the mouse gestures, in the r1 3.19 dialog look; the
  * Menu shows the client's captured menu bar with shortcuts and check marks, keyboard and groups, runs every item's own
- * action except the C.2 redirects, which open the native surfaces; Players lists the players with the bots' commands.
+ * action except the C.2 redirects, which open the native surfaces; Players lists the players with the allied bots' orders rows.
  */
 @Tag("on-demand")
 class GpuHelpMenuPlayersSmokeTest {
@@ -272,26 +275,24 @@ class GpuHelpMenuPlayersSmokeTest {
         }
     }
     @Test
-    void playersShowEachPlayerAndTheBotsCommandsAsGroups() {
+    void playersShowEachPlayerAndOpenTheAlliedBotsOrders() {
         GpuHudTestStage.run(hud -> {
             Dialogs dialogs = new Dialogs();
             GpuPlayersPanel panel = new GpuPlayersPanel(hud.kit, dialogs.source, dialogs.state);
             Table root = (Table) panel.actor();
             hud.window.addActor(root);
             List<String> ran = new ArrayList<>();
-            BoardScene.Command posture = new BoardScene.Command("posture", "Combat Posture", "", true, false,
-                  List.of(command("Attack", ran), command("Defend", ran)), () -> { });
-            BoardScene.Command maneuver = new BoardScene.Command("Maneuver", "Maneuver", "Quick maneuvers", true,
-                  false, List.of(posture, command("Alpha Strike!", ran)), () -> { });
-            BoardScene.Command behavior = new BoardScene.Command("Set Behavior", "Set Behavior", "", true, false,
-                  List.of(command("BERSERK", ran)), () -> { });
             BoardScene.Command pause = new BoardScene.Command("bot-pause", "Pause Game", "Only bots play", false,
                   false, List.of(), () -> ran.add("pause"));
             GpuPlayers.Snapshot players = new GpuPlayers.Snapshot(List.of(
-                  player(0, "GPU review", 1, true, false, false, List.of()),
-                  player(3, "Princess", 1, false, true, true, List.of(maneuver, behavior)),
-                  player(4, "Opponent", 2, false, false, false, List.of())), pause);
-            GpuHud.Inputs inputs = inputs(hud, frame(List.of(), players), GpuBoardSource.UiPreferences.capture(),
+                  player(0, "GPU review", 1, true, false, false),
+                  player(3, "Princess", 1, false, true, true),
+                  player(4, "Opponent", 2, false, false, false)), pause);
+            // Only the bot the local player commands gets its orders row; an enemy bot would not be in the snapshot.
+            GpuBots.Snapshot bots = new GpuBots.Snapshot(List.of(new GpuBots.BotRow(3, "Princess", AIType.PRINCESS,
+                  0xFF82E2CE, true, 4, false, null, BotStatus.NONE, List.of(), List.of(), Set.of(), false)),
+                  List.of(), Map.of());
+            GpuHud.Inputs inputs = inputs(hud, frame(List.of(), players, bots), GpuBoardSource.UiPreferences.capture(),
                   false);
             dialogs.state.dialog = Dialog.PLAYERS;
             panel.update(inputs);
@@ -299,33 +300,27 @@ class GpuHelpMenuPlayersSmokeTest {
             centre(hud, root);
             String waiting = Messages.getString("GpuBoard.hud.players.waiting").toUpperCase();
             String team1 = Messages.getString("GpuBoard.hud.players.team", 1);
+            String orders = Messages.getString("GpuBoard.hud.players.botOrders");
             assertEquals(List.of("PLAYERS", "Pause Game" + OFF, "---", "GPU review", waiting, team1, "---",
                   "Princess", Messages.getString("GpuBoard.hud.players.done").toUpperCase(),
-                  team1 + " · " + Messages.getString("GpuBoard.hud.players.bot"), "Maneuver ›", "Set Behavior ›",
+                  team1 + " · " + Messages.getString("GpuBoard.hud.players.bot"), orders,
                   "---", "Opponent", waiting, Messages.getString("GpuBoard.hud.players.team", 2)), lines(root));
             hud.draw();
             hud.capture("players-panel").dispose();
 
             assertSame(root, hud.stage.getKeyboardFocus());
             hud.stage.keyDown(Input.Keys.DOWN);
-            assertEquals(List.of("Maneuver"), highlighted(root), "the unavailable Pause row is skipped");
+            assertEquals(List.of(orders), highlighted(root), "the unavailable Pause row is skipped");
             hud.stage.keyDown(Input.Keys.ENTER);
-            panel.update(inputs);
-            centre(hud, root);
-            List<String> lines = lines(root);
-            assertEquals(List.of("Maneuver ⌄", "Combat Posture ›", "Alpha Strike!", "Set Behavior ›"),
-                  lines.subList(lines.indexOf("Maneuver ⌄"), lines.indexOf("Maneuver ⌄") + 4));
-            hud.draw();
-            hud.capture("players-panel-maneuver").dispose();
-            choose(item(root, "Alpha Strike!"));
-            assertEquals(List.of("Alpha Strike!"), ran, "a bot command runs its own action");
-            assertEquals(Dialog.NONE, dialogs.state.dialog, "and closes the panel for the board");
+            assertEquals(Dialog.BOTS, dialogs.state.dialog, "the orders row opens the bot sheet");
+            assertEquals(3, dialogs.state.botSheetId, "on that bot");
+            assertTrue(ran.isEmpty(), "no chat or Swing command runs");
             panel.update(inputs);
             verify(dialogs.players).setPanelOpen(false);
 
             // The marks the Swing list shows.
             GpuPlayers.PlayerRow referee = new GpuPlayers.PlayerRow(5, "Referee", 0, 0xFFB9A8FF, false, false,
-                  false, true, true, true, true, true, true, List.of());
+                  false, true, true, true, true, true, true);
             dialogs.state.dialog = Dialog.PLAYERS;
             panel.update(inputs(hud, frame(List.of(), new GpuPlayers.Snapshot(List.of(referee))),
                   GpuBoardSource.UiPreferences.capture(), false));
@@ -360,7 +355,8 @@ class GpuHelpMenuPlayersSmokeTest {
                 Actor help = hud.stage.getRoot().findActor("help-dialog");
                 Actor menu = hud.stage.getRoot().findActor("menu-panel");
 
-                // BOT_COMMANDS (Ctrl+Shift+G) opens the players panel, which captures the bot commands while open.
+                // BOT_COMMANDS (Ctrl+Shift+G) without exactly one commandable bot opens the players panel, which lists
+                // each bot's orders row.
                 assertTrue(hud.keyDown(Input.Keys.G, KeyEvent.VK_G,
                       InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK));
                 hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
@@ -488,10 +484,15 @@ class GpuHelpMenuPlayersSmokeTest {
     }
 
     private static GpuBoardSource.Frame frame(List<BoardScene.Command> menuBar, GpuPlayers.Snapshot players) {
+        return frame(menuBar, players, GpuBots.Snapshot.EMPTY);
+    }
+
+    private static GpuBoardSource.Frame frame(List<BoardScene.Command> menuBar, GpuPlayers.Snapshot players,
+          GpuBots.Snapshot bots) {
         GpuHudData panels = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
               GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-              RulerModel.Snapshot.NONE, players);
+              RulerModel.Snapshot.NONE, players).withBots(bots);
         return new GpuBoardSource.Frame(board(), List.of(), null, menuBar, "", null, 0, "", null,
               GpuReportLog.Snapshot.EMPTY, GpuBattleStatus.Snapshot.EMPTY, panels);
     }
@@ -516,13 +517,9 @@ class GpuHelpMenuPlayersSmokeTest {
     }
 
     private static GpuPlayers.PlayerRow player(int id, String name, int team, boolean local, boolean done,
-          boolean bot, List<BoardScene.Command> commands) {
+          boolean bot) {
         return new GpuPlayers.PlayerRow(id, name, team, local ? 0xFF82E2CE : 0xFFEC9189, local, done, bot, false,
-              false, false, false, false, false, commands);
-    }
-
-    private static BoardScene.Command command(String label, List<String> ran) {
-        return new BoardScene.Command(label, label, "", true, false, List.of(), () -> ran.add(label));
+              false, false, false, false, false);
     }
 
     /** Places the dialog as GpuHud does (C.1: centred, at most 620 wide and 140 less than the window high). */

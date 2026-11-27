@@ -226,6 +226,7 @@ final class GpuHud implements GpuBoardHud {
     private final Container<Actor> helpSlot;
     private final Container<Actor> menuSlot;
     private final Container<Actor> playersSlot;
+    private final Container<Actor> botSlot;
     private final Container<Actor> toastSlot;
     private final Container<Actor> modalSlot;
     /** The Tactical View's north mark: part of the board drawing, under the board labels. */
@@ -331,6 +332,7 @@ final class GpuHud implements GpuBoardHud {
         GpuHelpDialog help = new GpuHelpDialog(kit, source, state);
         menu = new GpuMenuPanel(kit, source, state);
         GpuPlayersPanel players = new GpuPlayersPanel(kit, source, state);
+        GpuBotSheet bots = new GpuBotSheet(kit, source, state);
         GpuToastStack toasts = new GpuToastStack(kit, source, state);
         modal = new GpuModalDialog(kit, source, state);
         GpuHexTip hexTip = new GpuHexTip(kit, state, contextMenu);
@@ -344,7 +346,7 @@ final class GpuHud implements GpuBoardHud {
               initiativeCard, conditionsCard, forces, unitCard, otherUnitCard, recordSheet, utilities,
               hint,
               minimap, overlays,
-              contacts, weapons, solution, log, dock, chat, overview, help, menu, players, contextMenu, hexTip, aim,
+              contacts, weapons, solution, log, dock, chat, overview, help, menu, players, bots, contextMenu, hexTip, aim,
               toasts, modal, arrivalCues, incomingCues, damageNumbers));
 
         // The Tactical View's north mark first: the prototype draws it on the board, under the labels (G4). Then the
@@ -400,6 +402,8 @@ final class GpuHud implements GpuBoardHud {
 
         // The aimed shot dialog's window-sized scrim over the panels and menus, under the toasts and the native modal.
         spanning.add(slot(dialogs, aim.actor()));
+        // The bot sheet stands at the window's right over the panels and the chat, and leaves the board playable.
+        botSlot = panel(dialogs, bots.actor()).fill();
 
         // The developer tuning utility leads the utility bar; its panel places itself.
         // Before release, delete this block, the tuningModel parameter, GpuHudState.Dialog.TUNING and GpuTuningPanel.
@@ -1075,7 +1079,7 @@ final class GpuHud implements GpuBoardHud {
         } else if (binds.contains(KeyCommandBind.KEY_BINDS)) {
             state.toggle(GpuHudState.Dialog.HELP);
         } else if (binds.contains(KeyCommandBind.BOT_COMMANDS)) {
-            state.toggle(GpuHudState.Dialog.PLAYERS);
+            state.botCommandsKey(inputs.frame().panels().bots());
         } else if (binds.contains(KeyCommandBind.LOS_SETTING)) {
             // View > Ruler / LOS Tool opens the native measurement panel.
             BoardScene.Command ruler = GpuBoardActions.menuItem(inputs.frame().globalCommands(),
@@ -1467,6 +1471,7 @@ final class GpuHud implements GpuBoardHud {
         helpSlot.setVisible(state.dialog == GpuHudState.Dialog.HELP);
         menuSlot.setVisible(state.dialog == GpuHudState.Dialog.MENU);
         playersSlot.setVisible(state.dialog == GpuHudState.Dialog.PLAYERS);
+        botSlot.setVisible(state.dialog == GpuHudState.Dialog.BOTS);
         centeredDialogs.setBounds(0, 0, width, height);
         centeredDialogs.open(centeredDialogOpen());
         modalSlot.setVisible(inputs.dialog() != null);
@@ -1543,10 +1548,14 @@ final class GpuHud implements GpuBoardHud {
         place(solutionSlot, width - gap - m.right(), height - rightReserve - solutionHeight, m.right(),
               solutionHeight);
 
+        // The bot sheet: a small dialog's width at the window's right, from under the utility bar to the bottom edge.
+        float botWidth = Math.min(DesignTokens.shipped().size().get("dialog.sm"), width - 2 * gap);
+        place(botSlot, width - gap - botWidth, rightStart, botWidth, Math.max(0, height - rightStart - gap));
+
         // Middle band between the columns: the dock along the bottom edge (battle HUD layout, zone 2), centred in the
         // window and clear of whatever reaches its height at either side: the unit card, or the forces list and the
-        // open unit sheet without one; the other unit's card or a right-column panel. The hint line and a pick's chip
-        // stand above it.
+        // open unit sheet without one; the other unit's card, a right-column panel or the bot sheet. The hint line and
+        // a pick's chip stand above it.
         float bandLeft = gap + Math.max(sheet ? m.grid() : forcesWidth, m.left()) + gap;
         float bandRight = width - gap - rightWidth - gap;
         float dockHeight = height(dockSlot);
@@ -1558,7 +1567,8 @@ final class GpuHud implements GpuBoardHud {
             }
         }
         float dockRight = width - gap;
-        for (Container<Actor> side : List.of(otherUnitSlot, contactsSlot, weaponsSlot, logSlot, solutionSlot)) {
+        for (Container<Actor> side : List.of(otherUnitSlot, contactsSlot, weaponsSlot, logSlot, solutionSlot,
+              botSlot)) {
             if (shown(side) && side.getHeight() > 0 && side.getY() < gap + dockHeight) {
                 dockRight = Math.min(dockRight, side.getX() - gap);
             }

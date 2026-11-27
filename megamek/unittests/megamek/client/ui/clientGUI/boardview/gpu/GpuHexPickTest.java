@@ -32,7 +32,6 @@ import javax.swing.JFrame;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
-import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
 import megamek.client.bot.AIType;
@@ -276,27 +275,15 @@ class GpuHexPickTest {
               .orElseThrow();
     }
 
-    /** The players panel's Strategic Target command of Princess, run as the HUD runs it. */
+    /**
+     * The bot commands panel's Strategic Target of Princess while the battle window shows: the HUD no longer lists the
+     * panel's orders (the bot sheet types strategic hexes), but a pick the panel starts still runs on the board.
+     */
     private static void nativeStrategicTarget(Session game) throws Exception {
-        GpuPlayers players = game.source().players();
-        players.setPanelOpen(true);
-        BoardScene.Command order = onSwing(() -> players.capture().players().stream()
-              .filter(row -> row.id() == game.princess().getId()).findFirst().orElseThrow().botCommands().stream()
-              .filter(group -> group.label().equals(Messages.getString("BotCommandPanel.Targets.title")))
-              .findFirst().orElseThrow());
-        BoardScene.Command item = leaf(order, Messages.getString("BotCommandPanel.StrategicTarget.title"));
-        players.setPanelOpen(false);
-        item.action().run();
-        // The command runs on the Swing thread after the call returns.
-        SwingUtilities.invokeAndWait(() -> { });
-    }
-
-    private static BoardScene.Command leaf(BoardScene.Command command, String label) {
-        if (command.label().equals(label) && command.children().isEmpty()) {
-            return command;
-        }
-        return command.children().stream().map(child -> leaf(child, label)).filter(found -> found != null)
-              .findFirst().orElse(null);
+        onSwing(() -> {
+            strategicTarget(game).doClick(0);
+            return null;
+        });
     }
 
     /** The pick of the frame the source publishes once the Swing thread ran what the HUD posted. */

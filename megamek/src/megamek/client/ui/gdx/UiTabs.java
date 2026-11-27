@@ -30,7 +30,7 @@ public class UiTabs extends UiOptionBar {
         Color tint = getColor();
         batch.setColor(tint.r, tint.g, tint.b, tint.a * parentAlpha);
         for (Option option : options()) {
-            if (!isDisabled() && (option.isOver() || option.isPressed())) {
+            if (!isDisabled() && !option.isDisabled() && (option.isOver() || option.isPressed())) {
                 over.draw(batch, x + option.getX(), y + option.getY(), option.getWidth(), option.getHeight());
             }
         }

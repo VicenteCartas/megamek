@@ -721,8 +721,9 @@ final class GpuCommandDock implements GpuHud.Component {
     private void forget() {
         GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
         GpuMovePlan.Snapshot move = inputs.frame().panels().move();
-        // The Tuning panel stays open beside play; the other dialogs cover the board.
-        boolean dialog = state.dialog != GpuHudState.Dialog.NONE && state.dialog != GpuHudState.Dialog.TUNING;
+        // The Tuning panel and the bot sheet stay open beside play; the other dialogs cover the board.
+        boolean dialog = state.dialog != GpuHudState.Dialog.NONE && state.dialog != GpuHudState.Dialog.TUNING
+              && state.dialog != GpuHudState.Dialog.BOTS;
         if (open != null && (inputs.dialog() != null || dialog || state.overview
               || inputs.frame().status().turnIndex() != confirmTurn
               || inputs.frame().status().round() != confirmRound

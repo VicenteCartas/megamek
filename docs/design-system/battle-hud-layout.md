@@ -45,7 +45,7 @@ Status: **agreed** layout, from the 2026-11-15 tester round of the deployment pr
 | 1 Your unit | Selected own unit: paperdoll, heat, MP, weapons; Unit record, Locate | `GpuUnitCard` (own) | Fixed width; the dock must not cover it |
 | 2 Actions | The phase's commands, its options row and Confirm | `GpuCommandDock` | Done (deployment): Deploy, Clear, height stepper; turning, load and the rest in More |
 | 3 Enemy unit | Hovered or inspected enemy / target: its card | `GpuUnitCard` (other) | None for now; in firing the target info stays in the right column (decision 1) |
-| 4 View & filters | Utilities (view, tactical, minimap, log, menu), overlays, minimap, log; deployment's overlay chips | `GpuUtilityBar`, `GpuTacticalOverlays`, `GpuDeployOverlays`, `GpuMinimap`, `GpuLogPanel` | Done: the deployment overlay chips moved here from the queue |
+| 4 View & filters | Utilities (view, tactical, minimap, log, chat, bots, menu), overlays, minimap, log; deployment's overlay chips; the bot sheet | `GpuUtilityBar`, `GpuTacticalOverlays`, `GpuDeployOverlays`, `GpuMinimap`, `GpuLogPanel`, `GpuBotSheet` | Done: the deployment overlay chips moved here from the queue; the bot sheet below |
 | 5 Phase / turn | Phase, round, turn order, whose turn; the initiative result | `GpuPhaseHeader` (drake, 2026-11-14) | Done: the initiative result card stacks under the header, top centre |
 | 6 Units list | Own and allied units, contacts tab, grouping, Next pending; per-phase status line | `GpuForcesPanel` | Done: also in deployment (`GpuDeploymentQueue` removed); the rail unfolds only by its button or pin |
 
@@ -74,6 +74,20 @@ skips the deployment phase and its initiative):
   beyond the edge to that hex, and plots its move from there. Esc on the bare placement takes it back.
 - Another player's walk-on replays from beyond the edge, and its arrival notice marks the hex where its move ends, as
   soon as its own replay finishes.
+
+### Bot orders
+
+The orders of an allied bot (Princess) open in the **bot sheet**, a non-modal panel in zone 4: the right column, from
+under the utility bar to the bottom edge, so the board, the own unit card and the dock stay usable while it is open.
+The dock treats it as a right-column panel and stays clear of it (rule 3).
+
+- **Entry points:** the bots utility (shown only while the player commands a bot), the *Orders and behavior* row under
+  each commandable bot in the Players panel, and the bot commands key (Ctrl+Shift+G), which opens the sheet when the
+  player commands exactly one bot and the Players panel otherwise.
+- **Scope:** the sheet's header says what its options change; today every option applies to the whole bot. Lances
+  and artillery are tabs for later.
+- **No chat:** each change goes to the bot as a typed command, never as a chat message. The sheet shows what was asked
+  until the bot reports it back.
 
 ## Known issues from the tester screenshots
 

@@ -331,6 +331,9 @@ public class Precognition implements Runnable {
                 case LOCAL_PN:
                 case PRINCESS_SETTINGS:
                 case PRINCESS_DISHONORED:
+                case BOT_BEHAVIOR_CHANGE:
+                case BOT_ORDER:
+                case PRINCESS_STATUS:
                 case FORCE_UPDATE:
                 case FORCE_DELETE:
                 case SENDING_REPORTS_SPECIAL:

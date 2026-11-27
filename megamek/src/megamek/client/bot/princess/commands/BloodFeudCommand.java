@@ -35,6 +35,7 @@ package megamek.client.bot.princess.commands;
 import java.util.List;
 
 import megamek.client.bot.Messages;
+import megamek.client.bot.princess.BotOrder;
 import megamek.client.bot.princess.Princess;
 import megamek.common.Player;
 import megamek.server.commands.arguments.Argument;
@@ -61,7 +62,7 @@ public class BloodFeudCommand implements ChatCommand {
         PlayerArgument playerArg = arguments.get(PLAYER_ID, PlayerArgument.class);
         Player player = princess.getGame().getPlayer(playerArg.getValue());
         if (player != null) {
-            princess.getHonorUtil().setEnemyDishonored(playerArg.getValue());
+            new BotOrder.BloodFeud(playerArg.getValue()).apply(princess);
             princess.sendDishonoredData();
             princess.sendChat(Messages.getString("Princess.command.bloodFeud.playerAdded", playerArg.getValue()));
         } else {

@@ -629,6 +629,11 @@ public final class BotSetupForm {
 
     /** The personalities whose presets are stored, in their order. */
     public List<Personality> personalities() {
+        return personalities(presets);
+    }
+
+    /** The personalities whose presets are among {@code presets}, in their order. */
+    public static List<Personality> personalities(Presets presets) {
         List<String> names = presets.names();
         List<Personality> shown = new ArrayList<>();
         for (Personality each : Personality.values()) {
@@ -637,6 +642,34 @@ public final class BotSetupForm {
             }
         }
         return shown;
+    }
+
+    /**
+     * The personality whose stored preset {@code settings} match, the combat posture aside, as {@link #personality()}
+     * matches the form's settings; empty when they match none.
+     */
+    public static Optional<Personality> personalityOf(BehaviorSettings settings, Presets presets) {
+        for (Personality each : personalities(presets)) {
+            BehaviorSettings stored = presets.get(each.preset());
+            if (stored != null && sameStyle(settings, stored)) {
+                return Optional.of(each);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static boolean sameStyle(BehaviorSettings settings, BehaviorSettings stored) {
+        for (Slider slider : Slider.values()) {
+            if (slider.clamp(slider.read.applyAsInt(stored)) != slider.clamp(slider.read.applyAsInt(settings))) {
+                return false;
+            }
+        }
+        for (Flag flag : Flag.values()) {
+            if (flag.preset() && flag.read.test(stored) != flag.read.test(settings)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** The stored preset of {@code personality}, or null when it is gone. */
