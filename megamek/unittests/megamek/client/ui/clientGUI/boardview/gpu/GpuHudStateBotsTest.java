@@ -65,7 +65,7 @@ class GpuHudStateBotsTest {
     @Test
     void onlyAnAlliedCasparLanceIsSelectedAndAnInspectionEndsIt() {
         GpuBots.Lance alpha = new GpuBots.Lance(4, "Alpha", List.of(20, 21), 20, "Route");
-        GpuBots.Order order = new GpuBots.Order(4, "Route", false, true);
+        GpuBots.Order order = new GpuBots.Order(4, "Route", false, true, 1, false, true);
         state.bots(new GpuBots.Snapshot(List.of(bot(3, AIType.PRINCESS, alpha, order),
               bot(6, AIType.CASPAR, alpha, order)), List.of(), Map.of()));
 

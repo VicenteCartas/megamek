@@ -65,6 +65,11 @@ final class BoardTacticalMarks {
 
     /** The markings now, without the path's own steps when the move plan draws its route; equal captures keep one. */
     BoardTactical capture(BoardClientState view, boolean planner) {
+        return capture(view, planner, List.of());
+    }
+
+    /** As {@link #capture(BoardClientState, boolean)}, with the allied bots' trail dots the client state lacks. */
+    BoardTactical capture(BoardClientState view, boolean planner, List<? extends TacticalMark> botOrders) {
         Board board = view.getBoard();
         Game game = view.getGame();
         List<TacticalMark> marks = view.getMarks();
@@ -100,6 +105,7 @@ final class BoardTacticalMarks {
                       local -> hexes(local, view.getStrafingCoords(), hex -> ring(hex, Color.YELLOW, 3)));
             }
             marks(graphics, view, marks.stream().filter(mark -> !isArea(mark)).toList());
+            marks(graphics, view, botOrders);
             if (!planner) { marks(graphics, view, view.getPathSteps()); }
             marks(graphics, view, view.getFlightPath());
             BoardTactical captured = graphics.snapshot();

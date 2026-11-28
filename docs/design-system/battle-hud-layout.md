@@ -107,6 +107,20 @@ Allied bots' forces and orders are shown, read-only, in zones 6 and 1:
 - **Ending it:** a unit row in the lance form inspects that unit. The card's ✕, Esc and a new own selection end the
   lance selection.
 
+The dock gives orders to the selection (its bot-orders variant, shown while an allied bot's lance or unit is selected
+and no replay runs). Its head names the lance or unit; its foot says what the orders change: the whole lance, or one
+unit (a unit that follows its lance leaves it).
+
+- **Move to…** and **Add waypoint…** start a board pick; the pick ends like the strategic hex pick.
+- **CASPAR:** Hold (Resume once every unit holds), Retreat, and Rejoin lance for a single unit that left its lance.
+  More holds Resume, Clear orders, Remove last waypoint, the four exit edges, the formations (whole lance only) and
+  the priority.
+- **Princess:** Remove last and Clear waypoints.
+
+The **Bot orders** overlay (Overlays panel, Units group, on by default) draws allied bots' orders on the board:
+CASPAR's routes, Princess's waypoints and trails, and Princess's strategic hexes as flags in the bot's color. Enemy
+bots' orders are never drawn.
+
 ## Known issues from the tester screenshots
 
 Addressed in the layout rework, pending a retest:

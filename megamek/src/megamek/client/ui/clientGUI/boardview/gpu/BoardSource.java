@@ -43,19 +43,21 @@ interface BoardSource extends AutoCloseable {
          * passes that draw it: the panel is expanded, the bases show their status badges, the enemy's rear arcs are
          * shaded, the E(C)CM fields are outlined and the jammed hexes hatched, the ground layer is lightened by level,
          * the lines between units are drawn, the hexes' captured labels carry their type block (so the Tactical View
-         * adds no depth of its own) and the hex labels are drawn on their outline (GpuHexText).
+         * adds no depth of its own), the hex labels are drawn on their outline (GpuHexText) and the allied bots' orders
+         * are marked.
          */
         public record Overlays(boolean panelOpen, boolean statusBadges, boolean rearArcs, boolean ecmFields,
-              boolean ecmHatch, boolean levelShading, boolean unitLinks, boolean hexTypes, boolean hexLabelOutline) {
+              boolean ecmHatch, boolean levelShading, boolean unitLinks, boolean hexTypes, boolean hexLabelOutline,
+              boolean botOrders) {
             /** The settings' defaults. */
             public static final Overlays DEFAULTS = new Overlays(true, true, true, true, true, false, true, false,
-                  false);
+                  false, true);
 
             static Overlays capture(GUIPreferences gui) {
                 return new Overlays(gui.getTacticalOverlaysOpen(), gui.getTacticalStatusBadges(),
                       gui.getTacticalRearArcs(), gui.getEcmTacticalFields(), gui.getEcmTacticalHatch(),
                       gui.getTacticalLevelShading(), gui.getShowUnitLinks(), gui.getHexTypesEnabled(),
-                      gui.getHexLabelOutline());
+                      gui.getHexLabelOutline(), gui.getTacticalBotOrders());
             }
         }
 

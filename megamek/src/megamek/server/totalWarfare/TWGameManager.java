@@ -114,6 +114,7 @@ import megamek.common.net.packets.Packet;
 import megamek.common.options.IBasicOption;
 import megamek.common.options.IOption;
 import megamek.common.options.OptionsConstants;
+import megamek.common.orders.UnitOrderRequest;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.planetaryConditions.Wind;
@@ -1233,6 +1234,26 @@ public class TWGameManager extends AbstractGameManager {
     }
 
     /**
+     * Applies a client's {@link PacketCommand#UNIT_ORDERS} as the {@code /unitOrder} command does; an order the sender
+     * may not give, or one missing what it needs, is logged and dropped.
+     */
+    void receiveUnitOrders(int connectionId, Packet packet) {
+        if (!(packet.getObject(0) instanceof List<?> orders)
+              || !orders.stream().allMatch(UnitOrderRequest.class::isInstance)) {
+            LOGGER.warn("Dropping a malformed {} from connection {}", packet.command(), connectionId);
+            return;
+        }
+        UnitOrderService service = new UnitOrderService(this);
+        for (Object order : orders) {
+            try {
+                service.apply(connectionId, (UnitOrderRequest) order);
+            } catch (IllegalArgumentException incomplete) {
+                LOGGER.warn("Dropping {} from connection {}: {}", order, connectionId, incomplete.getMessage());
+            }
+        }
+    }
+
+    /**
      * @return true when {@code sender} may command {@code bot}, as {@link Player#mayCommandBot} says
      */
     static boolean canCommandBot(@Nullable Player sender, @Nullable Player bot) {
@@ -1302,6 +1323,9 @@ public class TWGameManager extends AbstractGameManager {
                     if (packet.getObject(1) instanceof BotOrder) {
                         forwardToCommandableBot(player, packet);
                     }
+                    break;
+                case UNIT_ORDERS:
+                    receiveUnitOrders(connectionId, packet);
                     break;
                 case PRINCESS_STATUS:
                     // Only bots report their standing orders; relay them to every client, tagged with the bot's ID,

@@ -42,25 +42,47 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import megamek.client.bot.AIType;
 import megamek.client.bot.princess.BehaviorChange;
 import megamek.client.bot.princess.BotOrder;
 import megamek.client.bot.princess.CombatPosture;
+import megamek.common.OffBoardDirection;
 import megamek.common.Player;
+import megamek.common.board.Coords;
+import megamek.common.equipment.EquipmentType;
 import megamek.common.game.BotStatus;
 import megamek.common.game.Game;
 import megamek.common.net.enums.PacketCommand;
+import megamek.common.net.marshalling.SanityInputFilter;
 import megamek.common.net.packets.Packet;
+import megamek.common.orders.ContactRule;
+import megamek.common.orders.FormationOrder;
+import megamek.common.orders.FormationPace;
+import megamek.common.orders.FormationShape;
+import megamek.common.orders.LanceRole;
+import megamek.common.orders.OrderPriority;
+import megamek.common.orders.UnitOrderAction;
+import megamek.common.orders.UnitOrderRequest;
+import megamek.common.orders.UnitOrders;
+import megamek.common.orders.WaypointOrder;
+import megamek.common.units.BipedMek;
+import megamek.common.units.Entity;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 /**
  * Tests that the server passes typed bot commands only to a bot the sender may command - its own side, or any bot for
- * a game master - and relays and keeps the bots' status reports.
+ * a game master - relays and keeps the bots' status reports, and applies unit orders the sender may give.
  */
 class BotCommandForwardingTest {
 
@@ -75,6 +97,11 @@ class BotCommandForwardingTest {
     private Player ally;
     private Player enemy;
     private Player allyHuman;
+
+    @BeforeAll
+    static void initializeEquipment() {
+        EquipmentType.initializeTypes();
+    }
 
     @BeforeEach
     void setUp() {
@@ -177,5 +204,88 @@ class BotCommandForwardingTest {
 
         assertEquals(BotStatus.NONE, game.getBotStatus(ALLY_ID));
         verify(gameManager, never()).send(any(Packet.class));
+    }
+
+    @Test
+    void anAllysUnitOrdersAreAppliedInOrder() {
+        Entity first = casparUnit(20);
+        Entity second = casparUnit(21);
+        Coords hex = new Coords(4, 7);
+
+        gameManager.handlePacket(ALLY_ID, unitOrders(UnitOrderRequest.route(20, List.of(hex), List.of(), null),
+              UnitOrderRequest.route(21, List.of(hex), List.of(), null),
+              UnitOrderRequest.of(21, UnitOrderAction.HOLD_POSITION)));
+
+        assertEquals(List.of(hex), first.getUnitOrders().getRoute());
+        assertTrue(second.getUnitOrders().getRoute().isEmpty());
+        assertTrue(second.getUnitOrders().isPaused());
+    }
+
+    @Test
+    void anEnemysUnitOrdersAreDroppedAndAGameMastersApplied() {
+        Entity unit = casparUnit(20);
+        Coords hex = new Coords(4, 7);
+
+        gameManager.handlePacket(ENEMY_ID, unitOrders(UnitOrderRequest.route(20, List.of(hex), List.of(), null)));
+        assertTrue(unit.getUnitOrders().isEmpty());
+
+        enemy.setGameMaster(true);
+        gameManager.handlePacket(ENEMY_ID, unitOrders(UnitOrderRequest.route(20, List.of(hex), List.of(), null)));
+        assertEquals(List.of(hex), unit.getUnitOrders().getRoute());
+    }
+
+    @Test
+    void anIncompleteUnitOrderIsDroppedAndTheRestApplied() {
+        Entity unit = casparUnit(20);
+        Coords hex = new Coords(4, 7);
+
+        gameManager.handlePacket(ALLY_ID, unitOrders(UnitOrderRequest.route(20, List.of(), List.of(), null),
+              UnitOrderRequest.route(20, List.of(hex), List.of(), null)));
+
+        assertEquals(List.of(hex), unit.getUnitOrders().getRoute());
+    }
+
+    @Test
+    void aPrincessUnitTakesNoUnitOrders() {
+        Entity unit = casparUnit(20);
+        game.recordBotType(bot.getName(), AIType.PRINCESS);
+
+        gameManager.handlePacket(ALLY_ID, unitOrders(UnitOrderRequest.of(20, UnitOrderAction.HOLD_POSITION)));
+
+        assertTrue(unit.getUnitOrders().isEmpty());
+    }
+
+    @Test
+    void unitOrdersPassTheNetworkFilter() throws Exception {
+        ArrayList<UnitOrderRequest> orders = new ArrayList<>(List.of(
+              UnitOrderRequest.route(20, List.of(new Coords(4, 7)), List.of(new WaypointOrder(1, 2)),
+                    OrderPriority.IMPERATIVE),
+              UnitOrderRequest.edge(20, UnitOrderAction.EXIT_BY_EDGE, OffBoardDirection.NORTH),
+              UnitOrderRequest.formation(20, new FormationOrder(FormationShape.WEDGE, 20, 1, 0, FormationPace.WALK,
+                    ContactRule.TURN_AND_FIRE, true)),
+              new UnitOrderRequest(20, UnitOrderAction.SET_ROLE, List.of(), List.of(), null, UnitOrders.FACING_AUTO,
+                    UnitOrders.FACING_AUTO, null, null, LanceRole.convoy(OffBoardDirection.SOUTH))));
+
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {
+            output.writeObject(new Packet(PacketCommand.UNIT_ORDERS, orders));
+        }
+        try (ObjectInputStream input = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+            input.setObjectInputFilter(new SanityInputFilter());
+            assertEquals(orders, ((Packet) input.readObject()).getObject(0));
+        }
+    }
+
+    private Entity casparUnit(int id) {
+        game.recordBotType(bot.getName(), AIType.CASPAR);
+        BipedMek unit = new BipedMek();
+        unit.setId(id);
+        unit.setOwner(bot);
+        game.addEntity(unit);
+        return unit;
+    }
+
+    private static Packet unitOrders(UnitOrderRequest... orders) {
+        return new Packet(PacketCommand.UNIT_ORDERS, new ArrayList<>(List.of(orders)));
     }
 }

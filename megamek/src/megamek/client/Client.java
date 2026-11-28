@@ -112,6 +112,7 @@ import megamek.common.net.packets.Packet;
 import megamek.common.options.GameOptions;
 import megamek.common.options.IBasicOption;
 import megamek.common.options.OptionsConstants;
+import megamek.common.orders.UnitOrderRequest;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.turns.UnloadStrandedTurn;
@@ -1212,6 +1213,16 @@ public class Client extends AbstractClient {
      */
     public void sendBotOrder(int botId, BotOrder order) {
         send(new Packet(PacketCommand.BOT_ORDER, botId, order));
+    }
+
+    /**
+     * Gives CASPAR bot units orders, as the {@code /unitOrder} command does, all in one packet. The server applies
+     * those this player may give (units of a bot on its side, or any as a game master) and sends the units back.
+     *
+     * @param orders the orders, applied in order
+     */
+    public void sendUnitOrders(List<UnitOrderRequest> orders) {
+        send(new Packet(PacketCommand.UNIT_ORDERS, new ArrayList<>(orders)));
     }
 
     /**

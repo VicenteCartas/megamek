@@ -23,7 +23,7 @@ import megamek.client.ui.util.KeyCommandBind;
 
 /**
  * The Overlays popover (battle HUD layout, zone 4), which the utility bar's Overlays button opens under itself: while
- * deploying, deployment's expected damage, then twelve checkboxes in four groups, two to a line, for the overlays that
+ * deploying, deployment's expected damage, then thirteen checkboxes in four groups, two to a line, for the overlays that
  * can be visually busy. Each checkbox is one setting, the same in the 3D and the Tactical View (status badges and level
  * shading draw only in the Tactical View, so the 3D view greys them out): a View-menu item, which
  * the row runs and shows as selected (as the conditions card does), or a client setting, which the row toggles on the
@@ -47,6 +47,7 @@ final class GpuTacticalOverlays implements GpuHud.Component {
           tacticalSetting("units", "statusBadges", Overlays::statusBadges,
                 GUIPreferences::toggleTacticalStatusBadges),
           view("units", "links", ClientGUI.VIEW_TOGGLE_UNIT_LINKS),
+          setting("units", "botOrders", Overlays::botOrders, GUIPreferences::toggleTacticalBotOrders),
           view("combat", "envelope", ClientGUI.VIEW_MOVE_ENV),
           setting("combat", "rearArcs", Overlays::rearArcs, GUIPreferences::toggleTacticalRearArcs),
           view("combat", "losShading", ClientGUI.VIEW_TOGGLE_FOV_DARKEN),

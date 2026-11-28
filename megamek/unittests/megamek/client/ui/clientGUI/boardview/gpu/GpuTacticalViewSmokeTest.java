@@ -116,8 +116,8 @@ class GpuTacticalViewSmokeTest {
     private static final List<String> OVERLAY_SETTINGS = List.of(GUIPreferences.TACTICAL_OVERLAYS_OPEN,
           GUIPreferences.TACTICAL_STATUS_BADGES, GUIPreferences.TACTICAL_REAR_ARCS,
           GUIPreferences.BOARD_ECM_TACTICAL_FIELDS, GUIPreferences.BOARD_ECM_TACTICAL_HATCH,
-          GUIPreferences.TACTICAL_LEVEL_SHADING, GUIPreferences.SHOW_UNIT_LINKS, GUIPreferences.SHOW_COORDS,
-          GUIPreferences.SHOW_HEX_TYPES, GUIPreferences.MINI_MAP_ENABLED, GUIPreferences.GPU_CONTACTS_ENABLED);
+          GUIPreferences.TACTICAL_LEVEL_SHADING, GUIPreferences.SHOW_UNIT_LINKS, GUIPreferences.TACTICAL_BOT_ORDERS,
+          GUIPreferences.SHOW_COORDS, GUIPreferences.SHOW_HEX_TYPES, GUIPreferences.MINI_MAP_ENABLED, GUIPreferences.GPU_CONTACTS_ENABLED);
 
     @Test
     void turnsTheUnitsIntoIconsOnBasesOverTheGroundLayerAndRestoresTheThreeDimensionalView() throws Exception {

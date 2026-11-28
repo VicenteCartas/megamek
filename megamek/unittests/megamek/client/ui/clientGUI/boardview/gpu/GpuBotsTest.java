@@ -33,6 +33,7 @@ import megamek.client.bot.princess.Tactic;
 import megamek.client.lobby.BotSetupForm.Personality;
 import megamek.client.lobby.BotSetupForm.Presets;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBots.Control;
+import megamek.common.OffBoardDirection;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.force.Force;
@@ -42,6 +43,8 @@ import megamek.common.orders.ContactRule;
 import megamek.common.orders.FormationOrder;
 import megamek.common.orders.FormationPace;
 import megamek.common.orders.FormationShape;
+import megamek.common.orders.OrderPriority;
+import megamek.common.orders.UnitOrderRequest;
 import megamek.common.orders.UnitOrders;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Test;
@@ -204,7 +207,7 @@ class GpuBotsTest {
             assertFalse(princess.lancesSelectable(), "Princess takes orders for single units only");
             assertEquals(List.of(new GpuBots.Lance(Force.NO_FORCE, "Unassigned", List.of(8), -1,
                   "No waypoints")), princess.lances());
-            assertEquals(new GpuBots.Order(Force.NO_FORCE, "No waypoints", false, false),
+            assertEquals(new GpuBots.Order(Force.NO_FORCE, "No waypoints", false, false, 0, false, false),
                   princess.orders().get(8));
 
             SwingUtilities.invokeAndWait(() -> {
@@ -260,6 +263,89 @@ class GpuBotsTest {
     }
 
     @Test
+    void aCasparUnitSentAloneLeavesItsFormationAndALanceKeepsIt() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Sheet sheet = GpuTestSupport.onSwing(() -> sheet(fixture));
+            casparLance(fixture, sheet);
+            List<Coords> hex = List.of(new Coords(11, 5));
+            SwingUtilities.invokeAndWait(() -> sheet.orders().routeOrders(3, List.of(10), hex, false));
+            assertEquals(List.of("unit 10 FORMATION_OFF", "unit 10 ROUTE " + hex), sheet.sent(),
+                  "the wingman goes where it is sent, not back to its leader");
+
+            sheet.sent().clear();
+            SwingUtilities.invokeAndWait(() -> sheet.orders().routeOrders(3, List.of(8, 10), hex, false));
+            assertEquals(List.of("unit 8 ROUTE " + hex, "unit 10 ROUTE " + hex), sheet.sent(),
+                  "a lance moves in its formation");
+
+            sheet.sent().clear();
+            SwingUtilities.invokeAndWait(() -> sheet.orders().routeOrders(3, List.of(10), hex, true));
+            assertEquals(List.of("unit 10 ADD " + hex), sheet.sent(), "adding a waypoint keeps the formation");
+        }
+    }
+
+    @Test
+    void aPrincessUnitTakesWaypoints() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Sheet sheet = GpuTestSupport.onSwing(() -> sheet(fixture));
+            List<Coords> hexes = List.of(new Coords(11, 5), new Coords(12, 5));
+            SwingUtilities.invokeAndWait(() -> sheet.orders().routeOrders(3, List.of(8), hexes, false));
+            SwingUtilities.invokeAndWait(() -> sheet.orders().routeOrders(3, List.of(8), hexes, true));
+            sheet.orders().removeLastWaypoint(3, List.of(8));
+            sheet.orders().clearOrders(3, List.of(8));
+            assertEquals(List.of("3 " + new BotOrder.SetWaypoints(8, hexes), "3 " + new BotOrder.AddWaypoints(8, hexes),
+                  "3 " + new BotOrder.RemoveLastWaypoint(8), "3 " + new BotOrder.ClearWaypoints(8)), sheet.sent());
+        }
+    }
+
+    @Test
+    void casparOrdersGoAsUnitOrders() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Sheet sheet = GpuTestSupport.onSwing(() -> sheet(fixture));
+            casparLance(fixture, sheet);
+            sheet.orders().holdUnits(3, List.of(8, 10));
+            sheet.orders().resume(3, List.of(8));
+            sheet.orders().clearOrders(3, List.of(10));
+            sheet.orders().removeLastWaypoint(3, List.of(10));
+            sheet.orders().exitBy(3, List.of(8), OffBoardDirection.EAST);
+            sheet.orders().routePriority(3, List.of(8), OrderPriority.IMPERATIVE);
+            assertEquals(List.of("unit 8 HOLD_POSITION", "unit 10 HOLD_POSITION", "unit 8 RESUME", "unit 10 CLEAR",
+                  "unit 10 REMOVE_LAST", "unit 8 EXIT_BY_EDGE EAST", "unit 8 PRIORITY IMPERATIVE"), sheet.sent());
+        }
+    }
+
+    @Test
+    void aCasparLanceTakesTheLobbysFormationAndAUnitRejoinsAfterTheLast() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Sheet sheet = GpuTestSupport.onSwing(() -> sheet(fixture));
+            casparLance(fixture, sheet);
+            sheet.orders().formation(3, List.of(8, 10), FormationShape.COLUMN);
+            sheet.orders().formation(3, List.of(8, 10), null);
+            sheet.orders().formation(3, List.of(8), FormationShape.COLUMN);
+            assertEquals(List.of("unit 8 FORMATION COLUMN leader 8 slot 0", "unit 10 FORMATION COLUMN leader 8 slot 1",
+                  "unit 8 FORMATION_OFF", "unit 10 FORMATION_OFF"), sheet.sent(), "one unit makes no formation");
+
+            sheet.sent().clear();
+            SwingUtilities.invokeAndWait(() -> fixture.game.getEntity(10).setUnitOrders(UnitOrders.NONE));
+            sheet.orders().rejoin(3, 10, 8);
+            assertEquals(List.of("unit 10 FORMATION WEDGE leader 8 slot 1", "unit 10 ROUTE [" + new Coords(11, 5)
+                  + "] " + OrderPriority.NORMAL), sheet.sent(), "its place and the leader's route");
+        }
+    }
+
+    @Test
+    void retreatTakesTheBotsEdgeOrTheNearestOne() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Sheet sheet = GpuTestSupport.onSwing(() -> sheet(fixture));
+            casparLance(fixture, sheet);
+            SwingUtilities.invokeAndWait(() -> fixture.game.getEntity(8).setPosition(new Coords(0, 5)));
+            sheet.orders().retreatUnits(3, List.of(8, 10));
+            sheet.settings().setRetreatEdge(CardinalEdge.SOUTH);
+            sheet.orders().retreatUnits(3, List.of(8));
+            assertEquals(List.of("unit 8 EXIT_BY_EDGE WEST", "unit 10 EXIT_BY_EDGE WEST", "unit 8 EXIT_BY_EDGE SOUTH"),
+                  sheet.sent(), "the lead unit stands on the west edge");
+        }
+    }
+    @Test
     void ignoreTurretsListsNoTurretOnABoardWithout() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Sheet sheet = GpuTestSupport.onSwing(() -> sheet(fixture));
@@ -312,8 +398,35 @@ class GpuBotsTest {
             public void order(int botId, BotOrder order) {
                 sent.add(botId + " " + order);
             }
+
+            @Override
+            public void units(List<UnitOrderRequest> orders) {
+                orders.forEach(request -> sent.add("unit " + request.unitId() + " " + request.action()
+                      + (request.hexes().isEmpty() ? "" : " " + request.hexes())
+                      + (request.edge() == OffBoardDirection.NONE ? "" : " " + request.edge())
+                      + (request.priority() == null ? "" : " " + request.priority())
+                      + (request.formation() == null ? "" : " " + request.formation().getShape() + " leader "
+                      + request.formation().getLeaderId() + " slot " + request.formation().getSlot())));
+            }
         });
         return new Sheet(bots, orders, sent, clock, princess, settings);
+    }
+
+    /** EDT work: makes Princess a CASPAR bot whose lance Alpha is unit 8 leading unit 10 in a wedge to 1206. */
+    private static void casparLance(GpuBoardFixture fixture, Sheet sheet) throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            fixture.game.setBotTypes(Map.of("Princess", AIType.CASPAR));
+            try {
+                unit(fixture, 10, sheet.princess(), new Coords(7, 6));
+            } catch (Exception failure) {
+                throw new IllegalStateException(failure);
+            }
+            for (int id : List.of(8, 10)) {
+                fixture.game.getEntity(id).setUnitOrders(UnitOrders.NONE.withRoute(List.of(new Coords(11, 5)))
+                      .withFormation(new FormationOrder(FormationShape.WEDGE, 8, 2, id == 8 ? 0 : 1,
+                            FormationPace.WALK, ContactRule.HOLD)));
+            }
+        });
     }
 
     private static BehaviorSettings preset(Personality personality, int aggression) throws Exception {

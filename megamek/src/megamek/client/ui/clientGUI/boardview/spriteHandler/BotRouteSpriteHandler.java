@@ -42,6 +42,7 @@ import java.util.Set;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.TacticalStyle;
@@ -57,6 +58,8 @@ import megamek.common.orders.RouteGroups;
 import megamek.common.orders.UnitOrders;
 import megamek.common.orders.WaypointFormation;
 import megamek.common.orders.WaypointOrder;
+import megamek.common.preference.IPreferenceChangeListener;
+import megamek.common.preference.PreferenceChangeEvent;
 import megamek.common.units.Entity;
 
 /**
@@ -67,9 +70,10 @@ import megamek.common.units.Entity;
  * order it will be visited and what the units do there.
  *
  * <p>Routes are read from the units' own orders, which every client receives with the units, so the flags follow the
- * bots as they work through their routes. Enemy bots' routes are never drawn.</p>
+ * bots as they work through their routes. Enemy bots' routes are never drawn, and none are while the bot orders overlay
+ * ({@link GUIPreferences#getTacticalBotOrders()}) is off.</p>
  */
-public class BotRouteSpriteHandler extends BoardViewSpriteHandler {
+public class BotRouteSpriteHandler extends BoardViewSpriteHandler implements IPreferenceChangeListener {
 
     /** Banner colors, one per route group in unit order, chosen to stand apart from each other on any terrain. */
     private static final List<Color> ROUTE_COLORS = List.of(
@@ -193,7 +197,7 @@ public class BotRouteSpriteHandler extends BoardViewSpriteHandler {
      *
      * @return the hexes, both ends included
      */
-    static List<Coords> stepsBetween(Coords from, Coords to) {
+    public static List<Coords> stepsBetween(Coords from, Coords to) {
         List<Coords> steps = new ArrayList<>();
         Coords position = from;
         steps.add(position);
@@ -212,6 +216,9 @@ public class BotRouteSpriteHandler extends BoardViewSpriteHandler {
      */
     private void renewSprites() {
         clear();
+        if (!GUIP.getTacticalBotOrders()) {
+            return;
+        }
         List<Entity> units = new ArrayList<>(game.getEntitiesVector());
         units.sort(Comparator.comparingInt(Entity::getId));
         for (TrailDot dot : routeTrails(units, localPlayer())) {
@@ -412,9 +419,26 @@ public class BotRouteSpriteHandler extends BoardViewSpriteHandler {
         renewSprites();
     }
 
+    /**
+     * @param index a route's place among the routes drawn
+     *
+     * @return its banner color
+     */
+    public static Color routeColor(int index) {
+        return ROUTE_COLORS.get(index % ROUTE_COLORS.size());
+    }
+
+    @Override
+    public void preferenceChange(PreferenceChangeEvent event) {
+        if (event.getName().equals(GUIPreferences.TACTICAL_BOT_ORDERS)) {
+            renewSprites();
+        }
+    }
+
     @Override
     public void initialize() {
         game.addGameListener(this);
+        GUIP.addPreferenceChangeListener(this);
         renewSprites();
     }
 
@@ -422,5 +446,6 @@ public class BotRouteSpriteHandler extends BoardViewSpriteHandler {
     public void dispose() {
         clear();
         game.removeGameListener(this);
+        GUIP.removePreferenceChangeListener(this);
     }
 }

@@ -141,6 +141,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String TACTICAL_REAR_ARCS = "TacticalRearArcs";
     /** The Tactical View's ground layer lightens each hex by its level. */
     public static final String TACTICAL_LEVEL_SHADING = "TacticalLevelShading";
+    public static final String TACTICAL_BOT_ORDERS = "TacticalBotOrders";
     /** The boards draw the lines between units: C3 networks, spotting for indirect fire and TAG (View menu). */
     public static final String SHOW_UNIT_LINKS = "ShowUnitLinks";
     public static final String BOARD_DARKEN_MAP_AT_NIGHT = "BoardDarkenMapAtNight";
@@ -778,6 +779,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(TACTICAL_STATUS_BADGES, true);
         store.setDefault(TACTICAL_REAR_ARCS, true);
         store.setDefault(TACTICAL_LEVEL_SHADING, false);
+        store.setDefault(TACTICAL_BOT_ORDERS, true);
         store.setDefault(SHOW_UNIT_LINKS, true);
         store.setDefault(BOARD_DARKEN_MAP_AT_NIGHT, true);
         store.setDefault(BOARD_TRANSLUCENT_HIDDEN_UNITS, true);
@@ -3737,6 +3739,15 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void toggleTacticalLevelShading() {
         store.setValue(TACTICAL_LEVEL_SHADING, !getTacticalLevelShading());
+    }
+
+    /** Whether the board shows the orders of allied bots: their routes, waypoints and strategic hexes. */
+    public boolean getTacticalBotOrders() {
+        return store.getBoolean(TACTICAL_BOT_ORDERS);
+    }
+
+    public void toggleTacticalBotOrders() {
+        store.setValue(TACTICAL_BOT_ORDERS, !getTacticalBotOrders());
     }
 
     public boolean getShowUnitLinks() {

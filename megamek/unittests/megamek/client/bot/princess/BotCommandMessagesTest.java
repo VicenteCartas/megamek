@@ -247,7 +247,9 @@ class BotCommandMessagesTest {
         assertEquals(changes, changePacket.getObject(1));
 
         for (BotOrder order : List.of(new BotOrder.Hold(true), new BotOrder.TagTarget(6),
-              new BotOrder.ClearTagTargets(), new BotOrder.BloodFeud(2))) {
+              new BotOrder.ClearTagTargets(), new BotOrder.BloodFeud(2),
+              new BotOrder.SetWaypoints(7, List.of(HEX)), new BotOrder.AddWaypoints(7, List.of(HEX)),
+              new BotOrder.RemoveLastWaypoint(7), new BotOrder.ClearWaypoints(7))) {
             assertEquals(order, throughTheNetworkFilter(new Packet(PacketCommand.BOT_ORDER, 1, order)).getObject(1));
         }
 
@@ -280,6 +282,40 @@ class BotCommandMessagesTest {
         tracker.setEntityWaypoints(unit(7), List.of(HEX), princess);
         princess.sendStatusIfChanged();
         verify(princess).sendStatus();
+    }
+
+    @Test
+    void waypointOrdersSetAddRemoveAndClearAUnitsWaypoints() {
+        trackerReachingEveryHex();
+        Entity own = unit(7);
+        doReturn(List.of(own)).when(princess).getEntitiesOwned();
+        Coords second = new Coords(9, 2);
+        Coords third = new Coords(11, 3);
+
+        princess.receiveBotOrder(new BotOrder.SetWaypoints(7, List.of(HEX, second)));
+        princess.receiveBotOrder(new BotOrder.AddWaypoints(7, List.of(third)));
+        assertEquals(List.of(HEX, second, third), princess.buildStatus().waypointsOf(7));
+
+        princess.receiveBotOrder(new BotOrder.RemoveLastWaypoint(7));
+        assertEquals(List.of(HEX, second), princess.buildStatus().waypointsOf(7));
+
+        princess.receiveBotOrder(new BotOrder.ClearWaypoints(7));
+        assertEquals(List.of(), princess.buildStatus().waypointsOf(7));
+        verify(princess, times(4)).sendStatus();
+    }
+
+    @Test
+    void waypointOrdersSkipOtherUnitsAndHexesOffTheBoard() {
+        trackerReachingEveryHex();
+        doReturn(List.of(unit(7))).when(princess).getEntitiesOwned();
+        Coords offBoard = new Coords(99, 99);
+        when(mockGame.getBoard().contains(offBoard)).thenReturn(false);
+
+        princess.receiveBotOrder(new BotOrder.SetWaypoints(8, List.of(HEX)));
+        princess.receiveBotOrder(new BotOrder.SetWaypoints(7, List.of(offBoard, HEX)));
+
+        assertEquals(Set.of(7), princess.buildStatus().waypoints().keySet());
+        assertEquals(List.of(HEX), princess.buildStatus().waypointsOf(7));
     }
 
     private UnitBehavior trackerReachingEveryHex() {

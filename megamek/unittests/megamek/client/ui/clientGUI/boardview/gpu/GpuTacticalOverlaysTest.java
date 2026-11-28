@@ -156,13 +156,13 @@ class GpuTacticalOverlaysTest {
     /**
      * At 1920 x 1080, 1280 x 800 and 960 x 640 (the smallest stage, DisplayScale), with the minimap and the contacts on
      * or off and beside the firing phase's weapons panel: the open popover hangs one gap below its button, its right
-     * edge at the button's or further left, inside the window, with all twelve rows; it lies over the panels, so the
+     * edge at the button's or further left, inside the window, with all thirteen rows; it lies over the panels, so the
      * right column keeps its places.
      */
     @Test
     void theOverlaysPopoverHangsBelowItsButtonAndTheRightColumnKeepsItsPlaces() {
-        List<String> rows = List.of("statusBadges", "links", "envelope", "rearArcs", "losShading", "sensorRanges",
-              "fields", "jamming", "coordinates", "types", "levelShading", "distanceRings");
+        List<String> rows = List.of("statusBadges", "links", "botOrders", "envelope", "rearArcs", "losShading",
+              "sensorRanges", "fields", "jamming", "coordinates", "types", "levelShading", "distanceRings");
         for (int[] size : new int[][] { { 1920, 1080 }, { 1280, 800 }, { 960, 640 } }) {
             for (Object[] layout : new Object[][] { { GamePhase.MOVEMENT, true, true }, { GamePhase.MOVEMENT, false, true },
                   { GamePhase.MOVEMENT, false, false }, { GamePhase.FIRING, true, true } }) {

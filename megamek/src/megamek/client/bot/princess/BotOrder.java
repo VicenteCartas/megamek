@@ -34,13 +34,18 @@ package megamek.client.bot.princess;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 
 import megamek.common.Player;
+import megamek.common.board.Coords;
+import megamek.common.units.Entity;
 
 /**
  * A standing order to a Princess bot that is not part of its behavior settings, sent by an allied player or a game
  * master through {@link megamek.common.net.enums.PacketCommand#BOT_ORDER}. The bot follows it, then reports its state
- * to every client: hold and TAG through {@link megamek.common.game.BotStatus}, blood feuds through its honor report.
+ * to every client: hold, TAG and waypoints through {@link megamek.common.game.BotStatus}, blood feuds through its honor report.
  * The chat commands give the same orders through these records.
  */
 public sealed interface BotOrder extends Serializable {
@@ -97,5 +102,72 @@ public sealed interface BotOrder extends Serializable {
                 princess.getHonorUtil().setEnemyDishonored(playerId);
             }
         }
+    }
+
+    /**
+     * Replaces a unit's waypoints, as the set-waypoints command does. Hexes off the board, and those the unit cannot
+     * reach, are dropped.
+     */
+    record SetWaypoints(int unitId, List<Coords> hexes) implements BotOrder {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        public SetWaypoints {
+            hexes = new ArrayList<>(hexes);
+        }
+
+        @Override
+        public void apply(Princess princess) {
+            ownUnit(princess, unitId).ifPresent(unit -> princess.getUnitBehaviorTracker()
+                  .setEntityWaypoints(unit, onBoard(princess, hexes), princess));
+        }
+    }
+
+    /** Adds waypoints to the end of a unit's, as the add-waypoint command does; see {@link SetWaypoints}. */
+    record AddWaypoints(int unitId, List<Coords> hexes) implements BotOrder {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        public AddWaypoints {
+            hexes = new ArrayList<>(hexes);
+        }
+
+        @Override
+        public void apply(Princess princess) {
+            ownUnit(princess, unitId).ifPresent(unit -> princess.getUnitBehaviorTracker()
+                  .addEntityWaypoint(unit, onBoard(princess, hexes), princess));
+        }
+    }
+
+    /** Takes a unit's last waypoint off. */
+    record RemoveLastWaypoint(int unitId) implements BotOrder {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public void apply(Princess princess) {
+            ownUnit(princess, unitId).ifPresent(unit -> princess.getUnitBehaviorTracker()
+                  .removeTailWaypoint(unit, princess));
+        }
+    }
+
+    /** Clears a unit's waypoints. */
+    record ClearWaypoints(int unitId) implements BotOrder {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public void apply(Princess princess) {
+            ownUnit(princess, unitId).ifPresent(unit -> princess.getUnitBehaviorTracker()
+                  .clearWaypoints(unit, princess));
+        }
+    }
+
+    private static Optional<Entity> ownUnit(Princess princess, int unitId) {
+        return princess.getEntitiesOwned().stream().filter(entity -> entity.getId() == unitId).findFirst();
+    }
+
+    private static List<Coords> onBoard(Princess princess, List<Coords> hexes) {
+        return hexes.stream().filter(hex -> princess.getGame().getBoard().contains(hex)).toList();
     }
 }

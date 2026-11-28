@@ -39,6 +39,7 @@ import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
+import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.TacticalStyle;
@@ -1858,13 +1859,25 @@ final class GpuBoardSource implements BoardSource {
         WalkOnEntry entry = walkOnEntry;
         boolean ownSteps = GpuMovePlan.drawsRoute(move)
               || entry.stage() == EntryStage.SETTING_UP && entry.unitId() == move.entityId();
+        GpuBotOrderMarks.Marks botOrders = GUIPreferences.getInstance().getTacticalBotOrders()
+              ? GpuBotOrderMarks.capture(view.game.getEntitiesVector(), view.game.getPlayersList(),
+                    view.getLocalPlayer(), board, view.game::getBotStatus)
+              : GpuBotOrderMarks.Marks.EMPTY;
+        List<BoardMarker> markers = view.getBoardMarkers();
+        if (!botOrders.flags().isEmpty()) {
+            markers = new ArrayList<>(markers);
+            for (TacticalMark.Flag flag : botOrders.flags()) {
+                markers.add(view.boardMarker(BoardMarker.Kind.OBJECTIVE, flag.coords(), flag.color().getRGB(),
+                      flag.progress() == null ? flag.label() : flag.label() + " " + flag.progress()));
+            }
+        }
         BoardScene scene = new BoardScene(view.getBoardId(), board.getWidth(), board.getHeight(), markedTiles(board, units), units,
               List.of(), actorId, view.game.getPhase().localizedName(), commands,
               light == null || light.x == 0 && light.y == 0 ? null : new BoardScene.Light(light.x, -light.y),
               firingLines(), view.getWeaponRanges().stream().map(range -> new BoardScene.RangeBorder(
                     range.coords(), range.borders(), TacticalStyle.rangeColor(range.bracket()).getRGB(),
                     TacticalStyle.rangeText(range.bracket()))).toList(),
-              view.getBoardMarkers(), tacticalMarks.capture(view, ownSteps).withRuler(rulerSnapshot.ruler()),
+              markers, tacticalMarks.capture(view, ownSteps, botOrders.dots()).withRuler(rulerSnapshot.ruler()),
               view.getRangeLabels().stream().map(label -> new BoardScene.RangeLabel(label.coords(),
                     TacticalStyle.rangeColor(label.bracket()).getRGB(),
                     TacticalStyle.rangeText(label.bracket()))).toList(), fieldOfView,

@@ -50,6 +50,7 @@ import megamek.common.orders.LanceRoles;
 import megamek.common.orders.OrderPriority;
 import megamek.common.orders.RouteStyle;
 import megamek.common.orders.UnitOrderAction;
+import megamek.common.orders.UnitOrderRequest;
 import megamek.common.orders.UnitOrders;
 import megamek.common.orders.WaypointFormation;
 import megamek.common.orders.WaypointOrder;
@@ -175,25 +176,50 @@ public final class MoveOrderCommands {
      * @return the commands to send, in order
      */
     static List<String> lobbyFormationCommands(List<Entity> units, FormationShape shape) {
-        LanceRole role = LanceRoles.roleOf(units);
-        boolean isConvoy = (role != null) && role.isConvoy();
+        boolean isConvoy = isConvoy(units);
+        List<FormationOrder> formations = lobbyFormation(units, shape);
         List<String> commands = new ArrayList<>();
         for (int slot = 0; slot < units.size(); slot++) {
             int unitId = units.get(slot).getId();
-            int leaderId = units.get(0).getId();
+            FormationOrder formation = formations.get(slot);
             if (isConvoy) {
-                commands.add(formationCommand(unitId, leaderId, slot, shape.name(), FormationOrder.DEFAULT_SPACING,
-                      CONVOY_PACE.name(), CONVOY_CONTACT.name(), true));
+                commands.add(formationCommand(unitId, formation));
             } else {
                 commands.add(UnitOrderCommand.commandText(unitId, UnitOrderAction.FORMATION,
                       UnitOrderCommand.SHAPE + '=' + shape.name(),
-                      UnitOrderCommand.LEADER + '=' + leaderId,
-                      UnitOrderCommand.SPACING + '=' + FormationOrder.DEFAULT_SPACING,
-                      UnitOrderCommand.SLOT + '=' + slot,
+                      UnitOrderCommand.LEADER + '=' + formation.getLeaderId(),
+                      UnitOrderCommand.SPACING + '=' + formation.getSpacing(),
+                      UnitOrderCommand.SLOT + '=' + formation.getSlot(),
                       UnitOrderCommand.TOGETHER + "=true"));
             }
         }
         return commands;
+    }
+
+    /**
+     * The place of each unit of one lance in a shape, as {@link #lobbyFormationCommands(List, FormationShape)} gives
+     * it: the first unit leading, slots in lance order, spacing {@link FormationOrder#DEFAULT_SPACING}, keeping
+     * together; a convoy keeps its Run pace and Push through, any other lance walks and turns to fire.
+     *
+     * @param units the lance's units, in lance order, the first leading
+     * @param shape the shape chosen
+     *
+     * @return each unit's formation, in the order of {@code units}
+     */
+    public static List<FormationOrder> lobbyFormation(List<Entity> units, FormationShape shape) {
+        boolean isConvoy = isConvoy(units);
+        List<FormationOrder> formations = new ArrayList<>();
+        for (int slot = 0; slot < units.size(); slot++) {
+            formations.add(new FormationOrder(shape, units.get(0).getId(), FormationOrder.DEFAULT_SPACING, slot,
+                  isConvoy ? CONVOY_PACE : FormationPace.WALK, isConvoy ? CONVOY_CONTACT : ContactRule.TURN_AND_FIRE,
+                  true));
+        }
+        return formations;
+    }
+
+    private static boolean isConvoy(List<Entity> units) {
+        LanceRole role = LanceRoles.roleOf(units);
+        return (role != null) && role.isConvoy();
     }
 
     /**
@@ -362,19 +388,44 @@ public final class MoveOrderCommands {
      */
     static List<String> joinCommands(int unitId, UnitOrders leaderOrders, int leaderId, int highestSlot) {
         List<String> commands = new ArrayList<>();
-        if (leaderOrders.getFormation().isEmpty()) {
-            return commands;
-        }
-        FormationOrder formation = leaderOrders.getFormation().get();
-        commands.add(formationCommand(unitId, leaderId, highestSlot + 1, formation.getShape().name(),
-              formation.getSpacing(), formation.getPace().name(), formation.getContactRule().name(),
-              formation.isKeepTogether()));
-        if (leaderOrders.hasRoute()) {
-            commands.add(UnitOrderCommand.commandText(unitId, UnitOrderAction.ROUTE,
-                  UnitOrderCommand.hexesArgument(leaderOrders.getRoute(), leaderOrders.getWaypointOrders()),
-                  UnitOrderCommand.PRIORITY + '=' + leaderOrders.getPriority().name()));
+        for (UnitOrderRequest order : joinOrders(unitId, leaderOrders, leaderId, highestSlot)) {
+            if (order.action() == UnitOrderAction.FORMATION) {
+                commands.add(formationCommand(unitId, order.formation()));
+            } else {
+                commands.add(UnitOrderCommand.commandText(unitId, UnitOrderAction.ROUTE,
+                      UnitOrderCommand.hexesArgument(order.hexes(), order.waypointOrders()),
+                      UnitOrderCommand.PRIORITY + '=' + order.priority().name()));
+            }
         }
         return commands;
+    }
+
+    /**
+     * The orders that put a unit into an existing formation, as {@link #joinCommands} sends them: its place after the
+     * last unit, then the leader's route with its waypoint orders and priority.
+     *
+     * @param unitId       the unit joining
+     * @param leaderOrders the orders of the formation's leader
+     * @param leaderId     the formation's leader
+     * @param highestSlot  the highest slot taken in the formation now
+     *
+     * @return the orders, in order; empty when the leader is not in a formation
+     */
+    public static List<UnitOrderRequest> joinOrders(int unitId, UnitOrders leaderOrders, int leaderId,
+          int highestSlot) {
+        List<UnitOrderRequest> orders = new ArrayList<>();
+        if (leaderOrders.getFormation().isEmpty()) {
+            return orders;
+        }
+        FormationOrder formation = leaderOrders.getFormation().get();
+        orders.add(UnitOrderRequest.formation(unitId, new FormationOrder(formation.getShape(), leaderId,
+              formation.getSpacing(), highestSlot + 1, formation.getPace(), formation.getContactRule(),
+              formation.isKeepTogether())));
+        if (leaderOrders.hasRoute()) {
+            orders.add(UnitOrderRequest.route(unitId, leaderOrders.getRoute(), leaderOrders.getWaypointOrders(),
+                  leaderOrders.getPriority()));
+        }
+        return orders;
     }
 
     /**
@@ -397,6 +448,12 @@ public final class MoveOrderCommands {
                   formation.isKeepTogether()));
         }
         return commands;
+    }
+
+    private static String formationCommand(int unitId, FormationOrder formation) {
+        return formationCommand(unitId, formation.getLeaderId(), formation.getSlot(), formation.getShape().name(),
+              formation.getSpacing(), formation.getPace().name(), formation.getContactRule().name(),
+              formation.isKeepTogether());
     }
 
     private static String formationCommand(int unitId, int leaderId, int slot, String shape, int spacing,

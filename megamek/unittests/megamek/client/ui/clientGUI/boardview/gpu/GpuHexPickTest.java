@@ -48,6 +48,7 @@ import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.loaders.MekFileParser;
+import megamek.common.orders.UnitOrderRequest;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -181,6 +182,11 @@ class GpuHexPickTest {
                           @Override
                           public void order(int botId, BotOrder order) {
                               game.sent().add("order: " + order);
+                          }
+
+                          @Override
+                          public void units(List<UnitOrderRequest> orders) {
+                              orders.forEach(request -> game.sent().add("unit: " + request));
                           }
                       });
                 String description = Messages.getString("GpuBoard.hud.bots.hexes.order", "Princess");

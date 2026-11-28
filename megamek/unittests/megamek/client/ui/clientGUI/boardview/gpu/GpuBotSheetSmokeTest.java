@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -50,9 +52,11 @@ import megamek.client.ui.gdx.UiFilterChip;
 import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiTabs;
 import megamek.client.ui.gdx.UiTestStage;
+import megamek.client.ui.gdx.UiTheme;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.BotStatus;
+import megamek.common.orders.FormationShape;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -357,6 +361,94 @@ class GpuBotSheetSmokeTest {
         });
     }
 
+    /**
+     * Step 3 of the bot orders: the dock gives orders to the selected allied CASPAR lance, all its units at once, then to
+     * one of its units alone; the foot names the units an order applies to, and More holds the exit edges, formations
+     * and priority.
+     */
+    @Test
+    void theDockOrdersTheSelectedLanceThenOneOfItsUnits() {
+        GpuHudTestStage.run(harness -> {
+            SpriteBatch batch = new SpriteBatch();
+            GpuBoardSource source = mock(GpuBoardSource.class);
+            GpuBotOrders orders = mock(GpuBotOrders.class);
+            when(source.record()).thenReturn(mock(GpuUnitRecord.class));
+            when(source.players()).thenReturn(mock(GpuPlayers.class));
+            when(source.los()).thenReturn(mock(GpuLosResult.class));
+            when(source.bots()).thenReturn(mock(GpuBots.class));
+            when(source.botOrders()).thenReturn(orders);
+            GpuHud hud = new GpuHud(source, harness.theme.skin, batch, new BoardCamera(),
+                  mock(GpuBoardTuning.class), new GpuPlaybackHistory(new UnitPlayback()));
+            try {
+                GpuBoardSource.Frame frame = GpuHudFixtures.frame(alliedStatus(),
+                      GpuHudFixtures.panels(GpuUnitRecord.Snapshot.EMPTY).withBots(alliedBots()));
+                GpuBoardSource.UiPreferences preferences = GpuBoardSource.UiPreferences.capture();
+                harness.size(1360, 900);
+                float density = Gdx.graphics.getBackBufferWidth() / (float) Gdx.graphics.getWidth();
+                hud.resize(Math.round(harness.width() / density), Math.round(harness.height() / density),
+                      1 / density);
+                hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
+                hud.state.selectLance(CASPAR_BOT, FIRE_LANCE);
+                draw(hud, frame, preferences);
+                Table dock = hud.stage.getRoot().findActor("command-dock");
+                assertEquals("ORDERS FOR FIRE LANCE \u00b7 3", text(dock, "dock-title"));
+                assertEquals("Sent at once", text(dock, "dock-span"));
+                assertEquals("Applies to all 3 units of Fire lance", text(dock, "dock-foot-bold"));
+                assertNotNull(dock.findActor("dock-bot-hold"));
+                assertNotNull(dock.findActor("dock-bot-retreat"));
+                assertNull(dock.findActor("dock-bot-rejoin"), "a lance has no lance to rejoin");
+                UiTestStage.assertTexts(dock);
+                harness.capture("hud-dock-bot-lance").dispose();
+
+                List<Integer> lance = List.of(21, 22, 23);
+                click(dock.findActor("dock-bot-hold"));
+                verify(orders).holdUnits(CASPAR_BOT, lance);
+                click(dock.findActor("dock-main"));
+                verify(orders).moveTo(eq(CASPAR_BOT), eq(lance), anyString());
+                click(dock.findActor("dock-secondary"));
+                verify(orders).addWaypoints(eq(CASPAR_BOT), eq(lance), anyString());
+
+                // More: the exit edges, the lance's formations and the route's priority.
+                click(dock.findActor("dock-more"));
+                draw(hud, frame, preferences);
+                Actor drawer = hud.stage.getRoot().findActor("dock-more-drawer");
+                assertTrue(drawer.isVisible());
+                assertNotNull(hud.stage.getRoot().findActor("dock-more-dock.bot.exit.NORTH"));
+                assertNotNull(hud.stage.getRoot().findActor("dock-more-dock.bot.priority.IMPERATIVE"));
+                click(hud.stage.getRoot().findActor("dock-more-dock.bot.formation.WEDGE"));
+                verify(orders).formation(CASPAR_BOT, lance, FormationShape.WEDGE);
+                draw(hud, frame, preferences);
+
+                // One of its units alone: a follower, which may not rejoin a formation it is still in.
+                hud.state.inspected = 22;
+                draw(hud, frame, preferences);
+                assertEquals(UiTheme.upper("Orders for " + chassis(22)), text(dock, "dock-title"));
+                assertEquals("Applies to " + chassis(22) + " only", text(dock, "dock-foot-bold"));
+                assertEquals(" \u00b7 Move to takes it out of Fire lance's formation", text(dock, "dock-foot"));
+                UiButton rejoin = dock.findActor("dock-bot-rejoin");
+                assertNotNull(rejoin);
+                assertTrue(rejoin.isDisabled(), "a follower is in its lance's formation already");
+                click(dock.findActor("dock-bot-retreat"));
+                verify(orders).retreatUnits(CASPAR_BOT, List.of(22));
+                UiTestStage.assertTexts(dock);
+                harness.capture("hud-dock-bot-unit").dispose();
+
+                // Without a bot selection the dock goes back to the local turn.
+                hud.state.inspected = Entity.NONE;
+                draw(hud, frame, preferences);
+                assertNull(dock.findActor("dock-bot-hold"));
+            } finally {
+                hud.dispose();
+                batch.dispose();
+            }
+        });
+    }
+
+    private static String chassis(int unitId) {
+        return alliedStatus().units().stream().filter(unit -> unit.id() == unitId).findFirst().orElseThrow()
+              .chassis();
+    }
+
     private static void draw(GpuHud hud, GpuBoardSource.Frame frame, GpuBoardSource.UiPreferences preferences) {
         hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
         hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
@@ -399,9 +491,9 @@ class GpuBotSheetSmokeTest {
     /** The allied CASPAR bot "Kurita Regulars" with its Fire lance of 21 (the leader), 22 and 23 on a route. */
     private static GpuBots.Snapshot alliedBots() {
         GpuBots.Lance fire = new GpuBots.Lance(FIRE_LANCE, "Fire lance", List.of(21, 22, 23), 21, FIRE_ORDERS);
-        Map<Integer, GpuBots.Order> orders = Map.of(21, new GpuBots.Order(FIRE_LANCE, FIRE_ORDERS, false, true),
-              22, new GpuBots.Order(FIRE_LANCE, FIRE_ORDERS, true, false),
-              23, new GpuBots.Order(FIRE_LANCE, FIRE_ORDERS, true, false));
+        Map<Integer, GpuBots.Order> orders = Map.of(21, new GpuBots.Order(FIRE_LANCE, FIRE_ORDERS, false, true, 1, false, true),
+              22, new GpuBots.Order(FIRE_LANCE, FIRE_ORDERS, true, false, 1, false, true),
+              23, new GpuBots.Order(FIRE_LANCE, FIRE_ORDERS, true, false, 1, false, true));
         GpuBots.BotRow bot = new GpuBots.BotRow(CASPAR_BOT, "Kurita Regulars", AIType.CASPAR, 0xFF82E2CE, true, 3,
               false, behavior(), BotStatus.NONE, List.of(), List.of(), Set.of(), false, List.of(fire), orders);
         return new GpuBots.Snapshot(List.of(bot), List.of(), Map.of());

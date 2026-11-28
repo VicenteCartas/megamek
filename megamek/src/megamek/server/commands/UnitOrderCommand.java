@@ -32,15 +32,12 @@
  */
 package megamek.server.commands;
 
-import static megamek.server.Server.SERVER_CONN;
-
 import java.util.List;
 import java.util.Optional;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.common.OffBoardDirection;
-import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.orders.*;
 import megamek.common.units.Entity;
@@ -56,6 +53,7 @@ import megamek.server.commands.arguments.OptionalStringArgument;
 import megamek.server.commands.arguments.RouteArgument;
 import megamek.server.commands.arguments.UnitArgument;
 import megamek.server.totalWarfare.TWGameManager;
+import megamek.server.totalWarfare.UnitOrderService;
 
 /**
  * Gives a bot-controlled unit standing orders: a route, pause, resume, stop, an edge to move to or exit by, facing, or
@@ -90,6 +88,8 @@ public class UnitOrderCommand extends ClientServerCommand {
 
     private static final int HIGHEST_FACING = 5;
 
+    private final UnitOrderService service;
+
     /**
      * @param server      the server that relays the replies
      * @param gameManager the game manager whose units are ordered
@@ -97,6 +97,7 @@ public class UnitOrderCommand extends ClientServerCommand {
     public UnitOrderCommand(Server server, TWGameManager gameManager) {
         super(server, gameManager, COMMAND_NAME, Messages.getString("UnitOrder.cmd.help"),
               Messages.getString("UnitOrder.cmd.longName"));
+        service = new UnitOrderService(gameManager);
     }
 
     @Override
@@ -126,78 +127,48 @@ public class UnitOrderCommand extends ClientServerCommand {
     protected void runCommand(int connId, Arguments args) {
         int unitId = args.get(UNIT_ID, UnitArgument.class).getValue();
         UnitOrderAction action = args.getEnum(ACTION, UnitOrderAction.class);
-        Entity entity = gameManager.getGame().getEntity(unitId);
-        if (entity == null) {
-            LOGGER.info("[BotOrders] {} refused: no unit {}", action, unitId);
-            server.sendServerChat(connId, Messages.getString("Gamemaster.cmd.missingUnit"));
-            return;
-        }
-        String refusal = refusalReason(connId, entity);
+        String refusal = service.refusal(connId, unitId, action);
         if (refusal != null) {
-            LOGGER.info("[BotOrders] {} for {} refused: {}", action, entity.getDisplayName(), refusal);
             server.sendServerChat(connId, refusal);
             return;
         }
-
-        if (action == UnitOrderAction.SET_ROLE) {
-            setRole(connId, entity, args);
+        Entity entity = gameManager.getGame().getEntity(unitId);
+        RouteArgument route = args.get(HEXES, RouteArgument.class);
+        UnitOrderRequest request = new UnitOrderRequest(unitId, action, route.getHexes(), route.getWaypointOrders(),
+              (OffBoardDirection) args.get(EDGE).getValue(), facingArgument(args, FACING_WHILE_MOVING),
+              facingArgument(args, FACING_WHEN_STOPPED), (OrderPriority) args.get(PRIORITY).getValue(),
+              formationArgument(args, entity),
+              (action == UnitOrderAction.SET_ROLE) ? roleArgument(args, entity) : null);
+        // the command base class replies to a missing argument with the reason and the usage
+        refusal = service.apply(connId, request);
+        if (refusal != null) {
+            server.sendServerChat(connId, refusal);
             return;
         }
-
-        RouteArgument route = args.get(HEXES, RouteArgument.class);
-        List<Coords> hexes = route.getHexes();
-        List<WaypointOrder> waypointOrders = route.getWaypointOrders();
-        OffBoardDirection edge = (OffBoardDirection) args.get(EDGE).getValue();
-        int facingWhileMoving = facingArgument(args, FACING_WHILE_MOVING);
-        int facingWhenStopped = facingArgument(args, FACING_WHEN_STOPPED);
-        OrderPriority priority = (OrderPriority) args.get(PRIORITY).getValue();
-
-        UnitOrders newOrders;
-        try {
-            newOrders = action.apply(entity.getUnitOrders(), hexes, waypointOrders,
-                  (edge == null) ? OffBoardDirection.NONE : edge,
-                  facingWhileMoving, facingWhenStopped, priority, gameManager.getGame().getCurrentRound(),
-                  formationArgument(args, entity));
-        } catch (IllegalArgumentException missingArgument) {
-            // the command base class replies to the sender with the reason and the usage
-            LOGGER.info("[BotOrders] {} for {} refused: {}", action, entity.getDisplayName(),
-                  missingArgument.getMessage());
-            throw missingArgument;
-        }
-        entity.setUnitOrders(newOrders);
-        LOGGER.info("[BotOrders] {} (ID {}) given {}: now {}", entity.getDisplayName(), entity.getId(), action,
-              newOrders);
         server.sendServerChat(connId,
               Messages.getString("UnitOrder.cmd.success", entity.getDisplayName(), action.name()));
-        gameManager.entityUpdate(entity.getId());
     }
 
     /**
-     * Sets or clears the unit's lance role from the {@code role} argument: {@code NONE}, a convoy such as
-     * {@code CONVOY:NORTH}, or an escort.
+     * The lance role from the {@code role} argument: {@code NONE} (null), a convoy such as {@code CONVOY:NORTH}, or an
+     * escort.
+     *
+     * @throws IllegalArgumentException when no role is given or the text names none
      */
-    private void setRole(int connId, Entity entity, Arguments args) {
+    private static @Nullable LanceRole roleArgument(Arguments args, Entity entity) {
         // the argument holds an Optional: reading it as text gave "Optional[CONVOY:NORTH]", which no role parses
         Optional<String> roleText = args.get(ROLE, OptionalStringArgument.class).getValue();
         if (roleText.isEmpty() || roleText.get().isBlank()) {
             LOGGER.info("[BotOrders] SET_ROLE for {} refused: no role given", entity.getDisplayName());
             throw new IllegalArgumentException(Messages.getString("UnitOrder.cmd.role"));
         }
-        LanceRole role;
         try {
-            role = LanceRole.NONE_TEXT.equalsIgnoreCase(roleText.get().trim()) ? null
+            return LanceRole.NONE_TEXT.equalsIgnoreCase(roleText.get().trim()) ? null
                   : LanceRole.parse(roleText.get());
         } catch (IllegalArgumentException notARole) {
-            // the command base class replies to the sender with the reason and the usage
             LOGGER.info("[BotOrders] SET_ROLE for {} refused: {}", entity.getDisplayName(), notARole.getMessage());
             throw notARole;
         }
-        entity.setLanceRole(role);
-        LOGGER.info("[BotOrders] {} (ID {}) given the lance role {}", entity.getDisplayName(), entity.getId(),
-              (role == null) ? LanceRole.NONE_TEXT : role);
-        server.sendServerChat(connId, Messages.getString("UnitOrder.cmd.success", entity.getDisplayName(),
-              UnitOrderAction.SET_ROLE.name()));
-        gameManager.entityUpdate(entity.getId());
     }
 
     /**
@@ -207,30 +178,6 @@ public class UnitOrderCommand extends ClientServerCommand {
      */
     public static String roleArgument(@Nullable LanceRole role) {
         return ROLE + '=' + ((role == null) ? LanceRole.NONE_TEXT : role.toCommandText());
-    }
-
-    /**
-     * @return why the sender may not give this unit orders, or {@code null} if they may
-     */
-    private @Nullable String refusalReason(int connId, Entity entity) {
-        Player owner = entity.getOwner();
-        if ((owner == null) || !owner.isBot()) {
-            return Messages.getString("UnitOrder.cmd.notBot", entity.getDisplayName());
-        }
-        if (!OrderEligibility.takesUnitOrders(gameManager.getGame(), owner)) {
-            return Messages.getString("UnitOrder.cmd.notCaspar", entity.getDisplayName());
-        }
-        if (!OrderEligibility.isOrderableKind(entity)) {
-            return Messages.getString("UnitOrder.cmd.notOrderable", entity.getDisplayName());
-        }
-        if ((connId == SERVER_CONN) || isGM(connId)) {
-            return null;
-        }
-        Player sender = gameManager.getGame().getPlayer(connId);
-        if ((sender == null) || sender.isEnemyOf(owner)) {
-            return Messages.getString("UnitOrder.cmd.notAllowed", entity.getDisplayName());
-        }
-        return null;
     }
 
     /**

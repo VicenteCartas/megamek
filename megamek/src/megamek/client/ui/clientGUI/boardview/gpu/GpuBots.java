@@ -87,9 +87,11 @@ final class GpuBots {
 
     /**
      * An allied bot unit's orders: its lance's force, the line they show, whether it {@code follows} its lance's leader
-     * in formation and whether it is that {@code leader}.
+     * in formation and whether it is that {@code leader}, how many {@code waypoints} its route or waypoints have, whether
+     * it holds its position ({@code held}, CASPAR) and whether it has any orders at all.
      */
-    record Order(int forceId, String text, boolean follows, boolean leader) { }
+    record Order(int forceId, String text, boolean follows, boolean leader, int waypoints, boolean held,
+          boolean any) { }
 
     /**
      * One bot. {@code allied}: not an enemy of the local player (else a game master commands it). {@code behavior} is
@@ -403,19 +405,28 @@ final class GpuBots {
             for (Entity member : members) {
                 String text;
                 boolean follows = false;
+                int waypoints;
+                boolean held = false;
+                boolean any;
                 if (type == AIType.CASPAR) {
                     UnitOrders unitOrders = member.getUnitOrders();
                     text = GpuOrderText.caspar(status, unitOrders, LanceRoles.effectiveRole(member), round);
                     follows = member.getId() != lead && unitOrders.getFormation()
                           .map(formation -> formation.getLeaderId() == lead).orElse(false);
+                    waypoints = unitOrders.getRoute().size();
+                    held = unitOrders.isPaused();
+                    any = !unitOrders.isEmpty();
                 } else {
                     text = GpuOrderText.princess(status, member.getId());
+                    waypoints = status.waypointsOf(member.getId()).size();
+                    any = waypoints > 0;
                 }
                 if (member.getId() == leaderId) {
                     leaderText = text;
                 }
                 texts.add(text);
-                orders.put(member.getId(), new Order(forceId, text, follows, member.getId() == leaderId));
+                orders.put(member.getId(), new Order(forceId, text, follows, member.getId() == leaderId, waypoints,
+                      held, any));
             }
             String lanceText = leaderText != null ? leaderText
                   : texts.size() == 1 ? texts.iterator().next() : GpuOrderText.mixed();

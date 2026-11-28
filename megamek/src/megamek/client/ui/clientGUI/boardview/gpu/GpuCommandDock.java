@@ -55,10 +55,11 @@ final class GpuCommandDock implements GpuHud.Component {
      * The dock's variants (plan C.2); GENERIC is every phase and turn the prototype does not design. ENTRY is a walk-on
      * unit setting up its entry (walk-on step 1): its entry hex, facing, height, mode and setup, before it enters and
      * plans its move. STATUS holds the unit commands while the board plays a move, the local selection is cleared or
-     * the forces overview is open, and says why in the waiting box.
+     * the forces overview is open, and says why in the waiting box. BOT_ORDERS gives orders to the selected allied bot
+     * lance or unit (GpuBotDock), in any phase and turn.
      */
     private enum Variant {
-        INITIATIVE, ENTRY, PLAN, FLIGHT, WAITING, FIRE, PHYSICAL, NO_PHYSICAL, PLAYBACK, GENERIC, STATUS
+        INITIATIVE, ENTRY, PLAN, FLIGHT, WAITING, FIRE, PHYSICAL, NO_PHYSICAL, PLAYBACK, GENERIC, STATUS, BOT_ORDERS
     }
 
     /** The action awaiting an explicit choice beside its triggering button. */
@@ -354,7 +355,7 @@ final class GpuCommandDock implements GpuHud.Component {
         mainLineCell = main.getCell(mainLine);
         mainLineCell.height(0).padTop(0);
 
-        onChange(main, this::main);
+        onChange(main, this::mainButton);
         secondary = button("hud", null, "", null, "dock-secondary");
         secondary.pad(0, 14, 0, 14);
         onChange(secondary, this::secondary);
@@ -579,11 +580,12 @@ final class GpuCommandDock implements GpuHud.Component {
         List<String> buttons = switch (variant) {
             case PHYSICAL -> rowOptions().stream().map(GpuPhysicalOptions.Option::id).toList();
             case GENERIC -> rowCommands().stream().map(BoardScene.Command::id).toList();
+            case BOT_ORDERS -> botRow().stream().map(GpuBotDock.Action::id).toList();
             default -> List.of();
         };
         boolean secondaryShown = switch (variant) {
             case INITIATIVE -> enabled(command(REROLL));
-            case ENTRY, PLAN, PHYSICAL -> true;
+            case ENTRY, PLAN, PHYSICAL, BOT_ORDERS -> true;
             // A flying unit rarely may hold: MegaMek's Skip only while it allows one.
             case FLIGHT -> enabled(skip()) && !skipIsDone();
             // Without MegaMek's Skip, its Done both moves and holds: the main button is that command already.
@@ -632,6 +634,7 @@ final class GpuCommandDock implements GpuHud.Component {
             case PLAYBACK -> showPlayback();
             case GENERIC -> showGeneric();
             case STATUS -> showStatus();
+            case BOT_ORDERS -> showBotOrders();
         }
         // The hold and auto-declare modes (A.7 G15, A.8 H6) replace the span with their count, beside Stop.
         if (phase.isMovement() && panels.move().holdingRemaining() > 0) {
@@ -656,6 +659,8 @@ final class GpuCommandDock implements GpuHud.Component {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         GpuHudData panels = inputs.frame().panels();
         GamePhase phase = playbackPhase();
+        // Orders for an allied bot go out at once, outside the local turn too, but not while a move plays.
+        if (!state.playbackBusy() && botTarget() != null) { return Variant.BOT_ORDERS; }
         if (state.overview || state.turnLocked(status) && !phase.isReport()) { return Variant.STATUS; }
         boolean turns = phase.isMovement() || phase.isFiring() || phase.isTargeting() || phase.isPhysical();
         if (phase.isInitiativeReport()) {
@@ -851,6 +856,15 @@ final class GpuCommandDock implements GpuHud.Component {
                 row2.add(replay).minWidth(0);
             }
             case WAITING, STATUS -> row2.add(waiting).growX().minWidth(0);
+            case BOT_ORDERS -> {
+                // The bot's actions; they go out at once. Move to and Add waypoint start a pick on the board.
+                for (GpuBotDock.Action action : botRow()) {
+                    UiButton button = button("hud", null, action.label(), null, "dock-bot-" + action.id());
+                    onChange(button, () -> botAction(action.id()));
+                    choices.add(button);
+                    row1.add(button).growX().uniformX().minWidth(0).height(PLAIN);
+                }
+            }
             case ENTRY, GENERIC -> {
                 // The placement row, deployment's and walk-on step 1's alike (battle HUD layout, zone 2): the height
                 // stepper (lower, the height, higher) among the heights the unit could deploy at there, then its
@@ -1240,6 +1254,46 @@ final class GpuCommandDock implements GpuHud.Component {
         foot("", "");
     }
 
+    /**
+     * Orders for the selected allied bot lance or unit (BOT_ORDERS): the head names it, the option row holds the bot's
+     * actions, Move to and Add waypoint pick hexes on the board, and the foot says which units an order applies to.
+     */
+    private void showBotOrders() {
+        GpuBotDock.Target target = botTarget();
+        head(GpuBotDock.head(target, state), false);
+        span(text("GpuBoard.hud.dock.bot.sent"), UiTheme.MUTED);
+        List<GpuBotDock.Action> row = botRow();
+        for (int i = 0; i < choices.size() && i < row.size(); i++) {
+            choices.get(i).setText(UiTheme.upper(row.get(i).label()));
+            choices.get(i).setDisabled(!row.get(i).enabled());
+        }
+        main(text("GpuBoard.hud.dock.bot.moveTo"), source != null);
+        secondary(text("GpuBoard.hud.dock.bot.addWaypoint"), source != null);
+        String note = GpuBotDock.note(target);
+        foot(GpuBotDock.scope(target, state), note.isEmpty() ? "" : SEPARATOR + note);
+    }
+
+    /** The selected allied bot lance or inspected allied bot unit, or null. */
+    private GpuBotDock.Target botTarget() {
+        return GpuBotDock.target(state);
+    }
+
+    /** The bot's option row for the shown target, empty without one. */
+    private List<GpuBotDock.Action> botRow() {
+        GpuBotDock.Target target = botTarget();
+        return target == null ? List.of() : GpuBotDock.row(target, source == null ? null : source.botOrders());
+    }
+
+    /** Runs the bot action with {@code id} as the target has it now, while it is enabled. */
+    private void botAction(String id) {
+        GpuBotDock.Target target = botTarget();
+        GpuBotDock.Action action = target == null || source == null ? null
+              : GpuBotDock.action(target, source.botOrders(), id);
+        if (action != null && action.enabled()) {
+            action.run().run();
+        }
+    }
+
     /** The name of the player with {@code playerId} as the turn order lists it, or "Opponent". */
     private static String playerName(GpuBattleStatus.Snapshot status, int playerId) {
         return status.turns().stream().filter(slot -> slot.playerId() == playerId).map(GpuBattleStatus.Slot::playerName)
@@ -1456,6 +1510,18 @@ final class GpuCommandDock implements GpuHud.Component {
         }
     }
 
+    /** The main button: BOT_ORDERS starts Move to's pick, which the DONE key does not. */
+    private void mainButton() {
+        if (variant == Variant.BOT_ORDERS) {
+            GpuBotDock.Target target = botTarget();
+            if (target != null && source != null) {
+                GpuBotDock.moveTo(target, source.botOrders(), state);
+            }
+        } else {
+            main();
+        }
+    }
+
     /** The action row's secondary button: reroll, hold position, no attack, deployment's Clear or MegaMek's skip. */
     private void secondary() {
         switch (variant) {
@@ -1465,6 +1531,12 @@ final class GpuCommandDock implements GpuHud.Component {
             case PLAN -> run(holdId());
             case FLIGHT -> run(inputs.frame().panels().phase().skipId());
             case PHYSICAL -> run(noAction());
+            case BOT_ORDERS -> {
+                GpuBotDock.Target target = botTarget();
+                if (target != null && source != null) {
+                    GpuBotDock.addWaypoints(target, source.botOrders(), state);
+                }
+            }
             default -> { }
         }
     }
@@ -1670,6 +1742,11 @@ final class GpuCommandDock implements GpuHud.Component {
             case ENTRY -> new More(text("GpuBoard.hud.common.more"),
                   name(state.presented(inputs.frame().panels().move().entityId())), turnItems(), List.of(),
                   setupOverflow());
+            case BOT_ORDERS -> {
+                GpuBotDock.Target target = botTarget();
+                yield new More(text("GpuBoard.hud.dock.bot.more", GpuBotDock.name(target, state)), null,
+                      GpuBotDock.more(target, source.botOrders()), List.of());
+            }
             default -> {
                 List<BoardScene.Command> row = rowCommands();
                 items.addAll(turnItems());
@@ -1696,6 +1773,7 @@ final class GpuCommandDock implements GpuHud.Component {
             case GENERIC -> others(Set.of()).count() > rowCommands().size() || !setupOverflow().isEmpty()
                   || !turnItems().isEmpty();
             case ENTRY -> inputs.frame().panels().move().facingMatters() || !setupOverflow().isEmpty();
+            case BOT_ORDERS -> source != null && botTarget() != null && botTarget().caspar();
             default -> false;
         };
     }

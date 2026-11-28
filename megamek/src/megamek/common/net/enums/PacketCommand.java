@@ -76,6 +76,12 @@ public enum PacketCommand {
     BOT_ORDER,
 
     /**
+     * A player giving CASPAR bot units orders (C -> S), applied by the Server as the {@code /unitOrder} command does.
+     * Carries a list of {@link megamek.common.orders.UnitOrderRequest}s.
+     */
+    UNIT_ORDERS,
+
+    /**
      * A Princess Client reporting the orders it is following (C -> S), or the Server relaying one bot's report to all
      * Clients (S -> C), tagged with the bot's player ID. Carries a {@link megamek.common.game.BotStatus}.
      */

@@ -430,12 +430,12 @@ class GpuForcesPanelSmokeTest {
                         Map.of(), Set.of()), null, List.of(), List.of(), Set.of(), false,
                   List.of(new GpuBots.Lance(5, "Fire lance", List.of(21, 22), 21, route),
                         new GpuBots.Lance(6, "Scout lance", List.of(23), -1, "No orders")),
-                  Map.of(21, new GpuBots.Order(5, route, false, true), 22, new GpuBots.Order(5, route, true, false),
-                        23, new GpuBots.Order(6, "No orders", false, false)));
+                  Map.of(21, new GpuBots.Order(5, route, false, true, 1, false, true), 22, new GpuBots.Order(5, route, true, false, 1, false, true),
+                        23, new GpuBots.Order(6, "No orders", false, false, 0, false, false)));
             GpuBots.BotRow princess = new GpuBots.BotRow(10, "Davion Guards", AIType.PRINCESS, 0xFF82E2CE, true, 1,
                   false, null, null, List.of(), List.of(), Set.of(), false,
                   List.of(new GpuBots.Lance(7, "Recon lance", List.of(31), -1, "No waypoints")),
-                  Map.of(31, new GpuBots.Order(7, "No waypoints", false, false)));
+                  Map.of(31, new GpuBots.Order(7, "No waypoints", false, false, 0, false, false)));
             panel.state.bots(new GpuBots.Snapshot(List.of(caspar, princess), List.of(), Map.of()));
             GpuBoardSource.Frame frame = frame(status(GamePhase.MOVEMENT, true, 1, 0, units), players());
             show(hud, panel, frame);
